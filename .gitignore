@@ -1,0 +1,103 @@
+# Rust build artifacts
+/target/
+**/target/
+Cargo.lock
+
+# Rust backup files
+**/*.rs.bk
+**/*.orig
+
+# Development and editor files
+**/*.swp
+**/*.swo
+*~
+*.tmp
+.vscode/
+.idea/
+*.iml
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux system files
+*~
+
+# Logs and debugging
+*.log
+*.out
+*.err
+debug/
+
+# Performance and profiling
+*.prof
+perf.data*
+flamegraph.svg
+
+# Test coverage
+cov.info
+lcov.info
+coverage/
+
+# Benchmark results
+benchmark_results/
+*.criterion
+
+# Documentation build
+doc/
+book/
+
+# Temporary files
+.temp/
+tmp/
+
+# Git commit message drafts (private)
+git_message_brief.txt
+
+# IDE and development
+.vscode/settings.json
+.vscode/launch.json
+
+# Rust-analyzer
+rust-project.json
+
+# WebAssembly artifacts
+pkg/
+dist/
+wasm-pack.log
+
+# Node.js (if using for JS bindings)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if using for Python bindings)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+
+# Local configuration
+.env
+.env.local
+config.local.*
+

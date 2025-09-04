@@ -1,0 +1,17 @@
+[package]
+name = "rgx-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+rgx-core = { path = "../rgx-core" }
+
+[[bench]]
+name = "throughput"
+harness = false
+

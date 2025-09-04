@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = [
+    "rgx-core",
+    "rgx-cli", 
+    "rgx-bench",
+    "rgx-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Richard De Jesus <richarddje@example.com>"]
+license = "Apache-2.0"
+description = "High-performance regex engine with multi-language code execution"
+repository = "https://github.com/rdje/rgx"
+keywords = ["regex", "pattern", "performance", "webassembly", "jit"]
+categories = ["text-processing", "parser-implementations", "development-tools"]
+
+[workspace.dependencies]
+# Core dependencies
+rgx-core = { path = "rgx-core", version = "0.1.0" }
+
+# Performance optimizations
+simd-json = "0.13"
+memchr = "2.6"
+aho-corasick = "1.1"
+
+# WebAssembly runtime
+wasmtime = "14.0"
+wat = "1.0"
+
+# Scripting languages
+mlua = { version = "0.9", features = ["lua54", "send"] }
+rquickjs = "0.4"
+
+# SIMD and low-level optimizations
+wide = "0.7"
+bytemuck = "1.14"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Development
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+clap = { version = "4.4", features = ["derive"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = false
+strip = "symbols"
+
+[profile.bench]
+inherits = "release"
+debug = true
+lto = "thin"

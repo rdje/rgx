@@ -1,0 +1,16 @@
+[package]
+name = "rgx-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "rgx command-line interface"
+repository.workspace = true
+
+[dependencies]
+rgx-core = { path = "../rgx-core" }
+clap = { workspace = true, features = ["derive"] }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+

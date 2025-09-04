@@ -1,0 +1,44 @@
+[package]
+name = "rgx-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "High-performance regex engine core"
+repository.workspace = true
+
+[dependencies]
+# SIMD and performance
+wide = { workspace = true }
+bytemuck = { workspace = true }
+memchr = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# WebAssembly execution
+wasmtime = { workspace = true, optional = true }
+
+# Scripting languages
+mlua = { workspace = true, optional = true }
+rquickjs = { workspace = true, optional = true }
+
+# Utilities
+tracing = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+wasm = ["wasmtime"]
+lua = ["mlua"]
+javascript = ["rquickjs"]
+all-languages = ["wasm", "lua", "javascript"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "core_performance"
+harness = false
