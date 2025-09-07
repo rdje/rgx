@@ -145,6 +145,10 @@ pub enum OpCode {
     /// Exact repeat quantifier {n} - count in next byte
     RepeatExact = 0x87,
     
+    // === ALTERNATIVE TRACKING (0x90-0x9F) ===
+    /// Set the current alternative index (for match reporting)
+    SetAlternative = 0x90,
+    
     // === TERMINATION (0xF0-0xFF) ===
     /// Successful match - capture current position
     Match = 0xF0,
@@ -255,7 +259,7 @@ pub struct CompilationStats {
     pub jit_worthy: bool,
 }
 
-/// Execution context with performance optimizations
+    /// Execution context with performance optimizations
 #[derive(Debug)]
 pub struct ExecContext {
     /// Input text as UTF-8 bytes for SIMD processing
@@ -270,6 +274,21 @@ pub struct ExecContext {
     pub memo_cache: HashMap<(usize, usize), bool>,
     /// Call stack for recursion
     pub call_stack: Vec<usize>,
+    /// Backtrack stack for alternation and optional quantifiers
+    pub backtrack_stack: Vec<BacktrackFrame>,
+    /// Track which alternative is currently being executed
+    pub current_alternative: Option<usize>,
+}
+
+/// Backtracking frame for alternation and quantifiers
+#[derive(Debug, Clone)]
+pub struct BacktrackFrame {
+    /// Instruction pointer to return to
+    pub ip: usize,
+    /// Text position to restore
+    pub pos: usize,
+    /// Saved capture state
+    pub saved_captures: Vec<Option<usize>>,
 }
 
 /// Match result with full capture information
@@ -281,12 +300,14 @@ pub struct Match {
     pub end: usize,
     /// Capture groups (start, end) in bytes - None if group didn't match
     pub groups: Vec<Option<(usize, usize)>>,
+    /// Which top-level alternative matched (0-based index), None if no alternation
+    pub matched_alternative: Option<usize>,
 }
 
 /// High-performance regex execution engine
 pub struct RegexVM {
     /// Compiled program
-    program: Program,
+    pub program: Program,
     /// SIMD instruction support detected at runtime
     simd_support: SimdSupport,
 }
@@ -340,6 +361,8 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             memo_cache: HashMap::new(),
             call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: None,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -374,6 +397,7 @@ impl RegexVM {
                 start: 0,
                 end: ctx.pos,
                 groups: self.extract_captures(ctx),
+                matched_alternative: ctx.current_alternative,
             })
         } else {
             None
@@ -390,7 +414,8 @@ impl RegexVM {
                 return Some(Match {
                     start,
                     end: ctx.pos,
-                    groups: self.extract_captures(ctx),
+                    groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                    matched_alternative: ctx.current_alternative,
                 });
             }
         }
@@ -402,7 +427,7 @@ impl RegexVM {
         ctx.pos = start;
         let mut ip = 0;
         let code = &self.program.code;
-
+        
         loop {
             if ip >= code.len() {
                 return false;
@@ -421,6 +446,14 @@ impl RegexVM {
                                 continue;
                             }
                         }
+                    }
+                    // Character didn't match - try backtracking
+                    if let Some(frame) = ctx.backtrack_stack.pop() {
+                        // Restore saved state
+                        ip = frame.ip;
+                        ctx.pos = frame.pos;
+                        ctx.captures = frame.saved_captures;
+                        continue;
                     }
                     return false;
                 }
@@ -483,7 +516,204 @@ impl RegexVM {
                     return true;
                 }
 
+                OpCode::WordBoundary => {
+                    // Check if we're at a word boundary
+                    if self.is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    return false;
+                }
+
+                OpCode::NonWordBoundary => {
+                    // Check if we're NOT at a word boundary
+                    if !self.is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    return false;
+                }
+
+                OpCode::PlusGreedy => {
+                    // Read the length of the sub-expression  
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+                    
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+                    
+                    // Bounds check
+                    if expr_end > code.len() {
+                        return false;
+                    }
+                    
+                    // Must match at least once
+                    let _start_pos = ctx.pos;
+                    if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                        return false;
+                    }
+                    
+                    // Keep matching greedily until we can't match anymore
+                    loop {
+                        let before_pos = ctx.pos;
+                        if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            // Can't match anymore, that's fine
+                            break;
+                        }
+                        // If we didn't advance, avoid infinite loop
+                        if ctx.pos == before_pos {
+                            break;
+                        }
+                    }
+                    
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::StarGreedy => {
+                    // Read the length of the sub-expression  
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+                    
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+                    
+                    // Bounds check
+                    if expr_end > code.len() {
+                        return false;
+                    }
+                    
+                    // Match as many times as possible (greedy, zero or more)
+                    loop {
+                        let before_pos = ctx.pos;
+                        if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            // Can't match anymore, that's fine for *
+                            break;
+                        }
+                        // If we didn't advance, avoid infinite loop
+                        if ctx.pos == before_pos {
+                            break;
+                        }
+                    }
+                    
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::QuestionGreedy => {
+                    // Read the length of the sub-expression  
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+                    
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+                    
+                    // Bounds check
+                    if expr_end > code.len() {
+                        return false;
+                    }
+                    
+                    // Try to match once (greedy), but it's optional
+                    let _before_pos = ctx.pos;
+                    let _matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    // For ?, we don't care if it failed - it's optional
+                    
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::SaveStart => {
+                    // Read the group ID from operands
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+                    
+                    // Save current position as start of capture group
+                    let start_idx = group_id * 2;
+                    if start_idx < ctx.captures.len() {
+                        ctx.captures[start_idx] = Some(ctx.pos);
+                    }
+                    continue;
+                }
+
+                OpCode::SaveEnd => {
+                    // Read the group ID from operands
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+                    
+                    // Save current position as end of capture group
+                    let end_idx = group_id * 2 + 1;
+                    if end_idx < ctx.captures.len() {
+                        ctx.captures[end_idx] = Some(ctx.pos);
+                    }
+                    continue;
+                }
+
+                OpCode::Split => {
+                    // Read jump offset (2 bytes, little-endian)
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+                    
+                    // Save current state for backtracking
+                    let backtrack_frame = BacktrackFrame {
+                        ip: ip + offset, // Second alternative
+                        pos: ctx.pos,
+                        saved_captures: ctx.captures.clone(),
+                    };
+                    ctx.backtrack_stack.push(backtrack_frame);
+                    
+                    // Continue with first alternative (current path)
+                    continue;
+                }
+                
+                OpCode::Jump => {
+                    // Read jump offset (2 bytes, little-endian)
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2; // Skip the 2-byte offset operand
+                    ip += offset; // Then add the offset
+                    continue;
+                }
+
+                OpCode::SetAlternative => {
+                    // Read alternative index from operands
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let alternative_index = code[ip] as usize;
+                    ip += 1;
+                    
+                    // Set the current alternative being tested
+                    ctx.current_alternative = Some(alternative_index);
+                    continue;
+                }
+
                 OpCode::Fail => {
+                    // Try backtracking if we have saved states
+                    if let Some(frame) = ctx.backtrack_stack.pop() {
+                        // Restore saved state
+                        ip = frame.ip;
+                        ctx.pos = frame.pos;
+                        ctx.captures = frame.saved_captures;
+                        continue;
+                    }
                     return false;
                 }
 
@@ -538,6 +768,10 @@ impl RegexVM {
         for capture in ctx.captures.iter_mut() {
             *capture = None;
         }
+        // Also clear backtrack stack for fresh start
+        ctx.backtrack_stack.clear();
+        // Reset alternative tracking for fresh start
+        ctx.current_alternative = None;
     }
 
     /// Extract capture groups from context
@@ -561,6 +795,65 @@ impl RegexVM {
         groups
     }
 
+    /// Extract capture groups with explicit overall match (group 0)
+    fn extract_captures_with_match(&self, ctx: &ExecContext, match_start: usize, match_end: usize) -> Vec<Option<(usize, usize)>> {
+        let mut groups = Vec::new();
+        
+        // Group 0 is always the overall match
+        groups.push(Some((match_start, match_end)));
+        
+        // Extract the numbered capture groups (1, 2, 3, ...)
+        for i in 1..=self.program.num_groups {
+            let start_idx = (i * 2) as usize;
+            let end_idx = start_idx + 1;
+            
+            if let (Some(start), Some(end)) = (
+                ctx.captures.get(start_idx).and_then(|&x| x),
+                ctx.captures.get(end_idx).and_then(|&x| x)
+            ) {
+                groups.push(Some((start, end)));
+            } else {
+                groups.push(None);
+            }
+        }
+        
+        groups
+    }
+
+    /// Check if we're at a word boundary (\b)
+    fn is_at_word_boundary(&self, ctx: &ExecContext) -> bool {
+        let is_word_char = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+        
+        let prev_is_word = if ctx.pos == 0 {
+            false
+        } else {
+            // Look at previous character
+            let mut prev_pos = ctx.pos;
+            loop {
+                if prev_pos == 0 {
+                    break false;
+                }
+                prev_pos -= 1;
+                if let Ok(s) = std::str::from_utf8(&ctx.text[prev_pos..ctx.pos]) {
+                    if let Some(ch) = s.chars().next() {
+                        if ch.len_utf8() == ctx.pos - prev_pos {
+                            break is_word_char(ch);
+                        }
+                    }
+                }
+            }
+        };
+        
+        let curr_is_word = if let Some(ch) = self.current_char(ctx) {
+            is_word_char(ch)
+        } else {
+            false
+        };
+        
+        // Word boundary exists if exactly one of prev/curr is a word character
+        prev_is_word != curr_is_word
+    }
+
     /// Find all non-overlapping matches
     pub fn find_all(&self, text: &str) -> Vec<Match> {
         let mut matches = Vec::new();
@@ -574,6 +867,7 @@ impl RegexVM {
                     groups: m.groups.iter().map(|opt| {
                         opt.map(|(s, e)| (start + s, start + e))
                     }).collect(),
+                    matched_alternative: m.matched_alternative,
                 };
                 
                 start = adjusted_match.end.max(adjusted_match.start + 1);
@@ -589,6 +883,70 @@ impl RegexVM {
     /// Test if pattern matches text
     pub fn is_match(&self, text: &str) -> bool {
         self.find_first(text).is_some()
+    }
+    
+    /// Execute a sub-expression (used for quantifiers)
+    fn execute_subexpr(&self, ctx: &mut ExecContext, code: &[u8]) -> bool {
+        let mut ip = 0;
+        
+        loop {
+            if ip >= code.len() {
+                return true; // Successfully executed all instructions
+            }
+            
+            let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
+            ip += 1;
+            
+            match op {
+                OpCode::WordAscii => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if ch.is_ascii_alphanumeric() || ch == '_' {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                
+                OpCode::DigitAscii => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if ch.is_ascii_digit() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                
+                OpCode::Char => {
+                    // Read UTF-8 character from operands
+                    if let Some(expected) = self.read_char_operand(code, &mut ip) {
+                        if let Some(actual) = self.current_char(ctx) {
+                            if actual == expected {
+                                self.advance_char(ctx);
+                                continue;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                
+                OpCode::Any => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if ch != '\n' {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                
+                // Add other opcodes as needed
+                _ => {
+                    return false;
+                }
+            }
+        }
     }
 }
 
@@ -685,7 +1043,7 @@ impl OptimizingCompiler {
                 }
             }
             Regex::Group { expr, .. } => {
-                self.group_counter += 1;
+                // Only count groups during code generation, not analysis
                 self.analyze_pass(expr);
             }
             _ => {}
@@ -749,25 +1107,183 @@ impl OptimizingCompiler {
             }
             
             Regex::Alternation(alts) => {
-                // TODO: Implement efficient alternation compilation
-                for alt in alts {
-                    self.codegen_pass(alt);
+                // Implement proper alternation with Split opcodes and backtracking
+                if alts.is_empty() {
+                    self.emit_op(OpCode::Fail);
+                    return;
+                }
+                
+                if alts.len() == 1 {
+                    // Single alternative - emit SetAlternative for index 0 and compile
+                    self.emit_op(OpCode::SetAlternative);
+                    self.code.push(0);  // Alternative index 0
+                    self.codegen_pass(&alts[0]);
+                    return;
+                }
+                
+                // For multiple alternatives, use recursive structure:
+                // Split L1
+                // SetAlternative 0
+                // <alt0 code>
+                // Jump END
+                // L1: Split L2  (or just last alternative if this is second-to-last)
+                // SetAlternative 1
+                // <alt1 code>
+                // Jump END
+                // L2: SetAlternative 2
+                // <alt2 code>
+                // END: ...
+                
+                let mut end_jumps = Vec::new();
+                
+                for (i, alt) in alts.iter().enumerate() {
+                    if i == alts.len() - 1 {
+                        // Last alternative - no Split needed
+                        self.emit_op(OpCode::SetAlternative);
+                        self.code.push(i as u8);
+                        self.codegen_pass(alt);
+                    } else {
+                        // Not the last - emit Split to next alternative
+                        self.emit_op(OpCode::Split);
+                        let split_offset_pos = self.code.len();
+                        self.code.push(0); // Will be patched
+                        self.code.push(0); // Will be patched
+                        
+                        // Current alternative
+                        self.emit_op(OpCode::SetAlternative);
+                        self.code.push(i as u8);
+                        self.codegen_pass(alt);
+                        
+                        // Jump to end (except for last alternative)
+                        self.emit_op(OpCode::Jump);
+                        let end_jump_pos = self.code.len();
+                        self.code.push(0); // Will be patched
+                        self.code.push(0); // Will be patched
+                        end_jumps.push(end_jump_pos);
+                        
+                        // Patch the Split offset to point to start of next alternative
+                        let next_alt_start = self.code.len();
+                        // split_offset_pos is the position of the first offset byte
+                        // We need to calculate: next_alt_start - current_ip_after_reading_offset
+                        // current_ip_after_reading_offset = split_offset_pos + 2
+                        let split_offset = next_alt_start - (split_offset_pos + 2);
+                        let offset_bytes = (split_offset as u16).to_le_bytes();
+                        self.code[split_offset_pos] = offset_bytes[0];
+                        self.code[split_offset_pos + 1] = offset_bytes[1];
+                    }
+                }
+                
+                // Patch all end jumps to point to the end
+                let end_pos = self.code.len();
+                for end_jump_pos in end_jumps {
+                    let jump_offset = end_pos - end_jump_pos - 2;
+                    let offset_bytes = (jump_offset as u16).to_le_bytes();
+                    self.code[end_jump_pos] = offset_bytes[0];
+                    self.code[end_jump_pos + 1] = offset_bytes[1];
+                }
+            }
+            
+            Regex::WordBoundary { positive } => {
+                if *positive {
+                    self.emit_op(OpCode::WordBoundary);
+                } else {
+                    self.emit_op(OpCode::NonWordBoundary);
                 }
             }
             
             Regex::Quantified { expr, quantifier } => {
                 match quantifier {
                     Quantifier::OneOrMore { lazy: false } => {
-                        // For A+, emit: A followed by split back to A or continue
-                        self.codegen_pass(expr);
-                        // TODO: Implement proper loop bytecode
-                        // For now, just match the expression once
+                        // For A+, emit special PlusGreedy opcode
+                        self.emit_op(OpCode::PlusGreedy);
+                        
+                        // First, collect the sub-expression bytecode
+                        let mut sub_compiler = OptimizingCompiler::new();
+                        sub_compiler.codegen_pass(expr);
+                        let sub_code = sub_compiler.code;
+                        
+                        // Emit the length of the sub-expression
+                        self.code.push(sub_code.len() as u8);
+                        
+                        // Then emit the sub-expression bytecode
+                        self.code.extend(sub_code);
+                    }
+                    Quantifier::ZeroOrMore { lazy: false } => {
+                        // For A*, emit special StarGreedy opcode
+                        self.emit_op(OpCode::StarGreedy);
+                        
+                        // First, collect the sub-expression bytecode
+                        let mut sub_compiler = OptimizingCompiler::new();
+                        sub_compiler.codegen_pass(expr);
+                        let sub_code = sub_compiler.code;
+                        
+                        // Emit the length of the sub-expression
+                        self.code.push(sub_code.len() as u8);
+                        
+                        // Then emit the sub-expression bytecode
+                        self.code.extend(sub_code);
+                    }
+                    Quantifier::ZeroOrOne { lazy: false } => {
+                        // For A?, emit special QuestionGreedy opcode
+                        self.emit_op(OpCode::QuestionGreedy);
+                        
+                        // First, collect the sub-expression bytecode
+                        let mut sub_compiler = OptimizingCompiler::new();
+                        sub_compiler.codegen_pass(expr);
+                        let sub_code = sub_compiler.code;
+                        
+                        // Emit the length of the sub-expression
+                        self.code.push(sub_code.len() as u8);
+                        
+                        // Then emit the sub-expression bytecode
+                        self.code.extend(sub_code);
+                    }
+                    Quantifier::Range { min, max, lazy: false } => {
+                        // For A{n,m}, emit A exactly n times, then optionally up to (m-n) more times
+                        let min_count = *min as usize;
+                        let max_count = max.unwrap_or(*min) as usize;
+                        
+                        // Emit required repetitions (min times)
+                        for _ in 0..min_count {
+                            self.codegen_pass(expr);
+                        }
+                        
+                        // Emit optional repetitions (up to max-min more times)
+                        // For exact repetitions like {3}, min == max, so this does nothing
+                        for _ in min_count..max_count {
+                            // TODO: Implement optional matching with backtracking
+                            // For now, just require exact match
+                            if max.is_some() && max.unwrap() > *min {
+                                self.codegen_pass(expr);
+                            }
+                        }
                     }
                     _ => {
                         // TODO: Implement other quantifiers  
                         self.codegen_pass(expr);
                     }
                 }
+            }
+            
+            Regex::Group { expr, kind: _, .. } => {
+                // Only handle capturing groups for now
+                // Increment group counter and emit capture opcodes
+                self.group_counter += 1;
+                let group_id = self.group_counter;
+                
+                // Update max capture group for flags
+                self.flags.max_capture_group = self.flags.max_capture_group.max(group_id);
+                
+                // Emit SaveStart to capture beginning of group
+                self.emit_op(OpCode::SaveStart);
+                self.code.push(group_id as u8);
+                
+                // Compile the inner expression
+                self.codegen_pass(expr);
+                
+                // Emit SaveEnd to capture end of group
+                self.emit_op(OpCode::SaveEnd);
+                self.code.push(group_id as u8);
             }
             
             _ => {
@@ -798,9 +1314,11 @@ impl OptimizingCompiler {
         
         // Encode character as UTF-8 with length prefix
         let mut buf = [0; 4];
-        let utf8_bytes = ch.encode_utf8(&mut buf);
+        let utf8_str = ch.encode_utf8(&mut buf);
+        let utf8_bytes = utf8_str.as_bytes();
+        
         self.code.push(utf8_bytes.len() as u8);
-        self.code.extend_from_slice(utf8_bytes.as_bytes());
+        self.code.extend_from_slice(utf8_bytes);
         
         self.flags.instruction_count += 1;
     }
@@ -832,6 +1350,16 @@ impl TryFrom<u8> for OpCode {
             0x32 => Ok(StartText),
             0x33 => Ok(EndText),
             0x34 => Ok(EndTextOrNL),
+            0x35 => Ok(WordBoundary),
+            0x36 => Ok(NonWordBoundary),
+            0x40 => Ok(Jump),
+            0x41 => Ok(Split),
+            0x50 => Ok(SaveStart),
+            0x51 => Ok(SaveEnd),
+            0x80 => Ok(QuestionGreedy),
+            0x82 => Ok(StarGreedy),
+            0x84 => Ok(PlusGreedy),
+            0x90 => Ok(SetAlternative),
             0xF0 => Ok(Match),
             0xF1 => Ok(Fail),
             _ => Err(()),
@@ -907,5 +1435,256 @@ mod tests {
         assert!(vm.is_match("@"));
         assert!(!vm.is_match("\n")); // Dot doesn't match newline
         assert!(!vm.is_match(""));
+    }
+
+    #[test]
+    fn test_star_quantifier() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Quantified {
+            expr: Box::new(Regex::Char('a')),
+            quantifier: Quantifier::ZeroOrMore { lazy: false },
+        };
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        assert!(vm.is_match(""));     // Zero matches
+        assert!(vm.is_match("a"));    // One match
+        assert!(vm.is_match("aa"));   // Two matches
+        assert!(vm.is_match("aaa"));  // Three matches
+        assert!(vm.is_match("b"));    // Zero matches, continues to match rest
+        assert!(vm.is_match("aaab")); // Multiple matches followed by non-match
+    }
+
+    #[test]
+    fn test_question_quantifier() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Quantified {
+            expr: Box::new(Regex::Char('a')),
+            quantifier: Quantifier::ZeroOrOne { lazy: false },
+        };
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        assert!(vm.is_match(""));     // Zero matches
+        assert!(vm.is_match("a"));    // One match
+        assert!(vm.is_match("b"));    // Zero matches, continues to match rest
+        assert!(vm.is_match("aa"));   // One match, rest ignored
+        assert!(vm.is_match("ab"));   // One match, rest ignored
+    }
+
+    #[test]
+    fn test_complex_quantifiers() {
+        let mut compiler = OptimizingCompiler::new();
+        // Pattern: a*b+
+        let ast = Regex::Sequence(vec![
+            Regex::Quantified {
+                expr: Box::new(Regex::Char('a')),
+                quantifier: Quantifier::ZeroOrMore { lazy: false },
+            },
+            Regex::Quantified {
+                expr: Box::new(Regex::Char('b')),
+                quantifier: Quantifier::OneOrMore { lazy: false },
+            },
+        ]);
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        assert!(vm.is_match("b"));      // a* matches zero, b+ matches one
+        assert!(vm.is_match("ab"));     // a* matches one, b+ matches one
+        assert!(vm.is_match("abb"));    // a* matches one, b+ matches two
+        assert!(vm.is_match("aabb"));   // a* matches two, b+ matches two
+        assert!(!vm.is_match("a"));     // a* matches one, but b+ needs at least one
+        assert!(!vm.is_match(""));      // b+ needs at least one
+    }
+    
+    #[test]
+    fn test_capture_groups() {
+        let mut compiler = OptimizingCompiler::new();
+        // Pattern: (a)(b)
+        let ast = Regex::Sequence(vec![
+            Regex::Group {
+                expr: Box::new(Regex::Char('a')),
+                kind: GroupKind::Capturing,
+                index: Some(1),
+                name: None,
+            },
+            Regex::Group {
+                expr: Box::new(Regex::Char('b')),
+                kind: GroupKind::Capturing,
+                index: Some(2),
+                name: None,
+            },
+        ]);
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        
+        // Test matching and capture groups
+        if let Some(m) = vm.find_first("ab") {
+            println!("Debug: match = {:?}", m);
+            println!("Debug: vm.program.num_groups = {}", vm.program.num_groups);
+            assert_eq!(m.start, 0);
+            assert_eq!(m.end, 2);
+            assert_eq!(m.groups.len(), 3); // Overall match + 2 capture groups
+            
+            // Overall match (group 0)
+            assert_eq!(m.groups[0], Some((0, 2)));
+            
+            // First capture group (a)
+            assert_eq!(m.groups[1], Some((0, 1)));
+            
+            // Second capture group (b)
+            assert_eq!(m.groups[2], Some((1, 2)));
+        } else {
+            panic!("Match should succeed");
+        }
+        
+        // Test in larger text
+        if let Some(m) = vm.find_first("xabyz") {
+            assert_eq!(m.start, 1);
+            assert_eq!(m.end, 3);
+            assert_eq!(m.groups[0], Some((1, 3))); // Overall match
+            assert_eq!(m.groups[1], Some((1, 2))); // First group (a)
+            assert_eq!(m.groups[2], Some((2, 3))); // Second group (b)
+        } else {
+            panic!("Match should succeed");
+        }
+    }
+
+    #[test]
+    fn test_alternation() {
+        let mut compiler = OptimizingCompiler::new();
+        // Pattern: cat|dog
+        let ast = Regex::Alternation(vec![
+            Regex::Sequence(vec![
+                Regex::Char('c'),
+                Regex::Char('a'),
+                Regex::Char('t'),
+            ]),
+            Regex::Sequence(vec![
+                Regex::Char('d'),
+                Regex::Char('o'),
+                Regex::Char('g'),
+            ]),
+        ]);
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        
+        // Test first alternative
+        assert!(vm.is_match("cat"));
+        assert!(vm.is_match("I have a cat"));
+        
+        // Test second alternative
+        assert!(vm.is_match("dog"));
+        assert!(vm.is_match("I have a dog"));
+        
+        // Test that both work in same text
+        assert!(vm.is_match("catdog")); // Should match "cat"
+        assert!(vm.is_match("dogcat")); // Should match "dog"
+        
+        // Test non-matching
+        assert!(!vm.is_match("bird"));
+        assert!(!vm.is_match("ca"));    // Incomplete
+        assert!(!vm.is_match("do"));    // Incomplete
+    }
+
+    #[test]
+    fn test_complex_alternation() {
+        let mut compiler = OptimizingCompiler::new();
+        // Pattern: foo|bar|baz
+        let ast = Regex::Alternation(vec![
+            Regex::Sequence(vec![
+                Regex::Char('f'),
+                Regex::Char('o'),
+                Regex::Char('o'),
+            ]),
+            Regex::Sequence(vec![
+                Regex::Char('b'),
+                Regex::Char('a'),
+                Regex::Char('r'),
+            ]),
+            Regex::Sequence(vec![
+                Regex::Char('b'),
+                Regex::Char('a'),
+                Regex::Char('z'),
+            ]),
+        ]);
+        let program = compiler.compile(&ast);
+        
+        let vm = RegexVM::new(program);
+        
+        // Test all alternatives
+        assert!(vm.is_match("foo"));
+        assert!(vm.is_match("bar"));
+        assert!(vm.is_match("baz"));
+        
+        // Test in larger text
+        assert!(vm.is_match("foobar")); // Should match "foo"
+        assert!(vm.is_match("barbaz")); // Should match "bar"
+        assert!(vm.is_match("bazfoo")); // Should match "baz"
+        
+        // Test non-matching
+        assert!(!vm.is_match("qux"));
+        assert!(!vm.is_match("ba"));   // Matches start of both "bar" and "baz" but neither fully
+    }
+
+    #[test]
+    fn test_alternation_with_tracking() {
+        let mut compiler = OptimizingCompiler::new();
+        // Use same pattern as working test_alternation: cat|dog  
+        let ast = Regex::Alternation(vec![
+            Regex::Sequence(vec![
+                Regex::Char('c'),
+                Regex::Char('a'), 
+                Regex::Char('t'),
+            ]),
+            Regex::Sequence(vec![
+                Regex::Char('d'),
+                Regex::Char('o'),
+                Regex::Char('g'),
+            ]),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+        
+        // Test that basic alternation works
+        assert!(vm.is_match("cat"), "Should match 'cat'");
+        assert!(vm.is_match("dog"), "Should match 'dog'");
+        assert!(!vm.is_match("bird"), "Should not match 'bird'");
+        
+        // Now test alternative tracking with find_first 
+        if let Some(m) = vm.find_first("cat") {
+            assert_eq!(m.matched_alternative, Some(0)); // First alternative 
+            assert_eq!(m.start, 0);
+            assert_eq!(m.end, 3);
+        } else {
+            panic!("Should match 'cat'");
+        }
+        
+        if let Some(m) = vm.find_first("dog") {
+            assert_eq!(m.matched_alternative, Some(1)); // Second alternative
+            assert_eq!(m.start, 0);
+            assert_eq!(m.end, 3);
+        } else {
+            panic!("Should match 'dog'"); 
+        }
+        
+        // Test that alternatives are tracked correctly in larger text
+        if let Some(m) = vm.find_first("I have a cat") {
+            assert_eq!(m.matched_alternative, Some(0)); // First alternative
+            assert_eq!(m.start, 9); // Position of "cat"
+            assert_eq!(m.end, 12);
+        } else {
+            panic!("Should match 'cat' in larger text");
+        }
+        
+        if let Some(m) = vm.find_first("My dog is happy") {
+            assert_eq!(m.matched_alternative, Some(1)); // Second alternative
+            assert_eq!(m.start, 3); // Position of "dog" 
+            assert_eq!(m.end, 6);
+        } else {
+            panic!("Should match 'dog' in larger text");
+        }
     }
 }

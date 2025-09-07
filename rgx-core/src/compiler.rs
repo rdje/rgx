@@ -29,9 +29,19 @@ impl Compiler {
         // Parse pattern into AST using zero-cost compile-time selected parser
         let ast = parsing::parse_pattern(pattern)?;
         
+        // Debug output for failing patterns
+        if pattern.contains("{3}")||pattern.contains("\\b")||pattern.contains("@") {
+            println!("[DEBUG] Pattern: '{}'", pattern);
+            println!("[DEBUG] AST: {:?}", ast);
+        }
+        
         // Compile AST into optimized VM bytecode
         let mut vm_compiler = VMCompiler::new();
         let program = vm_compiler.compile(&ast);
+        
+        if pattern.contains("{3}")||pattern.contains("\\b")||pattern.contains("@") {
+            println!("[DEBUG] Program: {:?}", program);
+        }
         
         Ok(CompiledPattern {
             raw: pattern.to_string(),
