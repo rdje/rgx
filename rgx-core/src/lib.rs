@@ -42,7 +42,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-#![deny(unsafe_code)]
+// Allow unsafe code for SIMD optimizations only
+#![allow(unsafe_code)]
 #![warn(missing_docs, clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
