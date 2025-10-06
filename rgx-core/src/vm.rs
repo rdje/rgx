@@ -8,8 +8,9 @@
 //! - JIT compilation hints
 //! - Memoization for backtracking
 
-use crate::ast::{Regex, Quantifier, CharClass, AnchorType, GroupKind};
+use crate::ast::{Regex, Quantifier, CharClass, AnchorType, CharRange, GroupKind};
 use std::collections::HashMap;
+use crate::{debug_log, trace_log};
 
 /// High-performance bytecode instruction optimized for cache efficiency
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -353,6 +354,15 @@ impl RegexVM {
 
     /// Find first match using adaptive execution strategy
     pub fn find_first(&self, text: &str) -> Option<Match> {
+        debug_log!("vm", "=== VM FIND_FIRST STARTED ===");
+        debug_log!("vm", "Text: '{}' ({} bytes)", 
+                   if text.len() <= 100 { text } else { &text[..100] },
+                   text.len());
+        debug_log!("vm", "Bytecode: {} bytes, {} char classes, {} capture groups",
+                   self.program.code.len(), 
+                   self.program.char_classes.len(),
+                   self.program.num_groups);
+        
         let bytes = text.as_bytes();
         let mut ctx = ExecContext {
             text: bytes.to_vec(),
@@ -366,13 +376,23 @@ impl RegexVM {
         };
 
         // Adaptive strategy selection based on program characteristics
-        if self.should_use_simd_search(&ctx) {
+        let result = if self.should_use_simd_search(&ctx) {
+            debug_log!("vm", "Strategy: SIMD search (text>{} bytes, literals>0)", 64);
             self.find_first_simd(&mut ctx)
         } else if self.program.flags.has_anchors {
+            debug_log!("vm", "Strategy: Anchored search (has anchors)");
             self.find_first_anchored(&mut ctx)
         } else {
+            debug_log!("vm", "Strategy: Standard scanning");
             self.find_first_scanning(&mut ctx)
+        };
+        
+        match &result {
+            Some(m) => debug_log!("vm", "=== MATCH FOUND: {}..{} ===", m.start, m.end),
+            None => debug_log!("vm", "=== NO MATCH FOUND ==="),
         }
+        
+        result
     }
 
     /// Determine if SIMD pre-filtering would be beneficial  
@@ -439,64 +459,90 @@ impl RegexVM {
 
     /// Standard scanning approach - try match at each position
     fn find_first_scanning(&self, ctx: &mut ExecContext) -> Option<Match> {
+        debug_log!("vm", "Scanning {} positions (0..={})", ctx.text.len() + 1, ctx.text.len());
+        
         for start in 0..=ctx.text.len() {
+            trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
             ctx.pos = start;
             self.reset_captures(ctx);
             
             if self.execute_at(ctx, start) {
+                debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
                 return Some(Match {
                     start,
                     end: ctx.pos,
                     groups: self.extract_captures_with_match(ctx, start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                 });
+            } else {
+                trace_log!("vm", "✗ No match at position {}", start);
             }
         }
+        debug_log!("vm", "Scanning complete - no match found");
         None
     }
 
     /// Execute bytecode starting at given position
     fn execute_at(&self, ctx: &mut ExecContext, start: usize) -> bool {
+        debug_log!("vm", "Execute at text_pos={}, code_len={}", start, self.program.code.len());
         ctx.pos = start;
         let mut ip = 0;
         let code = &self.program.code;
         
         loop {
             if ip >= code.len() {
+                trace_log!("vm", "IP {} >= code length {}, return false", ip, code.len());
                 return false;
             }
 
             let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
+            trace_log!("vm", "[IP={:3}] OpCode={:?} (0x{:02x}), text_pos={}/{}", 
+                      ip, op, code[ip], ctx.pos, ctx.text.len());
             ip += 1;
 
             match op {
                 OpCode::Char => {
                     // Read UTF-8 character from operands
                     if let Some(expected) = self.read_char_operand(code, &mut ip) {
+                        trace_log!("vm", "  Char: expect='{}' (U+{:04X})", expected, expected as u32);
                         if let Some(actual) = self.current_char(ctx) {
                             if actual == expected {
+                                trace_log!("vm", "  ✓ Match '{}', advance pos {} -> {}", 
+                                          actual, ctx.pos, ctx.pos + actual.len_utf8());
                                 self.advance_char(ctx);
                                 continue;
+                            } else {
+                                trace_log!("vm", "  ✗ Got '{}' != '{}'", actual, expected);
                             }
+                        } else {
+                            trace_log!("vm", "  ✗ EOF, expected '{}'", expected);
                         }
                     }
                     // Character didn't match - try backtracking
                     if let Some(frame) = ctx.backtrack_stack.pop() {
+                        trace_log!("vm", "  Backtrack: IP {} -> {}, pos {} -> {}", 
+                                  ip - 1, frame.ip, ctx.pos, frame.pos);
                         // Restore saved state
                         ip = frame.ip;
                         ctx.pos = frame.pos;
                         ctx.captures = frame.saved_captures;
                         continue;
                     }
+                    trace_log!("vm", "  ✗ Char match failed, no backtrack available");
                     return false;
                 }
 
                 OpCode::Any => {
                     if let Some(ch) = self.current_char(ctx) {
                         if ch != '\n' {
+                            trace_log!("vm", "  ✓ Any: matched '{}' (not newline)", ch);
                             self.advance_char(ctx);
                             continue;
+                        } else {
+                            trace_log!("vm", "  ✗ Any: got newline");
                         }
+                    } else {
+                        trace_log!("vm", "  ✗ Any: EOF");
                     }
                     return false;
                 }
@@ -546,6 +592,7 @@ impl RegexVM {
                 }
 
                 OpCode::Match => {
+                    debug_log!("vm", "  ✓✓ MATCH opcode reached at pos={}", ctx.pos);
                     return true;
                 }
 
@@ -564,43 +611,104 @@ impl RegexVM {
                     }
                     return false;
                 }
+                
+                OpCode::CharClass | OpCode::CharClassNeg => {
+                    let is_neg = matches!(op, OpCode::CharClassNeg);
+                    trace_log!("vm", "  {} class_id lookup", if is_neg { "CharClassNeg" } else { "CharClass" });
+                    
+                    // Read character class ID
+                    if ip >= code.len() {
+                        trace_log!("vm", "  ✗ No class_id operand (ip {} >= len {})", ip, code.len());
+                        return false;
+                    }
+                    let class_id = code[ip] as usize;
+                    ip += 1;
+                    trace_log!("vm", "  Class ID = {}", class_id);
+                    
+                    // Get the character class
+                    if class_id >= self.program.char_classes.len() {
+                        trace_log!("vm", "  ✗ Invalid class_id {} (>= {})", 
+                                  class_id, self.program.char_classes.len());
+                        return false;
+                    }
+                    let char_class = &self.program.char_classes[class_id];
+                    debug_log!("vm", "  CharClass: ASCII bitmap has {} set bits, {} Unicode ranges",
+                              char_class.ascii_bitmap.iter().map(|&b| b.count_ones()).sum::<u32>(),
+                              char_class.unicode_ranges.len());
+                    
+                    // Get current character
+                    if let Some(ch) = self.current_char(ctx) {
+                        trace_log!("vm", "  Testing char '{}' (U+{:04X}) against class", ch, ch as u32);
+                        let matches = self.test_char_class(ch, char_class);
+                        let should_match = if is_neg { !matches } else { matches };
+                        
+                        trace_log!("vm", "  Class test: {}, negated={}, final={}", 
+                                  matches, is_neg, should_match);
+                        
+                        if should_match {
+                            trace_log!("vm", "  ✓ CharClass match, advance pos {} -> {}",
+                                      ctx.pos, ctx.pos + ch.len_utf8());
+                            self.advance_char(ctx);
+                            continue;
+                        } else {
+                            trace_log!("vm", "  ✗ CharClass no match");
+                        }
+                    } else {
+                        trace_log!("vm", "  ✗ EOF, can't match char class");
+                    }
+                    return false;
+                }
 
                 OpCode::PlusGreedy => {
+                    trace_log!("vm", "  PlusGreedy: reading subexpr length");
                     // Read the length of the sub-expression  
                     if ip >= code.len() {
+                        trace_log!("vm", "  ✗ No length operand");
                         return false;
                     }
                     let expr_len = code[ip] as usize;
                     ip += 1;
+                    trace_log!("vm", "  Subexpr length = {} bytes", expr_len);
                     
                     let expr_start = ip;
                     let expr_end = ip + expr_len;
                     
                     // Bounds check
                     if expr_end > code.len() {
+                        trace_log!("vm", "  ✗ Subexpr bounds exceed code length");
                         return false;
                     }
                     
                     // Must match at least once
-                    let _start_pos = ctx.pos;
+                    let start_pos = ctx.pos;
+                    trace_log!("vm", "  First match attempt at pos={}", ctx.pos);
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                        trace_log!("vm", "  ✗ PlusGreedy: first match failed");
                         return false;
                     }
+                    let first_match_end = ctx.pos;
+                    trace_log!("vm", "  ✓ First match succeeded, pos {} -> {}", start_pos, first_match_end);
                     
                     // Keep matching greedily until we can't match anymore
+                    let mut match_count = 1;
                     loop {
                         let before_pos = ctx.pos;
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             // Can't match anymore, that's fine
+                            trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
                             break;
                         }
                         // If we didn't advance, avoid infinite loop
                         if ctx.pos == before_pos {
+                            trace_log!("vm", "  PlusGreedy: no advance, stopping");
                             break;
                         }
+                        match_count += 1;
+                        trace_log!("vm", "  Match {}: pos {} -> {}", match_count, before_pos, ctx.pos);
                     }
                     
                     ip = expr_end;
+                    trace_log!("vm", "  PlusGreedy complete, continuing at IP={}", ip);
                     continue;
                 }
 
@@ -886,6 +994,53 @@ impl RegexVM {
         // Word boundary exists if exactly one of prev/curr is a word character
         prev_is_word != curr_is_word
     }
+    
+    /// Test if a character matches a compiled character class
+    fn test_char_class(&self, ch: char, char_class: &CompiledCharClass) -> bool {
+        let ch_code = ch as u32;
+        trace_log!("vm", "    test_char_class: ch='{}' (U+{:04X}), negated={}", 
+                  ch, ch_code, char_class.negated);
+        
+        // First check ASCII bitmap for fast path
+        if ch_code <= 127 {
+            let byte_idx = (ch_code / 16) as usize;
+            let bit_idx = (ch_code % 16) as usize;
+            let bitmap_byte = char_class.ascii_bitmap[byte_idx];
+            let bit_mask = 1u16 << bit_idx;
+            let matches_bitmap = (bitmap_byte & bit_mask) != 0;
+            
+            trace_log!("vm", "    ASCII bitmap: byte[{}]=0x{:04x}, bit={}, mask=0x{:04x}, matches={}",
+                      byte_idx, bitmap_byte, bit_idx, bit_mask, matches_bitmap);
+            
+            // Apply negation if needed
+            let result = matches_bitmap != char_class.negated;
+            trace_log!("vm", "    ASCII result: {} (matches_bitmap={}, negated={})", 
+                      result, matches_bitmap, char_class.negated);
+            return result;
+        }
+        
+        // Check Unicode ranges
+        let mut in_range = false;
+        trace_log!("vm", "    Checking {} Unicode ranges", char_class.unicode_ranges.len());
+        for &(start, end) in &char_class.unicode_ranges {
+            trace_log!("vm", "      Range U+{:04X}..U+{:04X}", start, end);
+            if ch_code >= start && ch_code <= end {
+                in_range = true;
+                trace_log!("vm", "      → IN RANGE");
+                break;
+            }
+            if ch_code < start {
+                trace_log!("vm", "      → char < start, stopping");
+                break; // Ranges are sorted, no need to check further
+            }
+        }
+        
+        // Apply negation if needed
+        let result = in_range != char_class.negated;
+        trace_log!("vm", "    Unicode result: {} (in_range={}, negated={})", 
+                  result, in_range, char_class.negated);
+        result
+    }
 
     /// Find all non-overlapping matches
     pub fn find_all(&self, text: &str) -> Vec<Match> {
@@ -967,6 +1122,35 @@ impl RegexVM {
                 OpCode::Any => {
                     if let Some(ch) = self.current_char(ctx) {
                         if ch != '\n' {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                
+                OpCode::CharClass | OpCode::CharClassNeg => {
+                    let is_neg = matches!(op, OpCode::CharClassNeg);
+                    
+                    // Read character class ID
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let class_id = code[ip] as usize;
+                    ip += 1;
+                    
+                    // Get the character class
+                    if class_id >= self.program.char_classes.len() {
+                        return false;
+                    }
+                    let char_class = &self.program.char_classes[class_id];
+                    
+                    // Get current character
+                    if let Some(ch) = self.current_char(ctx) {
+                        let matches = self.test_char_class(ch, char_class);
+                        let should_match = if is_neg { !matches } else { matches };
+                        
+                        if should_match {
                             self.advance_char(ctx);
                             continue;
                         }
@@ -1497,8 +1681,22 @@ impl OptimizingCompiler {
                     CharClass::Word { negated: true } => self.emit_op(OpCode::WordAsciiNeg),
                     CharClass::Space { negated: false } => self.emit_op(OpCode::SpaceAscii),
                     CharClass::Space { negated: true } => self.emit_op(OpCode::SpaceAsciiNeg),
-                    _ => {
-                        // TODO: Implement custom character classes
+                    CharClass::Custom { ranges, negated } => {
+                        // Compile custom character class into optimized bytecode
+                        // Store the class definition and emit CharClass opcode with index
+                        let class_id = self.compile_char_class(ranges, *negated);
+                        
+                        if *negated {
+                            self.emit_op(OpCode::CharClassNeg);
+                        } else {
+                            self.emit_op(OpCode::CharClass);
+                        }
+                        self.code.push(class_id as u8);
+                    }
+                    CharClass::UnicodeClass { name, negated: _ } => {
+                        // For now, treat Unicode classes as Any
+                        // TODO: Implement full Unicode property support
+                        eprintln!("Warning: Unicode class \\p{{{}}} not yet fully supported", name);
                         self.emit_op(OpCode::Any);
                     }
                 }
@@ -1736,6 +1934,57 @@ impl OptimizingCompiler {
         
         self.flags.instruction_count += 1;
     }
+    
+    /// Compile a custom character class and return its ID
+    fn compile_char_class(&mut self, ranges: &[CharRange], negated: bool) -> usize {
+        // Build an optimized character class representation
+        let mut ascii_bitmap = [0u16; 8]; // 128 bits for ASCII
+        let mut unicode_ranges = Vec::new();
+        
+        for range in ranges {
+            // Handle ASCII characters specially for performance
+            if range.start as u32 <= 127 && range.end as u32 <= 127 {
+                // Set bits in ASCII bitmap
+                for ch in range.start as u8..=range.end as u8 {
+                    let byte_idx = (ch / 16) as usize;
+                    let bit_idx = (ch % 16) as usize;
+                    ascii_bitmap[byte_idx] |= 1 << bit_idx;
+                }
+            } else {
+                // Add to Unicode ranges
+                unicode_ranges.push((range.start as u32, range.end as u32));
+            }
+        }
+        
+        // Sort and merge overlapping Unicode ranges for efficiency
+        unicode_ranges.sort_by_key(|r| r.0);
+        let mut merged: Vec<(u32, u32)> = Vec::new();
+        for range in unicode_ranges {
+            if let Some(last) = merged.last_mut() {
+                if range.0 <= last.1 + 1 {
+                    // Merge overlapping or adjacent ranges
+                    last.1 = last.1.max(range.1);
+                } else {
+                    merged.push(range);
+                }
+            } else {
+                merged.push(range);
+            }
+        }
+        
+        let char_class = CompiledCharClass {
+            ascii_bitmap,
+            unicode_ranges: merged,
+            negated,
+        };
+        
+        // Store the character class and return its index
+        let id = self.char_classes.len();
+        self.char_classes.push(char_class);
+        self.stats.char_classes += 1;
+        
+        id
+    }
 }
 
 impl Default for OptimizingCompiler {
@@ -1759,6 +2008,8 @@ impl TryFrom<u8> for OpCode {
             0x13 => Ok(WordAsciiNeg),
             0x14 => Ok(SpaceAscii),
             0x15 => Ok(SpaceAsciiNeg),
+            0x16 => Ok(CharClass),
+            0x17 => Ok(CharClassNeg),
             0x30 => Ok(StartLine),
             0x31 => Ok(EndLine),
             0x32 => Ok(StartText),

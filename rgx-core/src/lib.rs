@@ -74,6 +74,9 @@ pub mod javascript;
 // Error handling
 pub mod error;
 
+// Logging system
+pub mod log;
+
 // Re-exports for convenience
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use pattern::{Pattern, CompiledPattern};

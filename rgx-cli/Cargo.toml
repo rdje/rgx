@@ -13,4 +13,5 @@ rgx-core = { path = "../rgx-core" }
 clap = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+once_cell = "1.19"
 

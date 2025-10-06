@@ -10,6 +10,7 @@ publish = false
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
 rgx-core = { path = "../rgx-core" }
+pcre2 = "0.2"
 
 [[bench]]
 name = "throughput"
