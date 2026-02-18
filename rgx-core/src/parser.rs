@@ -254,6 +254,55 @@ impl<'a> Parser<'a> {
                 }
             }
             
+            Some(Token::NonCapturingGroupStart) => {
+                self.advance()?; // consume '(?:'
+                let expr = self.parse_alternation()?;
+                
+                // Expect closing ')'
+                match self.peek() {
+                    Some(Token::GroupEnd) => {
+                        self.advance()?; // consume ')'
+                        Ok(Regex::Group {
+                            expr: Box::new(expr),
+                            kind: GroupKind::NonCapturing,
+                            index: None,
+                            name: None,
+                        })
+                    }
+                    _ => Err(LexError::UnexpectedEOF {
+                        expected: "closing parenthesis ')'".to_string(),
+                        position: self.current_token.as_ref()
+                            .map(|t| t.position.clone())
+                            .unwrap_or_else(|| crate::token::Position::start()),
+                    })
+                }
+            }
+            
+            Some(Token::NamedGroupStart { name }) => {
+                let name = name.clone();
+                self.advance()?; // consume '(?<name>'
+                let expr = self.parse_alternation()?;
+                
+                // Expect closing ')'
+                match self.peek() {
+                    Some(Token::GroupEnd) => {
+                        self.advance()?; // consume ')'
+                        Ok(Regex::Group {
+                            expr: Box::new(expr),
+                            kind: GroupKind::Capturing,
+                            index: None,
+                            name: Some(name),
+                        })
+                    }
+                    _ => Err(LexError::UnexpectedEOF {
+                        expected: "closing parenthesis ')'".to_string(),
+                        position: self.current_token.as_ref()
+                            .map(|t| t.position.clone())
+                            .unwrap_or_else(|| crate::token::Position::start()),
+                    })
+                }
+            }
+            
             Some(Token::EOF) => {
                 Err(LexError::UnexpectedEOF {
                     expected: "regex expression".to_string(),
@@ -348,6 +397,48 @@ mod tests {
                 }
             }
             _ => panic!("Expected group")
+        }
+    }
+    
+    #[test]
+    fn test_parse_non_capturing_group() {
+        let mut parser = Parser::new("(?:abc)").unwrap();
+        let ast = parser.parse().unwrap();
+        
+        match ast {
+            Regex::Group { expr, kind, name, .. } => {
+                assert!(matches!(kind, GroupKind::NonCapturing));
+                assert_eq!(name, None);
+                match *expr {
+                    Regex::Sequence(elements) => {
+                        assert_eq!(elements.len(), 3);
+                        assert!(matches!(elements[0], Regex::Char('a')));
+                    }
+                    _ => panic!("Expected sequence inside non-capturing group")
+                }
+            }
+            _ => panic!("Expected non-capturing group")
+        }
+    }
+    
+    #[test]
+    fn test_parse_named_group() {
+        let mut parser = Parser::new("(?<word>abc)").unwrap();
+        let ast = parser.parse().unwrap();
+        
+        match ast {
+            Regex::Group { expr, kind, name, .. } => {
+                assert!(matches!(kind, GroupKind::Capturing));
+                assert_eq!(name, Some("word".to_string()));
+                match *expr {
+                    Regex::Sequence(elements) => {
+                        assert_eq!(elements.len(), 3);
+                        assert!(matches!(elements[0], Regex::Char('a')));
+                    }
+                    _ => panic!("Expected sequence inside named group")
+                }
+            }
+            _ => panic!("Expected named capturing group")
         }
     }
 

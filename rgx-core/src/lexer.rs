@@ -361,14 +361,54 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Parse group constructs - simplified to handle only basic groups
+    /// Parse group constructs: (...), (?:...), (?<name>...)
     fn parse_group(&mut self) -> Result<Token, LexError> {
+        let start_pos = self.current_position();
         self.advance(); // Skip '('
         
-        // For now, only support simple capturing groups
-        // Complex constructs like (?:...), (?<name>...), (?{...}) will be added later
-        // via pgen-generated parser
-        Ok(Token::GroupStart)
+        // Simple capturing group
+        if self.current != Some('?') {
+            return Ok(Token::GroupStart);
+        }
+        
+        self.advance(); // Skip '?'
+        
+        match self.current {
+            Some(':') => {
+                self.advance(); // Skip ':'
+                Ok(Token::NonCapturingGroupStart)
+            }
+            Some('<') => {
+                self.advance(); // Skip '<'
+                let mut name = String::new();
+                
+                while let Some(c) = self.current {
+                    if c == '>' {
+                        self.advance(); // Skip '>'
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+                
+                if name.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                
+                Ok(Token::NamedGroupStart { name })
+            }
+            _ => Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            }),
+        }
     }
 
 
@@ -588,6 +628,28 @@ mod tests {
             Token::Char('b'),
             Token::Char('c'),
             Token::GroupEnd
+        ]);
+    }
+    
+    #[test]
+    fn test_non_capturing_groups() {
+        let tokens = tokenize_all("(?:ab)").unwrap();
+        assert_eq!(tokens, vec![
+            Token::NonCapturingGroupStart,
+            Token::Char('a'),
+            Token::Char('b'),
+            Token::GroupEnd,
+        ]);
+    }
+    
+    #[test]
+    fn test_named_groups() {
+        let tokens = tokenize_all("(?<word>ab)").unwrap();
+        assert_eq!(tokens, vec![
+            Token::NamedGroupStart { name: "word".to_string() },
+            Token::Char('a'),
+            Token::Char('b'),
+            Token::GroupEnd,
         ]);
     }
 

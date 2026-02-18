@@ -1877,25 +1877,34 @@ impl OptimizingCompiler {
                 }
             }
             
-            Regex::Group { expr, kind: _, .. } => {
-                // Only handle capturing groups for now
-                // Increment group counter and emit capture opcodes
-                self.group_counter += 1;
-                let group_id = self.group_counter;
-                
-                // Update max capture group for flags
-                self.flags.max_capture_group = self.flags.max_capture_group.max(group_id);
-                
-                // Emit SaveStart to capture beginning of group
-                self.emit_op(OpCode::SaveStart);
-                self.code.push(group_id as u8);
-                
-                // Compile the inner expression
-                self.codegen_pass(expr);
-                
-                // Emit SaveEnd to capture end of group
-                self.emit_op(OpCode::SaveEnd);
-                self.code.push(group_id as u8);
+            Regex::Group { expr, kind, .. } => {
+                match kind {
+                    GroupKind::Capturing => {
+                        // Capturing group: allocate group ID and emit capture opcodes
+                        self.group_counter += 1;
+                        let group_id = self.group_counter;
+                        
+                        // Update max capture group for flags
+                        self.flags.max_capture_group = self.flags.max_capture_group.max(group_id);
+                        
+                        // Emit SaveStart to capture beginning of group
+                        self.emit_op(OpCode::SaveStart);
+                        self.code.push(group_id as u8);
+                        
+                        // Compile the inner expression
+                        self.codegen_pass(expr);
+                        
+                        // Emit SaveEnd to capture end of group
+                        self.emit_op(OpCode::SaveEnd);
+                        self.code.push(group_id as u8);
+                    }
+                    GroupKind::NonCapturing | GroupKind::Atomic => {
+                        // Non-capturing/atomic group scaffolding:
+                        // currently compile the expression without capture slots.
+                        // (Atomic no-backtracking semantics remain a future enhancement.)
+                        self.codegen_pass(expr);
+                    }
+                }
             }
             
             _ => {
