@@ -16,6 +16,7 @@ Pipeline in `rgx-core`:
 
 ## What is currently reliable
 - Core compile-and-run flow for basic regex patterns
+- Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
 - VM execution paths for literals, alternation, anchors, word boundaries, basic classes, and core quantifiers
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Parser support for capturing groups, non-capturing groups `(?:...)`, and named groups `(?<name>...)`
@@ -29,10 +30,10 @@ Pipeline in `rgx-core`:
 - JavaScript/WASM modules remain scaffold-level in user-facing flow
 
 ## Immediate priorities
-1. Parser completeness for advanced grouping and assertion syntax
-2. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-3. Define and enforce a stable capability matrix in docs + tests
-4. Expand integration tests from API entry points (not only VM unit tests)
+1. Expand parser-independent AST integration tests around advanced VM/compiler features
+2. Parser completeness for advanced grouping and assertion syntax (in parallel with PGEN readiness)
+3. Remove/finish placeholder VM/compiler paths and TODO opcode branches
+4. Define and enforce a stable capability matrix in docs + tests
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

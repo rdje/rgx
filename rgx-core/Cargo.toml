@@ -31,6 +31,7 @@ tracing = { workspace = true }
 [features]
 default = ["std"]
 std = []
+pgen-parser = []
 wasm = ["wasmtime"]
 lua = ["mlua"]
 javascript = ["rquickjs"]

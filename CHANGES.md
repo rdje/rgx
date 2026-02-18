@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-18 - Added parser-independent compile path for AST-driven development
+- Scope: `rgx-core` compiler/API and feature-gating
+- Changes:
+  - Added explicit `pgen-parser` feature in `rgx-core/Cargo.toml` to match existing cfg usage and upcoming PGEN integration
+  - Added `Compiler::compile_ast(ast)` to compile VM programs directly from AST without parsing
+  - Added public parserless entry points:
+    - `Regex::from_ast(ast)`
+    - `Regex::from_ast_with_mode(ast, mode)`
+  - Added tests exercising AST-driven compilation and matching via public API
+- Validation:
+  - `cargo test -p rgx-core` passed after these changes
+- Notes/impact:
+  - Unblocks VM/compiler/engine feature work while PGEN parser is still in active design
+  - Reduces dependency on parser completeness for core-engine progress
 ### 2026-02-18 - Added parser and codegen support for `(?:...)` and `(?<name>...)`
 - Scope: `rgx-core` lexer/parser/compiler integration
 - Changes:

@@ -135,6 +135,31 @@ impl Regex {
         })
     }
 
+    /// Compile a regex directly from a pre-built AST.
+    ///
+    /// This enables parser-independent development, testing, and benchmarking
+    /// of the compiler/VM/engine pipeline.
+    pub fn from_ast(ast: ast::Regex) -> Result<Self> {
+        let compiled = Compiler::new().compile_ast(ast)?;
+        let engine = Engine::new(&compiled)?;
+
+        Ok(Self {
+            pattern: compiled,
+            engine,
+        })
+    }
+
+    /// Compile a regex from AST using a specific execution mode.
+    pub fn from_ast_with_mode(ast: ast::Regex, mode: ExecutionMode) -> Result<Self> {
+        let compiled = Compiler::with_mode(mode).compile_ast(ast)?;
+        let engine = Engine::new(&compiled)?;
+
+        Ok(Self {
+            pattern: compiled,
+            engine,
+        })
+    }
+
     /// Find all matches in the given text.
     ///
     /// This method is optimized for bulk processing and will use SIMD
@@ -162,6 +187,7 @@ impl Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{GroupKind, Regex as RegexAst};
 
     #[test]
     fn basic_regex_compilation() {
@@ -186,5 +212,46 @@ mod tests {
         
         assert!(regex.is_match("123-45-6789"));
         assert!(!regex.is_match("not-a-ssn"));
+    }
+
+    #[test]
+    fn ast_compilation_without_parser() {
+        let ast = RegexAst::Alternation(vec![
+            RegexAst::Sequence(vec![
+                RegexAst::Char('c'),
+                RegexAst::Char('a'),
+                RegexAst::Char('t'),
+            ]),
+            RegexAst::Sequence(vec![
+                RegexAst::Char('d'),
+                RegexAst::Char('o'),
+                RegexAst::Char('g'),
+            ]),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile AST directly");
+        assert!(regex.is_match("dog"));
+        assert!(regex.is_match("I saw a cat"));
+        assert!(!regex.is_match("bird"));
+    }
+
+    #[test]
+    fn ast_compilation_with_atomic_group_scaffold() {
+        let ast = RegexAst::Group {
+            expr: Box::new(RegexAst::Sequence(vec![
+                RegexAst::Char('f'),
+                RegexAst::Char('o'),
+                RegexAst::Char('o'),
+            ])),
+            kind: GroupKind::Atomic,
+            index: None,
+            name: None,
+        };
+
+        let regex = Regex::from_ast_with_mode(ast, ExecutionMode::Pure)
+            .expect("Failed to compile atomic-group AST directly");
+        assert!(regex.is_match("foo"));
+        assert!(regex.is_match("xxfooyy"));
+        assert!(!regex.is_match("bar"));
     }
 }

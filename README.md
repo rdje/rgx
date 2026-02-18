@@ -15,6 +15,7 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Core quantifiers (`*`, `+`, `?`, simple `{n,m}` paths)
 - Capture group tracking in VM tests
 - Group parsing for capturing, non-capturing `(?:...)`, and named groups `(?<name>...)`
+- Parser-independent compilation from AST via public API (`Regex::from_ast`)
 - CLI usage for basic regex matching via `rgx-cli`
 
 ## Current limitations
