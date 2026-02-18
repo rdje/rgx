@@ -16,6 +16,8 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Capture group tracking in VM tests
 - Group parsing for capturing, non-capturing `(?:...)`, and named groups `(?<name>...)`
 - Parser-independent compilation from AST via public API (`Regex::from_ast`)
+- Parser-independent lookahead support via AST (`RegexAst::Lookahead`, positive/negative)
+- Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
 - CLI usage for basic regex matching via `rgx-cli`
 
 ## Current limitations

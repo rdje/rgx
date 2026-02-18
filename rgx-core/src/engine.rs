@@ -19,7 +19,11 @@ pub struct MatchResult {
     /// Start position in bytes
     pub start: usize, 
     /// End position in bytes
-    pub end: usize 
+    pub end: usize,
+    /// 1-based top-level branch number for top-level alternation matches.
+    ///
+    /// `None` when the pattern has no top-level alternation.
+    pub matched_branch_number: Option<usize>,
 }
 
 /// High-performance regex execution engine
@@ -53,7 +57,8 @@ impl Engine {
             .into_iter()
             .map(|m| MatchResult { 
                 start: m.start, 
-                end: m.end 
+                end: m.end,
+                matched_branch_number: m.matched_alternative.map(|id| id + 1),
             })
             .collect()
     }
@@ -66,7 +71,8 @@ impl Engine {
         self.vm.find_first(text_str)
             .map(|m| MatchResult { 
                 start: m.start, 
-                end: m.end 
+                end: m.end,
+                matched_branch_number: m.matched_alternative.map(|id| id + 1),
             })
     }
 

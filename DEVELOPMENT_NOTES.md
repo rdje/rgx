@@ -18,13 +18,15 @@ Pipeline in `rgx-core`:
 - Core compile-and-run flow for basic regex patterns
 - Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
 - VM execution paths for literals, alternation, anchors, word boundaries, basic classes, and core quantifiers
+- AST-first VM/compiler support for positive and negative lookahead assertions
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
+- Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, and named groups `(?<name>...)`
 - VM test suite coverage for core behavior
 
 ## Known engineering gaps
 - Parser support for advanced group syntaxes is incomplete
-  - lookarounds and inline code-block constructs are not fully wired
+  - lookaround syntax and inline code-block constructs are not fully wired
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path
 - JavaScript/WASM modules remain scaffold-level in user-facing flow

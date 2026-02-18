@@ -254,4 +254,77 @@ mod tests {
         assert!(regex.is_match("xxfooyy"));
         assert!(!regex.is_match("bar"));
     }
+
+    #[test]
+    fn ast_positive_lookahead_no_consume() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Lookahead {
+                expr: Box::new(RegexAst::Sequence(vec![
+                    RegexAst::Char('c'),
+                    RegexAst::Char('a'),
+                    RegexAst::Char('t'),
+                ])),
+                positive: true,
+            },
+            RegexAst::Char('c'),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile positive-lookahead AST directly");
+        let m = regex.find_first("xxcat").expect("Expected lookahead match");
+        assert_eq!(m.start, 2);
+        assert_eq!(m.end, 3); // Lookahead itself must not consume input
+    }
+
+    #[test]
+    fn ast_negative_lookahead() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Lookahead {
+                expr: Box::new(RegexAst::Char('x')),
+                positive: false,
+            },
+            RegexAst::Dot,
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile negative-lookahead AST directly");
+        assert!(regex.is_match("a"));
+        assert!(!regex.is_match("x"));
+    }
+
+    #[test]
+    fn top_level_branch_id_exposed() {
+        let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
+        let m = regex.find_first("xxdogxx").expect("Expected a match");
+        assert_eq!(m.matched_branch_number, Some(2)); // 1-based top-level branch number
+    }
+
+    #[test]
+    fn top_level_branch_id_not_overridden_by_nested_alternation() {
+        let ast = RegexAst::Alternation(vec![
+            RegexAst::Sequence(vec![
+                RegexAst::Char('a'),
+                RegexAst::Alternation(vec![RegexAst::Char('1'), RegexAst::Char('2')]),
+            ]),
+            RegexAst::Sequence(vec![
+                RegexAst::Char('b'),
+                RegexAst::Alternation(vec![RegexAst::Char('3'), RegexAst::Char('4')]),
+            ]),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile nested alternation AST");
+        let m = regex.find_first("b3").expect("Expected nested alternation match");
+        assert_eq!(m.matched_branch_number, Some(2)); // Must report top-level branch number
+    }
+
+    #[test]
+    fn single_arm_alternation_has_no_branch_number() {
+        let ast = RegexAst::Alternation(vec![RegexAst::Sequence(vec![
+            RegexAst::Char('c'),
+            RegexAst::Char('a'),
+            RegexAst::Char('t'),
+        ])]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile single-arm alternation AST");
+        let m = regex.find_first("xxcatxx").expect("Expected a match");
+        assert_eq!(m.matched_branch_number, None);
+    }
 }

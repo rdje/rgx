@@ -532,6 +532,37 @@ impl RegexVM {
                     return false;
                 }
 
+                OpCode::Lookahead | OpCode::LookaheadNeg => {
+                    // Read the length of the lookahead sub-expression
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
+                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
+                        matched
+                    } else {
+                        !matched
+                    };
+
+                    if !assertion_holds {
+                        return false;
+                    }
+
+                    // Assertions do not consume input
+                    ip = expr_end;
+                    continue;
+                }
+
                 OpCode::Any => {
                     if let Some(ch) = self.current_char(ctx) {
                         if ch != '\n' {
@@ -766,6 +797,38 @@ impl RegexVM {
                     let _matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     // For ?, we don't care if it failed - it's optional
                     
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::Lookahead | OpCode::LookaheadNeg => {
+                    // Read the length of the lookahead sub-expression
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    // Bounds check
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
+                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
+                        matched
+                    } else {
+                        !matched
+                    };
+
+                    if !assertion_holds {
+                        return false;
+                    }
+
+                    // Assertions do not consume input
                     ip = expr_end;
                     continue;
                 }
@@ -1157,6 +1220,37 @@ impl RegexVM {
                     }
                     return false;
                 }
+
+                OpCode::Lookahead | OpCode::LookaheadNeg => {
+                    // Read the length of the lookahead sub-expression
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
+                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
+                        matched
+                    } else {
+                        !matched
+                    };
+
+                    if !assertion_holds {
+                        return false;
+                    }
+
+                    // Assertions do not consume input
+                    ip = expr_end;
+                    continue;
+                }
                 
                 // Add other opcodes as needed
                 _ => {
@@ -1164,6 +1258,23 @@ impl RegexVM {
                 }
             }
         }
+    }
+
+    /// Execute an assertion sub-expression without consuming input
+    /// or mutating the parent execution context.
+    fn execute_assertion_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> bool {
+        let mut assertion_ctx = ExecContext {
+            text: ctx.text.clone(),
+            pos: ctx.pos,
+            end: ctx.end,
+            captures: ctx.captures.clone(),
+            memo_cache: HashMap::new(),
+            call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: ctx.current_alternative,
+        };
+
+        self.execute_subexpr(&mut assertion_ctx, code)
     }
     
     // =============================================================================
@@ -1605,7 +1716,7 @@ impl OptimizingCompiler {
         self.optimize_ast(ast);
         
         // Pass 3: Code generation - emit optimized bytecode
-        self.codegen_pass(ast);
+        self.codegen_pass(ast, true);
         
         // Pass 4: Final optimizations - peephole optimization on bytecode
         self.peephole_optimize();
@@ -1663,7 +1774,7 @@ impl OptimizingCompiler {
     }
     
     /// Code generation pass - emit optimized bytecode
-    fn codegen_pass(&mut self, ast: &Regex) {
+    fn codegen_pass(&mut self, ast: &Regex, is_top_level: bool) {
         match ast {
             Regex::Char(ch) => {
                 self.emit_char_op(OpCode::Char, *ch);
@@ -1714,7 +1825,7 @@ impl OptimizingCompiler {
             
             Regex::Sequence(items) => {
                 for item in items {
-                    self.codegen_pass(item);
+                    self.codegen_pass(item, false);
                 }
             }
             
@@ -1726,10 +1837,8 @@ impl OptimizingCompiler {
                 }
                 
                 if alts.len() == 1 {
-                    // Single alternative - emit SetAlternative for index 0 and compile
-                    self.emit_op(OpCode::SetAlternative);
-                    self.code.push(0);  // Alternative index 0
-                    self.codegen_pass(&alts[0]);
+                    // Single alternative
+                    self.codegen_pass(&alts[0], false);
                     return;
                 }
                 
@@ -1751,9 +1860,11 @@ impl OptimizingCompiler {
                 for (i, alt) in alts.iter().enumerate() {
                     if i == alts.len() - 1 {
                         // Last alternative - no Split needed
-                        self.emit_op(OpCode::SetAlternative);
-                        self.code.push(i as u8);
-                        self.codegen_pass(alt);
+                        if is_top_level {
+                            self.emit_op(OpCode::SetAlternative);
+                            self.code.push(i as u8);
+                        }
+                        self.codegen_pass(alt, false);
                     } else {
                         // Not the last - emit Split to next alternative
                         self.emit_op(OpCode::Split);
@@ -1762,9 +1873,11 @@ impl OptimizingCompiler {
                         self.code.push(0); // Will be patched
                         
                         // Current alternative
-                        self.emit_op(OpCode::SetAlternative);
-                        self.code.push(i as u8);
-                        self.codegen_pass(alt);
+                        if is_top_level {
+                            self.emit_op(OpCode::SetAlternative);
+                            self.code.push(i as u8);
+                        }
+                        self.codegen_pass(alt, false);
                         
                         // Jump to end (except for last alternative)
                         self.emit_op(OpCode::Jump);
@@ -1803,6 +1916,22 @@ impl OptimizingCompiler {
                 }
             }
             
+            Regex::Lookahead { expr, positive } => {
+                if *positive {
+                    self.emit_op(OpCode::Lookahead);
+                } else {
+                    self.emit_op(OpCode::LookaheadNeg);
+                }
+                
+                // Compile lookahead sub-expression inline with a length prefix.
+                let mut sub_compiler = OptimizingCompiler::new();
+                sub_compiler.codegen_pass(expr, false);
+                let sub_code = sub_compiler.code;
+                
+                self.code.push(sub_code.len() as u8);
+                self.code.extend(sub_code);
+            }
+            
             Regex::Quantified { expr, quantifier } => {
                 match quantifier {
                     Quantifier::OneOrMore { lazy: false } => {
@@ -1811,7 +1940,7 @@ impl OptimizingCompiler {
                         
                         // First, collect the sub-expression bytecode
                         let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr);
+                        sub_compiler.codegen_pass(expr, false);
                         let sub_code = sub_compiler.code;
                         
                         // Emit the length of the sub-expression
@@ -1826,7 +1955,7 @@ impl OptimizingCompiler {
                         
                         // First, collect the sub-expression bytecode
                         let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr);
+                        sub_compiler.codegen_pass(expr, false);
                         let sub_code = sub_compiler.code;
                         
                         // Emit the length of the sub-expression
@@ -1841,7 +1970,7 @@ impl OptimizingCompiler {
                         
                         // First, collect the sub-expression bytecode
                         let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr);
+                        sub_compiler.codegen_pass(expr, false);
                         let sub_code = sub_compiler.code;
                         
                         // Emit the length of the sub-expression
@@ -1857,7 +1986,7 @@ impl OptimizingCompiler {
                         
                         // Emit required repetitions (min times)
                         for _ in 0..min_count {
-                            self.codegen_pass(expr);
+                            self.codegen_pass(expr, false);
                         }
                         
                         // Emit optional repetitions (up to max-min more times)
@@ -1866,13 +1995,13 @@ impl OptimizingCompiler {
                             // TODO: Implement optional matching with backtracking
                             // For now, just require exact match
                             if max.is_some() && max.unwrap() > *min {
-                                self.codegen_pass(expr);
+                                self.codegen_pass(expr, false);
                             }
                         }
                     }
                     _ => {
                         // TODO: Implement other quantifiers  
-                        self.codegen_pass(expr);
+                        self.codegen_pass(expr, false);
                     }
                 }
             }
@@ -1892,7 +2021,7 @@ impl OptimizingCompiler {
                         self.code.push(group_id as u8);
                         
                         // Compile the inner expression
-                        self.codegen_pass(expr);
+                        self.codegen_pass(expr, false);
                         
                         // Emit SaveEnd to capture end of group
                         self.emit_op(OpCode::SaveEnd);
@@ -1902,7 +2031,7 @@ impl OptimizingCompiler {
                         // Non-capturing/atomic group scaffolding:
                         // currently compile the expression without capture slots.
                         // (Atomic no-backtracking semantics remain a future enhancement.)
-                        self.codegen_pass(expr);
+                        self.codegen_pass(expr, false);
                     }
                 }
             }
@@ -2026,6 +2155,8 @@ impl TryFrom<u8> for OpCode {
             0x34 => Ok(EndTextOrNL),
             0x35 => Ok(WordBoundary),
             0x36 => Ok(NonWordBoundary),
+            0x60 => Ok(Lookahead),
+            0x61 => Ok(LookaheadNeg),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x50 => Ok(SaveStart),

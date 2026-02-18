@@ -14,6 +14,38 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-18 - Added built-in 1-based top-level branch number reporting
+- Scope: `rgx-core` compiler/engine/public API semantics for top-level alternations
+- Changes:
+  - Restricted alternative tracking instrumentation to top-level alternation codegen paths
+  - Exposed a single user-facing field on match results:
+    - `MatchResult.matched_branch_number: Option<usize>`
+  - Mapped internal alternative indices to user-facing 1-based branch numbers
+  - Added/updated API tests to verify:
+    - top-level alternation branch number exposure
+    - nested alternation does not override top-level branch selection
+- Validation:
+  - `cargo test -p rgx-core` passed (49 tests)
+- Notes/impact:
+  - Removes user friction from 0-based IDs while preserving deterministic branch reporting
+  - Keeps branch reporting semantics focused on the top-level alternation contract
+### 2026-02-18 - Added AST-first lookahead support in compiler and VM
+- Scope: `rgx-core` VM/compiler execution semantics (parser-independent path)
+- Changes:
+  - Implemented AST codegen for lookahead assertions:
+    - `Regex::Lookahead { positive: true }` -> `OpCode::Lookahead`
+    - `Regex::Lookahead { positive: false }` -> `OpCode::LookaheadNeg`
+  - Implemented VM execution semantics for lookahead opcodes in:
+    - main executor
+    - sub-expression executor
+  - Added non-consuming assertion evaluation helper so lookahead does not mutate parent context
+  - Extended opcode decoding (`TryFrom<u8>`) for `Lookahead` and `LookaheadNeg`
+  - Added parser-independent public API tests for positive and negative lookahead behavior
+- Validation:
+  - `cargo test -p rgx-core` passed (46 tests)
+- Notes/impact:
+  - Enables continued feature progress on advanced assertions without depending on parser readiness
+  - Parser syntax for lookarounds remains pending; AST-first workflow is the current delivery path
 ### 2026-02-18 - Added parser-independent compile path for AST-driven development
 - Scope: `rgx-core` compiler/API and feature-gating
 - Changes:
