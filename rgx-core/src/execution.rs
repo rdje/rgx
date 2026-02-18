@@ -237,18 +237,18 @@ pub mod lua {
         fn reset(&mut self) {
             // TODO: Implement proper reset functionality
             // For now, just create a new Lua instance
-            if let Ok(mut new_lua) = Lua::new() {
-                // Remove dangerous standard libraries
-                new_lua.globals().set("io", Value::Nil).ok();
-                new_lua.globals().set("os", Value::Nil).ok();
-                new_lua.globals().set("debug", Value::Nil).ok();
-                new_lua.globals().set("require", Value::Nil).ok();
-                new_lua.globals().set("loadfile", Value::Nil).ok();
-                new_lua.globals().set("dofile", Value::Nil).ok();
-                new_lua.globals().set("package", Value::Nil).ok();
-                
-                *self.lua.lock().unwrap() = new_lua;
-            }
+            let mut new_lua = Lua::new();
+            
+            // Remove dangerous standard libraries
+            new_lua.globals().set("io", Value::Nil).ok();
+            new_lua.globals().set("os", Value::Nil).ok();
+            new_lua.globals().set("debug", Value::Nil).ok();
+            new_lua.globals().set("require", Value::Nil).ok();
+            new_lua.globals().set("loadfile", Value::Nil).ok();
+            new_lua.globals().set("dofile", Value::Nil).ok();
+            new_lua.globals().set("package", Value::Nil).ok();
+            
+            *self.lua.lock().unwrap() = new_lua;
         }
     }
     
