@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added parser-path conditional syntax support (group-exists subset) with explicit unsupported compile behavior
+- Scope: `rgx-core` lexer/parser/parsing conformance and docs alignment
+- Changes:
+  - Extended lexer group parsing to recognize conditional-start syntax for:
+    - group-exists form `(?(1)yes|no)`
+    - named-group-exists form `(?(<name>)yes|no)`
+  - Extended parser atom handling to build `Regex::Conditional` AST nodes from `Token::ConditionalStart`
+  - Added lexer and parser tests for conditional tokenization/AST mapping
+  - Added API-level regression test verifying conditional syntax now parses but still fails explicitly at compile/runtime boundary
+  - Extended parser conformance fixtures and parser contract docs to include conditional syntax as a parsed-but-unintegrated feature
+  - Updated roadmap/readme/development notes wording to reflect partial conditional parser support
+- Validation:
+  - `cargo test -p rgx-core`
+- Notes/impact:
+  - Advances parser completeness toward PGEN integration without introducing unsafe or silent runtime behavior
+  - Keeps conditional execution semantics explicitly unsupported until VM integration lands
 ### 2026-02-19 - Added formal parser contract and conformance harness scaffolding for PGEN readiness
 - Scope: `rgx-core` parser boundary definition and interoperability infrastructure
 - Changes:

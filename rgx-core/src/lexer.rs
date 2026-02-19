@@ -4,7 +4,7 @@
 //! a stream of tokens, handling all Perl regex features including our custom
 //! code execution blocks.
 
-use crate::ast::{AnchorType, CharRange, RecursionTarget};
+use crate::ast::{AnchorType, CharRange, ConditionalTest, RecursionTarget};
 use crate::token::{LexError, Position, Token, TokenWithPos};
 use std::str::Chars;
 
@@ -41,7 +41,7 @@ impl<'a> Lexer<'a> {
         } else {
             self.position.column += 1;
         }
-        
+
         self.current = self.chars.next();
         if self.current.is_some() {
             self.position.offset += 1;
@@ -64,22 +64,37 @@ impl<'a> Lexer<'a> {
 
         let token = match self.current {
             None => Token::EOF,
-            
+
             Some('\\') => self.parse_escape()?,
-            Some('.') => { self.advance(); Token::Dot }
-            Some('^') => { self.advance(); Token::Anchor(AnchorType::Start) }
-            Some('$') => { self.advance(); Token::Anchor(AnchorType::End) }
+            Some('.') => {
+                self.advance();
+                Token::Dot
+            }
+            Some('^') => {
+                self.advance();
+                Token::Anchor(AnchorType::Start)
+            }
+            Some('$') => {
+                self.advance();
+                Token::Anchor(AnchorType::End)
+            }
             Some('*') => self.parse_star()?,
             Some('+') => self.parse_plus()?,
             Some('?') => self.parse_question()?,
-            Some('|') => { self.advance(); Token::Alternation }
-            
+            Some('|') => {
+                self.advance();
+                Token::Alternation
+            }
+
             Some('(') => self.parse_group()?,
-            Some(')') => { self.advance(); Token::GroupEnd }
-            
+            Some(')') => {
+                self.advance();
+                Token::GroupEnd
+            }
+
             Some('[') => self.parse_character_class()?,
             Some('{') => self.parse_repeat_quantifier()?,
-            
+
             Some(c) => {
                 self.advance();
                 Token::Char(c)
@@ -101,19 +116,52 @@ impl<'a> Lexer<'a> {
             }),
 
             // Predefined character classes
-            Some('d') => { self.advance(); Ok(Token::Digit) }
-            Some('D') => { self.advance(); Ok(Token::DigitNeg) }
-            Some('w') => { self.advance(); Ok(Token::Word) }
-            Some('W') => { self.advance(); Ok(Token::WordNeg) }
-            Some('s') => { self.advance(); Ok(Token::Space) }
-            Some('S') => { self.advance(); Ok(Token::SpaceNeg) }
-            Some('b') => { self.advance(); Ok(Token::WordBoundary) }
-            Some('B') => { self.advance(); Ok(Token::WordBoundaryNeg) }
+            Some('d') => {
+                self.advance();
+                Ok(Token::Digit)
+            }
+            Some('D') => {
+                self.advance();
+                Ok(Token::DigitNeg)
+            }
+            Some('w') => {
+                self.advance();
+                Ok(Token::Word)
+            }
+            Some('W') => {
+                self.advance();
+                Ok(Token::WordNeg)
+            }
+            Some('s') => {
+                self.advance();
+                Ok(Token::Space)
+            }
+            Some('S') => {
+                self.advance();
+                Ok(Token::SpaceNeg)
+            }
+            Some('b') => {
+                self.advance();
+                Ok(Token::WordBoundary)
+            }
+            Some('B') => {
+                self.advance();
+                Ok(Token::WordBoundaryNeg)
+            }
 
             // Anchors
-            Some('A') => { self.advance(); Ok(Token::Anchor(AnchorType::AbsStart)) }
-            Some('Z') => { self.advance(); Ok(Token::Anchor(AnchorType::AbsEnd)) }
-            Some('z') => { self.advance(); Ok(Token::Anchor(AnchorType::AbsEndNoNL)) }
+            Some('A') => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsStart))
+            }
+            Some('Z') => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsEnd))
+            }
+            Some('z') => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsEndNoNL))
+            }
 
             // Backreferences
             Some(c) if c.is_ascii_digit() => self.parse_backreference(),
@@ -123,15 +171,35 @@ impl<'a> Lexer<'a> {
             Some('P') => self.parse_unicode_class(true),
 
             // Literal escape sequences
-            Some('n') => { self.advance(); Ok(Token::Char('\n')) }
-            Some('t') => { self.advance(); Ok(Token::Char('\t')) }
-            Some('r') => { self.advance(); Ok(Token::Char('\r')) }
-            Some('f') => { self.advance(); Ok(Token::Char('\u{0C}')) }
-            Some('a') => { self.advance(); Ok(Token::Char('\u{07}')) }
-            Some('e') => { self.advance(); Ok(Token::Char('\u{1B}')) }
+            Some('n') => {
+                self.advance();
+                Ok(Token::Char('\n'))
+            }
+            Some('t') => {
+                self.advance();
+                Ok(Token::Char('\t'))
+            }
+            Some('r') => {
+                self.advance();
+                Ok(Token::Char('\r'))
+            }
+            Some('f') => {
+                self.advance();
+                Ok(Token::Char('\u{0C}'))
+            }
+            Some('a') => {
+                self.advance();
+                Ok(Token::Char('\u{07}'))
+            }
+            Some('e') => {
+                self.advance();
+                Ok(Token::Char('\u{1B}'))
+            }
 
             // Escaped metacharacters
-            Some('.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\') => {
+            Some(
+                '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\',
+            ) => {
                 let ch = self.current.unwrap();
                 self.advance();
                 Ok(Token::Char(ch))
@@ -204,10 +272,12 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let number: u32 = number_str.parse().map_err(|_| LexError::InvalidBackreference {
-            number: number_str.clone(),
-            position: start_pos,
-        })?;
+        let number: u32 = number_str
+            .parse()
+            .map_err(|_| LexError::InvalidBackreference {
+                number: number_str.clone(),
+                position: start_pos,
+            })?;
 
         if number == 0 || number > 99 {
             return Err(LexError::InvalidBackreference {
@@ -244,7 +314,7 @@ impl<'a> Lexer<'a> {
             }
             digits
         } else {
-            // \xFF format  
+            // \xFF format
             let mut digits = String::new();
             for _ in 0..2 {
                 if let Some(c) = self.current {
@@ -266,12 +336,11 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = u32::from_str_radix(&hex_digits, 16).map_err(|_| {
-            LexError::InvalidEscape {
+        let code_point =
+            u32::from_str_radix(&hex_digits, 16).map_err(|_| LexError::InvalidEscape {
                 sequence: format!("\\x{}", hex_digits),
                 position: start_pos,
-            }
-        })?;
+            })?;
 
         let ch = char::from_u32(code_point).ok_or_else(|| LexError::InvalidEscape {
             sequence: format!("\\x{}", hex_digits),
@@ -305,12 +374,11 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = u32::from_str_radix(&octal_digits, 8).map_err(|_| {
-            LexError::InvalidEscape {
+        let code_point =
+            u32::from_str_radix(&octal_digits, 8).map_err(|_| LexError::InvalidEscape {
                 sequence: format!("\\{}", octal_digits),
                 position: start_pos,
-            }
-        })?;
+            })?;
 
         // Octal escapes are limited to byte values (0-255)
         if code_point > 255 {
@@ -361,19 +429,20 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?{lang:code})
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         let start_pos = self.current_position();
         self.advance(); // Skip '('
-        
+
         // Simple capturing group
         if self.current != Some('?') {
             return Ok(Token::GroupStart);
         }
-        
+
         self.advance(); // Skip '?'
-        
+
         match self.current {
+            Some('(') => self.parse_conditional_start(start_pos),
             Some('{') => {
                 self.advance(); // Skip '{'
 
@@ -503,9 +572,12 @@ impl<'a> Lexer<'a> {
                 }
                 self.advance(); // Skip ')'
 
-                let group_num = number_str.parse::<u32>().map_err(|_| LexError::InvalidGroupSyntax {
-                    position: start_pos,
-                })?;
+                let group_num =
+                    number_str
+                        .parse::<u32>()
+                        .map_err(|_| LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        })?;
                 if group_num == 0 {
                     return Err(LexError::InvalidGroupSyntax {
                         position: start_pos,
@@ -527,7 +599,7 @@ impl<'a> Lexer<'a> {
                     return Ok(Token::LookbehindNeg);
                 }
                 let mut name = String::new();
-                
+
                 while let Some(c) = self.current {
                     if c == '>' {
                         self.advance(); // Skip '>'
@@ -542,13 +614,13 @@ impl<'a> Lexer<'a> {
                         });
                     }
                 }
-                
+
                 if name.is_empty() {
                     return Err(LexError::InvalidGroupSyntax {
                         position: start_pos,
                     });
                 }
-                
+
                 Ok(Token::NamedGroupStart { name })
             }
             _ => Err(LexError::InvalidGroupSyntax {
@@ -557,6 +629,79 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Parse conditional start: (?(1)...), (?(<name>)...)
+    ///
+    /// This returns only the condition-start token. Branch expressions and
+    /// the closing group ')' are parsed by the parser stage.
+    fn parse_conditional_start(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip '(' after "(?"
+
+        let condition = match self.current {
+            Some(c) if c.is_ascii_digit() => {
+                let mut number_str = String::new();
+                while let Some(d) = self.current {
+                    if d.is_ascii_digit() {
+                        number_str.push(d);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+
+                let group_num =
+                    number_str
+                        .parse::<u32>()
+                        .map_err(|_| LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        })?;
+                if group_num == 0 {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                ConditionalTest::GroupExists(group_num)
+            }
+            Some('<') => {
+                self.advance(); // Skip '<'
+                let mut name = String::new();
+                while let Some(c) = self.current {
+                    if c == '>' {
+                        self.advance(); // Skip '>'
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+
+                if name.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                ConditionalTest::NamedGroupExists(name)
+            }
+            _ => {
+                return Err(LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                });
+            }
+        };
+
+        if self.current != Some(')') {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        self.advance(); // Skip ')' ending condition test
+
+        Ok(Token::ConditionalStart { condition })
+    }
 
     /// Parse character class [abc], [^abc], [a-z], etc.
     fn parse_character_class(&mut self) -> Result<Token, LexError> {
@@ -583,7 +728,7 @@ impl<'a> Lexer<'a> {
                 if let Some(escaped) = self.current {
                     ranges.push(CharRange::single(match escaped {
                         'n' => '\n',
-                        't' => '\t', 
+                        't' => '\t',
                         'r' => '\r',
                         '\\' => '\\',
                         ']' => ']',
@@ -611,7 +756,9 @@ impl<'a> Lexer<'a> {
                         ranges.push(CharRange::range(start_char, end_char));
                         self.advance();
                     } else {
-                        return Err(LexError::UnterminatedCharClass { position: start_pos });
+                        return Err(LexError::UnterminatedCharClass {
+                            position: start_pos,
+                        });
                     }
                 } else {
                     // Single character
@@ -621,7 +768,9 @@ impl<'a> Lexer<'a> {
         }
 
         if ranges.is_empty() {
-            return Err(LexError::UnterminatedCharClass { position: start_pos });
+            return Err(LexError::UnterminatedCharClass {
+                position: start_pos,
+            });
         }
 
         Ok(Token::CharClass { ranges, negated })
@@ -644,7 +793,7 @@ impl<'a> Lexer<'a> {
 
         // Parse the content: "n", "n,", "n,m"
         let parts: Vec<&str> = content.split(',').collect();
-        
+
         let (min, max) = match parts.as_slice() {
             [min_str] => {
                 // {n} - exactly n times
@@ -657,7 +806,7 @@ impl<'a> Lexer<'a> {
             [min_str, ""] => {
                 // {n,} - n or more times
                 let min: u32 = min_str.parse().map_err(|_| LexError::InvalidRepeat {
-                    text: content.clone(), 
+                    text: content.clone(),
                     position: start_pos,
                 })?;
                 (min, None)
@@ -707,7 +856,7 @@ mod tests {
     fn tokenize_all(input: &str) -> Result<Vec<Token>, LexError> {
         let mut lexer = Lexer::new(input);
         let mut tokens = Vec::new();
-        
+
         loop {
             let token_pos = lexer.next_token()?;
             if token_pos.token == Token::EOF {
@@ -715,134 +864,190 @@ mod tests {
             }
             tokens.push(token_pos.token);
         }
-        
+
         Ok(tokens)
     }
 
     #[test]
     fn test_simple_literals() {
         let tokens = tokenize_all("abc").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('a'),
-            Token::Char('b'), 
-            Token::Char('c')
-        ]);
+        assert_eq!(
+            tokens,
+            vec![Token::Char('a'), Token::Char('b'), Token::Char('c')]
+        );
     }
 
     #[test]
     fn test_quantifiers() {
         let tokens = tokenize_all("a*b+c?").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('a'),
-            Token::Star,
-            Token::Char('b'),
-            Token::Plus,
-            Token::Char('c'),
-            Token::Question
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('a'),
+                Token::Star,
+                Token::Char('b'),
+                Token::Plus,
+                Token::Char('c'),
+                Token::Question
+            ]
+        );
     }
 
     #[test]
     fn test_lazy_quantifiers() {
         let tokens = tokenize_all("a*?b+?c??").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('a'),
-            Token::StarLazy,
-            Token::Char('b'),
-            Token::PlusLazy,
-            Token::Char('c'),
-            Token::QuestionLazy
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('a'),
+                Token::StarLazy,
+                Token::Char('b'),
+                Token::PlusLazy,
+                Token::Char('c'),
+                Token::QuestionLazy
+            ]
+        );
     }
 
     #[test]
     fn test_character_classes() {
         let tokens = tokenize_all(r"\d\w\s").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Digit,
-            Token::Word,
-            Token::Space
-        ]);
+        assert_eq!(tokens, vec![Token::Digit, Token::Word, Token::Space]);
     }
 
     #[test]
     fn test_basic_groups() {
         let tokens = tokenize_all("(abc)").unwrap();
-        assert_eq!(tokens, vec![
-            Token::GroupStart,
-            Token::Char('a'),
-            Token::Char('b'),
-            Token::Char('c'),
-            Token::GroupEnd
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::GroupStart,
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::Char('c'),
+                Token::GroupEnd
+            ]
+        );
     }
-    
+
     #[test]
     fn test_non_capturing_groups() {
         let tokens = tokenize_all("(?:ab)").unwrap();
-        assert_eq!(tokens, vec![
-            Token::NonCapturingGroupStart,
-            Token::Char('a'),
-            Token::Char('b'),
-            Token::GroupEnd,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::NonCapturingGroupStart,
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
     }
 
     #[test]
     fn test_code_block_token() {
         let tokens = tokenize_all("(?{lua:return arg[0] ~= nil})").unwrap();
-        assert_eq!(tokens, vec![
-            Token::CodeBlock {
+        assert_eq!(
+            tokens,
+            vec![Token::CodeBlock {
                 lang: "lua".to_string(),
                 code: "return arg[0] ~= nil".to_string(),
-            },
-        ]);
+            },]
+        );
     }
 
     #[test]
     fn test_recursion_tokens() {
         let tokens = tokenize_all("(?R)(?1)(?&name)").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Recursion {
-                target: RecursionTarget::Entire,
-            },
-            Token::Recursion {
-                target: RecursionTarget::Group(1),
-            },
-            Token::Recursion {
-                target: RecursionTarget::NamedGroup("name".to_string()),
-            },
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Recursion {
+                    target: RecursionTarget::Entire,
+                },
+                Token::Recursion {
+                    target: RecursionTarget::Group(1),
+                },
+                Token::Recursion {
+                    target: RecursionTarget::NamedGroup("name".to_string()),
+                },
+            ]
+        );
     }
-    
+
+    #[test]
+    fn test_conditional_tokens_group_exists() {
+        let tokens = tokenize_all("(?(1)yes|no)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::GroupExists(1),
+                },
+                Token::Char('y'),
+                Token::Char('e'),
+                Token::Char('s'),
+                Token::Alternation,
+                Token::Char('n'),
+                Token::Char('o'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_named_group_exists() {
+        let tokens = tokenize_all("(?(<word>)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::NamedGroupExists("word".to_string()),
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
     #[test]
     fn test_named_groups() {
         let tokens = tokenize_all("(?<word>ab)").unwrap();
-        assert_eq!(tokens, vec![
-            Token::NamedGroupStart { name: "word".to_string() },
-            Token::Char('a'),
-            Token::Char('b'),
-            Token::GroupEnd,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::NamedGroupStart {
+                    name: "word".to_string()
+                },
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
     }
 
     #[test]
     fn test_lookaround_group_tokens() {
         let tokens = tokenize_all("(?=a)(?!b)(?<=c)(?<!d)").unwrap();
-        assert_eq!(tokens, vec![
-            Token::LookaheadPos,
-            Token::Char('a'),
-            Token::GroupEnd,
-            Token::LookaheadNeg,
-            Token::Char('b'),
-            Token::GroupEnd,
-            Token::LookbehindPos,
-            Token::Char('c'),
-            Token::GroupEnd,
-            Token::LookbehindNeg,
-            Token::Char('d'),
-            Token::GroupEnd,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::LookaheadPos,
+                Token::Char('a'),
+                Token::GroupEnd,
+                Token::LookaheadNeg,
+                Token::Char('b'),
+                Token::GroupEnd,
+                Token::LookbehindPos,
+                Token::Char('c'),
+                Token::GroupEnd,
+                Token::LookbehindNeg,
+                Token::Char('d'),
+                Token::GroupEnd,
+            ]
+        );
     }
 
     #[test]
@@ -853,52 +1058,68 @@ mod tests {
             Token::CharClass { ranges, negated } => {
                 assert!(!negated);
                 assert_eq!(ranges.len(), 3);
-            },
-            _ => panic!("Expected CharClass token")
+            }
+            _ => panic!("Expected CharClass token"),
         }
     }
 
     #[test]
     fn test_repeat_quantifier() {
         let tokens = tokenize_all("a{2,5}").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('a'),
-            Token::Repeat { min: 2, max: Some(5), lazy: false }
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('a'),
+                Token::Repeat {
+                    min: 2,
+                    max: Some(5),
+                    lazy: false
+                }
+            ]
+        );
     }
 
     #[test]
     fn test_anchors() {
         let tokens = tokenize_all("^abc$").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Anchor(AnchorType::Start),
-            Token::Char('a'),
-            Token::Char('b'),
-            Token::Char('c'),
-            Token::Anchor(AnchorType::End)
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Anchor(AnchorType::Start),
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::Char('c'),
+                Token::Anchor(AnchorType::End)
+            ]
+        );
     }
 
     #[test]
     fn test_alternation() {
         let tokens = tokenize_all("a|b|c").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('a'),
-            Token::Alternation,
-            Token::Char('b'),
-            Token::Alternation,
-            Token::Char('c')
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::Alternation,
+                Token::Char('c')
+            ]
+        );
     }
 
     #[test]
     fn test_escaped_literals() {
         let tokens = tokenize_all(r"\(\)\[\]").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Char('('),
-            Token::Char(')'),
-            Token::Char('['),
-            Token::Char(']')
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('('),
+                Token::Char(')'),
+                Token::Char('['),
+                Token::Char(']')
+            ]
+        );
     }
 }

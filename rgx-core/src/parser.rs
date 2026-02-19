@@ -3,7 +3,7 @@
 //! This module implements a recursive descent parser that converts tokens
 //! from the lexer into an Abstract Syntax Tree (AST).
 
-use crate::ast::{Regex, Quantifier, GroupKind, CharClass};
+use crate::ast::{CharClass, GroupKind, Quantifier, Regex};
 use crate::lexer::Lexer;
 use crate::token::{LexError, Token, TokenWithPos};
 
@@ -18,7 +18,7 @@ impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Result<Self, LexError> {
         let mut lexer = Lexer::new(input);
         let current_token = Some(lexer.next_token()?);
-        
+
         Ok(Self {
             lexer,
             current_token,
@@ -33,20 +33,20 @@ impl<'a> Parser<'a> {
     /// Consume the current token and advance to the next
     fn advance(&mut self) -> Result<Option<TokenWithPos>, LexError> {
         let current = self.current_token.take();
-        
+
         if let Some(ref token) = current {
             if token.token != Token::EOF {
                 self.current_token = Some(self.lexer.next_token()?);
             }
         }
-        
+
         Ok(current)
     }
 
     /// Parse the entire regex pattern
     pub fn parse(&mut self) -> Result<Regex, LexError> {
         let result = self.parse_alternation()?;
-        
+
         // Ensure we've consumed all tokens
         if let Some(token) = &self.current_token {
             if token.token != Token::EOF {
@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        
+
         Ok(result)
     }
 
@@ -153,77 +153,83 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Regex::Char(c))
             }
-            
+
             Some(Token::Dot) => {
                 self.advance()?;
                 Ok(Regex::Dot)
             }
-            
+
             Some(Token::Anchor(anchor_type)) => {
                 let anchor_type = *anchor_type;
                 self.advance()?;
                 Ok(Regex::Anchor(anchor_type))
             }
-            
+
             Some(Token::Digit) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Digit { negated: false }))
             }
-            
+
             Some(Token::DigitNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Digit { negated: true }))
             }
-            
+
             Some(Token::Word) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Word { negated: false }))
             }
-            
+
             Some(Token::WordNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Word { negated: true }))
             }
-            
+
             Some(Token::Space) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Space { negated: false }))
             }
-            
+
             Some(Token::SpaceNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Space { negated: true }))
             }
-            
+
             Some(Token::WordBoundary) => {
                 self.advance()?;
                 Ok(Regex::WordBoundary { positive: true })
             }
-            
+
             Some(Token::WordBoundaryNeg) => {
                 self.advance()?;
                 Ok(Regex::WordBoundary { positive: false })
             }
-            
+
             Some(Token::CharClass { ranges, negated }) => {
                 let ranges = ranges.clone();
                 let negated = *negated;
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
             }
-            
+
             Some(Token::UnicodeClass { name }) => {
                 let name = name.clone();
                 self.advance()?;
-                Ok(Regex::CharClass(CharClass::UnicodeClass { name, negated: false }))
+                Ok(Regex::CharClass(CharClass::UnicodeClass {
+                    name,
+                    negated: false,
+                }))
             }
-            
+
             Some(Token::UnicodeClassNeg { name }) => {
                 let name = name.clone();
                 self.advance()?;
-                Ok(Regex::CharClass(CharClass::UnicodeClass { name, negated: true }))
+                Ok(Regex::CharClass(CharClass::UnicodeClass {
+                    name,
+                    negated: true,
+                }))
             }
-            
+
             Some(Token::Backreference(n)) => {
                 let n = *n;
                 self.advance()?;
@@ -242,11 +248,43 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Regex::Recursion { target })
             }
-            
+
+            Some(Token::ConditionalStart { condition }) => {
+                let condition = condition.clone();
+                self.advance()?; // consume conditional start token
+
+                let true_branch = self.parse_sequence()?;
+                let false_branch = if matches!(self.peek(), Some(Token::Alternation)) {
+                    self.advance()?; // consume conditional branch separator '|'
+                    Some(Box::new(self.parse_sequence()?))
+                } else {
+                    None
+                };
+
+                match self.peek() {
+                    Some(Token::GroupEnd) => {
+                        self.advance()?; // consume ')'
+                        Ok(Regex::Conditional {
+                            condition,
+                            true_branch: Box::new(true_branch),
+                            false_branch,
+                        })
+                    }
+                    _ => Err(LexError::UnexpectedEOF {
+                        expected: "closing parenthesis ')'".to_string(),
+                        position: self
+                            .current_token
+                            .as_ref()
+                            .map(|t| t.position.clone())
+                            .unwrap_or_else(|| crate::token::Position::start()),
+                    }),
+                }
+            }
+
             Some(Token::GroupStart) => {
                 self.advance()?; // consume '('
                 let expr = self.parse_alternation()?;
-                
+
                 // Expect closing ')'
                 match self.peek() {
                     Some(Token::GroupEnd) => {
@@ -260,17 +298,19 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
-            
+
             Some(Token::NonCapturingGroupStart) => {
                 self.advance()?; // consume '(?:'
                 let expr = self.parse_alternation()?;
-                
+
                 // Expect closing ')'
                 match self.peek() {
                     Some(Token::GroupEnd) => {
@@ -284,18 +324,20 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
-            
+
             Some(Token::NamedGroupStart { name }) => {
                 let name = name.clone();
                 self.advance()?; // consume '(?<name>'
                 let expr = self.parse_alternation()?;
-                
+
                 // Expect closing ')'
                 match self.peek() {
                     Some(Token::GroupEnd) => {
@@ -309,10 +351,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
 
@@ -333,10 +377,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
 
@@ -355,10 +401,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
 
@@ -377,10 +425,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
 
@@ -399,10 +449,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
 
@@ -421,37 +473,37 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_token.as_ref()
+                        position: self
+                            .current_token
+                            .as_ref()
                             .map(|t| t.position.clone())
                             .unwrap_or_else(|| crate::token::Position::start()),
-                    })
+                    }),
                 }
             }
-            
-            Some(Token::EOF) => {
-                Err(LexError::UnexpectedEOF {
-                    expected: "regex expression".to_string(),
-                    position: self.current_token.as_ref()
-                        .map(|t| t.position.clone())
-                        .unwrap_or_else(|| crate::token::Position::start()),
-                })
-            }
-            
-            Some(other) => {
-                Err(LexError::UnexpectedEOF {
-                    expected: format!("unexpected token: {:?}", other),
-                    position: self.current_token.as_ref()
-                        .map(|t| t.position.clone())
-                        .unwrap_or_else(|| crate::token::Position::start()),
-                })
-            }
-            
-            None => {
-                Err(LexError::UnexpectedEOF {
-                    expected: "regex expression".to_string(),
-                    position: crate::token::Position::start(),
-                })
-            }
+
+            Some(Token::EOF) => Err(LexError::UnexpectedEOF {
+                expected: "regex expression".to_string(),
+                position: self
+                    .current_token
+                    .as_ref()
+                    .map(|t| t.position.clone())
+                    .unwrap_or_else(|| crate::token::Position::start()),
+            }),
+
+            Some(other) => Err(LexError::UnexpectedEOF {
+                expected: format!("unexpected token: {:?}", other),
+                position: self
+                    .current_token
+                    .as_ref()
+                    .map(|t| t.position.clone())
+                    .unwrap_or_else(|| crate::token::Position::start()),
+            }),
+
+            None => Err(LexError::UnexpectedEOF {
+                expected: "regex expression".to_string(),
+                position: crate::token::Position::start(),
+            }),
         }
     }
 }
@@ -464,7 +516,7 @@ mod tests {
     fn test_parse_simple_literal() {
         let mut parser = Parser::new("abc").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
             Regex::Sequence(elements) => {
                 assert_eq!(elements.len(), 3);
@@ -472,7 +524,7 @@ mod tests {
                 assert!(matches!(elements[1], Regex::Char('b')));
                 assert!(matches!(elements[2], Regex::Char('c')));
             }
-            _ => panic!("Expected sequence")
+            _ => panic!("Expected sequence"),
         }
     }
 
@@ -480,13 +532,13 @@ mod tests {
     fn test_parse_quantified() {
         let mut parser = Parser::new("a*").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
             Regex::Quantified { expr, quantifier } => {
                 assert!(matches!(*expr, Regex::Char('a')));
                 assert!(matches!(quantifier, Quantifier::ZeroOrMore { lazy: false }));
             }
-            _ => panic!("Expected quantified")
+            _ => panic!("Expected quantified"),
         }
     }
 
@@ -494,14 +546,14 @@ mod tests {
     fn test_parse_alternation() {
         let mut parser = Parser::new("a|b").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
             Regex::Alternation(alternatives) => {
                 assert_eq!(alternatives.len(), 2);
                 assert!(matches!(alternatives[0], Regex::Char('a')));
                 assert!(matches!(alternatives[1], Regex::Char('b')));
             }
-            _ => panic!("Expected alternation")
+            _ => panic!("Expected alternation"),
         }
     }
 
@@ -509,7 +561,7 @@ mod tests {
     fn test_parse_group() {
         let mut parser = Parser::new("(abc)").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
             Regex::Group { expr, kind, .. } => {
                 assert!(matches!(kind, GroupKind::Capturing));
@@ -518,20 +570,22 @@ mod tests {
                         assert_eq!(elements.len(), 3);
                         assert!(matches!(elements[0], Regex::Char('a')));
                     }
-                    _ => panic!("Expected sequence inside group")
+                    _ => panic!("Expected sequence inside group"),
                 }
             }
-            _ => panic!("Expected group")
+            _ => panic!("Expected group"),
         }
     }
-    
+
     #[test]
     fn test_parse_non_capturing_group() {
         let mut parser = Parser::new("(?:abc)").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
-            Regex::Group { expr, kind, name, .. } => {
+            Regex::Group {
+                expr, kind, name, ..
+            } => {
                 assert!(matches!(kind, GroupKind::NonCapturing));
                 assert_eq!(name, None);
                 match *expr {
@@ -539,20 +593,22 @@ mod tests {
                         assert_eq!(elements.len(), 3);
                         assert!(matches!(elements[0], Regex::Char('a')));
                     }
-                    _ => panic!("Expected sequence inside non-capturing group")
+                    _ => panic!("Expected sequence inside non-capturing group"),
                 }
             }
-            _ => panic!("Expected non-capturing group")
+            _ => panic!("Expected non-capturing group"),
         }
     }
-    
+
     #[test]
     fn test_parse_named_group() {
         let mut parser = Parser::new("(?<word>abc)").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
-            Regex::Group { expr, kind, name, .. } => {
+            Regex::Group {
+                expr, kind, name, ..
+            } => {
                 assert!(matches!(kind, GroupKind::Capturing));
                 assert_eq!(name, Some("word".to_string()));
                 match *expr {
@@ -560,10 +616,10 @@ mod tests {
                         assert_eq!(elements.len(), 3);
                         assert!(matches!(elements[0], Regex::Char('a')));
                     }
-                    _ => panic!("Expected sequence inside named group")
+                    _ => panic!("Expected sequence inside named group"),
                 }
             }
-            _ => panic!("Expected named capturing group")
+            _ => panic!("Expected named capturing group"),
         }
     }
 
@@ -650,9 +706,54 @@ mod tests {
 
         match ast {
             Regex::Recursion { target } => {
-                assert_eq!(target, crate::ast::RecursionTarget::NamedGroup("word".to_string()));
+                assert_eq!(
+                    target,
+                    crate::ast::RecursionTarget::NamedGroup("word".to_string())
+                );
             }
             _ => panic!("Expected recursion node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_group_exists() {
+        let mut parser = Parser::new("(?(1)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(condition, crate::ast::ConditionalTest::GroupExists(1));
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_named_group_exists_without_false_branch() {
+        let mut parser = Parser::new("(?(<word>)a)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(
+                    condition,
+                    crate::ast::ConditionalTest::NamedGroupExists("word".to_string())
+                );
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                assert!(false_branch.is_none());
+            }
+            _ => panic!("Expected conditional node"),
         }
     }
 
@@ -660,12 +761,12 @@ mod tests {
     fn test_parse_character_class() {
         let mut parser = Parser::new("\\d").unwrap();
         let ast = parser.parse().unwrap();
-        
+
         match ast {
             Regex::CharClass(CharClass::Digit { negated }) => {
                 assert!(!negated);
             }
-            _ => panic!("Expected digit character class")
+            _ => panic!("Expected digit character class"),
         }
     }
 }

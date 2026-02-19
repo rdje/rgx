@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (current recur
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.0`
+- Version: `v0.1.1`
 - Last updated: `2026-02-19`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -41,6 +41,9 @@ Required invariants:
   - code blocks `(?{lang:code})` -> `Regex::CodeBlock { lang, code }`
   - recursion `(?R)`, `(?1)`, `(?&name)` -> `Regex::Recursion { target }`
   - backreferences like `\1` -> `Regex::Backreference(..)`
+  - conditional (currently supported parser tests):
+    - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
+    - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
 
 ## Error contract
 - Parse failures must return `Err(RgxError::Compile(message))`.
@@ -55,6 +58,7 @@ Current contract:
   - code blocks
   - recursion
   - backreferences
+  - conditionals (group-exists and named-group-exists tests)
 - Compiler must then fail explicitly (not silently) for unintegrated runtime features.
 
 This boundary enables parser progress without unsafe runtime behavior.

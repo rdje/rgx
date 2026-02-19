@@ -341,6 +341,7 @@ mod tests {
             "(?:a)(?<word>b)(?>c)",
             "(?=ab)c",
             "(?<!x)a",
+            "(?(1)a|b)",
             "(?{lua:return true})",
             "(?R)",
             r"(a)\1",
@@ -365,6 +366,7 @@ mod tests {
             "(?:a)(?<word>b)(?>c)",
             "(?=ab)c",
             "(?<!x)a",
+            "(?(1)a|b)",
             "(?{lua:return true})",
             "(?R)",
             r"(a)\1",
@@ -408,6 +410,10 @@ mod tests {
             (
                 "(?R)",
                 "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(1)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
             ),
         ];
 

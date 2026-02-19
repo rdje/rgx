@@ -34,11 +34,12 @@ Live forward-looking tracker for rgx.
   - add API-level tests for behavior guarantees
 
 ### Parser completeness path (toward PGEN integration)
-- Status: `planned`
+- Status: `in-progress`
 - Goal: support advanced group/assertion syntax in parser path to match AST-first capabilities.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
+  - incrementally close remaining syntax gaps (initial conditional parsing subset now wired)
 
 ### Parser interoperability contract and conformance harness
 - Status: `in-progress`

@@ -24,7 +24,7 @@ The most mature component is the VM/compiler path in `rgx-core`.
 
 ## Current limitations
 - Advanced parser syntax is still partial (conditionals remain incomplete)
-- Backreference, recursion, and code-block constructs are parsed, but VM execution is not yet integrated (compile returns explicit unsupported errors)
+- Backreference, recursion, conditional, and code-block constructs are parsed, but VM execution is not yet integrated (compile returns explicit unsupported errors)
 - A number of advanced opcodes/features are declared but not fully implemented
 - JavaScript/WASM integration is scaffolded but not production-ready in the user-facing regex path
 

@@ -49,27 +49,27 @@
 
 // Core modules
 pub mod ast;
+pub mod compiler;
+pub mod engine;
+pub mod execution;
 pub mod lexer;
 pub mod parser;
 pub mod parsing;
+pub mod pattern;
 pub mod token;
 pub mod vm;
-pub mod compiler;
-pub mod execution;
-pub mod pattern;
-pub mod engine;
 
 // Performance optimizations
-pub mod simd;
 pub mod cache;
+pub mod simd;
 
 // Code execution backends
-#[cfg(feature = "wasm")]
-pub mod wasm;
-#[cfg(feature = "lua")]  
-pub mod lua;
 #[cfg(feature = "javascript")]
 pub mod javascript;
+#[cfg(feature = "lua")]
+pub mod lua;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 // Error handling
 pub mod error;
@@ -78,10 +78,10 @@ pub mod error;
 pub mod log;
 
 // Re-exports for convenience
-pub use engine::{Engine, ExecutionMode, MatchResult};
-pub use pattern::{Pattern, CompiledPattern};
 pub use compiler::Compiler;
-pub use error::{RgxError, Result};
+pub use engine::{Engine, ExecutionMode, MatchResult};
+pub use error::{Result, RgxError};
+pub use pattern::{CompiledPattern, Pattern};
 
 /// High-performance regex matcher with optional code execution capabilities.
 ///
@@ -112,7 +112,7 @@ impl Regex {
     pub fn compile(pattern: &str) -> Result<Self> {
         let compiled = Compiler::new().compile(pattern)?;
         let engine = Engine::new(&compiled)?;
-        
+
         Ok(Self {
             pattern: compiled,
             engine,
@@ -128,7 +128,7 @@ impl Regex {
     pub fn with_mode(pattern: &str, mode: ExecutionMode) -> Result<Self> {
         let compiled = Compiler::with_mode(mode).compile(pattern)?;
         let engine = Engine::new(&compiled)?;
-        
+
         Ok(Self {
             pattern: compiled,
             engine,
@@ -198,9 +198,8 @@ mod tests {
 
     #[test]
     fn email_pattern_matching() {
-        let regex = Regex::compile(r"\b\w+@\w+\.\w+\b")
-            .expect("Failed to compile email regex");
-        
+        let regex = Regex::compile(r"\b\w+@\w+\.\w+\b").expect("Failed to compile email regex");
+
         let matches = regex.find_all("Contact admin@example.com or support@test.org");
         assert_eq!(matches.len(), 2);
     }
@@ -209,7 +208,7 @@ mod tests {
     fn pure_performance_mode() {
         let regex = Regex::with_mode(r"\d{3}-\d{2}-\d{4}", ExecutionMode::Pure)
             .expect("Failed to compile in pure mode");
-        
+
         assert!(regex.is_match("123-45-6789"));
         assert!(!regex.is_match("not-a-ssn"));
     }
@@ -269,7 +268,8 @@ mod tests {
             RegexAst::Char('c'),
         ]);
 
-        let regex = Regex::from_ast(ast).expect("Failed to compile positive-lookahead AST directly");
+        let regex =
+            Regex::from_ast(ast).expect("Failed to compile positive-lookahead AST directly");
         let m = regex.find_first("xxcat").expect("Expected lookahead match");
         assert_eq!(m.start, 2);
         assert_eq!(m.end, 3); // Lookahead itself must not consume input
@@ -285,7 +285,8 @@ mod tests {
             RegexAst::Dot,
         ]);
 
-        let regex = Regex::from_ast(ast).expect("Failed to compile negative-lookahead AST directly");
+        let regex =
+            Regex::from_ast(ast).expect("Failed to compile negative-lookahead AST directly");
         assert!(regex.is_match("a"));
         assert!(!regex.is_match("x"));
     }
@@ -304,8 +305,11 @@ mod tests {
             RegexAst::Char('d'),
         ]);
 
-        let regex = Regex::from_ast(ast).expect("Failed to compile positive-lookbehind AST directly");
-        let m = regex.find_first("xxcatd").expect("Expected lookbehind match");
+        let regex =
+            Regex::from_ast(ast).expect("Failed to compile positive-lookbehind AST directly");
+        let m = regex
+            .find_first("xxcatd")
+            .expect("Expected lookbehind match");
         assert_eq!(m.start, 5);
         assert_eq!(m.end, 6); // Lookbehind itself must not consume input
     }
@@ -320,22 +324,27 @@ mod tests {
             RegexAst::Char('a'),
         ]);
 
-        let regex = Regex::from_ast(ast).expect("Failed to compile negative-lookbehind AST directly");
+        let regex =
+            Regex::from_ast(ast).expect("Failed to compile negative-lookbehind AST directly");
         assert!(regex.is_match("ba"));
         assert!(!regex.is_match("xa"));
     }
 
     #[test]
     fn parser_positive_lookahead_syntax() {
-        let regex = Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
-        let m = regex.find_first("xxcat").expect("Expected parser-path lookahead match");
+        let regex =
+            Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
+        let m = regex
+            .find_first("xxcat")
+            .expect("Expected parser-path lookahead match");
         assert_eq!(m.start, 2);
         assert_eq!(m.end, 3);
     }
 
     #[test]
     fn parser_negative_lookbehind_syntax() {
-        let regex = Regex::compile("(?<!x)a").expect("Failed to compile parser-path lookbehind syntax");
+        let regex =
+            Regex::compile("(?<!x)a").expect("Failed to compile parser-path lookbehind syntax");
         assert!(regex.is_match("ba"));
         assert!(!regex.is_match("xa"));
     }
@@ -360,7 +369,9 @@ mod tests {
         let result = Regex::compile("(?{lua:return true})");
         assert!(result.is_err(), "Code block should not silently compile");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("code-block syntax is parsed but not yet integrated into VM execution"));
+        assert!(
+            msg.contains("code-block syntax is parsed but not yet integrated into VM execution")
+        );
     }
 
     #[test]
@@ -377,6 +388,14 @@ mod tests {
         assert!(result.is_err(), "Recursion should not silently compile");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(msg.contains("recursion syntax is parsed but not yet integrated into VM execution"));
+    }
+
+    #[test]
+    fn parser_conditional_syntax_reports_explicit_unsupported_error() {
+        let result = Regex::compile("(?(1)a|b)");
+        assert!(result.is_err(), "Conditional should not silently compile");
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("conditional syntax is parsed but not yet integrated into VM execution"));
     }
 
     #[test]
@@ -400,7 +419,9 @@ mod tests {
         ]);
 
         let regex = Regex::from_ast(ast).expect("Failed to compile nested alternation AST");
-        let m = regex.find_first("b3").expect("Expected nested alternation match");
+        let m = regex
+            .find_first("b3")
+            .expect("Expected nested alternation match");
         assert_eq!(m.matched_branch_number, Some(2)); // Must report top-level branch number
     }
 
