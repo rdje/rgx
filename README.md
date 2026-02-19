@@ -43,7 +43,9 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 
 ## Documentation map
 - `CHANGES.md`: living progress ledger (authoritative change history)
+- `ROADMAP.md`: live forward-looking roadmap tracker (`Now` / `Next` / `Later`)
 - `DEVELOPMENT_NOTES.md`: technical knowledge base and current engineering notes
 - `PROJECT_VISION.md`: long-term direction and goals
+- `docs/USER_GUIDE.md`: live end-user guide (layered by depth from quick start to gory details)
 - `docs/architecture.md`: current architecture and data flow
 - `docs/TECHNICAL_DECISIONS.md`: major design decisions and tradeoffs

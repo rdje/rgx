@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added live roadmap tracker and layered end-user guide
+- Scope: repository documentation structure and usability
+- Changes:
+  - Added `ROADMAP.md` as a live forward-looking tracker with:
+    - maintenance workflow
+    - explicit status legend
+    - structured `Now` / `Next` / `Later` sections
+  - Added `docs/USER_GUIDE.md` as a live end-user guide with layered depth:
+    - Level 0 quick start
+    - Level 1 practical usage
+    - Level 2 advanced AST-first usage
+    - Level 3 behavior semantics and implementation-facing details
+  - Updated `README.md` documentation map to include both new docs
+  - Updated `DEVELOPMENT_NOTES.md` documentation policy to include maintenance intent for both docs
+- Validation:
+  - Verified documentation links and cross-references for consistency
+  - Content reviewed for alignment with current shipped behavior and known parser-path limits
+- Notes/impact:
+  - Establishes dedicated live planning and user-facing guidance surfaces
+  - Improves onboarding for both contributors and end users at different depth levels
 ### 2026-02-19 - Added AST-first lookbehind support in compiler and VM
 - Scope: `rgx-core` VM/compiler assertion semantics (parser-independent path)
 - Changes:

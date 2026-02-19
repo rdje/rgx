@@ -39,5 +39,7 @@ Pipeline in `rgx-core`:
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
+- `ROADMAP.md` is the live forward-looking planning tracker
+- `docs/USER_GUIDE.md` is the live end-user guide with layered depth
 - This file is for technical understanding and implementation notes
 - `PROJECT_VISION.md` is aspirational; it should not be used to infer shipped features
