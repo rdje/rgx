@@ -290,6 +290,8 @@ pub struct BacktrackFrame {
     pub pos: usize,
     /// Saved capture state
     pub saved_captures: Vec<Option<usize>>,
+    /// Saved atomic-group stack state
+    pub saved_call_stack: Vec<usize>,
 }
 
 /// Match result with full capture information
@@ -526,6 +528,7 @@ impl RegexVM {
                         ip = frame.ip;
                         ctx.pos = frame.pos;
                         ctx.captures = frame.saved_captures;
+                        ctx.call_stack = frame.saved_call_stack;
                         continue;
                     }
                     trace_log!("vm", "  ✗ Char match failed, no backtrack available");
@@ -855,6 +858,7 @@ impl RegexVM {
                         ip: ip + offset, // Second alternative
                         pos: ctx.pos,
                         saved_captures: ctx.captures.clone(),
+                        saved_call_stack: ctx.call_stack.clone(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
                     
@@ -886,6 +890,23 @@ impl RegexVM {
                     continue;
                 }
 
+                OpCode::AtomicStart => {
+                    // Mark current backtrack depth; frames created after this point
+                    // are internal to the atomic group.
+                    ctx.call_stack.push(ctx.backtrack_stack.len());
+                    continue;
+                }
+
+                OpCode::AtomicEnd => {
+                    // On successful atomic-group completion, discard all backtrack
+                    // frames created inside the group.
+                    if let Some(mark) = ctx.call_stack.pop() {
+                        ctx.backtrack_stack.truncate(mark);
+                        continue;
+                    }
+                    return false;
+                }
+
                 OpCode::Fail => {
                     // Try backtracking if we have saved states
                     if let Some(frame) = ctx.backtrack_stack.pop() {
@@ -893,6 +914,7 @@ impl RegexVM {
                         ip = frame.ip;
                         ctx.pos = frame.pos;
                         ctx.captures = frame.saved_captures;
+                        ctx.call_stack = frame.saved_call_stack;
                         continue;
                     }
                     return false;
@@ -951,6 +973,8 @@ impl RegexVM {
         }
         // Also clear backtrack stack for fresh start
         ctx.backtrack_stack.clear();
+        // Clear atomic-group markers for fresh start
+        ctx.call_stack.clear();
         // Reset alternative tracking for fresh start
         ctx.current_alternative = None;
     }
@@ -1235,6 +1259,19 @@ impl RegexVM {
                     // Assertions do not consume input
                     ip = expr_end;
                     continue;
+                }
+
+                OpCode::AtomicStart => {
+                    ctx.call_stack.push(ctx.backtrack_stack.len());
+                    continue;
+                }
+
+                OpCode::AtomicEnd => {
+                    if let Some(mark) = ctx.call_stack.pop() {
+                        ctx.backtrack_stack.truncate(mark);
+                        continue;
+                    }
+                    return false;
                 }
                 
                 // Add other opcodes as needed
@@ -2058,10 +2095,15 @@ impl OptimizingCompiler {
                         self.code.push(group_id as u8);
                     }
                     GroupKind::NonCapturing | GroupKind::Atomic => {
-                        // Non-capturing/atomic group scaffolding:
-                        // currently compile the expression without capture slots.
-                        // (Atomic no-backtracking semantics remain a future enhancement.)
-                        self.codegen_pass(expr, false);
+                        if matches!(kind, GroupKind::Atomic) {
+                            // Atomic group: prevent backtracking into the group after it succeeds.
+                            self.emit_op(OpCode::AtomicStart);
+                            self.codegen_pass(expr, false);
+                            self.emit_op(OpCode::AtomicEnd);
+                        } else {
+                            // Non-capturing group
+                            self.codegen_pass(expr, false);
+                        }
                     }
                 }
             }
@@ -2189,6 +2231,8 @@ impl TryFrom<u8> for OpCode {
             0x61 => Ok(LookaheadNeg),
             0x62 => Ok(Lookbehind),
             0x63 => Ok(LookbehindNeg),
+            0x64 => Ok(AtomicStart),
+            0x65 => Ok(AtomicEnd),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x50 => Ok(SaveStart),

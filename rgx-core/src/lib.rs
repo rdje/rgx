@@ -341,6 +341,21 @@ mod tests {
     }
 
     #[test]
+    fn parser_atomic_group_blocks_backtracking() {
+        let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
+        let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");
+
+        assert!(!atomic.is_match("abc"));
+        assert!(non_atomic.is_match("abc"));
+    }
+
+    #[test]
+    fn parser_atomic_group_can_match_first_branch_without_backtrack() {
+        let regex = Regex::compile("(?>ab|a)c").expect("Failed to compile atomic-group pattern");
+        assert!(regex.is_match("abc"));
+    }
+
+    #[test]
     fn top_level_branch_id_exposed() {
         let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
         let m = regex.find_first("xxdogxx").expect("Expected a match");

@@ -30,6 +30,7 @@ Pipeline in `rgx-core`:
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
+- Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
 - VM test suite coverage for core behavior
 
 ## Known engineering gaps

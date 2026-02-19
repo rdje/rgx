@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Implemented atomic-group no-backtracking runtime semantics
+- Scope: `rgx-core` VM/compiler behavior for `(?>...)` groups
+- Changes:
+  - Updated compiler codegen for `GroupKind::Atomic` to emit:
+    - `OpCode::AtomicStart`
+    - inner expression
+    - `OpCode::AtomicEnd`
+  - Implemented VM runtime handling for atomic opcodes:
+    - marks/tracks backtrack-stack depth at atomic-group entry
+    - truncates internal backtrack frames on atomic-group success
+  - Preserved atomic marker stack state across backtrack restores
+  - Added opcode decoding for `AtomicStart`/`AtomicEnd`
+  - Added parser-path API tests verifying atomic semantics:
+    - `(?>a|ab)c` does not match `abc`
+    - `(a|ab)c` matches `abc`
+    - `(?>ab|a)c` matches `abc`
+- Validation:
+  - `cargo test -p rgx-core` passed (59 tests)
+- Notes/impact:
+  - Delivers actual atomic-group behavior instead of prior scaffolded no-op handling
+  - Improves regex semantics parity for atomic-group constructs in parser path
 ### 2026-02-19 - Added parser-path lookaround syntax support
 - Scope: `rgx-core` lexer/parser and compile-path behavior alignment
 - Changes:

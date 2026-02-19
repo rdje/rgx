@@ -95,6 +95,13 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - Negative assertion requires assertion sub-expression to not match.
 - Lookbehind specifically requires a sub-expression match that ends exactly at the current position.
 
+### Atomic-group semantics
+- Atomic groups `(?>...)` are supported.
+- Once an atomic group succeeds, rgx does not backtrack into alternatives/paths created inside that group.
+- Example consequence:
+  - `(?>a|ab)c` does not match `abc`
+  - `(a|ab)c` can match `abc`
+
 ### Branch reporting semantics
 - Branch reporting is intentionally scoped to top-level alternations.
 - User-facing field is `matched_branch_number` and is 1-based.

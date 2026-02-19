@@ -14,7 +14,7 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Literal matching, alternation, anchors, basic character classes
 - Core quantifiers (`*`, `+`, `?`, simple `{n,m}` paths)
 - Capture group tracking in VM tests
-- Group parsing for capturing, non-capturing `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
+- Group support for capturing, non-capturing `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)` (no-backtracking semantics)
 - Parser-independent compilation from AST via public API (`Regex::from_ast`)
 - Lookaround support (positive/negative lookahead + lookbehind) via parser syntax and AST
 - Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
