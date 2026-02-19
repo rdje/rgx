@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Expanded parser-path conditional syntax support to include bare-name and lookaround conditions
+- Scope: `rgx-core` lexer/parser/conformance coverage for conditional syntax completeness
+- Changes:
+  - Extended lexer conditional-start parsing to support:
+    - bare named-group condition `(?(name)yes|no)` (mapped to `NamedGroupExists`)
+    - lookahead condition `(?(?=expr)yes|no)` (mapped to `ConditionalTest::Lookahead`)
+    - lookbehind condition `(?(?<=expr)yes|no)` (mapped to `ConditionalTest::Lookbehind`)
+  - Added internal lexer helper to parse lookaround condition sub-expressions into AST before emitting `Token::ConditionalStart`
+  - Added lexer tests for:
+    - bare named-group condition tokenization
+    - lookahead condition tokenization
+    - lookbehind condition tokenization
+  - Added parser tests for:
+    - bare named-group conditional AST mapping
+    - lookahead conditional AST mapping
+    - lookbehind conditional AST mapping
+  - Extended parser contract/conformance fixtures to include the new conditional forms
+  - Added API regression for lookahead-conditional syntax to confirm explicit unsupported compile/runtime boundary behavior remains intact
+- Validation:
+  - `cargo test -p rgx-core` passed (83 tests)
+  - `cargo test -p rgx-core --features pgen-parser` passed (84 tests)
+- Notes/impact:
+  - Advances parser completeness toward PGEN-readiness without changing runtime safety semantics
+  - Conditional execution remains explicitly unsupported in VM runtime path until dedicated integration lands
 ### 2026-02-19 - Collected and committed carried-over code cleanup edits from previously unstaged files
 - Scope: cross-crate code hygiene cleanup (`rgx-core`, `rgx-cli`, `rgx-bench`)
 - Changes:

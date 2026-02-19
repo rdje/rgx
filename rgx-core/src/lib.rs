@@ -399,6 +399,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_conditional_lookahead_syntax_reports_explicit_unsupported_error() {
+        let result = Regex::compile("(?(?=ab)x|y)");
+        assert!(
+            result.is_err(),
+            "Lookahead conditional should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("conditional syntax is parsed but not yet integrated into VM execution"));
+    }
+
+    #[test]
     fn top_level_branch_id_exposed() {
         let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
         let m = regex.find_first("xxdogxx").expect("Expected a match");

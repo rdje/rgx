@@ -4,7 +4,7 @@
 //! a stream of tokens, handling all Perl regex features including our custom
 //! code execution blocks.
 
-use crate::ast::{AnchorType, CharRange, ConditionalTest, RecursionTarget};
+use crate::ast::{AnchorType, CharRange, ConditionalTest, RecursionTarget, Regex};
 use crate::token::{LexError, Position, Token, TokenWithPos};
 use std::str::Chars;
 
@@ -629,7 +629,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Parse conditional start: (?(1)...), (?(<name>)...)
+    /// Parse conditional start:
+    /// - (?(1)...)
+    /// - (?(<name>)...)
+    /// - (?(name)...)
+    /// - (?(?=expr)...)
+    /// - (?(?<=expr)...)
     ///
     /// This returns only the condition-start token. Branch expressions and
     /// the closing group ')' are parsed by the parser stage.
@@ -686,6 +691,50 @@ impl<'a> Lexer<'a> {
                 }
                 ConditionalTest::NamedGroupExists(name)
             }
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+                let mut name = String::new();
+                while let Some(ch) = self.current {
+                    if ch.is_ascii_alphanumeric() || ch == '_' {
+                        name.push(ch);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+
+                if name.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                ConditionalTest::NamedGroupExists(name)
+            }
+            Some('?') => {
+                self.advance(); // Skip '?' in condition test
+                match self.current {
+                    Some('=') => {
+                        self.advance(); // Skip '='
+                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                        ConditionalTest::Lookahead(Box::new(expr))
+                    }
+                    Some('<') => {
+                        self.advance(); // Skip '<'
+                        if self.current != Some('=') {
+                            return Err(LexError::InvalidGroupSyntax {
+                                position: start_pos,
+                            });
+                        }
+                        self.advance(); // Skip '='
+                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                        ConditionalTest::Lookbehind(Box::new(expr))
+                    }
+                    _ => {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+            }
             _ => {
                 return Err(LexError::InvalidGroupSyntax {
                     position: start_pos,
@@ -701,6 +750,82 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip ')' ending condition test
 
         Ok(Token::ConditionalStart { condition })
+    }
+
+    /// Parse the condition sub-expression text of a lookaround conditional and
+    /// build its AST.
+    ///
+    /// Leaves `self.current` positioned on the closing ')' of the condition.
+    fn parse_conditional_subexpression_ast(
+        &mut self,
+        start_pos: Position,
+    ) -> Result<Regex, LexError> {
+        let mut expr_text = String::new();
+        let mut paren_depth = 0usize;
+        let mut in_char_class = false;
+        let mut escaped = false;
+
+        loop {
+            match self.current {
+                None => {
+                    return Err(LexError::UnterminatedGroup {
+                        position: start_pos,
+                    });
+                }
+                Some(ch) => {
+                    if escaped {
+                        expr_text.push(ch);
+                        escaped = false;
+                        self.advance();
+                        continue;
+                    }
+
+                    if ch == '\\' {
+                        expr_text.push(ch);
+                        escaped = true;
+                        self.advance();
+                        continue;
+                    }
+
+                    if in_char_class {
+                        expr_text.push(ch);
+                        if ch == ']' {
+                            in_char_class = false;
+                        }
+                        self.advance();
+                        continue;
+                    }
+
+                    match ch {
+                        '[' => {
+                            in_char_class = true;
+                            expr_text.push(ch);
+                            self.advance();
+                        }
+                        '(' => {
+                            paren_depth += 1;
+                            expr_text.push(ch);
+                            self.advance();
+                        }
+                        ')' => {
+                            if paren_depth == 0 {
+                                break;
+                            }
+                            paren_depth -= 1;
+                            expr_text.push(ch);
+                            self.advance();
+                        }
+                        _ => {
+                            expr_text.push(ch);
+                            self.advance();
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut parser = crate::parser::Parser::new(&expr_text)?;
+        parser.parse()
     }
 
     /// Parse character class [abc], [^abc], [a-z], etc.
@@ -1003,6 +1128,60 @@ mod tests {
             vec![
                 Token::ConditionalStart {
                     condition: ConditionalTest::NamedGroupExists("word".to_string()),
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_bare_named_group_exists() {
+        let tokens = tokenize_all("(?(word)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::NamedGroupExists("word".to_string()),
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_lookahead_condition() {
+        let tokens = tokenize_all("(?(?=ab)x|y)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::Lookahead(Box::new(Regex::Sequence(vec![
+                        Regex::Char('a'),
+                        Regex::Char('b'),
+                    ]))),
+                },
+                Token::Char('x'),
+                Token::Alternation,
+                Token::Char('y'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_lookbehind_condition() {
+        let tokens = tokenize_all("(?(?<=z)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::Lookbehind(Box::new(Regex::Char('z'))),
                 },
                 Token::Char('a'),
                 Token::Alternation,

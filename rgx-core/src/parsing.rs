@@ -342,6 +342,9 @@ mod tests {
             "(?=ab)c",
             "(?<!x)a",
             "(?(1)a|b)",
+            "(?(word)a|b)",
+            "(?(?=ab)x|y)",
+            "(?(?<=z)a|b)",
             "(?{lua:return true})",
             "(?R)",
             r"(a)\1",
@@ -367,6 +370,9 @@ mod tests {
             "(?=ab)c",
             "(?<!x)a",
             "(?(1)a|b)",
+            "(?(word)a|b)",
+            "(?(?=ab)x|y)",
+            "(?(?<=z)a|b)",
             "(?{lua:return true})",
             "(?R)",
             r"(a)\1",
@@ -413,6 +419,10 @@ mod tests {
             ),
             (
                 "(?(1)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?=ab)x|y)",
                 "conditional syntax is parsed but not yet integrated into VM execution",
             ),
         ];

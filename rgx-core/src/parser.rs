@@ -758,6 +758,82 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_conditional_bare_named_group_exists() {
+        let mut parser = Parser::new("(?(word)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(
+                    condition,
+                    crate::ast::ConditionalTest::NamedGroupExists("word".to_string())
+                );
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_lookahead_condition() {
+        let mut parser = Parser::new("(?(?=ab)x|y)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookahead(expr) => {
+                        assert_eq!(
+                            *expr,
+                            Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')])
+                        );
+                    }
+                    other => panic!("Expected lookahead condition, got: {other:?}"),
+                }
+                assert!(matches!(*true_branch, Regex::Char('x')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('y')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_lookbehind_condition() {
+        let mut parser = Parser::new("(?(?<=z)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookbehind(expr) => {
+                        assert_eq!(*expr, Regex::Char('z'));
+                    }
+                    other => panic!("Expected lookbehind condition, got: {other:?}"),
+                }
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
     fn test_parse_character_class() {
         let mut parser = Parser::new("\\d").unwrap();
         let ast = parser.parse().unwrap();
