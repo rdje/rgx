@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added formal parser contract and conformance harness scaffolding for PGEN readiness
+- Scope: `rgx-core` parser boundary definition and interoperability infrastructure
+- Changes:
+  - Added `docs/PARSER_CONTRACT.md` as a versioned contract document covering:
+    - parser public interface (`RegexParser` trait + compile-time selected parser functions)
+    - AST output invariants required by compiler/runtime
+    - parse error mapping contract (`RgxError::Compile`)
+    - parse-success/compile-fail boundary for currently unintegrated runtime features
+    - capability-flag interpretation and backend change policy
+  - Added parser conformance scaffold tests in `rgx-core/src/parsing.rs` for:
+    - fixture parity between active parser and recursive-descent reference output
+    - group metadata invariants (`index: None` parser responsibility boundary)
+    - parse-failure error mapping guarantees
+    - explicit compile-boundary failures for parsed-but-unintegrated constructs
+    - `pgen-parser` backend-type parity check hook (feature-gated)
+  - Made `pgen-parser` capability reporting truthful to current fallback behavior (no overclaiming of advanced/recovery/highlighting support)
+  - Updated `README.md`, `ROADMAP.md`, and `DEVELOPMENT_NOTES.md` to reference the parser contract and conformance harness as active infrastructure
+- Validation:
+  - `cargo test -p rgx-core`
+- Notes/impact:
+  - Establishes an explicit RGX↔PGEN parser handshake artifact early
+  - Reduces integration risk by turning parser compatibility into executable tests
 ### 2026-02-19 - Added recursion syntax parsing with explicit unsupported compile errors
 - Scope: `rgx-core` lexer/parser/compiler behavior for advanced unintegrated constructs
 - Changes:

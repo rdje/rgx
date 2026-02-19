@@ -69,7 +69,9 @@ pub struct ParserCapabilities {
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     let mut parser = crate::parser::Parser::new(pattern)
         .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-    parser.parse().map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+    parser
+        .parse()
+        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
 }
 
 /// Zero-cost PGEN parser (when enabled)
@@ -79,7 +81,9 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     // For now, fall back to recursive descent
     let mut parser = crate::parser::Parser::new(pattern)
         .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-    parser.parse().map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+    parser
+        .parse()
+        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
 }
 
 /// Get the active parser name (compile-time)
@@ -110,9 +114,11 @@ pub fn parser_capabilities() -> ParserCapabilities {
 #[cfg(feature = "pgen-parser")]
 pub fn parser_capabilities() -> ParserCapabilities {
     ParserCapabilities {
+        // Current pgen-parser path is still a recursive-descent fallback.
+        // Keep capability flags truthful until a real PGEN backend lands.
         code_blocks: true,
         named_groups: true,
-        perl_advanced: true,
+        perl_advanced: false,
         unicode_properties: true,
         lookarounds: true,
         error_recovery: true,
@@ -136,7 +142,8 @@ impl PatternAnalysis {
             has_code_blocks: pattern.contains("(?{"),
             has_complex_groups: pattern.contains("(?") && !pattern.contains("(?:"),
             has_recursion: pattern.contains("(?R") || pattern.contains("(?&"),
-            complexity_score: pattern.len() as u32 + pattern.matches(['(', '[', '{', '*', '+', '?']).count() as u32,
+            complexity_score: pattern.len() as u32
+                + pattern.matches(['(', '[', '{', '*', '+', '?']).count() as u32,
         }
     }
 }
@@ -160,7 +167,9 @@ impl RegexParser for RecursiveDescentParser {
         // Use existing parser implementation
         let mut parser = crate::parser::Parser::new(pattern)
             .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-        parser.parse().map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+        parser
+            .parse()
+            .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
     }
 
     fn parser_name(&self) -> &'static str {
@@ -208,13 +217,15 @@ impl RegexParser for PgenParser {
 
     fn capabilities(&self) -> ParserCapabilities {
         ParserCapabilities {
-            code_blocks: true, // PGEN parser will support all features
+            // Current pgen-parser path is still a recursive-descent fallback.
+            // Keep capability flags truthful until a real PGEN backend lands.
+            code_blocks: true,
             named_groups: true,
-            perl_advanced: true,
+            perl_advanced: false,
             unicode_properties: true,
             lookarounds: true,
-            error_recovery: true,
-            syntax_highlighting: true,
+            error_recovery: false,
+            syntax_highlighting: false,
         }
     }
 }
@@ -243,6 +254,14 @@ impl Default for ParserConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{GroupKind, Regex};
+
+    fn parse_with_reference_parser(pattern: &str) -> Regex {
+        let mut parser = RecursiveDescentParser::new();
+        parser
+            .parse_pattern(pattern)
+            .unwrap_or_else(|e| panic!("reference parser failed for pattern '{pattern}': {e}"))
+    }
 
     #[test]
     fn test_zero_cost_parsing() {
@@ -255,7 +274,7 @@ mod tests {
         let name = parser_name();
         #[cfg(not(feature = "pgen-parser"))]
         assert_eq!(name, "recursive-descent");
-        
+
         #[cfg(feature = "pgen-parser")]
         assert_eq!(name, "pgen");
     }
@@ -267,5 +286,145 @@ mod tests {
         assert!(caps.named_groups);
         assert!(caps.lookarounds);
         assert!(caps.code_blocks);
+    }
+
+    #[test]
+    fn parser_contract_group_metadata_invariants() {
+        let ast =
+            parse_pattern("(?<word>a)(?:b)(?>c)").expect("Parser should accept group variants");
+
+        match ast {
+            Regex::Sequence(items) => {
+                assert_eq!(items.len(), 3);
+
+                match &items[0] {
+                    Regex::Group {
+                        kind, index, name, ..
+                    } => {
+                        assert_eq!(kind, &GroupKind::Capturing);
+                        assert_eq!(*index, None);
+                        assert_eq!(name.as_deref(), Some("word"));
+                    }
+                    other => panic!("Expected named capturing group, got: {other:?}"),
+                }
+
+                match &items[1] {
+                    Regex::Group {
+                        kind, index, name, ..
+                    } => {
+                        assert_eq!(kind, &GroupKind::NonCapturing);
+                        assert_eq!(*index, None);
+                        assert_eq!(*name, None);
+                    }
+                    other => panic!("Expected non-capturing group, got: {other:?}"),
+                }
+
+                match &items[2] {
+                    Regex::Group {
+                        kind, index, name, ..
+                    } => {
+                        assert_eq!(kind, &GroupKind::Atomic);
+                        assert_eq!(*index, None);
+                        assert_eq!(*name, None);
+                    }
+                    other => panic!("Expected atomic group, got: {other:?}"),
+                }
+            }
+            other => panic!("Expected sequence AST, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_contract_active_parser_matches_reference_fixtures() {
+        let fixtures = [
+            "a|b",
+            "(?:a)(?<word>b)(?>c)",
+            "(?=ab)c",
+            "(?<!x)a",
+            "(?{lua:return true})",
+            "(?R)",
+            r"(a)\1",
+        ];
+
+        for pattern in fixtures {
+            let active = parse_pattern(pattern)
+                .unwrap_or_else(|e| panic!("active parser failed for pattern '{pattern}': {e}"));
+            let reference = parse_with_reference_parser(pattern);
+            assert_eq!(
+                active, reference,
+                "active parser output diverged from reference parser for pattern '{pattern}'"
+            );
+        }
+    }
+
+    #[cfg(feature = "pgen-parser")]
+    #[test]
+    fn parser_contract_pgen_backend_matches_reference_fixtures() {
+        let fixtures = [
+            "a|b",
+            "(?:a)(?<word>b)(?>c)",
+            "(?=ab)c",
+            "(?<!x)a",
+            "(?{lua:return true})",
+            "(?R)",
+            r"(a)\1",
+        ];
+
+        for pattern in fixtures {
+            let mut pgen = PgenParser::new();
+            let pgen_ast = pgen
+                .parse_pattern(pattern)
+                .unwrap_or_else(|e| panic!("pgen parser failed for pattern '{pattern}': {e}"));
+            let reference = parse_with_reference_parser(pattern);
+            assert_eq!(
+                pgen_ast, reference,
+                "pgen parser output diverged from reference parser for pattern '{pattern}'"
+            );
+        }
+    }
+
+    #[test]
+    fn parser_contract_maps_parse_failures_to_compile_errors() {
+        let err = parse_pattern("(").expect_err("Unterminated group should fail parsing");
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("pattern compile error:"),
+            "expected compile-style error mapping, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parser_contract_parsed_but_unintegrated_features_fail_at_compile_boundary() {
+        let compiler = crate::compiler::Compiler::new();
+        let cases = [
+            (
+                "(?{lua:return true})",
+                "code-block syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                r"(a)\1",
+                "backreferences are parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?R)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+        ];
+
+        for (pattern, expected_msg) in cases {
+            parse_pattern(pattern).unwrap_or_else(|e| {
+                panic!("parser should accept contract fixture '{pattern}': {e}")
+            });
+            let err = match compiler.compile(pattern) {
+                Ok(_) => panic!(
+                    "pattern should fail at compile boundary until runtime integration lands: {pattern}"
+                ),
+                Err(err) => err,
+            };
+            assert!(
+                err.to_string().contains(expected_msg),
+                "unexpected compile boundary message for pattern '{pattern}': {err}"
+            );
+        }
     }
 }

@@ -40,6 +40,14 @@ Live forward-looking tracker for rgx.
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
 
+### Parser interoperability contract and conformance harness
+- Status: `in-progress`
+- Goal: define and enforce a stable parser boundary so PGEN integration is seamless.
+- Scope:
+  - maintain a versioned contract in `docs/PARSER_CONTRACT.md`
+  - keep fixture-based parser conformance tests in `rgx-core/src/parsing.rs`
+  - enforce parse-success/compile-unsupported boundary checks for unintegrated runtime features
+
 ### Capability matrix hardening
 - Status: `planned`
 - Goal: document and test exactly what is shipped vs scaffolded.

@@ -33,7 +33,19 @@ Pipeline in `rgx-core`:
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
+- Formal parser interoperability contract at `docs/PARSER_CONTRACT.md`
+- Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
 - VM test suite coverage for core behavior
+
+## Parser interoperability contract (RGX <-> PGEN)
+- Contract source of truth: `docs/PARSER_CONTRACT.md`
+- Integration seam: `rgx-core/src/parsing.rs` (`RegexParser` trait + compile-time parser selection functions)
+- Current conformance baseline:
+  - fixture parity checks between active parser and recursive-descent reference output
+  - parser AST metadata invariants required by downstream compiler/runtime
+  - parse-fail error mapping consistency (`RgxError::Compile`)
+  - explicit parse-success/compile-fail guardrails for unintegrated runtime features
+- Any backend swap that changes parser behavior must update the contract version, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
 - Parser support for advanced group syntaxes is incomplete
@@ -47,13 +59,15 @@ Pipeline in `rgx-core`:
 1. Build and maintain a PCRE2 compatibility matrix with explicit exceptions/gaps
 2. Expand differential and integration tests to improve semantic parity and accuracy confidence
 3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
-4. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
-5. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-6. Define staged rollout for multi-language code-block runtime support with shared safety controls
+4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
+5. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
+6. Remove/finish placeholder VM/compiler paths and TODO opcode branches
+7. Define staged rollout for multi-language code-block runtime support with shared safety controls
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
 - `ROADMAP.md` is the live forward-looking planning tracker
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth
+- `docs/PARSER_CONTRACT.md` is the parser interoperability source of truth
 - This file is for technical understanding and implementation notes
 - `PROJECT_VISION.md` is aspirational; it should not be used to infer shipped features
