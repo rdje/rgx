@@ -1,23 +1,23 @@
-use crate::pattern::CompiledPattern;
 use crate::error::Result;
+use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
 
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ExecutionMode { 
+pub enum ExecutionMode {
     /// Maximum performance, pure regex matching only
-    Pure, 
+    Pure,
     /// Code execution in sandboxed environments only
-    Safe, 
+    Safe,
     /// All features including native callbacks
-    Full 
+    Full,
 }
 
 /// Match result with position information
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MatchResult { 
+pub struct MatchResult {
     /// Start position in bytes
-    pub start: usize, 
+    pub start: usize,
     /// End position in bytes
     pub end: usize,
     /// 1-based top-level branch number for top-level alternation matches.
@@ -38,8 +38,8 @@ impl Engine {
     /// Create new engine from compiled pattern
     pub fn new(pattern: &CompiledPattern) -> Result<Self> {
         let vm = RegexVM::new(pattern.program.clone());
-        
-        Ok(Self { 
+
+        Ok(Self {
             vm,
             mode: pattern.mode,
         })
@@ -52,11 +52,12 @@ impl Engine {
             Ok(s) => s,
             Err(_) => return Vec::new(), // Invalid UTF-8
         };
-        
-        self.vm.find_all(text_str)
+
+        self.vm
+            .find_all(text_str)
             .into_iter()
-            .map(|m| MatchResult { 
-                start: m.start, 
+            .map(|m| MatchResult {
+                start: m.start,
                 end: m.end,
                 matched_branch_number: m.matched_alternative.map(|id| id + 1),
             })
@@ -67,13 +68,12 @@ impl Engine {
     pub fn find_first(&self, text: &[u8]) -> Option<MatchResult> {
         // Convert bytes to string for VM processing
         let text_str = std::str::from_utf8(text).ok()?;
-        
-        self.vm.find_first(text_str)
-            .map(|m| MatchResult { 
-                start: m.start, 
-                end: m.end,
-                matched_branch_number: m.matched_alternative.map(|id| id + 1),
-            })
+
+        self.vm.find_first(text_str).map(|m| MatchResult {
+            start: m.start,
+            end: m.end,
+            matched_branch_number: m.matched_alternative.map(|id| id + 1),
+        })
     }
 
     /// Test if pattern matches the input (fastest operation)
@@ -86,4 +86,3 @@ impl Engine {
         }
     }
 }
-

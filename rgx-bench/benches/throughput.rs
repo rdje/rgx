@@ -1,6 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use rgx_core::Regex;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use pcre2::bytes::Regex as PcreRegex;
+use rgx_core::Regex;
 use std::time::Duration;
 
 // Test data sizes for scaling benchmarks
@@ -63,7 +63,7 @@ fn generate_test_data(size: usize, pattern: &str) -> String {
             }
             data.push_str(" suffix");
             data
-        },
+        }
         r"\b\w+@\w+\.\w+\b" => {
             let mut data = String::with_capacity(size + 200);
             data.push_str("Contact info: ");
@@ -74,7 +74,7 @@ fn generate_test_data(size: usize, pattern: &str) -> String {
             }
             data.push_str(" end.");
             data
-        },
+        }
         r"\d{3}-\d{2}-\d{4}" => {
             let mut data = String::with_capacity(size + 200);
             data.push_str("SSNs: ");
@@ -85,7 +85,7 @@ fn generate_test_data(size: usize, pattern: &str) -> String {
             }
             data.push_str(" done.");
             data
-        },
+        }
         _ => {
             // Generic test data for other patterns
             let mut data = String::with_capacity(size + 100);
@@ -111,7 +111,7 @@ fn benchmark_compilation(c: &mut Criterion) {
                 b.iter(|| {
                     let _regex = Regex::compile(pat).unwrap();
                 });
-            }
+            },
         );
 
         group.bench_with_input(
@@ -121,7 +121,7 @@ fn benchmark_compilation(c: &mut Criterion) {
                 b.iter(|| {
                     let _regex = PcreRegex::new(pat).unwrap();
                 });
-            }
+            },
         );
     }
 
@@ -146,7 +146,7 @@ fn benchmark_throughput(c: &mut Criterion) {
                     b.iter(|| {
                         let _matches = regex.find_all(data);
                     });
-                }
+                },
             );
 
             group.bench_with_input(
@@ -157,7 +157,7 @@ fn benchmark_throughput(c: &mut Criterion) {
                     b.iter(|| {
                         let _matches: Vec<_> = regex.find_iter(data.as_bytes()).collect();
                     });
-                }
+                },
             );
         }
     }
@@ -180,7 +180,7 @@ fn benchmark_find_first(c: &mut Criterion) {
                 b.iter(|| {
                     let _match = regex.find_first(data);
                 });
-            }
+            },
         );
 
         group.bench_with_input(
@@ -191,14 +191,14 @@ fn benchmark_find_first(c: &mut Criterion) {
                 b.iter(|| {
                     let _match = regex.find(data.as_bytes());
                 });
-            }
+            },
         );
     }
 
     group.finish();
 }
 
-criterion_group!{
+criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(100)

@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Collected and committed carried-over code cleanup edits from previously unstaged files
+- Scope: cross-crate code hygiene cleanup (`rgx-core`, `rgx-cli`, `rgx-bench`)
+- Changes:
+  - Consolidated long-standing unstaged edits in bench/CLI/core files into one tracked change set
+  - Normalized formatting/style in touched files (import ordering, spacing, line wrapping, macro formatting, and newline hygiene)
+  - Applied the same cleanup to debug examples and supporting modules to keep code style consistent
+  - No new feature surface introduced; intent is repository hygiene and maintainability for already-modified files
+- Validation:
+  - `cargo test -p rgx-core`
+- Notes/impact:
+  - Removes stale local drift from earlier sessions
+  - Reduces review noise in future feature commits by clearing carried-over non-functional edits
 ### 2026-02-19 - Added parser-path conditional syntax support (group-exists subset) with explicit unsupported compile behavior
 - Scope: `rgx-core` lexer/parser/parsing conformance and docs alignment
 - Changes:

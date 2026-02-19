@@ -1,25 +1,27 @@
-use crate::error::{Result, RgxError};
-use crate::engine::ExecutionMode;
 use crate::ast::Regex as RegexAst;
-use crate::pattern::CompiledPattern;
+use crate::engine::ExecutionMode;
+use crate::error::{Result, RgxError};
 use crate::parsing;
-use crate::vm::{OptimizingCompiler as VMCompiler};
+use crate::pattern::CompiledPattern;
+use crate::vm::OptimizingCompiler as VMCompiler;
 use crate::{debug_log, trace_log};
 
 /// Compiler that transforms regex patterns into optimized execution programs
-pub struct Compiler { 
-    mode: ExecutionMode 
+pub struct Compiler {
+    mode: ExecutionMode,
 }
 
 impl Compiler {
     /// Create new compiler with pure execution mode (maximum performance)
-    pub fn new() -> Self { 
-        Self { mode: ExecutionMode::Pure } 
+    pub fn new() -> Self {
+        Self {
+            mode: ExecutionMode::Pure,
+        }
     }
-    
+
     /// Create compiler with specific execution mode
-    pub fn with_mode(mode: ExecutionMode) -> Self { 
-        Self { mode } 
+    pub fn with_mode(mode: ExecutionMode) -> Self {
+        Self { mode }
     }
 
     /// Compile regex pattern into optimized bytecode program
@@ -27,12 +29,12 @@ impl Compiler {
         debug_log!("compiler", "=== STARTING COMPILATION ===");
         debug_log!("compiler", "Pattern: '{}'", pattern);
         debug_log!("compiler", "Mode: {:?}", self.mode);
-        
+
         if pattern.is_empty() {
             debug_log!("compiler", "ERROR: Empty pattern");
             return Err(RgxError::Compile("empty pattern".into()));
         }
-        
+
         // Parse pattern into AST using zero-cost compile-time selected parser
         debug_log!("compiler", "Parsing pattern into AST...");
         let ast = parsing::parse_pattern(pattern)?;
@@ -61,9 +63,21 @@ impl Compiler {
         let program = vm_compiler.compile(&ast);
 
         debug_log!("compiler", "Program compiled:");
-        debug_log!("compiler", "  - Bytecode length: {} bytes", program.code.len());
-        debug_log!("compiler", "  - Character classes: {}", program.char_classes.len());
-        debug_log!("compiler", "  - String literals: {}", program.string_literals.len());
+        debug_log!(
+            "compiler",
+            "  - Bytecode length: {} bytes",
+            program.code.len()
+        );
+        debug_log!(
+            "compiler",
+            "  - Character classes: {}",
+            program.char_classes.len()
+        );
+        debug_log!(
+            "compiler",
+            "  - String literals: {}",
+            program.string_literals.len()
+        );
         debug_log!("compiler", "  - Capture groups: {}", program.num_groups);
         debug_log!("compiler", "  - Flags: {:?}", program.flags);
         debug_log!("compiler", "  - Stats: {:?}", program.stats);
@@ -114,4 +128,3 @@ impl Default for Compiler {
         Self::new()
     }
 }
-

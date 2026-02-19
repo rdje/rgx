@@ -1,5 +1,5 @@
-use crate::engine::ExecutionMode;
 use crate::ast::Regex as RegexAst;
+use crate::engine::ExecutionMode;
 use crate::vm::Program;
 
 /// A compiled regex pattern with AST and optimized VM bytecode
@@ -17,4 +17,3 @@ pub struct CompiledPattern {
 
 /// Pattern builder and analysis utilities
 pub struct Pattern;
-

@@ -32,16 +32,16 @@
 //! .{8,}(?{lua:return string.match(arg[0], "[A-Z]") and string.match(arg[0], "[0-9]")})
 //! ```
 
+use crate::error::{Result, RgxError};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use crate::error::{Result, RgxError};
 
 // ============================================================================
 // EXECUTION CONTEXT
 // ============================================================================
 
 /// Execution context passed to code blocks with match information.
-/// 
+///
 /// This provides safe, read-only access to:
 /// - The matched text
 /// - Capture groups
@@ -72,17 +72,17 @@ impl ExecContext {
             variables: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Get the current match (group 0)
     pub fn current_match(&self) -> Option<&str> {
         self.captures.get(0)?.as_deref()
     }
-    
+
     /// Get a capture group by index
     pub fn group(&self, index: usize) -> Option<&str> {
         self.captures.get(index)?.as_deref()
     }
-    
+
     /// Get a named capture group
     pub fn named(&self, name: &str) -> Option<&str> {
         self.named_captures.get(name).map(|s| s.as_str())
@@ -113,19 +113,19 @@ pub enum ExecResult {
 // ============================================================================
 
 /// Trait for language-specific execution engines.
-/// 
+///
 /// Each language backend implements this trait to provide
 /// sandboxed code execution with consistent semantics.
 pub trait ExecutionEngine: Send + Sync {
     /// Execute code with the given context
     fn execute(&self, code: &str, context: &ExecContext) -> ExecResult;
-    
+
     /// Language identifier ("lua", "js", "wasm", etc.)
     fn language(&self) -> &str;
-    
+
     /// Check if the engine is available (dependencies installed)
     fn is_available(&self) -> bool;
-    
+
     /// Reset the engine state (clear any cached state)
     fn reset(&mut self);
 }
@@ -137,15 +137,15 @@ pub trait ExecutionEngine: Send + Sync {
 #[cfg(feature = "lua")]
 pub mod lua {
     use super::*;
-    use mlua::{Lua, Value, Function, Table};
-    
-    /// 
+    use mlua::{Function, Lua, Table, Value};
+
+    ///
     /// **Security Features:**
     /// - No file I/O (io library removed)
     /// - No system access (os library removed)
     /// - No module loading (require disabled)
     /// - Memory limits enforced
-    /// 
+    ///
     /// **Performance:**
     /// - ~1-5 microseconds per execution
     /// - Cached Lua state for efficiency
@@ -153,12 +153,12 @@ pub mod lua {
     pub struct LuaEngine {
         lua: std::sync::Arc<std::sync::Mutex<Lua>>,
     }
-    
+
     impl LuaEngine {
         /// Create a new sandboxed Lua engine
         pub fn new() -> Result<Self> {
             let lua = Lua::new();
-            
+
             // Remove dangerous standard libraries
             lua.globals().set("io", Value::Nil).ok();
             lua.globals().set("os", Value::Nil).ok();
@@ -167,17 +167,17 @@ pub mod lua {
             lua.globals().set("loadfile", Value::Nil).ok();
             lua.globals().set("dofile", Value::Nil).ok();
             lua.globals().set("package", Value::Nil).ok();
-            
-            Ok(Self { 
-                lua: std::sync::Arc::new(std::sync::Mutex::new(lua))
+
+            Ok(Self {
+                lua: std::sync::Arc::new(std::sync::Mutex::new(lua)),
             })
         }
-        
+
         /// Set up the execution context in Lua globals
         fn setup_context(&self, context: &ExecContext) -> mlua::Result<()> {
             let lua = self.lua.lock().unwrap();
             let globals = lua.globals();
-            
+
             // Create arg table with captures
             let arg_table = lua.create_table()?;
             for (i, capture) in context.captures.iter().enumerate() {
@@ -186,37 +186,41 @@ pub mod lua {
                 }
             }
             globals.set("arg", arg_table)?;
-            
+
             // Set match position
             globals.set("pos", context.position)?;
-            
+
             // Set full text (read-only)
             globals.set("text", context.text.clone())?;
-            
+
             // Create named captures table
             let named_table = lua.create_table()?;
             for (name, value) in &context.named_captures {
                 named_table.set(name.clone(), value.clone())?;
             }
             globals.set("named", named_table)?;
-            
+
             Ok(())
         }
     }
-    
+
     impl ExecutionEngine for LuaEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             // Set up context
             if let Err(e) = self.setup_context(context) {
                 return ExecResult::Error(format!("Context setup failed: {}", e));
             }
-            
+
             // Execute the code
             let lua = self.lua.lock().unwrap();
             let result = lua.load(code).eval::<Value>();
             match result {
                 Ok(Value::Boolean(b)) => {
-                    if b { ExecResult::Success } else { ExecResult::Failure }
+                    if b {
+                        ExecResult::Success
+                    } else {
+                        ExecResult::Failure
+                    }
                 }
                 Ok(Value::Number(n)) => ExecResult::Numeric(n),
                 Ok(Value::String(s)) => ExecResult::Replacement(s.to_string_lossy().to_string()),
@@ -225,20 +229,20 @@ pub mod lua {
                 Err(e) => ExecResult::Error(format!("Lua error: {}", e)),
             }
         }
-        
+
         fn language(&self) -> &str {
             "lua"
         }
-        
+
         fn is_available(&self) -> bool {
             true
         }
-        
+
         fn reset(&mut self) {
             // TODO: Implement proper reset functionality
             // For now, just create a new Lua instance
             let mut new_lua = Lua::new();
-            
+
             // Remove dangerous standard libraries
             new_lua.globals().set("io", Value::Nil).ok();
             new_lua.globals().set("os", Value::Nil).ok();
@@ -247,11 +251,11 @@ pub mod lua {
             new_lua.globals().set("loadfile", Value::Nil).ok();
             new_lua.globals().set("dofile", Value::Nil).ok();
             new_lua.globals().set("package", Value::Nil).ok();
-            
+
             *self.lua.lock().unwrap() = new_lua;
         }
     }
-    
+
     impl Default for LuaEngine {
         fn default() -> Self {
             Self::new().expect("Failed to create Lua engine")
@@ -266,17 +270,17 @@ pub mod lua {
 #[cfg(feature = "javascript")]
 pub mod javascript {
     use super::*;
-    use rquickjs::{Context, Runtime, Value, Object, Array};
-    
+    use rquickjs::{Array, Context, Object, Runtime, Value};
+
     /// JavaScript execution engine using QuickJS.
-    /// 
+    ///
     /// **Security Features:**
     /// - No file system access
     /// - No network capabilities
     /// - No process/system access
     /// - Memory and CPU limits
     /// - No eval() or Function constructor
-    /// 
+    ///
     /// **Performance:**
     /// - ~5-20 microseconds per execution
     /// - Lightweight JS engine (QuickJS)
@@ -284,35 +288,35 @@ pub mod javascript {
     pub struct JavaScriptEngine {
         runtime: Runtime,
     }
-    
+
     impl JavaScriptEngine {
         /// Create a new sandboxed JavaScript engine
         pub fn new() -> Result<Self> {
             let runtime = Runtime::new()
                 .map_err(|e| RgxError::Engine(format!("Failed to create JS runtime: {}", e)))?;
-            
+
             // Set memory limit (10MB)
             runtime.set_memory_limit(10 * 1024 * 1024);
-            
+
             // Set max stack size
             runtime.set_max_stack_size(256 * 1024);
-            
+
             Ok(Self { runtime })
         }
-        
+
         /// Execute JavaScript code in sandboxed context
         fn execute_sandboxed(&self, code: &str, context: &ExecContext) -> ExecResult {
             let ctx_result = Context::base(&self.runtime);
-            
+
             let ctx = match ctx_result {
                 Ok(ctx) => ctx,
                 Err(e) => return ExecResult::Error(format!("Context creation failed: {}", e)),
             };
-            
+
             ctx.with(|ctx| {
                 // Set up global context
                 let globals = ctx.globals();
-                
+
                 // Create arg array with captures
                 if let Ok(arg_array) = Array::new(ctx) {
                     for (i, capture) in context.captures.iter().enumerate() {
@@ -322,11 +326,11 @@ pub mod javascript {
                     }
                     globals.set("arg", arg_array).ok();
                 }
-                
+
                 // Set position and text
                 globals.set("pos", context.position as i32).ok();
                 globals.set("text", context.text.clone()).ok();
-                
+
                 // Create named captures object
                 if let Ok(named_obj) = Object::new(ctx) {
                     for (name, value) in &context.named_captures {
@@ -334,19 +338,23 @@ pub mod javascript {
                     }
                     globals.set("named", named_obj).ok();
                 }
-                
+
                 // Remove dangerous functions
                 globals.set("eval", Value::Undefined).ok();
                 globals.set("Function", Value::Undefined).ok();
                 globals.set("fetch", Value::Undefined).ok();
                 globals.set("XMLHttpRequest", Value::Undefined).ok();
-                
+
                 // Execute the code
                 match ctx.eval::<Value>(code) {
                     Ok(val) => {
                         if val.is_bool() {
                             if let Some(b) = val.as_bool() {
-                                if b { ExecResult::Success } else { ExecResult::Failure }
+                                if b {
+                                    ExecResult::Success
+                                } else {
+                                    ExecResult::Failure
+                                }
                             } else {
                                 ExecResult::Success
                             }
@@ -373,20 +381,20 @@ pub mod javascript {
             })
         }
     }
-    
+
     impl ExecutionEngine for JavaScriptEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             self.execute_sandboxed(code, context)
         }
-        
+
         fn language(&self) -> &str {
             "js"
         }
-        
+
         fn is_available(&self) -> bool {
             true
         }
-        
+
         fn reset(&mut self) {
             // QuickJS doesn't provide direct reset, create new runtime
             if let Ok(new_runtime) = Runtime::new() {
@@ -396,7 +404,7 @@ pub mod javascript {
             }
         }
     }
-    
+
     impl Default for JavaScriptEngine {
         fn default() -> Self {
             Self::new().expect("Failed to create JavaScript engine")
@@ -412,7 +420,7 @@ pub mod javascript {
 pub type NativeCallback = Box<dyn Fn(&ExecContext) -> ExecResult + Send + Sync>;
 
 /// Registry for native callbacks that can be called from patterns.
-/// 
+///
 /// This allows users to register Rust functions that can be called
 /// from regex patterns using `(?{native:function_name})`.
 pub struct NativeCallbackRegistry {
@@ -426,15 +434,15 @@ impl NativeCallbackRegistry {
             callbacks: HashMap::new(),
         }
     }
-    
+
     /// Register a native callback function
-    pub fn register<F>(&mut self, name: String, callback: F) 
+    pub fn register<F>(&mut self, name: String, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
         self.callbacks.insert(name, Box::new(callback));
     }
-    
+
     /// Call a registered callback
     pub fn call(&self, name: &str, context: &ExecContext) -> ExecResult {
         match self.callbacks.get(name) {
@@ -442,7 +450,7 @@ impl NativeCallbackRegistry {
             None => ExecResult::Error(format!("Unknown native function: {}", name)),
         }
     }
-    
+
     /// Check if a callback is registered
     pub fn has(&self, name: &str) -> bool {
         self.callbacks.contains_key(name)
@@ -460,7 +468,7 @@ impl Default for NativeCallbackRegistry {
 // ============================================================================
 
 /// Central manager for all code execution engines.
-/// 
+///
 /// This coordinates between different language backends and provides
 /// a unified interface for the regex engine to execute embedded code.
 pub struct ExecutionManager {
@@ -482,7 +490,7 @@ impl ExecutionManager {
             native_callbacks: NativeCallbackRegistry::new(),
         }
     }
-    
+
     /// Execute code in the specified language
     pub fn execute(&self, language: &str, code: &str, context: &ExecContext) -> ExecResult {
         match language {
@@ -494,7 +502,7 @@ impl ExecutionManager {
                     ExecResult::Error("Lua engine not available".to_string())
                 }
             }
-            
+
             #[cfg(feature = "javascript")]
             "js" | "javascript" => {
                 if let Some(engine) = &self.js_engine {
@@ -503,16 +511,16 @@ impl ExecutionManager {
                     ExecResult::Error("JavaScript engine not available".to_string())
                 }
             }
-            
+
             "native" => {
                 // For native, the 'code' is the function name
                 self.native_callbacks.call(code, context)
             }
-            
+
             _ => ExecResult::Error(format!("Unknown language: {}", language)),
         }
     }
-    
+
     /// Register a native callback
     pub fn register_native<F>(&mut self, name: String, callback: F)
     where
@@ -520,7 +528,7 @@ impl ExecutionManager {
     {
         self.native_callbacks.register(name, callback);
     }
-    
+
     /// Check if a language is available
     pub fn is_language_available(&self, language: &str) -> bool {
         match language {
@@ -539,4 +547,3 @@ impl Default for ExecutionManager {
         Self::new()
     }
 }
-
