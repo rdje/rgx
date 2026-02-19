@@ -1,6 +1,7 @@
 use crate::error::{Result, RgxError};
 use crate::engine::ExecutionMode;
 use crate::ast::Regex as RegexAst;
+use crate::ast::ConditionalTest;
 use crate::pattern::CompiledPattern;
 use crate::parsing;
 use crate::vm::{OptimizingCompiler as VMCompiler};
@@ -52,6 +53,12 @@ impl Compiler {
     fn compile_ast_with_label(&self, ast: RegexAst, raw_label: &str) -> Result<CompiledPattern> {
         debug_log!("compiler", "AST: {:?}", ast);
 
+        if Self::contains_code_block(&ast) {
+            return Err(RgxError::Compile(
+                "code-block syntax is parsed but not yet integrated into VM execution".to_string(),
+            ));
+        }
+
         // Compile AST into optimized VM bytecode
         debug_log!("compiler", "Compiling AST to VM bytecode...");
         let mut vm_compiler = VMCompiler::new();
@@ -78,6 +85,39 @@ impl Compiler {
             ast,
             program,
         })
+    }
+
+    fn contains_code_block(ast: &RegexAst) -> bool {
+        match ast {
+            RegexAst::CodeBlock { .. } => true,
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
+                items.iter().any(Self::contains_code_block)
+            }
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Group { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. } => Self::contains_code_block(expr),
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let cond_has_code = match condition {
+                    ConditionalTest::Lookahead(expr) | ConditionalTest::Lookbehind(expr) => {
+                        Self::contains_code_block(expr)
+                    }
+                    ConditionalTest::GroupExists(_) | ConditionalTest::NamedGroupExists(_) => false,
+                };
+
+                cond_has_code
+                    || Self::contains_code_block(true_branch)
+                    || false_branch
+                        .as_ref()
+                        .map(|expr| Self::contains_code_block(expr))
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
     }
 }
 

@@ -361,7 +361,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...)
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         let start_pos = self.current_position();
         self.advance(); // Skip '('
@@ -374,6 +374,61 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip '?'
         
         match self.current {
+            Some('{') => {
+                self.advance(); // Skip '{'
+
+                // Parse language name up to ':'
+                let mut lang = String::new();
+                while let Some(c) = self.current {
+                    if c == ':' {
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                        lang.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+
+                if lang.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+
+                if self.current != Some(':') {
+                    return Err(LexError::ExpectedColon {
+                        position: start_pos,
+                    });
+                }
+                self.advance(); // Skip ':'
+
+                // Parse code until terminating "})"
+                let mut code = String::new();
+                loop {
+                    match self.current {
+                        Some('}') if self.peek() == Some(')') => {
+                            self.advance(); // Skip '}'
+                            self.advance(); // Skip ')'
+                            break;
+                        }
+                        Some(c) => {
+                            code.push(c);
+                            self.advance();
+                        }
+                        None => {
+                            return Err(LexError::UnterminatedCodeBlock {
+                                position: start_pos,
+                            });
+                        }
+                    }
+                }
+
+                Ok(Token::CodeBlock { lang, code })
+            }
             Some(':') => {
                 self.advance(); // Skip ':'
                 Ok(Token::NonCapturingGroupStart)
@@ -660,6 +715,17 @@ mod tests {
             Token::Char('a'),
             Token::Char('b'),
             Token::GroupEnd,
+        ]);
+    }
+
+    #[test]
+    fn test_code_block_token() {
+        let tokens = tokenize_all("(?{lua:return arg[0] ~= nil})").unwrap();
+        assert_eq!(tokens, vec![
+            Token::CodeBlock {
+                lang: "lua".to_string(),
+                code: "return arg[0] ~= nil".to_string(),
+            },
         ]);
     }
     

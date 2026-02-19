@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added parser-side code-block syntax parsing with explicit unsupported compile behavior
+- Scope: `rgx-core` lexer/parser/compiler safety and capability signaling
+- Changes:
+  - Extended lexer group parsing to recognize code blocks:
+    - `(?{lang:code})` -> `Token::CodeBlock { lang, code }`
+  - Extended parser to build `Regex::CodeBlock` AST nodes
+  - Updated recursive-descent parser capability flags to reflect implemented parsing support:
+    - `named_groups = true`
+    - `lookarounds = true`
+    - `code_blocks = true`
+  - Added explicit compile-time rejection for code-block AST nodes with clear error text, avoiding silent miscompilation in current VM path
+  - Added tests for:
+    - lexer code-block tokenization
+    - parser code-block AST construction
+    - API-level explicit unsupported compile error
+    - parser capability flags
+- Validation:
+  - `cargo test -p rgx-core` passed (62 tests)
+- Notes/impact:
+  - Improves correctness by replacing silent failure behavior with explicit unsupported signaling
+  - Preserves forward progress toward full code-block runtime integration
 ### 2026-02-19 - Implemented atomic-group no-backtracking runtime semantics
 - Scope: `rgx-core` VM/compiler behavior for `(?>...)` groups
 - Changes:

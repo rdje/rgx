@@ -229,6 +229,13 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Regex::Backreference(n))
             }
+
+            Some(Token::CodeBlock { lang, code }) => {
+                let lang = lang.clone();
+                let code = code.clone();
+                self.advance()?;
+                Ok(Regex::CodeBlock { lang, code })
+            }
             
             Some(Token::GroupStart) => {
                 self.advance()?; // consume '('
@@ -600,6 +607,20 @@ mod tests {
                 assert!(matches!(elements[1], Regex::Char('a')));
             }
             _ => panic!("Expected sequence"),
+        }
+    }
+
+    #[test]
+    fn test_parse_code_block() {
+        let mut parser = Parser::new("(?{lua:return true})").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::CodeBlock { lang, code } => {
+                assert_eq!(lang, "lua");
+                assert_eq!(code, "return true");
+            }
+            _ => panic!("Expected code block"),
         }
     }
 

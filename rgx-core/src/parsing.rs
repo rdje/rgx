@@ -97,11 +97,11 @@ pub fn parser_name() -> &'static str {
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parser_capabilities() -> ParserCapabilities {
     ParserCapabilities {
-        code_blocks: false,
-        named_groups: false,
+        code_blocks: true,
+        named_groups: true,
         perl_advanced: false,
         unicode_properties: true,
-        lookarounds: false,
+        lookarounds: true,
         error_recovery: false,
         syntax_highlighting: false,
     }
@@ -169,11 +169,11 @@ impl RegexParser for RecursiveDescentParser {
 
     fn capabilities(&self) -> ParserCapabilities {
         ParserCapabilities {
-            code_blocks: false, // Not implemented yet
-            named_groups: false, // Not implemented yet
+            code_blocks: true,
+            named_groups: true,
             perl_advanced: false,
             unicode_properties: true, // Lexer supports this
-            lookarounds: false, // Not implemented yet
+            lookarounds: true,
             error_recovery: false,
             syntax_highlighting: false,
         }
@@ -264,5 +264,8 @@ mod tests {
     fn test_parser_capabilities() {
         let caps = parser_capabilities();
         assert!(caps.unicode_properties); // Should support basic unicode
+        assert!(caps.named_groups);
+        assert!(caps.lookarounds);
+        assert!(caps.code_blocks);
     }
 }

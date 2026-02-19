@@ -16,13 +16,14 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Capture group tracking in VM tests
 - Group support for capturing, non-capturing `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)` (no-backtracking semantics)
 - Parser-independent compilation from AST via public API (`Regex::from_ast`)
+- Parser recognizes code-block syntax `(?{lang:code})`
 - Lookaround support (positive/negative lookahead + lookbehind) via parser syntax and AST
 - Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
 - CLI usage for basic regex matching via `rgx-cli`
 
 ## Current limitations
-- Advanced parser syntax is still partial (conditionals, recursion, and code-block syntax are not yet fully parsed/wired)
-- Inline code-block regex syntax like `(?{lua:...})` is not yet available through the current parser path
+- Advanced parser syntax is still partial (conditionals and recursion remain incomplete)
+- Code-block syntax is parsed, but execution is not yet integrated into VM path (compile returns explicit unsupported error)
 - A number of advanced opcodes/features are declared but not fully implemented
 - JavaScript/WASM integration is scaffolded but not production-ready in the user-facing regex path
 
