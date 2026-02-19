@@ -6,6 +6,13 @@ Technical knowledge base for day-to-day engineering work in rgx.
 - Document practical architecture insights and constraints
 - Keep a concise list of known gaps and immediate priorities
 
+## Strategic goal clarification
+- rgx targets practical parity with PCRE2 for:
+  - feature coverage
+  - runtime performance
+  - matching accuracy
+- rgx also targets broader code-block language support over time (e.g., JavaScript, Lua, Julia, and additional runtimes), with explicit safety and sandbox guarantees.
+
 ## Current architecture (practical view)
 Pipeline in `rgx-core`:
 1. `lexer.rs` tokenizes pattern text
@@ -32,10 +39,12 @@ Pipeline in `rgx-core`:
 - JavaScript/WASM modules remain scaffold-level in user-facing flow
 
 ## Immediate priorities
-1. Expand parser-independent AST integration tests around advanced VM/compiler features
-2. Parser completeness for advanced grouping and assertion syntax (in parallel with PGEN readiness)
-3. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-4. Define and enforce a stable capability matrix in docs + tests
+1. Build and maintain a PCRE2 compatibility matrix with explicit exceptions/gaps
+2. Expand differential and integration tests to improve semantic parity and accuracy confidence
+3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
+4. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
+5. Remove/finish placeholder VM/compiler paths and TODO opcode branches
+6. Define staged rollout for multi-language code-block runtime support with shared safety controls
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

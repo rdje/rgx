@@ -2,7 +2,7 @@
 This document describes long-term direction, not a statement that all features are currently shipped.
 
 ## Mission
-Build a fast, safe regex engine with a VM core and a path to controlled embedded code execution.
+Build a fast, safe regex engine with a VM core that targets practical parity with PCRE2 for features, speed, and matching accuracy, plus controlled embedded code execution.
 
 ## Principles
 - Performance-first core for pure regex workloads
@@ -11,9 +11,10 @@ Build a fast, safe regex engine with a VM core and a path to controlled embedded
 - Pragmatic delivery: ship verified capabilities, avoid overstating status
 
 ## Long-term goals
-- Competitive performance against established engines for targeted workloads
-- Broader regex feature coverage (including advanced assertions/group types)
-- Mature multi-language execution story where sandbox guarantees are explicit
+- Practical feature parity with PCRE2 across supported regex constructs
+- Competitive performance with PCRE2 on representative benchmark workloads
+- High-confidence matching accuracy validated against differential and integration tests
+- Mature multi-language code-block execution story where sandbox guarantees are explicit
 - Robust language bindings and production-focused tooling
 
 ## Non-goals for the near term
@@ -21,7 +22,8 @@ Build a fast, safe regex engine with a VM core and a path to controlled embedded
 - Shipping broad plugin ecosystems before core parser/VM completeness is stable
 
 ## Success criteria
+- A documented compatibility matrix versus PCRE2, including explicit exceptions/gaps
 - A documented and tested capability matrix that matches real behavior
-- Sustained benchmark improvements validated in `rgx-bench`
+- Sustained benchmark improvements validated in `rgx-bench`, including PCRE2 comparisons
 - High-confidence API behavior backed by integration tests
 - Documentation that cleanly separates current status from future aspirations

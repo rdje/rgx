@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Clarified strategic goals: PCRE2 parity + broader code-block languages
+- Scope: vision/roadmap/notes alignment for project direction
+- Changes:
+  - Updated `PROJECT_VISION.md` to explicitly target practical parity with PCRE2 for:
+    - feature coverage
+    - speed
+    - matching accuracy
+  - Updated `ROADMAP.md` with explicit PCRE2 parity workstream and multi-language code-block expansion goals
+  - Updated `DEVELOPMENT_NOTES.md` to capture this goal clarification and re-prioritize immediate work accordingly
+  - Updated `docs/TECHNICAL_DECISIONS.md` with explicit decision records for:
+    - PCRE2 parity as north-star target
+    - staged multi-language code-block expansion (including Julia)
+- Validation:
+  - Reviewed cross-doc consistency and wording to ensure goals are clearly marked as targets, not currently shipped guarantees
+- Notes/impact:
+  - Makes strategic direction explicit for future sessions and contributors
+  - Reduces ambiguity between current capabilities and long-term parity goals
 ### 2026-02-19 - Added live roadmap tracker and layered end-user guide
 - Scope: repository documentation structure and usability
 - Changes:

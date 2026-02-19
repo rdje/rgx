@@ -19,6 +19,13 @@ Live forward-looking tracker for rgx.
 - `done`: completed and validated (then move to `CHANGES.md`)
 
 ## Now (active)
+### PCRE2 parity program (features, speed, accuracy)
+- Status: `in-progress`
+- Goal: converge toward practical parity with PCRE2 in capabilities and runtime behavior.
+- Scope:
+  - maintain a compatibility matrix against PCRE2 feature areas
+  - use differential tests to catch semantic mismatches
+  - track benchmark parity trends in `rgx-bench`
 ### Parser-independent engine maturity
 - Status: `in-progress`
 - Goal: continue delivering advanced regex semantics through AST-first paths while parser syntax catches up.
@@ -50,10 +57,17 @@ Live forward-looking tracker for rgx.
 
 ### Embedded code-path integration clarity
 - Status: `planned`
-- Goal: define explicit readiness gates for Lua/JavaScript regex code paths.
+- Goal: define explicit readiness gates for multi-language code-block paths (JavaScript, Lua, Julia, and additional languages).
 - Scope:
   - parser/VM integration boundaries
   - safety model and capability boundaries in docs
+
+### Multi-language code-block runtime expansion
+- Status: `planned`
+- Goal: extend code-block runtime support beyond initial languages while preserving deterministic behavior and safety guarantees.
+- Scope:
+  - language runtime integration sequence (JS/Lua first, Julia and others next)
+  - shared execution contracts, resource limits, and sandbox controls
 
 ## Later (strategic)
 ### Broader feature coverage
