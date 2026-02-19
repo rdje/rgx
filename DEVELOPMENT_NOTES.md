@@ -28,6 +28,7 @@ Pipeline in `rgx-core`:
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
+- Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -36,8 +37,8 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser support for advanced group syntaxes is incomplete
-  - conditionals/recursion are not fully wired
-- Code-block execution is not yet integrated into the VM runtime path (compile currently returns explicit unsupported error)
+  - conditionals are not fully wired
+- Backreference, recursion, and code-block execution are not yet integrated into the VM runtime path (compile currently returns explicit unsupported errors)
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path
 - JavaScript/WASM modules remain scaffold-level in user-facing flow

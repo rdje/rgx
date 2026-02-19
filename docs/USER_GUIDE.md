@@ -82,6 +82,7 @@ assert!(re.is_match("dog"));
   - `(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)`
 - AST-first lookahead/lookbehind support remains available via `Regex::from_ast`.
 - Parser also recognizes code-block syntax `(?{lang:code})`, but execution is not yet wired into VM runtime.
+- Parser also recognizes recursion syntax (`(?R)`, `(?1)`, `(?&name)`), but execution is not yet wired into VM runtime.
 
 ## Level 3 - Gory details (behavior semantics)
 ### Execution model
@@ -109,8 +110,8 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - Nested alternations do not override top-level branch selection in the reported value.
 
 ### Current constraints to keep in mind
-- Some advanced parser syntaxes are still incomplete (for example conditionals and recursion).
-- Code-block syntax (e.g., `(?{lua:...})`) is parsed, but currently returns an explicit compile-time unsupported error.
+- Some advanced parser syntaxes are still incomplete (for example conditionals).
+- Backreference, recursion, and code-block syntax are parsed, but currently return explicit compile-time unsupported errors.
 - Declared opcodes/features should be treated as shipped only when parser/compiler/VM/API paths are all validated.
 
 ## Troubleshooting checklist

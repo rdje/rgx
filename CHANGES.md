@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added recursion syntax parsing with explicit unsupported compile errors
+- Scope: `rgx-core` lexer/parser/compiler behavior for advanced unintegrated constructs
+- Changes:
+  - Extended lexer/parser support for recursion syntax:
+    - `(?R)`
+    - `(?1)`
+    - `(?&name)`
+  - Added parser AST mapping for recursion tokens (`Regex::Recursion`)
+  - Generalized compiler unsupported-feature detection so these constructs now fail explicitly (instead of silently degrading):
+    - backreferences
+    - recursion
+    - conditionals
+    - code blocks
+  - Added tests for:
+    - recursion tokenization/parsing
+    - API-level explicit compile errors for backreference and recursion
+- Validation:
+  - `cargo test -p rgx-core` passed (67 tests)
+- Notes/impact:
+  - Improves correctness and debuggability by replacing silent failure behavior with explicit unsupported diagnostics
+  - Advances parser completeness while preserving safe behavior until VM execution integration lands
 ### 2026-02-19 - Added parser-side code-block syntax parsing with explicit unsupported compile behavior
 - Scope: `rgx-core` lexer/parser/compiler safety and capability signaling
 - Changes:

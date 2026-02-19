@@ -4,7 +4,7 @@
 //! a stream of tokens, handling all Perl regex features including our custom
 //! code execution blocks.
 
-use crate::ast::{AnchorType, CharRange};
+use crate::ast::{AnchorType, CharRange, RecursionTarget};
 use crate::token::{LexError, Position, Token, TokenWithPos};
 use std::str::Chars;
 
@@ -445,6 +445,76 @@ impl<'a> Lexer<'a> {
                 self.advance(); // Skip '>'
                 Ok(Token::AtomicGroupStart)
             }
+            Some('R') => {
+                self.advance(); // Skip 'R'
+                if self.current == Some(')') {
+                    self.advance(); // Skip ')'
+                    Ok(Token::Recursion {
+                        target: RecursionTarget::Entire,
+                    })
+                } else {
+                    Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    })
+                }
+            }
+            Some('&') => {
+                self.advance(); // Skip '&'
+                let mut name = String::new();
+                while let Some(c) = self.current {
+                    if c == ')' {
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+
+                if name.is_empty() || self.current != Some(')') {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                self.advance(); // Skip ')'
+                Ok(Token::Recursion {
+                    target: RecursionTarget::NamedGroup(name),
+                })
+            }
+            Some(c) if c.is_ascii_digit() => {
+                let mut number_str = String::new();
+                while let Some(d) = self.current {
+                    if d.is_ascii_digit() {
+                        number_str.push(d);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+
+                if self.current != Some(')') {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                self.advance(); // Skip ')'
+
+                let group_num = number_str.parse::<u32>().map_err(|_| LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                })?;
+                if group_num == 0 {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                Ok(Token::Recursion {
+                    target: RecursionTarget::Group(group_num),
+                })
+            }
             Some('<') => {
                 self.advance(); // Skip '<'
 
@@ -725,6 +795,22 @@ mod tests {
             Token::CodeBlock {
                 lang: "lua".to_string(),
                 code: "return arg[0] ~= nil".to_string(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_recursion_tokens() {
+        let tokens = tokenize_all("(?R)(?1)(?&name)").unwrap();
+        assert_eq!(tokens, vec![
+            Token::Recursion {
+                target: RecursionTarget::Entire,
+            },
+            Token::Recursion {
+                target: RecursionTarget::Group(1),
+            },
+            Token::Recursion {
+                target: RecursionTarget::NamedGroup("name".to_string()),
             },
         ]);
     }

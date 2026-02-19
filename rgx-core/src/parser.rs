@@ -236,6 +236,12 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Regex::CodeBlock { lang, code })
             }
+
+            Some(Token::Recursion { target }) => {
+                let target = target.clone();
+                self.advance()?;
+                Ok(Regex::Recursion { target })
+            }
             
             Some(Token::GroupStart) => {
                 self.advance()?; // consume '('
@@ -621,6 +627,32 @@ mod tests {
                 assert_eq!(code, "return true");
             }
             _ => panic!("Expected code block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_recursion_entire_pattern() {
+        let mut parser = Parser::new("(?R)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Recursion { target } => {
+                assert!(matches!(target, crate::ast::RecursionTarget::Entire));
+            }
+            _ => panic!("Expected recursion node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_recursion_named_group() {
+        let mut parser = Parser::new("(?&word)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Recursion { target } => {
+                assert_eq!(target, crate::ast::RecursionTarget::NamedGroup("word".to_string()));
+            }
+            _ => panic!("Expected recursion node"),
         }
     }
 
