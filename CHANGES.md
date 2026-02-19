@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added AST-first lookbehind support in compiler and VM
+- Scope: `rgx-core` VM/compiler assertion semantics (parser-independent path)
+- Changes:
+  - Implemented AST codegen for lookbehind assertions:
+    - `Regex::Lookbehind { positive: true }` -> `OpCode::Lookbehind`
+    - `Regex::Lookbehind { positive: false }` -> `OpCode::LookbehindNeg`
+  - Implemented VM execution semantics for lookbehind opcodes in:
+    - main executor
+    - sub-expression executor
+  - Added bounded lookbehind assertion evaluation helper that requires the assertion sub-expression to end at current position
+  - Extended opcode decoding (`TryFrom<u8>`) for `Lookbehind` and `LookbehindNeg`
+  - Removed duplicate lookahead opcode branch in VM executor and bounded character reads by execution context end
+  - Added parser-independent public API tests for positive and negative lookbehind behavior
+- Validation:
+  - `cargo test -p rgx-core` passed (51 tests)
+- Notes/impact:
+  - Enables AST-first progress on lookbehind assertions without parser syntax dependency
+  - Parser syntax for lookbehind remains pending in parser path
 ### 2026-02-18 - Added built-in 1-based top-level branch number reporting
 - Scope: `rgx-core` compiler/engine/public API semantics for top-level alternations
 - Changes:

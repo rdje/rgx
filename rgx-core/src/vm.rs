@@ -532,8 +532,8 @@ impl RegexVM {
                     return false;
                 }
 
-                OpCode::Lookahead | OpCode::LookaheadNeg => {
-                    // Read the length of the lookahead sub-expression
+                OpCode::Lookahead | OpCode::LookaheadNeg | OpCode::Lookbehind | OpCode::LookbehindNeg => {
+                    // Read the length of the assertion sub-expression
                     if ip >= code.len() {
                         return false;
                     }
@@ -547,11 +547,19 @@ impl RegexVM {
                         return false;
                     }
 
-                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
-                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
-                        matched
-                    } else {
-                        !matched
+                    let matched = match op {
+                        OpCode::Lookahead | OpCode::LookaheadNeg => {
+                            self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end])
+                        }
+                        OpCode::Lookbehind | OpCode::LookbehindNeg => {
+                            self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end])
+                        }
+                        _ => false,
+                    };
+                    let assertion_holds = match op {
+                        OpCode::Lookahead | OpCode::Lookbehind => matched,
+                        OpCode::LookaheadNeg | OpCode::LookbehindNeg => !matched,
+                        _ => false,
                     };
 
                     if !assertion_holds {
@@ -801,37 +809,6 @@ impl RegexVM {
                     continue;
                 }
 
-                OpCode::Lookahead | OpCode::LookaheadNeg => {
-                    // Read the length of the lookahead sub-expression
-                    if ip >= code.len() {
-                        return false;
-                    }
-                    let expr_len = code[ip] as usize;
-                    ip += 1;
-
-                    let expr_start = ip;
-                    let expr_end = ip + expr_len;
-
-                    // Bounds check
-                    if expr_end > code.len() {
-                        return false;
-                    }
-
-                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
-                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
-                        matched
-                    } else {
-                        !matched
-                    };
-
-                    if !assertion_holds {
-                        return false;
-                    }
-
-                    // Assertions do not consume input
-                    ip = expr_end;
-                    continue;
-                }
 
                 OpCode::SaveStart => {
                     // Read the group ID from operands
@@ -951,7 +928,7 @@ impl RegexVM {
 
     /// Get current character at context position
     fn current_char(&self, ctx: &ExecContext) -> Option<char> {
-        if ctx.pos >= ctx.text.len() {
+        if ctx.pos >= ctx.end {
             return None;
         }
 
@@ -1221,8 +1198,8 @@ impl RegexVM {
                     return false;
                 }
 
-                OpCode::Lookahead | OpCode::LookaheadNeg => {
-                    // Read the length of the lookahead sub-expression
+                OpCode::Lookahead | OpCode::LookaheadNeg | OpCode::Lookbehind | OpCode::LookbehindNeg => {
+                    // Read the length of the assertion sub-expression
                     if ip >= code.len() {
                         return false;
                     }
@@ -1236,11 +1213,19 @@ impl RegexVM {
                         return false;
                     }
 
-                    let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
-                    let assertion_holds = if matches!(op, OpCode::Lookahead) {
-                        matched
-                    } else {
-                        !matched
+                    let matched = match op {
+                        OpCode::Lookahead | OpCode::LookaheadNeg => {
+                            self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end])
+                        }
+                        OpCode::Lookbehind | OpCode::LookbehindNeg => {
+                            self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end])
+                        }
+                        _ => false,
+                    };
+                    let assertion_holds = match op {
+                        OpCode::Lookahead | OpCode::Lookbehind => matched,
+                        OpCode::LookaheadNeg | OpCode::LookbehindNeg => !matched,
+                        _ => false,
                     };
 
                     if !assertion_holds {
@@ -1275,6 +1260,31 @@ impl RegexVM {
         };
 
         self.execute_subexpr(&mut assertion_ctx, code)
+    }
+
+    /// Execute a lookbehind assertion by finding a sub-expression match
+    /// that ends exactly at the current position.
+    fn execute_lookbehind_assertion(&self, ctx: &ExecContext, code: &[u8]) -> bool {
+        let assertion_end = ctx.pos;
+
+        for start in (0..=assertion_end).rev() {
+            let mut lookbehind_ctx = ExecContext {
+                text: ctx.text.clone(),
+                pos: start,
+                end: assertion_end,
+                captures: ctx.captures.clone(),
+                memo_cache: HashMap::new(),
+                call_stack: Vec::new(),
+                backtrack_stack: Vec::new(),
+                current_alternative: ctx.current_alternative,
+            };
+
+            if self.execute_subexpr(&mut lookbehind_ctx, code) && lookbehind_ctx.pos == assertion_end {
+                return true;
+            }
+        }
+
+        false
     }
     
     // =============================================================================
@@ -1741,6 +1751,10 @@ impl OptimizingCompiler {
             Regex::CharClass(_) => self.stats.char_classes += 1,
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
+            Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+                self.flags.has_lookarounds = true;
+                self.analyze_pass(expr);
+            }
             Regex::Sequence(items) => {
                 for item in items {
                     self.analyze_pass(item);
@@ -1928,6 +1942,22 @@ impl OptimizingCompiler {
                 sub_compiler.codegen_pass(expr, false);
                 let sub_code = sub_compiler.code;
                 
+                self.code.push(sub_code.len() as u8);
+                self.code.extend(sub_code);
+            }
+
+            Regex::Lookbehind { expr, positive } => {
+                if *positive {
+                    self.emit_op(OpCode::Lookbehind);
+                } else {
+                    self.emit_op(OpCode::LookbehindNeg);
+                }
+
+                // Compile lookbehind sub-expression inline with a length prefix.
+                let mut sub_compiler = OptimizingCompiler::new();
+                sub_compiler.codegen_pass(expr, false);
+                let sub_code = sub_compiler.code;
+
                 self.code.push(sub_code.len() as u8);
                 self.code.extend(sub_code);
             }
@@ -2157,6 +2187,8 @@ impl TryFrom<u8> for OpCode {
             0x36 => Ok(NonWordBoundary),
             0x60 => Ok(Lookahead),
             0x61 => Ok(LookaheadNeg),
+            0x62 => Ok(Lookbehind),
+            0x63 => Ok(LookbehindNeg),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x50 => Ok(SaveStart),

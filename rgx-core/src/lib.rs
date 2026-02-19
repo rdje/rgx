@@ -291,6 +291,41 @@ mod tests {
     }
 
     #[test]
+    fn ast_positive_lookbehind_no_consume() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Lookbehind {
+                expr: Box::new(RegexAst::Sequence(vec![
+                    RegexAst::Char('c'),
+                    RegexAst::Char('a'),
+                    RegexAst::Char('t'),
+                ])),
+                positive: true,
+            },
+            RegexAst::Char('d'),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile positive-lookbehind AST directly");
+        let m = regex.find_first("xxcatd").expect("Expected lookbehind match");
+        assert_eq!(m.start, 5);
+        assert_eq!(m.end, 6); // Lookbehind itself must not consume input
+    }
+
+    #[test]
+    fn ast_negative_lookbehind() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Lookbehind {
+                expr: Box::new(RegexAst::Char('x')),
+                positive: false,
+            },
+            RegexAst::Char('a'),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile negative-lookbehind AST directly");
+        assert!(regex.is_match("ba"));
+        assert!(!regex.is_match("xa"));
+    }
+
+    #[test]
     fn top_level_branch_id_exposed() {
         let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
         let m = regex.find_first("xxdogxx").expect("Expected a match");
