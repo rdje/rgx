@@ -14,14 +14,14 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Literal matching, alternation, anchors, basic character classes
 - Core quantifiers (`*`, `+`, `?`, simple `{n,m}` paths)
 - Capture group tracking in VM tests
-- Group parsing for capturing, non-capturing `(?:...)`, and named groups `(?<name>...)`
+- Group parsing for capturing, non-capturing `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Parser-independent compilation from AST via public API (`Regex::from_ast`)
-- Parser-independent lookaround support via AST (`RegexAst::Lookahead` and `RegexAst::Lookbehind`, positive/negative)
+- Lookaround support (positive/negative lookahead + lookbehind) via parser syntax and AST
 - Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
 - CLI usage for basic regex matching via `rgx-cli`
 
 ## Current limitations
-- Advanced group syntax is still partial (lookarounds and code-block syntax are not yet parsed)
+- Advanced parser syntax is still partial (conditionals, recursion, and code-block syntax are not yet fully parsed/wired)
 - Inline code-block regex syntax like `(?{lua:...})` is not yet available through the current parser path
 - A number of advanced opcodes/features are declared but not fully implemented
 - JavaScript/WASM integration is scaffolded but not production-ready in the user-facing regex path

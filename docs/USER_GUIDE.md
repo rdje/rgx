@@ -78,9 +78,9 @@ assert!(re.is_match("dog"));
 ```
 
 ### Lookaround status
-- AST-first lookahead is supported (positive/negative).
-- AST-first lookbehind is supported (positive/negative).
-- Parser syntax for full lookaround coverage is still being completed.
+- Parser syntax supports positive/negative lookahead and lookbehind:
+  - `(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)`
+- AST-first lookahead/lookbehind support remains available via `Regex::from_ast`.
 
 ## Level 3 - Gory details (behavior semantics)
 ### Execution model
@@ -101,7 +101,7 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - Nested alternations do not override top-level branch selection in the reported value.
 
 ### Current constraints to keep in mind
-- Some advanced parser syntaxes are still incomplete even where VM/compiler support exists.
+- Some advanced parser syntaxes are still incomplete (for example conditionals, recursion, and inline code-block paths).
 - Inline code-block syntax (e.g., `(?{lua:...})`) is not fully available via current parser path.
 - Declared opcodes/features should be treated as shipped only when parser/compiler/VM/API paths are all validated.
 

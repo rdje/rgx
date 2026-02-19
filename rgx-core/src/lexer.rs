@@ -361,7 +361,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Parse group constructs: (...), (?:...), (?<name>...)
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...)
     fn parse_group(&mut self) -> Result<Token, LexError> {
         let start_pos = self.current_position();
         self.advance(); // Skip '('
@@ -378,8 +378,29 @@ impl<'a> Lexer<'a> {
                 self.advance(); // Skip ':'
                 Ok(Token::NonCapturingGroupStart)
             }
+            Some('=') => {
+                self.advance(); // Skip '='
+                Ok(Token::LookaheadPos)
+            }
+            Some('!') => {
+                self.advance(); // Skip '!'
+                Ok(Token::LookaheadNeg)
+            }
+            Some('>') => {
+                self.advance(); // Skip '>'
+                Ok(Token::AtomicGroupStart)
+            }
             Some('<') => {
                 self.advance(); // Skip '<'
+
+                if self.current == Some('=') {
+                    self.advance(); // Skip '='
+                    return Ok(Token::LookbehindPos);
+                }
+                if self.current == Some('!') {
+                    self.advance(); // Skip '!'
+                    return Ok(Token::LookbehindNeg);
+                }
                 let mut name = String::new();
                 
                 while let Some(c) = self.current {
@@ -649,6 +670,25 @@ mod tests {
             Token::NamedGroupStart { name: "word".to_string() },
             Token::Char('a'),
             Token::Char('b'),
+            Token::GroupEnd,
+        ]);
+    }
+
+    #[test]
+    fn test_lookaround_group_tokens() {
+        let tokens = tokenize_all("(?=a)(?!b)(?<=c)(?<!d)").unwrap();
+        assert_eq!(tokens, vec![
+            Token::LookaheadPos,
+            Token::Char('a'),
+            Token::GroupEnd,
+            Token::LookaheadNeg,
+            Token::Char('b'),
+            Token::GroupEnd,
+            Token::LookbehindPos,
+            Token::Char('c'),
+            Token::GroupEnd,
+            Token::LookbehindNeg,
+            Token::Char('d'),
             Token::GroupEnd,
         ]);
     }

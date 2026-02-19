@@ -326,6 +326,21 @@ mod tests {
     }
 
     #[test]
+    fn parser_positive_lookahead_syntax() {
+        let regex = Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
+        let m = regex.find_first("xxcat").expect("Expected parser-path lookahead match");
+        assert_eq!(m.start, 2);
+        assert_eq!(m.end, 3);
+    }
+
+    #[test]
+    fn parser_negative_lookbehind_syntax() {
+        let regex = Regex::compile("(?<!x)a").expect("Failed to compile parser-path lookbehind syntax");
+        assert!(regex.is_match("ba"));
+        assert!(!regex.is_match("xa"));
+    }
+
+    #[test]
     fn top_level_branch_id_exposed() {
         let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
         let m = regex.find_first("xxdogxx").expect("Expected a match");

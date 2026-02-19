@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Added parser-path lookaround syntax support
+- Scope: `rgx-core` lexer/parser and compile-path behavior alignment
+- Changes:
+  - Extended group-token lexing to recognize:
+    - positive lookahead `(?=...)`
+    - negative lookahead `(?!...)`
+    - positive lookbehind `(?<=...)`
+    - negative lookbehind `(?<!...)`
+    - atomic-group start `(?>...)`
+  - Extended parser atom handling to build AST nodes for lookaround tokens and atomic groups
+  - Added lexer tests for lookaround tokenization
+  - Added parser tests for lookaround and atomic-group parsing
+  - Added API tests through `Regex::compile(...)` for parser-path lookahead/lookbehind semantics
+- Validation:
+  - `cargo test -p rgx-core` passed (57 tests)
+- Notes/impact:
+  - Closes a parser-vs-AST gap for lookaround support
+  - Keeps AST-first path available while parser completeness work continues for other advanced constructs
 ### 2026-02-19 - Clarified strategic goals: PCRE2 parity + broader code-block languages
 - Scope: vision/roadmap/notes alignment for project direction
 - Changes:
