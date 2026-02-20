@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Expanded PCRE2 differential gap guardrails for recursion and conditionals
+- Scope: parity harness hardening for parsed-but-unintegrated syntax families
+- Changes:
+  - Extended `rgx-bench/tests/pcre2_parity.rs` with reusable known-gap assertions that enforce:
+    - `rgx` compile-time explicit unsupported errors with expected error text
+    - successful PCRE2 execution for the same patterns
+  - Added recursion known-gap differential cases for:
+    - `(?R)`, `(?1)`, and `(?&name)` recursion forms
+  - Added conditional known-gap differential cases for:
+    - group-exists and named-group-exists forms
+    - lookahead and lookbehind condition forms (positive/negative variants)
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` to document the newly covered conditional variant set under known gaps
+- Validation:
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Turns additional parity-gap claims into executable regression guards
+  - Reduces risk of silent drift between documented PCRE2 gaps and test-enforced behavior
 ### 2026-02-20 - Started PCRE2 parity baseline with live matrix and differential tests
 - Scope: parity-program bootstrap for capability/behavior verification against PCRE2
 - Changes:

@@ -31,6 +31,10 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - rgx currently parses and returns explicit compile-time unsupported errors.
 - Conditionals (`(?(...)yes|no)`): `rgx-gap`
   - rgx currently parses and returns explicit compile-time unsupported errors.
+  - differential tests currently cover:
+    - group-exists `(?(1)...)`
+    - named-group-exists `(?(<name>)...)`, `(?(name)...)`
+    - lookaround conditions `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
 
 ## Out of scope for PCRE2 parity
 - rgx inline code blocks (`(?{lang:code})`): `out-of-scope`

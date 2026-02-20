@@ -43,6 +43,7 @@ Pipeline in `rgx-core`:
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
+- Differential known-gap parity checks currently cover backreference, recursion, and conditional syntax families
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
