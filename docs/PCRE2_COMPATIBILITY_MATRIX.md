@@ -13,6 +13,9 @@ Live compatibility tracker for `rgx` against PCRE2.
 
 ## Parity-verified baseline
 Backed by `rgx-bench/tests/pcre2_parity.rs`.
+- Differential assertions currently verify both:
+  - first-match span parity (`find_first` equivalent)
+  - all-match non-overlapping span parity (`find_all` vs `find_iter`)
 
 - Literals and concatenation: `parity-verified`
 - Alternation: `parity-verified`

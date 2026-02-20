@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Expanded PCRE2 supported-syntax differential checks to find-all span parity
+- Scope: parity harness depth for currently shipped syntax behavior
+- Changes:
+  - Extended `rgx-bench/tests/pcre2_parity.rs` with reusable all-span helpers:
+    - rgx `find_all` span collection
+    - PCRE2 `find_iter` span collection
+  - Added `pcre2_parity_supported_syntax_find_all_spans` covering representative supported syntax classes:
+    - literals, alternation, digit classes, word boundaries
+    - lookahead/lookbehind (positive and negative)
+    - atomic-group no-backtracking behavior and non-atomic counterexample
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` to explicitly state first-match and find-all differential parity coverage
+- Validation:
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Strengthens parity confidence beyond first-match behavior by validating non-overlapping multi-match span parity
+  - Improves regression detection for scanning behavior differences between rgx and PCRE2
 ### 2026-02-20 - Expanded PCRE2 differential gap guardrails for recursion and conditionals
 - Scope: parity harness hardening for parsed-but-unintegrated syntax families
 - Changes:

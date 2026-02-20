@@ -7,6 +7,74 @@ struct ParityCase {
     input: &'static str,
 }
 
+#[test]
+fn pcre2_parity_supported_syntax_find_all_spans() {
+    let cases = [
+        ParityCase {
+            name: "literal_all",
+            pattern: "cat",
+            input: "cat xx cat yy cat",
+        },
+        ParityCase {
+            name: "alternation_all",
+            pattern: "cat|dog",
+            input: "dog xx cat yy dog",
+        },
+        ParityCase {
+            name: "digit_class_all",
+            pattern: r"\d+",
+            input: "a1 bb22 c333",
+        },
+        ParityCase {
+            name: "word_boundary_all",
+            pattern: r"\bcat\b",
+            input: "cat scat cat",
+        },
+        ParityCase {
+            name: "positive_lookahead_all",
+            pattern: "(?=ab)a",
+            input: "abxxab",
+        },
+        ParityCase {
+            name: "negative_lookahead_all",
+            pattern: "(?!cat)c",
+            input: "car cat cup",
+        },
+        ParityCase {
+            name: "positive_lookbehind_all",
+            pattern: "(?<=x)a",
+            input: "xaxxa",
+        },
+        ParityCase {
+            name: "negative_lookbehind_all",
+            pattern: "(?<!x)a",
+            input: "a xa ba",
+        },
+        ParityCase {
+            name: "atomic_group_no_backtrack_all",
+            pattern: "(?>a|ab)c",
+            input: "ac abc ac",
+        },
+        ParityCase {
+            name: "non_atomic_counterexample_all",
+            pattern: "(a|ab)c",
+            input: "abc ac",
+        },
+    ];
+
+    for case in cases {
+        let rgx = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx error: {e}", case.name));
+        let pcre2 = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "find_all span mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+}
+
 struct KnownGapCase {
     name: &'static str,
     pattern: &'static str,
@@ -20,6 +88,16 @@ fn rgx_first_span(pattern: &str, input: &str) -> Result<Option<(usize, usize)>, 
     Ok(regex.find_first(input).map(|m| (m.start, m.end)))
 }
 
+fn rgx_all_spans(pattern: &str, input: &str) -> Result<Vec<(usize, usize)>, String> {
+    let regex =
+        RgxRegex::compile(pattern).map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
+    Ok(regex
+        .find_all(input)
+        .into_iter()
+        .map(|m| (m.start, m.end))
+        .collect())
+}
+
 fn pcre2_first_span(pattern: &str, input: &str) -> Result<Option<(usize, usize)>, String> {
     let regex = PcreRegex::new(pattern)
         .map_err(|e| format!("pcre2 compile failed for '{pattern}': {e}"))?;
@@ -27,6 +105,17 @@ fn pcre2_first_span(pattern: &str, input: &str) -> Result<Option<(usize, usize)>
         .find(input.as_bytes())
         .map_err(|e| format!("pcre2 find failed for '{pattern}': {e}"))?;
     Ok(found.map(|m| (m.start(), m.end())))
+}
+
+fn pcre2_all_spans(pattern: &str, input: &str) -> Result<Vec<(usize, usize)>, String> {
+    let regex = PcreRegex::new(pattern)
+        .map_err(|e| format!("pcre2 compile failed for '{pattern}': {e}"))?;
+    let mut spans = Vec::new();
+    for next in regex.find_iter(input.as_bytes()) {
+        let found = next.map_err(|e| format!("pcre2 find_iter failed for '{pattern}': {e}"))?;
+        spans.push((found.start(), found.end()));
+    }
+    Ok(spans)
 }
 
 fn assert_known_gap_case(case: &KnownGapCase) {
