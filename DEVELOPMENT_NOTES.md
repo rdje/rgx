@@ -38,6 +38,7 @@ Pipeline in `rgx-core`:
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
 - Formal parser interoperability contract at `docs/PARSER_CONTRACT.md`
+- Live shipped-vs-scaffolded matrix at `docs/CAPABILITY_MATRIX.md`
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
 - VM test suite coverage for core behavior
 
@@ -73,5 +74,6 @@ Pipeline in `rgx-core`:
 - `ROADMAP.md` is the live forward-looking planning tracker
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth
 - `docs/PARSER_CONTRACT.md` is the parser interoperability source of truth
+- `docs/CAPABILITY_MATRIX.md` is the shipped-vs-scaffolded capability source of truth
 - This file is for technical understanding and implementation notes
 - `PROJECT_VISION.md` is aspirational; it should not be used to infer shipped features

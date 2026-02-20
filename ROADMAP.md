@@ -50,9 +50,10 @@ Live forward-looking tracker for rgx.
   - enforce parse-success/compile-unsupported boundary checks for unintegrated runtime features
 
 ### Capability matrix hardening
-- Status: `planned`
+- Status: `in-progress`
 - Goal: document and test exactly what is shipped vs scaffolded.
 - Scope:
+  - maintain `docs/CAPABILITY_MATRIX.md` as source of truth for shipped-vs-scaffolded status
   - expand integration tests for user-facing APIs
   - keep docs synchronized with verified behavior
 

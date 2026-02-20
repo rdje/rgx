@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Started capability matrix hardening with live matrix doc and integration guardrail tests
+- Scope: docs + user-facing API behavior validation for shipped-vs-scaffolded clarity
+- Changes:
+  - Added `docs/CAPABILITY_MATRIX.md` as live source-of-truth for feature status (`shipped`, `parsed-only`, `scaffolded`)
+  - Added capability-matrix integration tests in `rgx-core/src/lib.rs` for:
+    - representative supported parser-path feature cases
+    - representative parsed-but-explicitly-unsupported compile-boundary cases
+  - Aligned `rgx-core/src/parsing.rs` parser-conformance fixtures after recent conditional additions (removed duplicate fixture, synchronized active/pgen fixture coverage)
+  - Updated `README.md`, `DEVELOPMENT_NOTES.md`, and `ROADMAP.md` to reference matrix ownership and mark matrix hardening as active
+- Validation:
+  - `cargo test -p rgx-core` passed (90 tests)
+  - `cargo test -p rgx-core --features pgen-parser` passed (91 tests)
+- Notes/impact:
+  - Makes shipped behavior boundaries explicit for users and contributors
+  - Reduces regression risk by enforcing matrix expectations in executable tests
 ### 2026-02-19 - Expanded conditional parser support to include negative lookaround condition forms
 - Scope: `rgx-core` conditional parser completeness and conformance/contract alignment
 - Changes:

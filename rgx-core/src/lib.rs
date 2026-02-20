@@ -421,6 +421,68 @@ mod tests {
     }
 
     #[test]
+    fn capability_matrix_supported_parser_path_cases() {
+        let cases = [
+            ("cat|dog", "pet dog", true),
+            (r"\d{2,3}", "id 1234", true),
+            ("(?<word>cat)", "xxcatyy", true),
+            ("(?>ab|a)c", "abc", true),
+            ("(?<!x)a", "ba", true),
+            ("(?=cat)c", "xxcat", true),
+            ("(?<!x)a", "xa", false),
+        ];
+
+        for (pattern, input, expected) in cases {
+            let regex = Regex::compile(pattern)
+                .unwrap_or_else(|e| panic!("expected supported pattern '{pattern}' to compile: {e}"));
+            assert_eq!(
+                regex.is_match(input),
+                expected,
+                "unexpected match result for supported pattern '{pattern}' on input '{input}'"
+            );
+        }
+    }
+
+    #[test]
+    fn capability_matrix_explicit_unsupported_compile_boundary_cases() {
+        let cases = [
+            (
+                r"(a)\1",
+                "backreferences are parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?R)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?{lua:return true})",
+                "code-block syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(1)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?!ab)x|y)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+        ];
+
+        for (pattern, expected_msg) in cases {
+            let err = match Regex::compile(pattern) {
+                Ok(_) => panic!(
+                    "expected pattern to be rejected at explicit compile boundary: {pattern}"
+                ),
+                Err(err) => err,
+            };
+            assert!(
+                err.to_string().contains(expected_msg),
+                "unexpected compile boundary message for pattern '{pattern}': {err}"
+            );
+        }
+    }
+
+    #[test]
     fn top_level_branch_id_exposed() {
         let regex = Regex::compile("cat|dog|bird").expect("Failed to compile alternation");
         let m = regex.find_first("xxdogxx").expect("Expected a match");

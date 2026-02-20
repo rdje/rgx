@@ -51,5 +51,6 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 - `PROJECT_VISION.md`: long-term direction and goals
 - `docs/USER_GUIDE.md`: live end-user guide (layered by depth from quick start to gory details)
 - `docs/PARSER_CONTRACT.md`: canonical parser interoperability contract for RGX <-> PGEN integration
+- `docs/CAPABILITY_MATRIX.md`: live shipped-vs-scaffolded feature matrix
 - `docs/architecture.md`: current architecture and data flow
 - `docs/TECHNICAL_DECISIONS.md`: major design decisions and tradeoffs
