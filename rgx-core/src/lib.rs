@@ -340,6 +340,21 @@ mod tests {
         assert_eq!(m.start, 2);
         assert_eq!(m.end, 3);
     }
+    #[test]
+    fn parser_negative_lookahead_syntax() {
+        let regex =
+            Regex::compile("(?!cat)c").expect("Failed to compile parser-path lookahead syntax");
+        assert!(regex.is_match("car"));
+        assert!(!regex.is_match("cat"));
+    }
+
+    #[test]
+    fn parser_positive_lookbehind_syntax() {
+        let regex =
+            Regex::compile("(?<=x)a").expect("Failed to compile parser-path lookbehind syntax");
+        assert!(regex.is_match("xa"));
+        assert!(!regex.is_match("ba"));
+    }
 
     #[test]
     fn parser_negative_lookbehind_syntax() {
@@ -427,6 +442,10 @@ mod tests {
             (r"\d{2,3}", "id 1234", true),
             ("(?<word>cat)", "xxcatyy", true),
             ("(?>ab|a)c", "abc", true),
+            ("(?!cat)c", "car", true),
+            ("(?!cat)c", "cat", false),
+            ("(?<=x)a", "xa", true),
+            ("(?<=x)a", "ba", false),
             ("(?<!x)a", "ba", true),
             ("(?=cat)c", "xxcat", true),
             ("(?<!x)a", "xa", false),
@@ -455,6 +474,14 @@ mod tests {
                 "recursion syntax is parsed but not yet integrated into VM execution",
             ),
             (
+                "(?1)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?&word)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
                 "(?{lua:return true})",
                 "code-block syntax is parsed but not yet integrated into VM execution",
             ),
@@ -463,7 +490,27 @@ mod tests {
                 "conditional syntax is parsed but not yet integrated into VM execution",
             ),
             (
+                "(?(<word>)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(word)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?=ab)x|y)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
                 "(?(?!ab)x|y)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?<=z)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?<!z)a|b)",
                 "conditional syntax is parsed but not yet integrated into VM execution",
             ),
         ];

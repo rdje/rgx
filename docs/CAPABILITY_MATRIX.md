@@ -37,8 +37,8 @@ Behavior contract:
 - Compilation intentionally fails with explicit error messages until VM/runtime integration lands.
 
 Representative test anchors:
-- `rgx-core/src/lib.rs` explicit unsupported compile-boundary tests
-- `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests
+- `rgx-core/src/lib.rs` explicit unsupported compile-boundary tests (including recursion variants and conditional condition variants)
+- `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests (active and `pgen-parser` fixture parity)
 
 ## Conditional parser condition forms (current parser coverage)
 - Group-exists: `(?(1)yes|no)` (`shipped` at parser level)

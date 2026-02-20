@@ -3,6 +3,13 @@ Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
 
+## Living-document policy
+- Last updated: 2026-02-20
+- This is a live document and should be updated as user-visible behavior changes.
+- Keep examples and feature-status notes aligned with current shipped behavior.
+- Update cadence: revise this guide whenever behavior changes land, and at minimum once per roadmap milestone.
+- For recent changes and validation details, cross-check `CHANGES.md`.
+
 ## Guide levels
 - Level 0: quick start
 - Level 1: practical day-to-day usage

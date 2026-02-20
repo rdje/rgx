@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Expanded capability-matrix guardrails across recursion and conditional syntax variants
+- Scope: parser/API guardrail hardening for parsed-but-unintegrated advanced syntax
+- Changes:
+  - Expanded parser-path lookaround coverage in `rgx-core/src/lib.rs` with explicit parser syntax tests for:
+    - negative lookahead `(?!...)`
+    - positive lookbehind `(?<=...)`
+  - Expanded capability-matrix supported parser-path cases in `rgx-core/src/lib.rs` to include representative negative-lookahead and positive-lookbehind semantics
+  - Expanded explicit unsupported compile-boundary cases in `rgx-core/src/lib.rs` to cover:
+    - recursion variants `(?R)`, `(?1)`, `(?&word)`
+    - conditional condition variants `(?(1)...)`, `(?(<word>)...)`, `(?(word)...)`, `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
+  - Expanded parser contract fixtures/guardrails in `rgx-core/src/parsing.rs` to include:
+    - named-group conditional angle-bracket form `(?(<word>)...)`
+    - recursion variants `(?1)` and `(?&word)` in active and `pgen-parser` fixture parity checks
+    - compile-boundary guardrail cases for the same recursion/conditional variants
+- Validation:
+  - `cargo test -p rgx-core` passed (92 tests)
+  - `cargo test -p rgx-core --features pgen-parser` passed (93 tests)
+- Notes/impact:
+  - Reduces regression risk by ensuring capability-matrix boundaries are enforced across all currently documented recursion/conditional parser variants
+  - Keeps parser acceptance and compile-boundary behavior aligned between active and feature-gated parser backends
 ### 2026-02-19 - Started capability matrix hardening with live matrix doc and integration guardrail tests
 - Scope: docs + user-facing API behavior validation for shipped-vs-scaffolded clarity
 - Changes:

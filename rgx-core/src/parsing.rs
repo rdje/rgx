@@ -342,6 +342,7 @@ mod tests {
             "(?=ab)c",
             "(?<!x)a",
             "(?(1)a|b)",
+            "(?(<word>)a|b)",
             "(?(word)a|b)",
             "(?(?=ab)x|y)",
             "(?(?!ab)x|y)",
@@ -349,6 +350,8 @@ mod tests {
             "(?(?<!z)a|b)",
             "(?{lua:return true})",
             "(?R)",
+            "(?1)",
+            "(?&word)",
             r"(a)\1",
         ];
 
@@ -372,6 +375,7 @@ mod tests {
             "(?=ab)c",
             "(?<!x)a",
             "(?(1)a|b)",
+            "(?(<word>)a|b)",
             "(?(word)a|b)",
             "(?(?=ab)x|y)",
             "(?(?!ab)x|y)",
@@ -379,6 +383,8 @@ mod tests {
             "(?(?<!z)a|b)",
             "(?{lua:return true})",
             "(?R)",
+            "(?1)",
+            "(?&word)",
             r"(a)\1",
         ];
 
@@ -422,7 +428,23 @@ mod tests {
                 "recursion syntax is parsed but not yet integrated into VM execution",
             ),
             (
+                "(?1)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?&word)",
+                "recursion syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
                 "(?(1)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(<word>)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(word)a|b)",
                 "conditional syntax is parsed but not yet integrated into VM execution",
             ),
             (
@@ -435,6 +457,10 @@ mod tests {
             ),
             (
                 "(?(?<!z)a|b)",
+                "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                "(?(?<=z)a|b)",
                 "conditional syntax is parsed but not yet integrated into VM execution",
             ),
         ];
