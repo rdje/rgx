@@ -40,7 +40,9 @@ Pipeline in `rgx-core`:
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
 - Formal parser interoperability contract at `docs/PARSER_CONTRACT.md`
 - Live shipped-vs-scaffolded matrix at `docs/CAPABILITY_MATRIX.md`
+- Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
+- Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
@@ -61,7 +63,7 @@ Pipeline in `rgx-core`:
 - JavaScript/WASM modules remain scaffold-level in user-facing flow
 
 ## Immediate priorities
-1. Build and maintain a PCRE2 compatibility matrix with explicit exceptions/gaps
+1. Expand and maintain the PCRE2 compatibility matrix with explicit exceptions/gaps and executable differential tests
 2. Expand differential and integration tests to improve semantic parity and accuracy confidence
 3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
@@ -75,5 +77,6 @@ Pipeline in `rgx-core`:
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth
 - `docs/PARSER_CONTRACT.md` is the parser interoperability source of truth
 - `docs/CAPABILITY_MATRIX.md` is the shipped-vs-scaffolded capability source of truth
+- `docs/PCRE2_COMPATIBILITY_MATRIX.md` is the rgx-vs-PCRE2 parity source of truth
 - This file is for technical understanding and implementation notes
 - `PROJECT_VISION.md` is aspirational; it should not be used to infer shipped features

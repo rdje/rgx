@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Started PCRE2 parity baseline with live matrix and differential tests
+- Scope: parity-program bootstrap for capability/behavior verification against PCRE2
+- Changes:
+  - Added `docs/PCRE2_COMPATIBILITY_MATRIX.md` as the live rgx-vs-PCRE2 parity source-of-truth with:
+    - parity status labels
+    - parity-verified baseline feature set
+    - explicit known rgx gaps and out-of-scope extensions
+  - Added executable differential tests in `rgx-bench/tests/pcre2_parity.rs`:
+    - first-match span parity checks across representative supported syntax
+    - explicit known-gap guardrail for backreference compile behavior (`rgx` rejected vs PCRE2 executed)
+  - Updated `README.md`, `DEVELOPMENT_NOTES.md`, and `ROADMAP.md` to reference the new parity matrix and baseline harness
+- Validation:
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Converts parity claims into executable checks instead of documentation-only assertions
+  - Establishes a concrete baseline for incremental PCRE2 parity expansion
 ### 2026-02-20 - Expanded capability-matrix guardrails across recursion and conditional syntax variants
 - Scope: parser/API guardrail hardening for parsed-but-unintegrated advanced syntax
 - Changes:

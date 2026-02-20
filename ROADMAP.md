@@ -26,6 +26,7 @@ Live forward-looking tracker for rgx.
   - maintain a compatibility matrix against PCRE2 feature areas
   - use differential tests to catch semantic mismatches
   - track benchmark parity trends in `rgx-bench`
+  - baseline established: `docs/PCRE2_COMPATIBILITY_MATRIX.md` + `rgx-bench/tests/pcre2_parity.rs`
 ### Parser-independent engine maturity
 - Status: `in-progress`
 - Goal: continue delivering advanced regex semantics through AST-first paths while parser syntax catches up.

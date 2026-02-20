@@ -52,5 +52,6 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 - `docs/USER_GUIDE.md`: live end-user guide (layered by depth from quick start to gory details)
 - `docs/PARSER_CONTRACT.md`: canonical parser interoperability contract for RGX <-> PGEN integration
 - `docs/CAPABILITY_MATRIX.md`: live shipped-vs-scaffolded feature matrix
+- `docs/PCRE2_COMPATIBILITY_MATRIX.md`: live rgx-vs-PCRE2 parity matrix
 - `docs/architecture.md`: current architecture and data flow
 - `docs/TECHNICAL_DECISIONS.md`: major design decisions and tradeoffs
