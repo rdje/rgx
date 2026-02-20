@@ -32,7 +32,7 @@ Pipeline in `rgx-core`:
 - Parser-path support for conditional syntax tokenization/parsing:
   - group-exists forms (`(?(1)...)`)
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
-  - positive lookaround condition forms (`(?(?=...)...)`, `(?(?<=...)...)`)
+  - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -53,7 +53,7 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser support for advanced group syntaxes is incomplete
-  - conditionals are partially wired; negative-lookaround and broader condition forms remain pending
+  - conditionals are partially wired; broader condition forms remain pending
 - Backreference, recursion, and code-block execution are not yet integrated into the VM runtime path (compile currently returns explicit unsupported errors)
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path

@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-19 - Expanded conditional parser support to include negative lookaround condition forms
+- Scope: `rgx-core` conditional parser completeness and conformance/contract alignment
+- Changes:
+  - Extended lexer conditional-start parsing to support:
+    - negative lookahead condition form `(?(?!expr)yes|no)`
+    - negative lookbehind condition form `(?(?<!expr)yes|no)`
+  - Updated `ConditionalTest` lookaround condition shape to encode sign explicitly:
+    - `Lookahead { expr, positive }`
+    - `Lookbehind { expr, positive }`
+  - Added lexer tests for negative lookahead/lookbehind conditional tokenization
+  - Added parser tests for negative lookahead/lookbehind conditional AST mapping
+  - Extended parser conformance fixtures and compile-boundary guardrail checks with negative lookaround conditional patterns
+  - Added API regression for negative-lookbehind conditional syntax to keep explicit unsupported compile/runtime boundary behavior validated
+  - Updated parser contract (`docs/PARSER_CONTRACT.md` v0.1.3), README, and development notes to reflect expanded parser coverage
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-core --features pgen-parser`
+- Notes/impact:
+  - Reduces parser completeness gap for conditional syntax without changing runtime integration status
+  - Conditional execution remains explicitly unsupported until VM execution support lands
 ### 2026-02-19 - Expanded parser-path conditional syntax support to include bare-name and lookaround conditions
 - Scope: `rgx-core` lexer/parser/conformance coverage for conditional syntax completeness
 - Changes:

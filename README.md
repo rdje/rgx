@@ -18,7 +18,7 @@ The most mature component is the VM/compiler path in `rgx-core`.
 - Parser-independent compilation from AST via public API (`Regex::from_ast`)
 - Parser recognizes code-block syntax `(?{lang:code})`
 - Parser recognizes recursion syntax (`(?R)`, `(?1)`, `(?&name)`)
-- Parser recognizes conditional syntax (group/named-group/positive-lookaround condition forms)
+- Parser recognizes conditional syntax (group/named-group/lookaround condition forms, including negative lookaround variants)
 - Lookaround support (positive/negative lookahead + lookbehind) via parser syntax and AST
 - Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
 - CLI usage for basic regex matching via `rgx-cli`

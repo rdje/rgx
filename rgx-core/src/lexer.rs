@@ -634,7 +634,9 @@ impl<'a> Lexer<'a> {
     /// - (?(<name>)...)
     /// - (?(name)...)
     /// - (?(?=expr)...)
+    /// - (?(?!expr)...)
     /// - (?(?<=expr)...)
+    /// - (?(?<!expr)...)
     ///
     /// This returns only the condition-start token. Branch expressions and
     /// the closing group ')' are parsed by the parser stage.
@@ -715,18 +717,36 @@ impl<'a> Lexer<'a> {
                     Some('=') => {
                         self.advance(); // Skip '='
                         let expr = self.parse_conditional_subexpression_ast(start_pos)?;
-                        ConditionalTest::Lookahead(Box::new(expr))
+                        ConditionalTest::Lookahead {
+                            expr: Box::new(expr),
+                            positive: true,
+                        }
+                    }
+                    Some('!') => {
+                        self.advance(); // Skip '!'
+                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                        ConditionalTest::Lookahead {
+                            expr: Box::new(expr),
+                            positive: false,
+                        }
                     }
                     Some('<') => {
                         self.advance(); // Skip '<'
-                        if self.current != Some('=') {
-                            return Err(LexError::InvalidGroupSyntax {
-                                position: start_pos,
-                            });
-                        }
-                        self.advance(); // Skip '='
+                        let positive = match self.current {
+                            Some('=') => true,
+                            Some('!') => false,
+                            _ => {
+                                return Err(LexError::InvalidGroupSyntax {
+                                    position: start_pos,
+                                });
+                            }
+                        };
+                        self.advance(); // Skip '=' or '!'
                         let expr = self.parse_conditional_subexpression_ast(start_pos)?;
-                        ConditionalTest::Lookbehind(Box::new(expr))
+                        ConditionalTest::Lookbehind {
+                            expr: Box::new(expr),
+                            positive,
+                        }
                     }
                     _ => {
                         return Err(LexError::InvalidGroupSyntax {
@@ -1138,6 +1158,26 @@ mod tests {
     }
 
     #[test]
+    fn test_conditional_tokens_negative_lookbehind_condition() {
+        let tokens = tokenize_all("(?(?<!z)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::Lookbehind {
+                        expr: Box::new(Regex::Char('z')),
+                        positive: false,
+                    },
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
     fn test_conditional_tokens_bare_named_group_exists() {
         let tokens = tokenize_all("(?(word)a|b)").unwrap();
         assert_eq!(
@@ -1161,10 +1201,29 @@ mod tests {
             tokens,
             vec![
                 Token::ConditionalStart {
-                    condition: ConditionalTest::Lookahead(Box::new(Regex::Sequence(vec![
-                        Regex::Char('a'),
-                        Regex::Char('b'),
-                    ]))),
+                    condition: ConditionalTest::Lookahead {
+                        expr: Box::new(Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')])),
+                        positive: true,
+                    },
+                },
+                Token::Char('x'),
+                Token::Alternation,
+                Token::Char('y'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+    #[test]
+    fn test_conditional_tokens_negative_lookahead_condition() {
+        let tokens = tokenize_all("(?(?!ab)x|y)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::Lookahead {
+                        expr: Box::new(Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')])),
+                        positive: false,
+                    },
                 },
                 Token::Char('x'),
                 Token::Alternation,
@@ -1181,7 +1240,10 @@ mod tests {
             tokens,
             vec![
                 Token::ConditionalStart {
-                    condition: ConditionalTest::Lookbehind(Box::new(Regex::Char('z'))),
+                    condition: ConditionalTest::Lookbehind {
+                        expr: Box::new(Regex::Char('z')),
+                        positive: true,
+                    },
                 },
                 Token::Char('a'),
                 Token::Alternation,

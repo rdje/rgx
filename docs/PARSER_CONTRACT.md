@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (current recur
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.2`
+- Version: `v0.1.3`
 - Last updated: `2026-02-19`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -45,8 +45,10 @@ Required invariants:
     - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
     - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
     - `(?(name)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
-    - `(?(?=expr)yes|no)` -> `Regex::Conditional { condition: Lookahead(expr), ... }`
-    - `(?(?<=expr)yes|no)` -> `Regex::Conditional { condition: Lookbehind(expr), ... }`
+    - `(?(?=expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: true }, ... }`
+    - `(?(?!expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: false }, ... }`
+    - `(?(?<=expr)yes|no)` -> `Regex::Conditional { condition: Lookbehind { expr, positive: true }, ... }`
+    - `(?(?<!expr)yes|no)` -> `Regex::Conditional { condition: Lookbehind { expr, positive: false }, ... }`
 
 ## Error contract
 - Parse failures must return `Err(RgxError::Compile(message))`.
@@ -61,7 +63,7 @@ Current contract:
   - code blocks
   - recursion
   - backreferences
-  - conditionals (group/named-group/positive-lookaround forms in parser tests)
+  - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
 - Compiler must then fail explicitly (not silently) for unintegrated runtime features.
 
 This boundary enables parser progress without unsafe runtime behavior.

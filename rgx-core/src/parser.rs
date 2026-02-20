@@ -792,13 +792,43 @@ mod tests {
                 false_branch,
             } => {
                 match condition {
-                    crate::ast::ConditionalTest::Lookahead(expr) => {
+                    crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                        assert!(positive);
                         assert_eq!(
                             *expr,
                             Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')])
                         );
                     }
                     other => panic!("Expected lookahead condition, got: {other:?}"),
+                }
+                assert!(matches!(*true_branch, Regex::Char('x')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('y')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_negative_lookahead_condition() {
+        let mut parser = Parser::new("(?(?!ab)x|y)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                        assert!(!positive);
+                        assert_eq!(
+                            *expr,
+                            Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')])
+                        );
+                    }
+                    other => panic!("Expected negative lookahead condition, got: {other:?}"),
                 }
                 assert!(matches!(*true_branch, Regex::Char('x')));
                 let false_branch = false_branch.expect("Expected false branch");
@@ -820,10 +850,37 @@ mod tests {
                 false_branch,
             } => {
                 match condition {
-                    crate::ast::ConditionalTest::Lookbehind(expr) => {
+                    crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                        assert!(positive);
                         assert_eq!(*expr, Regex::Char('z'));
                     }
                     other => panic!("Expected lookbehind condition, got: {other:?}"),
+                }
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_negative_lookbehind_condition() {
+        let mut parser = Parser::new("(?(?<!z)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                        assert!(!positive);
+                        assert_eq!(*expr, Regex::Char('z'));
+                    }
+                    other => panic!("Expected negative lookbehind condition, got: {other:?}"),
                 }
                 assert!(matches!(*true_branch, Regex::Char('a')));
                 let false_branch = false_branch.expect("Expected false branch");

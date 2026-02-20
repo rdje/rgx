@@ -170,10 +170,10 @@ pub enum ConditionalTest {
     GroupExists(u32),
     /// Test if named group exists (?(<name>)...)  
     NamedGroupExists(String),
-    /// Lookahead test (?(?=...)...)
-    Lookahead(Box<Regex>),
-    /// Lookbehind test (?(?<=...)...)
-    Lookbehind(Box<Regex>),
+    /// Lookahead test (?(?=...)...) or (?(?!...)...)
+    Lookahead { expr: Box<Regex>, positive: bool },
+    /// Lookbehind test (?(?<=...)...) or (?(?<!...)...)
+    Lookbehind { expr: Box<Regex>, positive: bool },
 }
 
 /// Recursion targets
