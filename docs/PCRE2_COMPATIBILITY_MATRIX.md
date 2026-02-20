@@ -19,12 +19,14 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 
 - Literals and concatenation: `parity-verified`
 - Alternation: `parity-verified`
-- Basic quantifiers/ranges: `parity-verified`
+- Basic quantifiers (`*`, `+`, `?`): `parity-verified`
+- Start-anchor (`^`) behavior in supported parser-path form: `parity-verified`
 - Character-class shorthand (`\d`) and word boundaries: `parity-verified`
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
   - positive/negative lookbehind: `parity-verified`
 - Atomic-group no-backtracking semantics: `parity-verified`
+- Explicit no-match parity checks (first-match = `None`, all-match = empty): `parity-verified`
 
 ## Known rgx gaps relative to PCRE2
 - Backreferences (`\1`, etc.): `rgx-gap`
@@ -38,6 +40,10 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
     - group-exists `(?(1)...)`
     - named-group-exists `(?(<name>)...)`, `(?(name)...)`
     - lookaround conditions `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
+- End-anchor (`$`) match behavior on supported syntax: `rgx-gap`
+  - differential tests currently document divergence where PCRE2 matches and rgx does not.
+- Range quantifier (`{n,m}`) scanning/earliest-match behavior: `rgx-gap`
+  - differential tests currently document divergence for representative `{2,3}` scanning cases.
 
 ## Out of scope for PCRE2 parity
 - rgx inline code blocks (`(?{lang:code})`): `out-of-scope`

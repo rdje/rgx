@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Expanded PCRE2 differential parity coverage for anchors, quantifiers, and no-match behavior
+- Scope: supported-syntax parity hardening in `rgx-bench` differential suite
+- Changes:
+  - Extended `pcre2_parity_supported_syntax_first_match_span` with additional supported-syntax coverage:
+    - start-anchor (`^`) cases
+    - additional basic-quantifier (`+`) cases
+    - explicit no-match example
+  - Extended `pcre2_parity_supported_syntax_find_all_spans` with:
+    - start-anchor (`^`) cases
+    - basic-quantifier (`+`) multi-match scanning cases
+    - explicit no-match all-span case
+  - Added `pcre2_parity_supported_syntax_no_match_consistency` to assert parity invariants when no match exists:
+    - first-match parity (`None`)
+    - all-match parity (empty span set)
+  - Added explicit known-gap differential test for end-anchor (`$`) divergence (`pcre2_parity_known_gap_end_anchor_behavior`)
+  - Added explicit known-gap differential test for range quantifier scanning divergence (`pcre2_parity_known_gap_range_quantifier_scan_behavior`)
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` to reflect start-anchor/no-match parity and end-anchor known-gap status
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` to classify range quantifier scanning as a known gap
+- Validation:
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Improves confidence in parity for scan behavior and negative-path semantics, not just positive match examples
+  - Strengthens regression detection for no-match and scan semantics while keeping end-anchor and range-quantifier behavior truthfully classified as current parity gaps
 ### 2026-02-20 - Expanded PCRE2 supported-syntax differential checks to find-all span parity
 - Scope: parity harness depth for currently shipped syntax behavior
 - Changes:
