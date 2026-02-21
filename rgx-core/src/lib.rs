@@ -365,6 +365,26 @@ mod tests {
     }
 
     #[test]
+    fn parser_end_anchor_suffix_match() {
+        let regex = Regex::compile("dog$").expect("Failed to compile end-anchor syntax");
+        let m = regex
+            .find_first("cat dog")
+            .expect("Expected suffix match for end-anchor pattern");
+        assert_eq!(m.start, 4);
+        assert_eq!(m.end, 7);
+        assert!(!regex.is_match("cat dog x"));
+    }
+
+    #[test]
+    fn parser_end_anchor_find_all_only_terminal_match() {
+        let regex = Regex::compile("dog$").expect("Failed to compile end-anchor syntax");
+        let matches = regex.find_all("dog xx dog");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].start, 7);
+        assert_eq!(matches[0].end, 10);
+    }
+
+    #[test]
     fn parser_atomic_group_blocks_backtracking() {
         let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
         let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");
@@ -449,6 +469,8 @@ mod tests {
             ("(?<!x)a", "ba", true),
             ("(?=cat)c", "xxcat", true),
             ("(?<!x)a", "xa", false),
+            ("dog$", "cat dog", true),
+            ("dog$", "cat dog x", false),
         ];
 
         for (pattern, input, expected) in cases {

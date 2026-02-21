@@ -66,6 +66,11 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "cat dog cat",
         },
         ParityCase {
+            name: "anchor_end_all",
+            pattern: "dog$",
+            input: "cat dog",
+        },
+        ParityCase {
             name: "quantifier_plus_all",
             pattern: "ab+",
             input: "ab abb abbb a",
@@ -285,6 +290,11 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             input: "cat dog",
         },
         ParityCase {
+            name: "anchor_end",
+            pattern: "dog$",
+            input: "cat dog",
+        },
+        ParityCase {
             name: "quantifier_plus",
             pattern: "ab+",
             input: "xxabbbzz",
@@ -347,25 +357,6 @@ fn pcre2_parity_known_gap_recursion_compile_behavior() {
     }
 }
 
-#[test]
-fn pcre2_parity_known_gap_end_anchor_behavior() {
-    let pattern = "dog$";
-    let input = "cat dog";
-
-    let rgx_first =
-        rgx_first_span(pattern, input).unwrap_or_else(|e| panic!("[end_anchor_gap] rgx first error: {e}"));
-    let pcre2_first = pcre2_first_span(pattern, input)
-        .unwrap_or_else(|e| panic!("[end_anchor_gap] pcre2 first error: {e}"));
-    assert_eq!(pcre2_first, Some((4, 7)));
-    assert_eq!(rgx_first, None);
-
-    let rgx_all =
-        rgx_all_spans(pattern, input).unwrap_or_else(|e| panic!("[end_anchor_gap] rgx all error: {e}"));
-    let pcre2_all = pcre2_all_spans(pattern, input)
-        .unwrap_or_else(|e| panic!("[end_anchor_gap] pcre2 all error: {e}"));
-    assert_eq!(pcre2_all, vec![(4, 7)]);
-    assert!(rgx_all.is_empty());
-}
 
 #[test]
 fn pcre2_parity_known_gap_range_quantifier_scan_behavior() {

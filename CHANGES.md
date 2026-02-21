@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-20 - Fixed end-anchor (`$`) suffix matching parity by correcting anchored-search strategy selection
+- Scope: `rgx-core` VM matching strategy + regression coverage + parity docs/tests
+- Changes:
+  - Fixed VM strategy selection in `rgx-core/src/vm.rs`:
+    - introduced `should_use_start_anchored_search()` so anchored fast-path is used only for start-anchored programs
+    - end-anchor-only patterns now use standard scanning instead of incorrectly forcing start-position-only execution
+  - Added VM regressions in `rgx-core/src/vm.rs`:
+    - suffix match for `dog$` in `cat dog`
+    - `find_all` behavior confirming only terminal match is returned for end-anchored pattern
+  - Added parser-path API regressions in `rgx-core/src/lib.rs`:
+    - `Regex::compile(\"dog$\")` now validated for `find_first`, `find_all`, and non-terminal rejection behavior
+    - capability-matrix supported parser-path cases now include `dog$` true/false expectations
+  - Updated differential parity harness in `rgx-bench/tests/pcre2_parity.rs`:
+    - moved end-anchor from known-gap test back into supported parity first-match and find-all case sets
+    - removed obsolete known-gap end-anchor divergence assertion
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md`:
+    - anchors (`^`, `$`) now listed as parity-verified in supported parser-path forms
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Closes previously documented end-anchor parity gap against PCRE2 for supported parser-path cases
+  - Preserves truthful gap reporting for remaining known divergence (`{n,m}` range quantifier scanning behavior)
 ### 2026-02-20 - Expanded PCRE2 differential parity coverage for anchors, quantifiers, and no-match behavior
 - Scope: supported-syntax parity hardening in `rgx-bench` differential suite
 - Changes:

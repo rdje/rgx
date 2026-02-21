@@ -401,8 +401,8 @@ impl RegexVM {
                 64
             );
             self.find_first_simd(&mut ctx)
-        } else if self.program.flags.has_anchors {
-            debug_log!("vm", "Strategy: Anchored search (has anchors)");
+        } else if self.should_use_start_anchored_search() {
+            debug_log!("vm", "Strategy: Start-anchored search");
             self.find_first_anchored(&mut ctx)
         } else {
             debug_log!("vm", "Strategy: Standard scanning");
@@ -422,6 +422,26 @@ impl RegexVM {
         self.simd_support.sse2 && 
         ctx.text.len() > 64 && // Worth SIMD overhead
         self.program.stats.literal_chars > 0 // Has literal content to search for
+    }
+
+    /// Determine whether it is safe to run the anchored fast-path.
+    ///
+    /// The anchored fast-path only attempts matching at position 0, so it is
+    /// valid only when the compiled program is explicitly start-anchored.
+    /// End-anchor-only programs (e.g. `dog$`) still require scanning.
+    fn should_use_start_anchored_search(&self) -> bool {
+        if !self.program.flags.has_anchors {
+            return false;
+        }
+
+        let Some(first) = self.program.code.first() else {
+            return false;
+        };
+
+        matches!(
+            OpCode::try_from(*first),
+            Ok(OpCode::StartLine | OpCode::StartText)
+        )
     }
 
     /// SIMD-accelerated first match search using state-of-the-art algorithms
@@ -2465,6 +2485,44 @@ mod tests {
         assert!(vm.is_match("a"));
         assert!(vm.is_match("ab"));
         assert!(!vm.is_match("ba")); // Doesn't start with 'a'
+    }
+
+    #[test]
+    fn test_anchor_end_scans_to_suffix_match() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Char('d'),
+            Regex::Char('o'),
+            Regex::Char('g'),
+            Regex::Anchor(AnchorType::End),
+        ]);
+        let program = compiler.compile(&ast);
+
+        let vm = RegexVM::new(program);
+        let m = vm
+            .find_first("cat dog")
+            .expect("Expected suffix match for end-anchored pattern");
+        assert_eq!(m.start, 4);
+        assert_eq!(m.end, 7);
+        assert!(!vm.is_match("cat dog x"));
+    }
+
+    #[test]
+    fn test_anchor_end_find_all_returns_only_terminal_match() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Char('d'),
+            Regex::Char('o'),
+            Regex::Char('g'),
+            Regex::Anchor(AnchorType::End),
+        ]);
+        let program = compiler.compile(&ast);
+
+        let vm = RegexVM::new(program);
+        let matches = vm.find_all("dog xx dog");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].start, 7);
+        assert_eq!(matches[0].end, 10);
     }
 
     #[test]

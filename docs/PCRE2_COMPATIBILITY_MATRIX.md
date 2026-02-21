@@ -20,7 +20,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Literals and concatenation: `parity-verified`
 - Alternation: `parity-verified`
 - Basic quantifiers (`*`, `+`, `?`): `parity-verified`
-- Start-anchor (`^`) behavior in supported parser-path form: `parity-verified`
+- Anchors (`^`, `$`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`) and word boundaries: `parity-verified`
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
@@ -40,8 +40,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
     - group-exists `(?(1)...)`
     - named-group-exists `(?(<name>)...)`, `(?(name)...)`
     - lookaround conditions `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
-- End-anchor (`$`) match behavior on supported syntax: `rgx-gap`
-  - differential tests currently document divergence where PCRE2 matches and rgx does not.
 - Range quantifier (`{n,m}`) scanning/earliest-match behavior: `rgx-gap`
   - differential tests currently document divergence for representative `{2,3}` scanning cases.
 
