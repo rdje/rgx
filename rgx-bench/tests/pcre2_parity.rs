@@ -443,6 +443,101 @@ fn pcre2_parity_supported_unbounded_range_quantifier_behavior() {
 }
 
 #[test]
+fn pcre2_parity_supported_quantifier_suffix_backtracking_behavior() {
+    let first_cases = [
+        ParityCase {
+            name: "star_suffix_backtrack_first",
+            pattern: "a*a",
+            input: "a",
+        },
+        ParityCase {
+            name: "plus_suffix_backtrack_first",
+            pattern: "a+a",
+            input: "aa",
+        },
+        ParityCase {
+            name: "question_suffix_backtrack_first",
+            pattern: "ab?b",
+            input: "ab",
+        },
+    ];
+
+    for case in first_cases {
+        let rgx = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2 = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "quantifier suffix first-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+
+    assert_eq!(
+        pcre2_first_span("a*a", "a")
+            .unwrap_or_else(|e| panic!("[star_suffix_backtrack_first] pcre2 error: {e}")),
+        Some((0, 1))
+    );
+    assert_eq!(
+        pcre2_first_span("a+a", "aa")
+            .unwrap_or_else(|e| panic!("[plus_suffix_backtrack_first] pcre2 error: {e}")),
+        Some((0, 2))
+    );
+    assert_eq!(
+        pcre2_first_span("ab?b", "ab")
+            .unwrap_or_else(|e| panic!("[question_suffix_backtrack_first] pcre2 error: {e}")),
+        Some((0, 2))
+    );
+
+    let all_cases = [
+        ParityCase {
+            name: "star_suffix_backtrack_all",
+            pattern: "a*a",
+            input: "a a a",
+        },
+        ParityCase {
+            name: "plus_suffix_backtrack_all",
+            pattern: "a+a",
+            input: "aa aaaa",
+        },
+        ParityCase {
+            name: "question_suffix_backtrack_all",
+            pattern: "ab?b",
+            input: "ab abb abbb",
+        },
+    ];
+
+    for case in all_cases {
+        let rgx = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2 = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "quantifier suffix find_all mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+
+    assert_eq!(
+        pcre2_all_spans("a*a", "a a a")
+            .unwrap_or_else(|e| panic!("[star_suffix_backtrack_all] pcre2 error: {e}")),
+        vec![(0, 1), (2, 3), (4, 5)]
+    );
+    assert_eq!(
+        pcre2_all_spans("a+a", "aa aaaa")
+            .unwrap_or_else(|e| panic!("[plus_suffix_backtrack_all] pcre2 error: {e}")),
+        vec![(0, 2), (3, 7)]
+    );
+    assert_eq!(
+        pcre2_all_spans("ab?b", "ab abb abbb")
+            .unwrap_or_else(|e| panic!("[question_suffix_backtrack_all] pcre2 error: {e}")),
+        vec![(0, 2), (3, 6), (7, 10)]
+    );
+}
+
+#[test]
 fn pcre2_parity_known_gap_conditional_compile_behavior() {
     let cases = [
         KnownGapCase {

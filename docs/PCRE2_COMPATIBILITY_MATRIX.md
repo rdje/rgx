@@ -20,6 +20,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Literals and concatenation: `parity-verified`
 - Alternation: `parity-verified`
 - Basic quantifiers (`*`, `+`, `?`): `parity-verified`
+  - differential coverage includes suffix-sensitive backtracking scenarios (e.g., `a*a`, `a+a`, `ab?b`)
 - Range quantifier (`{n,m}`) scanning/earliest-match behavior: `parity-verified`
   - differential coverage includes bounded-range suffix backtracking scenarios (e.g., `{2,3}3`), exact-range `{n}` find-all behavior, and unbounded-range `{n,}` scan/suffix-sensitive cases
 - Anchors (`^`, `$`) in supported parser-path forms: `parity-verified`

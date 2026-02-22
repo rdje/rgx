@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-22 - Added differential parity guardrails for greedy quantifier suffix backtracking
+- Scope: PCRE2 differential test coverage expansion for `*`, `+`, and `?` backtracking semantics
+- Changes:
+  - Added `pcre2_parity_supported_quantifier_suffix_backtracking_behavior` in `rgx-bench/tests/pcre2_parity.rs`
+  - New differential first-match and `find_all` cases validate suffix-sensitive behavior for:
+    - `a*a`
+    - `a+a`
+    - `ab?b`
+  - Added explicit PCRE2 expected-span assertions inside the new differential test to pin expected behavior
+- Validation:
+  - `cargo test -p rgx-bench pcre2_parity_supported_quantifier_suffix_backtracking_behavior -- --nocapture`
+  - `cargo test -p rgx-bench`
+  - `cargo test -p rgx-core quantifier_backtracks_for_suffix -- --nocapture`
+- Notes/impact:
+  - Hardens parity regression detection for the same greedy quantifier suffix semantics recently fixed in VM execution
+  - Keeps parity assertions focused on executable, behavior-level outcomes rather than documentation-only claims
 ### 2026-02-22 - Fixed greedy quantifier backtracking runtime semantics and added unbounded-range parity coverage
 - Scope: VM quantifier execution correctness + PCRE2 parity hardening for unbounded ranges
 - Changes:

@@ -55,6 +55,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-22
+- Completed differential parity-hardening increment for greedy quantifier suffix behavior:
+  - added `pcre2_parity_supported_quantifier_suffix_backtracking_behavior` in `rgx-bench/tests/pcre2_parity.rs`
+  - covers first-match and `find_all` parity for suffix-sensitive `a*a`, `a+a`, and `ab?b`
+  - includes explicit PCRE2 expected-span assertions to lock reference behavior
+  - validation passed with targeted `rgx-bench` + `rgx-core` quantifier regression commands
 - Completed unbounded-range parity hardening + quantifier runtime correction:
   - root cause found via new tests: greedy quantifier execution (`*`, `+`, `?`) lacked runtime fallback states, so suffix-compatible backtracking paths were lost
   - fixed `PlusGreedy`, `StarGreedy`, and `QuestionGreedy` execution to save fallback frames and restore state on failed/no-advance repetition attempts
