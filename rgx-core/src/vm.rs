@@ -883,8 +883,16 @@ impl RegexVM {
                     // Must match at least once
                     let start_pos = ctx.pos;
                     trace_log!("vm", "  First match attempt at pos={}", ctx.pos);
+                    let first_saved_captures = ctx.captures.clone();
+                    let first_saved_call_stack = ctx.call_stack.clone();
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                        ctx.pos = start_pos;
+                        ctx.captures = first_saved_captures;
+                        ctx.call_stack = first_saved_call_stack;
                         trace_log!("vm", "  ✗ PlusGreedy: first match failed");
+                        if self.try_backtrack(ctx, &mut ip) {
+                            continue;
+                        }
                         return false;
                     }
                     let first_match_end = ctx.pos;
@@ -899,16 +907,31 @@ impl RegexVM {
                     let mut match_count = 1;
                     loop {
                         let before_pos = ctx.pos;
+                        let saved_captures = ctx.captures.clone();
+                        let saved_call_stack = ctx.call_stack.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            ctx.pos = before_pos;
+                            ctx.captures = saved_captures;
+                            ctx.call_stack = saved_call_stack;
                             // Can't match anymore, that's fine
                             trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
                             break;
                         }
                         // If we didn't advance, avoid infinite loop
                         if ctx.pos == before_pos {
+                            ctx.captures = saved_captures;
+                            ctx.call_stack = saved_call_stack;
                             trace_log!("vm", "  PlusGreedy: no advance, stopping");
                             break;
                         }
+                        // Greedy path consumed one extra repetition; keep a fallback
+                        // to continue after this quantifier without this repetition.
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
                         match_count += 1;
                         trace_log!(
                             "vm",
@@ -943,14 +966,29 @@ impl RegexVM {
                     // Match as many times as possible (greedy, zero or more)
                     loop {
                         let before_pos = ctx.pos;
+                        let saved_captures = ctx.captures.clone();
+                        let saved_call_stack = ctx.call_stack.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            ctx.pos = before_pos;
+                            ctx.captures = saved_captures;
+                            ctx.call_stack = saved_call_stack;
                             // Can't match anymore, that's fine for *
                             break;
                         }
                         // If we didn't advance, avoid infinite loop
                         if ctx.pos == before_pos {
+                            ctx.captures = saved_captures;
+                            ctx.call_stack = saved_call_stack;
                             break;
                         }
+                        // Greedy path consumed one repetition; keep a fallback
+                        // to continue after this quantifier without this repetition.
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
                     }
 
                     ip = expr_end;
@@ -973,10 +1011,24 @@ impl RegexVM {
                         return false;
                     }
 
-                    // Try to match once (greedy), but it's optional
-                    let _before_pos = ctx.pos;
-                    let _matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
-                    // For ?, we don't care if it failed - it's optional
+                    // Try to match once (greedy), but keep backtrack fallback
+                    // for the zero-occurrence path.
+                    let before_pos = ctx.pos;
+                    let saved_captures = ctx.captures.clone();
+                    let saved_call_stack = ctx.call_stack.clone();
+                    let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    if !matched || ctx.pos == before_pos {
+                        ctx.pos = before_pos;
+                        ctx.captures = saved_captures;
+                        ctx.call_stack = saved_call_stack;
+                    } else {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
+                    }
 
                     ip = expr_end;
                     continue;

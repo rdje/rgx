@@ -14,6 +14,31 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-22 - Fixed greedy quantifier backtracking runtime semantics and added unbounded-range parity coverage
+- Scope: VM quantifier execution correctness + PCRE2 parity hardening for unbounded ranges
+- Changes:
+  - Updated greedy quantifier execution in `rgx-core/src/vm.rs`:
+    - `PlusGreedy`, `StarGreedy`, and `QuestionGreedy` now preserve backtrack fallback states for consumed repetitions
+    - failed/no-advance repetition attempts now restore pre-attempt position/capture/call-stack state before continuing
+    - `PlusGreedy` first-required repetition failure now properly participates in outer backtracking
+  - Added parser-path regressions in `rgx-core/src/lib.rs`:
+    - unbounded range `{2,}` first-match/find-all behavior
+    - unbounded-range suffix backtracking/greedy behavior (`\\d{2,}3`)
+    - suffix backtracking guardrails for greedy `*`, `+`, and `?` (`a*a`, `a+a`, `ab?b`)
+  - Added differential PCRE2 parity test in `rgx-bench/tests/pcre2_parity.rs`:
+    - `pcre2_parity_supported_unbounded_range_quantifier_behavior` covering `{n,}` scan parity and suffix-sensitive `{n,}3` behavior
+  - Expanded supported parser-path matrix cases with unbounded range and unbounded-range suffix examples
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` range note to include unbounded range parity coverage
+- Validation:
+  - `cargo test -p rgx-core parser_unbounded_range_quantifier -- --nocapture`
+  - `cargo test -p rgx-core quantifier_backtracks_for_suffix -- --nocapture`
+  - `cargo test -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test -p rgx-bench pcre2_parity_supported_unbounded_range_quantifier_behavior -- --nocapture`
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Closes a correctness hole where greedy quantified subexpressions could over-consume without fallback to suffix-compatible spans
+  - Raises confidence that range quantifier parity now holds for both bounded `{n,m}` and unbounded `{n,}` forms
 ### 2026-02-22 - Expanded bounded-range suffix parity coverage in differential and API tests
 - Scope: parity hardening for backtracking-sensitive bounded range quantifier behavior
 - Changes:

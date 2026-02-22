@@ -41,6 +41,7 @@ Live continuity memory for `rgx` sessions.
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
+- Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -48,12 +49,21 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Continue expanding differential parity coverage for other backtracking-sensitive quantifier patterns beyond bounded-range cases.
+- Continue expanding differential parity coverage for additional backtracking-sensitive quantifier and grouped-pattern combinations.
 - Continue closing remaining parsed-but-unintegrated parity gaps (backreferences, recursion, conditionals).
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
 ### 2026-02-22
+- Completed unbounded-range parity hardening + quantifier runtime correction:
+  - root cause found via new tests: greedy quantifier execution (`*`, `+`, `?`) lacked runtime fallback states, so suffix-compatible backtracking paths were lost
+  - fixed `PlusGreedy`, `StarGreedy`, and `QuestionGreedy` execution to save fallback frames and restore state on failed/no-advance repetition attempts
+  - added parser-path regressions for:
+    - unbounded range `{2,}` scan/find_all
+    - unbounded-range suffix behavior (`\\d{2,}3`)
+    - generic greedy quantifier suffix backtracking (`a*a`, `a+a`, `ab?b`)
+  - added differential parity test `pcre2_parity_supported_unbounded_range_quantifier_behavior`
+  - full `rgx-core` and `rgx-bench` suites passed after changes
 - Completed follow-up parity-hardening pass after closing `{n,m}` gap:
   - added supported-syntax PCRE2 differential cases for bounded-range suffix backtracking (`\\d{2,3}3`) in both first-match and find-all suites
   - added exact-range `{3}` find-all differential coverage

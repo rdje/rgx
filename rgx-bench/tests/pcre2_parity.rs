@@ -400,6 +400,49 @@ fn pcre2_parity_supported_range_quantifier_scan_behavior() {
 }
 
 #[test]
+fn pcre2_parity_supported_unbounded_range_quantifier_behavior() {
+    let pattern = r"\d{2,}";
+
+    let first_input = "x1y22z333";
+    let rgx_first = rgx_first_span(pattern, first_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_quantifier_supported] rgx first error: {e}"));
+    let pcre2_first = pcre2_first_span(pattern, first_input).unwrap_or_else(|e| {
+        panic!("[unbounded_range_quantifier_supported] pcre2 first error: {e}")
+    });
+    assert_eq!(pcre2_first, Some((3, 5)));
+    assert_eq!(rgx_first, pcre2_first);
+
+    let all_input = "x1 y22 z333 w4444";
+    let rgx_all = rgx_all_spans(pattern, all_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_quantifier_supported] rgx all error: {e}"));
+    let pcre2_all = pcre2_all_spans(pattern, all_input).unwrap_or_else(|e| {
+        panic!("[unbounded_range_quantifier_supported] pcre2 all error: {e}")
+    });
+    assert_eq!(pcre2_all, vec![(4, 6), (8, 11), (13, 17)]);
+    assert_eq!(rgx_all, pcre2_all);
+
+    let suffix_pattern = r"\d{2,}3";
+    let suffix_first_input = "x123 y2233";
+    let rgx_suffix_first = rgx_first_span(suffix_pattern, suffix_first_input).unwrap_or_else(|e| {
+        panic!("[unbounded_range_suffix_supported] rgx first error: {e}")
+    });
+    let pcre2_suffix_first =
+        pcre2_first_span(suffix_pattern, suffix_first_input).unwrap_or_else(|e| {
+            panic!("[unbounded_range_suffix_supported] pcre2 first error: {e}")
+        });
+    assert_eq!(pcre2_suffix_first, Some((1, 4)));
+    assert_eq!(rgx_suffix_first, pcre2_suffix_first);
+
+    let suffix_all_input = "123 2233 993 4443";
+    let rgx_suffix_all = rgx_all_spans(suffix_pattern, suffix_all_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_suffix_supported] rgx all error: {e}"));
+    let pcre2_suffix_all = pcre2_all_spans(suffix_pattern, suffix_all_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_suffix_supported] pcre2 all error: {e}"));
+    assert_eq!(pcre2_suffix_all, vec![(0, 3), (4, 8), (9, 12), (13, 17)]);
+    assert_eq!(rgx_suffix_all, pcre2_suffix_all);
+}
+
+#[test]
 fn pcre2_parity_known_gap_conditional_compile_behavior() {
     let cases = [
         KnownGapCase {

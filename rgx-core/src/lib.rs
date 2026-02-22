@@ -431,6 +431,79 @@ mod tests {
     }
 
     #[test]
+    fn parser_unbounded_range_quantifier_scans_to_earliest_valid_span() {
+        let regex =
+            Regex::compile(r"\d{2,}").expect("Failed to compile unbounded range-quantifier syntax");
+        let first = regex
+            .find_first("x1y22z333")
+            .expect("Expected first unbounded range-quantifier match");
+        assert_eq!(first.start, 3);
+        assert_eq!(first.end, 5);
+
+        let all = regex.find_all("x1 y22 z333 w4444");
+        let spans: Vec<(usize, usize)> = all.into_iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(4, 6), (8, 11), (13, 17)]);
+    }
+
+    #[test]
+    fn parser_unbounded_range_quantifier_suffix_backtracks_and_prefers_longest() {
+        let regex = Regex::compile(r"\d{2,}3")
+            .expect("Failed to compile unbounded range-quantifier suffix pattern");
+
+        let backtrack = regex
+            .find_first("123")
+            .expect("Expected unbounded-range suffix backtracking match");
+        assert_eq!(backtrack.start, 0);
+        assert_eq!(backtrack.end, 3);
+
+        let greedy = regex
+            .find_first("2233")
+            .expect("Expected unbounded-range greedy suffix match");
+        assert_eq!(greedy.start, 0);
+        assert_eq!(greedy.end, 4);
+    }
+
+    #[test]
+    fn parser_unbounded_range_quantifier_suffix_find_all_spans() {
+        let regex = Regex::compile(r"\d{2,}3")
+            .expect("Failed to compile unbounded range-quantifier suffix pattern");
+        let all = regex.find_all("123 2233 993 4443");
+        let spans: Vec<(usize, usize)> = all.into_iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 3), (4, 8), (9, 12), (13, 17)]);
+    }
+
+    #[test]
+    fn parser_star_quantifier_backtracks_for_suffix() {
+        let regex = Regex::compile("a*a").expect("Failed to compile star-quantifier suffix pattern");
+        let m = regex
+            .find_first("a")
+            .expect("Expected star-quantifier suffix backtracking match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 1);
+    }
+
+    #[test]
+    fn parser_plus_quantifier_backtracks_for_suffix() {
+        let regex = Regex::compile("a+a").expect("Failed to compile plus-quantifier suffix pattern");
+        let m = regex
+            .find_first("aa")
+            .expect("Expected plus-quantifier suffix backtracking match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 2);
+    }
+
+    #[test]
+    fn parser_question_quantifier_backtracks_for_suffix() {
+        let regex =
+            Regex::compile("ab?b").expect("Failed to compile question-quantifier suffix pattern");
+        let m = regex
+            .find_first("ab")
+            .expect("Expected question-quantifier suffix backtracking match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 2);
+    }
+
+    #[test]
     fn parser_atomic_group_blocks_backtracking() {
         let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
         let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");
@@ -506,8 +579,15 @@ mod tests {
         let cases = [
             ("cat|dog", "pet dog", true),
             (r"\d{2,3}", "id 1234", true),
+            (r"\d{2,}", "x1y22", true),
+            (r"\d{2,}", "x1y", false),
             (r"\d{2,3}3", "x123y", true),
             (r"\d{2,3}3", "x12y", false),
+            (r"\d{2,}3", "x123y", true),
+            (r"\d{2,}3", "x12y", false),
+            ("a*a", "a", true),
+            ("a+a", "aa", true),
+            ("ab?b", "ab", true),
             ("(?<word>cat)", "xxcatyy", true),
             ("(?>ab|a)c", "abc", true),
             ("(?!cat)c", "car", true),

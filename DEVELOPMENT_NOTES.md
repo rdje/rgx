@@ -46,6 +46,8 @@ Pipeline in `rgx-core`:
 - Differential known-gap parity checks currently cover backreference, recursion, and conditional syntax families
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
 - Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
+- Differential supported-syntax parity now also includes unbounded range coverage (`{n,}`) including suffix-sensitive `{n,}3` behavior
+- Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
