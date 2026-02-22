@@ -20,6 +20,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Literals and concatenation: `parity-verified`
 - Alternation: `parity-verified`
 - Basic quantifiers (`*`, `+`, `?`): `parity-verified`
+- Range quantifier (`{n,m}`) scanning/earliest-match behavior: `parity-verified`
+  - differential coverage includes bounded-range suffix backtracking scenarios (e.g., `{2,3}3`) and exact-range `{n}` find-all behavior
 - Anchors (`^`, `$`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`) and word boundaries: `parity-verified`
 - Lookarounds:
@@ -40,8 +42,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
     - group-exists `(?(1)...)`
     - named-group-exists `(?(<name>)...)`, `(?(name)...)`
     - lookaround conditions `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
-- Range quantifier (`{n,m}`) scanning/earliest-match behavior: `rgx-gap`
-  - differential tests currently document divergence for representative `{2,3}` scanning cases.
 
 ## Out of scope for PCRE2 parity
 - rgx inline code blocks (`(?{lang:code})`): `out-of-scope`

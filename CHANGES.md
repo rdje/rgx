@@ -14,6 +14,48 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-22 - Expanded bounded-range suffix parity coverage in differential and API tests
+- Scope: parity hardening for backtracking-sensitive bounded range quantifier behavior
+- Changes:
+  - Extended `rgx-bench/tests/pcre2_parity.rs` supported-syntax differential matrices with additional range cases:
+    - `{2,3}3` bounded suffix backtracking scenarios in first-match and find-all parity sets
+    - exact-range `{3}` multi-match find-all parity scenario
+  - Extended parser-path regressions in `rgx-core/src/lib.rs`:
+    - bounded-range suffix backtracking stays correct (`123` with `\\d{2,3}3`)
+    - greedy longest-valid bounded-range suffix span is preferred (`2233` with `\\d{2,3}3`)
+    - bounded-range suffix `find_all` spans are stable across multiple tokens
+  - Expanded `capability_matrix_supported_parser_path_cases` with positive/negative bounded-range suffix examples
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` notes to reflect expanded bounded-range suffix and exact-range differential coverage
+- Validation:
+  - `cargo test -p rgx-core parser_range_quantifier -- --nocapture`
+  - `cargo test -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test -p rgx-bench`
+  - `cargo test -p rgx-core`
+- Notes/impact:
+  - Increases confidence that recently fixed `{n,m}` execution semantics remain aligned with PCRE2 under suffix-sensitive backtracking pressure
+  - Improves regression detection without changing runtime feature scope
+### 2026-02-22 - Closed `{n,m}` scan parity gap against PCRE2
+- Scope: `rgx-core` range-quantifier execution semantics, differential parity tests, and parity docs
+- Changes:
+  - Updated `rgx-core/src/vm.rs` range quantifier code generation:
+    - bounded ranges (`{n,m}`) now compile required prefix + greedy optional tail via `Split`, enabling fallback to shorter valid spans
+    - unbounded ranges (`{n,}`) now compile required prefix + unbounded `StarGreedy` tail
+  - Added VM helper `try_backtrack` and wired mismatch paths for key opcodes (`Any`, ASCII classes, boundaries, anchors, lookarounds, custom char classes) to honor pending backtrack frames instead of hard-failing immediately
+  - Added parser-path regressions in `rgx-core/src/lib.rs`:
+    - `{2,3}` earliest valid scan span behavior
+    - `{2,3}` bounded backtracking when followed by a literal suffix
+  - Updated differential parity coverage in `rgx-bench/tests/pcre2_parity.rs`:
+    - reclassified range scan test from known-gap to parity-supported and now asserts equality with PCRE2
+  - Updated `docs/PCRE2_COMPATIBILITY_MATRIX.md`:
+    - moved `{n,m}` scanning/earliest-match behavior to parity-verified baseline
+- Validation:
+  - `cargo test -p rgx-core parser_range_quantifier -- --nocapture`
+  - `cargo test -p rgx-bench pcre2_parity_supported_range_quantifier_scan_behavior -- --nocapture`
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-bench`
+- Notes/impact:
+  - Closes the previously tracked `{n,m}` scanning parity divergence
+  - Keeps remaining known-gap focus on parsed-but-unintegrated advanced families (backreferences, recursion, conditionals)
 ### 2026-02-22 - Introduced `MEMORY.md` as live continuity infrastructure for cross-session resume
 - Scope: documentation/process hardening for interruption-safe session handoff
 - Changes:

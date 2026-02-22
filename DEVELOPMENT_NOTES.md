@@ -44,6 +44,8 @@ Pipeline in `rgx-core`:
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
 - Differential known-gap parity checks currently cover backreference, recursion, and conditional syntax families
+- Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
+- Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

@@ -76,6 +76,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "ab abb abbb a",
         },
         ParityCase {
+            name: "range_bounded_suffix_backtrack_all",
+            pattern: r"\d{2,3}3",
+            input: "123 2233 993 4443",
+        },
+        ParityCase {
+            name: "range_exact_all",
+            pattern: r"\d{3}",
+            input: "12 123 4567 890",
+        },
+        ParityCase {
             name: "no_match_all",
             pattern: "cat",
             input: "dog bird",
@@ -300,6 +310,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             input: "xxabbbzz",
         },
         ParityCase {
+            name: "range_bounded_suffix_backtrack",
+            pattern: r"\d{2,3}3",
+            input: "x123y",
+        },
+        ParityCase {
+            name: "range_bounded_suffix_greedy",
+            pattern: r"\d{2,3}3",
+            input: "x2233y",
+        },
+        ParityCase {
             name: "no_match",
             pattern: "cat",
             input: "dog",
@@ -359,24 +379,24 @@ fn pcre2_parity_known_gap_recursion_compile_behavior() {
 
 
 #[test]
-fn pcre2_parity_known_gap_range_quantifier_scan_behavior() {
+fn pcre2_parity_supported_range_quantifier_scan_behavior() {
     let pattern = r"\d{2,3}";
 
     let first_input = "x1y22z333";
     let rgx_first = rgx_first_span(pattern, first_input)
-        .unwrap_or_else(|e| panic!("[range_quantifier_gap] rgx first error: {e}"));
+        .unwrap_or_else(|e| panic!("[range_quantifier_supported] rgx first error: {e}"));
     let pcre2_first = pcre2_first_span(pattern, first_input)
-        .unwrap_or_else(|e| panic!("[range_quantifier_gap] pcre2 first error: {e}"));
+        .unwrap_or_else(|e| panic!("[range_quantifier_supported] pcre2 first error: {e}"));
     assert_eq!(pcre2_first, Some((3, 5)));
-    assert_ne!(rgx_first, pcre2_first);
+    assert_eq!(rgx_first, pcre2_first);
 
     let all_input = "x1 y22 z333 w4444";
     let rgx_all = rgx_all_spans(pattern, all_input)
-        .unwrap_or_else(|e| panic!("[range_quantifier_gap] rgx all error: {e}"));
+        .unwrap_or_else(|e| panic!("[range_quantifier_supported] rgx all error: {e}"));
     let pcre2_all = pcre2_all_spans(pattern, all_input)
-        .unwrap_or_else(|e| panic!("[range_quantifier_gap] pcre2 all error: {e}"));
+        .unwrap_or_else(|e| panic!("[range_quantifier_supported] pcre2 all error: {e}"));
     assert_eq!(pcre2_all, vec![(4, 6), (8, 11), (13, 16)]);
-    assert_ne!(rgx_all, pcre2_all);
+    assert_eq!(rgx_all, pcre2_all);
 }
 
 #[test]

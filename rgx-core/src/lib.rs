@@ -385,6 +385,52 @@ mod tests {
     }
 
     #[test]
+    fn parser_range_quantifier_scans_to_earliest_valid_span() {
+        let regex = Regex::compile(r"\d{2,3}").expect("Failed to compile range-quantifier syntax");
+
+        let first = regex
+            .find_first("x1y22z333")
+            .expect("Expected first range-quantifier match");
+        assert_eq!(first.start, 3);
+        assert_eq!(first.end, 5);
+
+        let all = regex.find_all("x1 y22 z333 w4444");
+        let spans: Vec<(usize, usize)> = all.into_iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(4, 6), (8, 11), (13, 16)]);
+    }
+
+    #[test]
+    fn parser_range_quantifier_backtracks_when_followed_by_literal() {
+        let regex =
+            Regex::compile(r"\d{2,3}3").expect("Failed to compile range-quantifier suffix pattern");
+        let m = regex
+            .find_first("123")
+            .expect("Expected bounded-range backtracking match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+    }
+
+    #[test]
+    fn parser_range_quantifier_suffix_prefers_longest_valid_span() {
+        let regex =
+            Regex::compile(r"\d{2,3}3").expect("Failed to compile range-quantifier suffix pattern");
+        let m = regex
+            .find_first("2233")
+            .expect("Expected bounded-range greedy suffix match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 4);
+    }
+
+    #[test]
+    fn parser_range_quantifier_suffix_find_all_spans() {
+        let regex =
+            Regex::compile(r"\d{2,3}3").expect("Failed to compile range-quantifier suffix pattern");
+        let all = regex.find_all("123 2233 993 4443");
+        let spans: Vec<(usize, usize)> = all.into_iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 3), (4, 8), (9, 12), (13, 17)]);
+    }
+
+    #[test]
     fn parser_atomic_group_blocks_backtracking() {
         let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
         let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");
@@ -460,6 +506,8 @@ mod tests {
         let cases = [
             ("cat|dog", "pet dog", true),
             (r"\d{2,3}", "id 1234", true),
+            (r"\d{2,3}3", "x123y", true),
+            (r"\d{2,3}3", "x12y", false),
             ("(?<word>cat)", "xxcatyy", true),
             ("(?>ab|a)c", "abc", true),
             ("(?!cat)c", "car", true),

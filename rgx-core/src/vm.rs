@@ -529,6 +529,20 @@ impl RegexVM {
         None
     }
 
+    /// Restore a previously saved execution state if backtracking is available.
+    /// Returns true when a frame was restored and execution should continue.
+    fn try_backtrack(&self, ctx: &mut ExecContext, ip: &mut usize) -> bool {
+        if let Some(frame) = ctx.backtrack_stack.pop() {
+            *ip = frame.ip;
+            ctx.pos = frame.pos;
+            ctx.captures = frame.saved_captures;
+            ctx.call_stack = frame.saved_call_stack;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Execute bytecode starting at given position
     fn execute_at(&self, ctx: &mut ExecContext, start: usize) -> bool {
         debug_log!(
@@ -647,6 +661,9 @@ impl RegexVM {
                     };
 
                     if !assertion_holds {
+                        if self.try_backtrack(ctx, &mut ip) {
+                            continue;
+                        }
                         return false;
                     }
 
@@ -667,6 +684,9 @@ impl RegexVM {
                     } else {
                         trace_log!("vm", "  ✗ Any: EOF");
                     }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
                     return false;
                 }
 
@@ -676,6 +696,9 @@ impl RegexVM {
                             self.advance_char(ctx);
                             continue;
                         }
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
                     }
                     return false;
                 }
@@ -687,6 +710,9 @@ impl RegexVM {
                             continue;
                         }
                     }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
                     return false;
                 }
 
@@ -697,6 +723,9 @@ impl RegexVM {
                             continue;
                         }
                     }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
                     return false;
                 }
 
@@ -704,11 +733,17 @@ impl RegexVM {
                     if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
                         continue;
                     }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
                     return false;
                 }
 
                 OpCode::EndLine => {
                     if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -724,12 +759,18 @@ impl RegexVM {
                     if self.is_at_word_boundary(ctx) {
                         continue;
                     }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
                     return false;
                 }
 
                 OpCode::NonWordBoundary => {
                     // Check if we're NOT at a word boundary
                     if !self.is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -812,6 +853,9 @@ impl RegexVM {
                         }
                     } else {
                         trace_log!("vm", "  ✗ EOF, can't match char class");
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
                     }
                     return false;
                 }
@@ -2236,22 +2280,45 @@ impl OptimizingCompiler {
                         max,
                         lazy: false,
                     } => {
-                        // For A{n,m}, emit A exactly n times, then optionally up to (m-n) more times
+                        // For A{n,m}, emit A exactly n times, then up to (m-n) greedy
+                        // optional repetitions backed by Split-based backtracking.
+                        // For A{n,}, emit A exactly n times then A*.
                         let min_count = *min as usize;
-                        let max_count = max.unwrap_or(*min) as usize;
-
-                        // Emit required repetitions (min times)
+                        // Emit required repetitions (min times).
                         for _ in 0..min_count {
                             self.codegen_pass(expr, false);
                         }
+                        match max {
+                            Some(max_value) => {
+                                let max_count = *max_value as usize;
+                                // Emit greedy optional repetitions (bounded tail).
+                                for _ in min_count..max_count {
+                                    // Split first tries the expr path and saves a fallback
+                                    // that skips this optional repetition.
+                                    self.emit_op(OpCode::Split);
+                                    let split_offset_pos = self.code.len();
+                                    self.code.push(0); // patch later
+                                    self.code.push(0); // patch later
 
-                        // Emit optional repetitions (up to max-min more times)
-                        // For exact repetitions like {3}, min == max, so this does nothing
-                        for _ in min_count..max_count {
-                            // TODO: Implement optional matching with backtracking
-                            // For now, just require exact match
-                            if max.is_some() && max.unwrap() > *min {
-                                self.codegen_pass(expr, false);
+                                    self.codegen_pass(expr, false);
+
+                                    let skip_expr_target = self.code.len();
+                                    let split_offset = skip_expr_target - (split_offset_pos + 2);
+                                    let offset_bytes = (split_offset as u16).to_le_bytes();
+                                    self.code[split_offset_pos] = offset_bytes[0];
+                                    self.code[split_offset_pos + 1] = offset_bytes[1];
+                                }
+                            }
+                            None => {
+                                // Emit unbounded tail as A* after required prefix.
+                                self.emit_op(OpCode::StarGreedy);
+
+                                let mut sub_compiler = OptimizingCompiler::new();
+                                sub_compiler.codegen_pass(expr, false);
+                                let sub_code = sub_compiler.code;
+
+                                self.code.push(sub_code.len() as u8);
+                                self.code.extend(sub_code);
                             }
                         }
                     }

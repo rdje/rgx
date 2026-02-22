@@ -40,7 +40,7 @@ Live continuity memory for `rgx` sessions.
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
-- Known parity divergence still tracked: `{n,m}` range-quantifier scanning/earliest-match behavior.
+- `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -48,12 +48,30 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Investigate and close `{n,m}` range-quantifier scanning parity gap against PCRE2.
-- Continue expanding differential parity coverage while keeping docs and tests synchronized.
+- Continue expanding differential parity coverage for other backtracking-sensitive quantifier patterns beyond bounded-range cases.
+- Continue closing remaining parsed-but-unintegrated parity gaps (backreferences, recursion, conditionals).
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
 ### 2026-02-22
+- Completed follow-up parity-hardening pass after closing `{n,m}` gap:
+  - added supported-syntax PCRE2 differential cases for bounded-range suffix backtracking (`\\d{2,3}3`) in both first-match and find-all suites
+  - added exact-range `{3}` find-all differential coverage
+  - added parser-path API regressions for bounded-range suffix backtracking, greedy longest-valid suffix behavior, and stable `find_all` spans
+  - expanded capability-matrix parser-path supported case table with bounded-range suffix positive/negative examples
+- Validation for this increment:
+  - `cargo test -p rgx-core parser_range_quantifier -- --nocapture`
+  - `cargo test -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test -p rgx-bench`
+  - `cargo test -p rgx-core`
+- Closed the previously tracked `{n,m}` PCRE2 parity gap:
+  - root cause: range quantifier codegen forced exact-max behavior for bounded ranges and mismatch paths bypassed available backtrack frames
+  - fix: compile bounded optional range tail with `Split`-based greedy optionals and make key opcode mismatch paths honor `try_backtrack`
+  - validation: targeted and full `rgx-core` + `rgx-bench` test suites passed
+- Updated parity/docs/test state after the fix:
+  - reclassified range differential case to parity-supported in `rgx-bench/tests/pcre2_parity.rs`
+  - updated `docs/PCRE2_COMPATIBILITY_MATRIX.md` to mark `{n,m}` scan behavior parity-verified
+  - added parser-path regressions in `rgx-core/src/lib.rs` for earliest-scan and bounded-range suffix backtracking behavior
 - User requested creation of `MEMORY.md` as critical live continuity infrastructure.
 - Explicit requirement: keep this document continuously updated with key actionable exchange outcomes (not full transcript), and do it before commit workflow.
 - This file was created and integrated into live documentation policy so future AI instances can resume quickly and safely.
