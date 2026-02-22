@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-22 - Introduced `MEMORY.md` as live continuity infrastructure for cross-session resume
+- Scope: documentation/process hardening for interruption-safe session handoff
+- Changes:
+  - Added `MEMORY.md` at repository root as a live, compact continuity document designed for:
+    - rapid post-crash/post-reset resume
+    - preserving key actionable user/agent exchange outcomes
+    - explicit resume checklist and workflow invariants
+  - Defined mandatory update cadence in `MEMORY.md`:
+    - update after completed tasks
+    - update before commit workflow
+  - Integrated `MEMORY.md` into live-doc ecosystem references:
+    - `README.md` documentation map
+    - `DEVELOPMENT_NOTES.md` documentation policy
+- Validation:
+  - Documentation consistency review across `MEMORY.md`, `README.md`, and `DEVELOPMENT_NOTES.md`
+- Notes/impact:
+  - Reduces context-loss risk across session interruptions and AI instance handoffs
+  - Makes process-critical workflow expectations explicit and centralized
 ### 2026-02-20 - Fixed end-anchor (`$`) suffix matching parity by correcting anchored-search strategy selection
 - Scope: `rgx-core` VM matching strategy + regression coverage + parity docs/tests
 - Changes:

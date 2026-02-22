@@ -74,6 +74,7 @@ Pipeline in `rgx-core`:
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
+- `MEMORY.md` is the live cross-session continuity memory and must be updated after completed tasks before commit workflow
 - `ROADMAP.md` is the live forward-looking planning tracker
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth
 - `docs/PARSER_CONTRACT.md` is the parser interoperability source of truth
