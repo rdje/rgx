@@ -49,6 +49,7 @@ Pipeline in `rgx-core`:
 - Differential supported-syntax parity now also includes unbounded range coverage (`{n,}`) including suffix-sensitive `{n,}3` behavior
 - Differential supported-syntax parity now includes dedicated suffix-backtracking guardrails for greedy `*`, `+`, and `?` quantifiers
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
+- Core/CLI logging now supports routing debug/trace output to `trace.log` via `RGX_TRACE_FILE` / `rgx-cli --trace-log`
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

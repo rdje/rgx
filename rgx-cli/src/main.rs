@@ -22,6 +22,10 @@ struct Cli {
     #[arg(long, short = 't')]
     trace: bool,
 
+    /// Route debug/trace output to trace.log instead of the terminal
+    #[arg(long)]
+    trace_log: bool,
+
     /// Pattern to match
     pattern: String,
 
@@ -58,13 +62,13 @@ impl Logger {
 
     pub fn debug(&self, module: &str, msg: &str) {
         if self.level >= LogLevel::Debug {
-            eprintln!("[DEBUG] [{}] {}", module, msg);
+            rgx_core::log::emit_external("DEBUG", module, file!(), line!(), module_path!(), msg);
         }
     }
 
     pub fn trace(&self, module: &str, msg: &str) {
         if self.level == LogLevel::Trace {
-            eprintln!("[TRACE] [{}] {}", module, msg);
+            rgx_core::log::emit_external("TRACE", module, file!(), line!(), module_path!(), msg);
         }
     }
 }
@@ -83,18 +87,37 @@ impl Ord for LogLevel {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Set global logging env before any log emission.
+    std::env::set_var("RGX_DEBUG", if cli.debug { "1" } else { "0" });
+    std::env::set_var("RGX_TRACE", if cli.trace { "1" } else { "0" });
+    if cli.trace_log {
+        std::env::set_var("RGX_TRACE_FILE", "trace.log");
+    }
+
+    // Initialize rgx_core logging system after env is ready.
+    rgx_core::log::init();
 
     // Set up logging based on CLI flags
     {
         let mut logger = LOGGER.lock().unwrap();
         if cli.trace {
             logger.set_level(LogLevel::Trace);
-            eprintln!("[TRACE MODE ENABLED] - Showing EVERYTHING that happens in rgx");
-            eprintln!("================================================================================\n");
+            logger.trace(
+                "main",
+                "TRACE MODE ENABLED - Showing EVERYTHING that happens in rgx",
+            );
         } else if cli.debug {
             logger.set_level(LogLevel::Debug);
-            eprintln!("[DEBUG MODE ENABLED] - Showing compilation and execution details");
-            eprintln!("================================================================================\n");
+            logger.debug(
+                "main",
+                "DEBUG MODE ENABLED - Showing compilation and execution details",
+            );
+        }
+        if cli.trace_log {
+            logger.debug(
+                "main",
+                "Trace output routing enabled: logs are written to trace.log",
+            );
         }
     }
 
@@ -113,13 +136,6 @@ fn main() -> anyhow::Result<()> {
         "safe" => ExecutionMode::Safe,
         _ => ExecutionMode::Full,
     };
-
-    // Set the global debug flag for rgx_core BEFORE using it
-    std::env::set_var("RGX_DEBUG", if cli.debug { "1" } else { "0" });
-    std::env::set_var("RGX_TRACE", if cli.trace { "1" } else { "0" });
-
-    // Initialize rgx_core logging system
-    rgx_core::log::init();
 
     let regex = if mode == ExecutionMode::Pure {
         LOGGER

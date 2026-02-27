@@ -55,6 +55,13 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-02-27
+- Added file-based trace routing support for debugging output:
+  - `rgx-core` logging now supports `RGX_TRACE_FILE=trace.log` sink routing
+  - `rgx-cli` now has `--trace-log` to enable trace routing to `trace.log`
+  - CLI debug/trace messages are routed through the same core sink as VM/compiler logs
+- Initialization order was adjusted so log env config is applied before first emission, avoiding early-init misconfiguration.
+- Verified by running `rgx-cli --debug --trace-log` and confirming log lines are written to `trace.log`.
 ### 2026-02-26
 - Added root-level `COMMIT.md` as authoritative commit-workflow contract for AI handoff and process consistency.
 - `COMMIT.md` now defines:

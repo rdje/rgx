@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Added trace.log routing for debug/trace output
+- Scope: tracing usability and output control in `rgx-core` + `rgx-cli`
+- Changes:
+  - Refactored `rgx-core/src/log.rs` into a centralized emit/sink model:
+    - supports `RGX_TRACE_FILE=<path>` to route debug/trace output into a file (e.g., `trace.log`)
+    - keeps existing `RGX_DEBUG`/`RGX_TRACE` filtering behavior
+    - updates `debug_log!` / `trace_log!` macros to use centralized emit helpers that include source file/module/line metadata
+  - Updated `rgx-cli/src/main.rs`:
+    - added `--trace-log` option to route logs to `trace.log`
+    - routes CLI debug/trace banner and progress messages through the same core logging sink
+    - initializes logging environment before first log emission so filtering/routing configuration is stable
+  - Updated docs to include trace-log usage in quick-start examples and technical notes
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - `cargo run --bin rgx-cli -- --debug --trace-log "a" "a"`
+  - verified `trace.log` contains emitted trace/debug lines while match result output remains on CLI output
+- Notes/impact:
+  - Enables file-backed trace collection for post-run debugging and handoff artifacts
+  - Ensures trace logs and CLI-side debug messages are routed consistently through one sink
 ### 2026-02-26 - Added `COMMIT.md` as authoritative commit-workflow contract
 - Scope: workflow/documentation hardening for deterministic commits and AI handoff consistency
 - Changes:

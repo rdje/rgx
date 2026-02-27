@@ -35,6 +35,7 @@ cargo build
 cargo test --workspace
 cargo test -p rgx-core vm::
 cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+cargo run --bin rgx-cli -- --debug --trace-log "cat|dog" "I have a cat"
 ```
 
 ## Repository structure
