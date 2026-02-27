@@ -56,6 +56,15 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-27
+- Extended structured tracing into parser-path pipeline:
+  - `rgx-core/src/parser.rs` now emits structured entry/exit/decision logs for parser hotspots (`new`, `parse`, `parse_alternation`, `parse_sequence`, `parse_quantified`, `parse_atom`)
+  - `rgx-core/src/parsing.rs` now emits parser-backend selection and parse-boundary logs in both recursive-descent and `pgen-parser` feature paths
+  - `RecursiveDescentParser::parse_pattern` trait adapter now emits parse-boundary outcome logs
+- Validation confirmed:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - parser trace lines are visible in `trace.log` at `--verbosity debug` and filtered at `--verbosity low` / `--quiet`
+### 2026-02-27
 - Added first UVM-style tracing increment after trace-file routing baseline:
   - `rgx-core/src/log.rs` now provides `Verbosity::{None,Low,Medium,High,Debug}` with env control via `RGX_VERBOSITY`
   - structured trace helpers added: `trace_enter!`, `trace_exit!`, `trace_decision!`

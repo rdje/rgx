@@ -54,6 +54,10 @@ Pipeline in `rgx-core`:
   - `rgx-cli --verbosity <level>` with legacy aliases `--debug` (high) and `--trace` (debug)
   - `RGX_TRACE_FILE` / `rgx-cli --trace-log` for sink routing into `trace.log`
   - structured trace helpers for function entry/exit and decision reasoning (`trace_enter!`, `trace_exit!`, `trace_decision!`)
+- Parser-path tracing now covers parser frontend boundaries:
+  - parser stack hotspots (`Parser::new/parse/parse_alternation/parse_sequence/parse_quantified/parse_atom`)
+  - compile-time parsing entry (`parsing::parse_pattern`) and trait adapter path (`RecursiveDescentParser::parse_pattern`)
+  - backend-selection and parse-boundary decision logs visible at medium/high/debug verbosity levels
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

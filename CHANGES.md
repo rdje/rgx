@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Extended structured tracing into parser-path pipeline
+- Scope: parser-path observability depth in `rgx-core` parsing stack
+- Changes:
+  - Instrumented `rgx-core/src/parser.rs` with structured tracing on parser hotspots:
+    - function entry/exit tracing for `Parser::new`, `parse`, `parse_alternation`, `parse_sequence`, `parse_quantified`, and `parse_atom`
+    - decision tracing for alternation branching, quantifier wrapping, and post-parse EOF boundary checks
+  - Instrumented `rgx-core/src/parsing.rs` compile-time parser entry points:
+    - structured tracing for `parse_pattern` in both recursive-descent and `pgen-parser` feature paths
+    - structured tracing for `RecursiveDescentParser::parse_pattern` trait adapter
+    - low-level parser backend-selection logs plus parse-boundary success/failure decisions
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - `cargo run --bin rgx-cli -- --verbosity debug --trace-log \"a|b\" \"a\"`
+  - `cargo run --bin rgx-cli -- --verbosity low --trace-log \"a|b\" \"a\"`
+  - `cargo run --bin rgx-cli -- --quiet --trace-log \"a|b\" \"a\"`
+  - verified parser-path trace lines appear in `trace.log` at debug verbosity and are filtered at low/quiet
+- Notes/impact:
+  - Improves trace continuity from parser frontend into compiler/VM flow
+  - Makes parser decisions and parse-boundary failures more diagnosable with file/function/line origin metadata
 ### 2026-02-27 - Added UVM-style multi-level verbosity and structured tracing helpers
 - Scope: first-class tracing ergonomics and observability depth in `rgx-core` + `rgx-cli`
 - Changes:

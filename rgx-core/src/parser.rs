@@ -6,6 +6,7 @@
 use crate::ast::{CharClass, GroupKind, Quantifier, Regex};
 use crate::lexer::Lexer;
 use crate::token::{LexError, Token, TokenWithPos};
+use crate::{trace_decision, trace_enter, trace_exit, trace_log};
 
 /// Parser for regex patterns
 pub struct Parser<'a> {
@@ -16,13 +17,63 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// Create a new parser for the given input
     pub fn new(input: &'a str) -> Result<Self, LexError> {
+        trace_enter!("parser", "Parser::new", "input_len={}", input.len());
         let mut lexer = Lexer::new(input);
-        let current_token = Some(lexer.next_token()?);
+        let current_token = match lexer.next_token() {
+            Ok(token) => Some(token),
+            Err(err) => {
+                trace_exit!("parser", "Parser::new", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
-        Ok(Self {
+        let initial_token = current_token
+            .as_ref()
+            .map(|token| format!("{:?}", token.token))
+            .unwrap_or_else(|| "<none>".to_string());
+
+        let parser = Self {
             lexer,
             current_token,
-        })
+        };
+        trace_exit!(
+            "parser",
+            "Parser::new",
+            "ok=true,initial_token={}",
+            initial_token
+        );
+        Ok(parser)
+    }
+
+    fn current_token_snapshot(&self) -> String {
+        self.peek()
+            .map(|token| format!("{token:?}"))
+            .unwrap_or_else(|| "<none>".to_string())
+    }
+
+    fn regex_kind(node: &Regex) -> &'static str {
+        match node {
+            Regex::Empty => "Empty",
+            Regex::Char(_) => "Char",
+            Regex::Dot => "Dot",
+            Regex::CharClass(_) => "CharClass",
+            Regex::Digit { .. } => "Digit",
+            Regex::Word { .. } => "Word",
+            Regex::Space { .. } => "Space",
+            Regex::UnicodeClass { .. } => "UnicodeClass",
+            Regex::Anchor(_) => "Anchor",
+            Regex::WordBoundary { .. } => "WordBoundary",
+            Regex::Sequence(_) => "Sequence",
+            Regex::Alternation(_) => "Alternation",
+            Regex::Quantified { .. } => "Quantified",
+            Regex::Group { .. } => "Group",
+            Regex::Backreference(_) => "Backreference",
+            Regex::Lookahead { .. } => "Lookahead",
+            Regex::Lookbehind { .. } => "Lookbehind",
+            Regex::CodeBlock { .. } => "CodeBlock",
+            Regex::Conditional { .. } => "Conditional",
+            Regex::Recursion { .. } => "Recursion",
+        }
     }
 
     /// Get the current token without consuming it
@@ -45,60 +96,194 @@ impl<'a> Parser<'a> {
 
     /// Parse the entire regex pattern
     pub fn parse(&mut self) -> Result<Regex, LexError> {
-        let result = self.parse_alternation()?;
+        trace_enter!(
+            "parser",
+            "Parser::parse",
+            "start_token={}",
+            self.current_token_snapshot()
+        );
+
+        let result = match self.parse_alternation() {
+            Ok(ast) => ast,
+            Err(err) => {
+                trace_exit!("parser", "Parser::parse", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
         // Ensure we've consumed all tokens
         if let Some(token) = &self.current_token {
             if token.token != Token::EOF {
+                trace_decision!(
+                    "parser",
+                    "post-parse token == EOF",
+                    false,
+                    "found trailing token {:?} at parser boundary",
+                    token.token
+                );
+                trace_exit!(
+                    "parser",
+                    "Parser::parse",
+                    "ok=false,error=trailing token {:?}",
+                    token.token
+                );
                 return Err(LexError::UnexpectedEOF {
                     expected: "end of input".to_string(),
                     position: token.position.clone(),
                 });
             }
         }
+        trace_decision!(
+            "parser",
+            "post-parse token == EOF",
+            true,
+            "all tokens consumed successfully"
+        );
 
+        trace_exit!(
+            "parser",
+            "Parser::parse",
+            "ok=true,node_kind={}",
+            Self::regex_kind(&result)
+        );
         Ok(result)
     }
 
     /// Parse alternation: expr | expr | expr
     fn parse_alternation(&mut self) -> Result<Regex, LexError> {
-        let mut alternatives = vec![self.parse_sequence()?];
+        trace_enter!(
+            "parser",
+            "Parser::parse_alternation",
+            "token={}",
+            self.current_token_snapshot()
+        );
+        let mut alternatives = match self.parse_sequence() {
+            Ok(first) => vec![first],
+            Err(err) => {
+                trace_exit!(
+                    "parser",
+                    "Parser::parse_alternation",
+                    "ok=false,error={}",
+                    err
+                );
+                return Err(err);
+            }
+        };
 
         while matches!(self.peek(), Some(Token::Alternation)) {
+            trace_decision!(
+                "parser",
+                "peek() == Token::Alternation",
+                true,
+                "consume alternation separator and parse next branch"
+            );
             self.advance()?; // consume '|'
-            alternatives.push(self.parse_sequence()?);
+            let branch = match self.parse_sequence() {
+                Ok(sequence) => sequence,
+                Err(err) => {
+                    trace_exit!(
+                        "parser",
+                        "Parser::parse_alternation",
+                        "ok=false,error={}",
+                        err
+                    );
+                    return Err(err);
+                }
+            };
+            alternatives.push(branch);
+            trace_log!(
+                "parser",
+                "parsed alternation branch count={}",
+                alternatives.len()
+            );
         }
 
-        if alternatives.len() == 1 {
-            Ok(alternatives.into_iter().next().unwrap())
+        let alternation_present = alternatives.len() > 1;
+        trace_decision!(
+            "parser",
+            "alternatives.len() > 1",
+            alternation_present,
+            "wrap into alternation node only when multiple branches exist"
+        );
+        let result = if alternation_present {
+            Regex::Alternation(alternatives)
         } else {
-            Ok(Regex::Alternation(alternatives))
-        }
+            alternatives.into_iter().next().unwrap()
+        };
+        trace_exit!(
+            "parser",
+            "Parser::parse_alternation",
+            "ok=true,node_kind={}",
+            Self::regex_kind(&result)
+        );
+        Ok(result)
     }
 
     /// Parse sequence: expr expr expr
     fn parse_sequence(&mut self) -> Result<Regex, LexError> {
+        trace_enter!(
+            "parser",
+            "Parser::parse_sequence",
+            "token={}",
+            self.current_token_snapshot()
+        );
         let mut elements = Vec::new();
 
         while let Some(token) = self.peek() {
             match token {
                 Token::EOF | Token::Alternation | Token::GroupEnd => break,
                 _ => {
-                    elements.push(self.parse_quantified()?);
+                    let element = match self.parse_quantified() {
+                        Ok(node) => node,
+                        Err(err) => {
+                            trace_exit!(
+                                "parser",
+                                "Parser::parse_sequence",
+                                "ok=false,error={}",
+                                err
+                            );
+                            return Err(err);
+                        }
+                    };
+                    elements.push(element);
                 }
             }
         }
 
-        match elements.len() {
-            0 => Ok(Regex::Empty),
-            1 => Ok(elements.into_iter().next().unwrap()),
-            _ => Ok(Regex::Sequence(elements)),
-        }
+        let result = match elements.len() {
+            0 => Regex::Empty,
+            1 => elements.into_iter().next().unwrap(),
+            _ => Regex::Sequence(elements),
+        };
+        trace_exit!(
+            "parser",
+            "Parser::parse_sequence",
+            "ok=true,node_kind={}",
+            Self::regex_kind(&result)
+        );
+        Ok(result)
     }
 
     /// Parse quantified expression: expr?, expr*, expr+, expr{n,m}
     fn parse_quantified(&mut self) -> Result<Regex, LexError> {
-        let expr = self.parse_atom()?;
+        trace_enter!(
+            "parser",
+            "Parser::parse_quantified",
+            "token={}",
+            self.current_token_snapshot()
+        );
+        let expr = match self.parse_atom() {
+            Ok(node) => node,
+            Err(err) => {
+                trace_exit!(
+                    "parser",
+                    "Parser::parse_quantified",
+                    "ok=false,error={}",
+                    err
+                );
+                return Err(err);
+            }
+        };
 
         let quantifier = match self.peek() {
             Some(Token::Question) => {
@@ -135,19 +320,40 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
-        if let Some(q) = quantifier {
-            Ok(Regex::Quantified {
+        let quantified = quantifier.is_some();
+        trace_decision!(
+            "parser",
+            "quantifier.is_some()",
+            quantified,
+            "wrap atom into quantified AST node only when suffix quantifier is present"
+        );
+        let result = if let Some(q) = quantifier {
+            Regex::Quantified {
                 expr: Box::new(expr),
                 quantifier: q,
-            })
+            }
         } else {
-            Ok(expr)
-        }
+            expr
+        };
+        trace_exit!(
+            "parser",
+            "Parser::parse_quantified",
+            "ok=true,node_kind={},quantified={}",
+            Self::regex_kind(&result),
+            quantified
+        );
+        Ok(result)
     }
 
     /// Parse atomic expression: literals, groups, character classes, etc.
     fn parse_atom(&mut self) -> Result<Regex, LexError> {
-        match self.peek() {
+        trace_enter!(
+            "parser",
+            "Parser::parse_atom",
+            "token={}",
+            self.current_token_snapshot()
+        );
+        let result = match self.peek() {
             Some(Token::Char(c)) => {
                 let c = *c;
                 self.advance()?;
@@ -504,7 +710,17 @@ impl<'a> Parser<'a> {
                 expected: "regex expression".to_string(),
                 position: crate::token::Position::start(),
             }),
+        };
+        match &result {
+            Ok(node) => trace_exit!(
+                "parser",
+                "Parser::parse_atom",
+                "ok=true,node_kind={}",
+                Self::regex_kind(node)
+            ),
+            Err(err) => trace_exit!("parser", "Parser::parse_atom", "ok=false,error={}", err),
         }
+        result
     }
 }
 

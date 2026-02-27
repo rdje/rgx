@@ -6,6 +6,7 @@
 
 use crate::ast::Regex;
 use crate::error::Result;
+use crate::{low_log, trace_decision, trace_enter, trace_exit};
 
 /// Core trait for regex pattern parsers
 ///
@@ -67,23 +68,90 @@ pub struct ParserCapabilities {
 /// runtime overhead. No vtables, no heap allocations, no indirection.
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
-    let mut parser = crate::parser::Parser::new(pattern)
-        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-    parser
-        .parse()
-        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+    trace_enter!(
+        "parsing",
+        "parsing::parse_pattern[recursive-descent]",
+        "pattern_len={}",
+        pattern.len()
+    );
+    low_log!("parsing", "Using recursive-descent parser backend");
+    let mut parser = match crate::parser::Parser::new(pattern) {
+        Ok(parser) => parser,
+        Err(err) => {
+            trace_exit!(
+                "parsing",
+                "parsing::parse_pattern[recursive-descent]",
+                "ok=false,error={}",
+                err
+            );
+            return Err(crate::error::RgxError::Compile(err.to_string()));
+        }
+    };
+
+    let result = match parser.parse() {
+        Ok(ast) => Ok(ast),
+        Err(err) => Err(crate::error::RgxError::Compile(err.to_string())),
+    };
+    trace_decision!(
+        "parsing",
+        "parse result is_ok()",
+        result.is_ok(),
+        "recursive-descent parse boundary outcome"
+    );
+    trace_exit!(
+        "parsing",
+        "parsing::parse_pattern[recursive-descent]",
+        "ok={}",
+        result.is_ok()
+    );
+    result
 }
 
 /// Zero-cost PGEN parser (when enabled)
 #[cfg(feature = "pgen-parser")]
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
+    trace_enter!(
+        "parsing",
+        "parsing::parse_pattern[pgen-feature]",
+        "pattern_len={}",
+        pattern.len()
+    );
     // TODO: Replace with actual PGEN parser when available
     // For now, fall back to recursive descent
-    let mut parser = crate::parser::Parser::new(pattern)
-        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-    parser
-        .parse()
-        .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+    low_log!(
+        "parsing",
+        "pgen-parser feature enabled; currently using recursive-descent fallback"
+    );
+    let mut parser = match crate::parser::Parser::new(pattern) {
+        Ok(parser) => parser,
+        Err(err) => {
+            trace_exit!(
+                "parsing",
+                "parsing::parse_pattern[pgen-feature]",
+                "ok=false,error={}",
+                err
+            );
+            return Err(crate::error::RgxError::Compile(err.to_string()));
+        }
+    };
+
+    let result = match parser.parse() {
+        Ok(ast) => Ok(ast),
+        Err(err) => Err(crate::error::RgxError::Compile(err.to_string())),
+    };
+    trace_decision!(
+        "parsing",
+        "parse result is_ok()",
+        result.is_ok(),
+        "pgen-feature parser boundary outcome"
+    );
+    trace_exit!(
+        "parsing",
+        "parsing::parse_pattern[pgen-feature]",
+        "ok={}",
+        result.is_ok()
+    );
+    result
 }
 
 /// Get the active parser name (compile-time)
@@ -164,12 +232,43 @@ impl RecursiveDescentParser {
 
 impl RegexParser for RecursiveDescentParser {
     fn parse_pattern(&mut self, pattern: &str) -> Result<Regex> {
+        trace_enter!(
+            "parsing",
+            "RecursiveDescentParser::parse_pattern",
+            "pattern_len={}",
+            pattern.len()
+        );
         // Use existing parser implementation
-        let mut parser = crate::parser::Parser::new(pattern)
-            .map_err(|e| crate::error::RgxError::Compile(e.to_string()))?;
-        parser
-            .parse()
-            .map_err(|e| crate::error::RgxError::Compile(e.to_string()))
+        let mut parser = match crate::parser::Parser::new(pattern) {
+            Ok(parser) => parser,
+            Err(err) => {
+                trace_exit!(
+                    "parsing",
+                    "RecursiveDescentParser::parse_pattern",
+                    "ok=false,error={}",
+                    err
+                );
+                return Err(crate::error::RgxError::Compile(err.to_string()));
+            }
+        };
+
+        let result = match parser.parse() {
+            Ok(ast) => Ok(ast),
+            Err(err) => Err(crate::error::RgxError::Compile(err.to_string())),
+        };
+        trace_decision!(
+            "parsing",
+            "recursive-descent trait parse result is_ok()",
+            result.is_ok(),
+            "RegexParser adapter parse boundary outcome"
+        );
+        trace_exit!(
+            "parsing",
+            "RecursiveDescentParser::parse_pattern",
+            "ok={}",
+            result.is_ok()
+        );
+        result
     }
 
     fn parser_name(&self) -> &'static str {
