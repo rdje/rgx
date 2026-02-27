@@ -33,7 +33,7 @@ Live continuity memory for `rgx` sessions.
 - Always run `git --no-pager status` before every commit.
 - Stage from that exact status output (no hidden extras).
 - Use `git_message_brief.txt` with `git commit -F git_message_brief.txt`.
-- Include `Co-Authored-By: Warp <agent@warp.dev>` in commit messages.
+- Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
 - After commit:
   - clear `git_message_brief.txt`
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
@@ -55,6 +55,20 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-02-27
+- Added first UVM-style tracing increment after trace-file routing baseline:
+  - `rgx-core/src/log.rs` now provides `Verbosity::{None,Low,Medium,High,Debug}` with env control via `RGX_VERBOSITY`
+  - structured trace helpers added: `trace_enter!`, `trace_exit!`, `trace_decision!`
+  - level-filtered external sink API added: `emit_external_at(...)`
+- Updated `rgx-cli` tracing UX:
+  - new `--verbosity <none|low|medium|high|debug>`
+  - new `--quiet`
+  - legacy compatibility kept: `--debug => high`, `--trace => debug`
+- Instrumented compiler/VM hotspots with explicit entry/exit and decision-reason logs.
+- Verified filtering behavior and sink routing with:
+  - `--verbosity debug --trace-log` (exhaustive output)
+  - `--verbosity low --trace-log` (milestone-only output)
+  - `--quiet --trace-log` (empty `trace.log`)
 ### 2026-02-27
 - Added file-based trace routing support for debugging output:
   - `rgx-core` logging now supports `RGX_TRACE_FILE=trace.log` sink routing

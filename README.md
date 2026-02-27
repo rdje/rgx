@@ -35,8 +35,13 @@ cargo build
 cargo test --workspace
 cargo test -p rgx-core vm::
 cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
-cargo run --bin rgx-cli -- --debug --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a cat"
 ```
+- Legacy flags remain available:
+  - `--debug` is equivalent to `--verbosity high`
+  - `--trace` is equivalent to `--verbosity debug`
 
 ## Repository structure
 - `rgx-core/`: regex engine core (AST, parser, compiler, VM)

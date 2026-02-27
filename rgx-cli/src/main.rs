@@ -1,4 +1,5 @@
 use clap::Parser;
+use rgx_core::log::Verbosity;
 use rgx_core::{ExecutionMode, Regex};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -14,13 +15,21 @@ struct Cli {
     #[arg(long, value_parser = ["pure", "safe", "full"], default_value = "pure")]
     mode: String,
 
-    /// Enable debug output (shows compilation and execution details)
+    /// Enable high-verbosity output (legacy alias for --verbosity high)
     #[arg(long, short = 'd')]
     debug: bool,
 
-    /// Enable trace output (shows EVERYTHING - very verbose)
+    /// Enable debug-verbosity output (legacy alias for --verbosity debug)
     #[arg(long, short = 't')]
     trace: bool,
+
+    /// Set UVM-style verbosity level
+    #[arg(long, value_parser = ["none", "low", "medium", "high", "debug"])]
+    verbosity: Option<String>,
+
+    /// Disable all trace/debug output
+    #[arg(long, conflicts_with_all = ["debug", "trace", "verbosity"])]
+    quiet: bool,
 
     /// Route debug/trace output to trace.log instead of the terminal
     #[arg(long)]
@@ -38,85 +47,136 @@ struct Cli {
 pub static LOGGER: once_cell::sync::Lazy<Arc<Mutex<Logger>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(Logger::new())));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    Off,
-    Debug,
-    Trace,
-}
-
 pub struct Logger {
-    level: LogLevel,
+    level: Verbosity,
 }
 
 impl Logger {
     fn new() -> Self {
         Self {
-            level: LogLevel::Off,
+            level: Verbosity::None,
         }
     }
 
-    pub fn set_level(&mut self, level: LogLevel) {
+    pub fn set_level(&mut self, level: Verbosity) {
         self.level = level;
     }
 
+    pub fn low(&self, module: &str, msg: &str) {
+        if self.level >= Verbosity::Low {
+            rgx_core::log::emit_external_at(
+                Verbosity::Low,
+                "LOW",
+                module,
+                file!(),
+                line!(),
+                module_path!(),
+                msg,
+            );
+        }
+    }
+
     pub fn debug(&self, module: &str, msg: &str) {
-        if self.level >= LogLevel::Debug {
-            rgx_core::log::emit_external("DEBUG", module, file!(), line!(), module_path!(), msg);
+        if self.level >= Verbosity::High {
+            rgx_core::log::emit_external_at(
+                Verbosity::High,
+                "HIGH",
+                module,
+                file!(),
+                line!(),
+                module_path!(),
+                msg,
+            );
         }
     }
 
     pub fn trace(&self, module: &str, msg: &str) {
-        if self.level == LogLevel::Trace {
-            rgx_core::log::emit_external("TRACE", module, file!(), line!(), module_path!(), msg);
+        if self.level >= Verbosity::Debug {
+            rgx_core::log::emit_external_at(
+                Verbosity::Debug,
+                "TRACE",
+                module,
+                file!(),
+                line!(),
+                module_path!(),
+                msg,
+            );
         }
     }
 }
 
-impl PartialOrd for LogLevel {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+fn resolve_verbosity(cli: &Cli) -> Verbosity {
+    if cli.quiet {
+        return Verbosity::None;
+    }
+
+    if let Some(value) = &cli.verbosity {
+        return Verbosity::parse(value).unwrap_or(Verbosity::None);
+    }
+
+    if cli.trace {
+        Verbosity::Debug
+    } else if cli.debug {
+        Verbosity::High
+    } else {
+        Verbosity::None
     }
 }
 
-impl Ord for LogLevel {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (*self as u8).cmp(&(*other as u8))
+fn configure_logging_environment(cli: &Cli, verbosity: Verbosity) {
+    std::env::set_var("RGX_VERBOSITY", verbosity.as_str());
+    std::env::set_var(
+        "RGX_DEBUG",
+        if verbosity >= Verbosity::High {
+            "1"
+        } else {
+            "0"
+        },
+    );
+    std::env::set_var(
+        "RGX_TRACE",
+        if verbosity >= Verbosity::Debug {
+            "1"
+        } else {
+            "0"
+        },
+    );
+
+    if cli.trace_log {
+        std::env::set_var("RGX_TRACE_FILE", "trace.log");
+    } else {
+        std::env::remove_var("RGX_TRACE_FILE");
     }
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    // Set global logging env before any log emission.
-    std::env::set_var("RGX_DEBUG", if cli.debug { "1" } else { "0" });
-    std::env::set_var("RGX_TRACE", if cli.trace { "1" } else { "0" });
-    if cli.trace_log {
-        std::env::set_var("RGX_TRACE_FILE", "trace.log");
-    }
+    let verbosity = resolve_verbosity(&cli);
+    configure_logging_environment(&cli, verbosity);
 
     // Initialize rgx_core logging system after env is ready.
     rgx_core::log::init();
 
-    // Set up logging based on CLI flags
+    // Set up logging based on resolved verbosity.
     {
         let mut logger = LOGGER.lock().unwrap();
-        if cli.trace {
-            logger.set_level(LogLevel::Trace);
-            logger.trace(
-                "main",
-                "TRACE MODE ENABLED - Showing EVERYTHING that happens in rgx",
-            );
-        } else if cli.debug {
-            logger.set_level(LogLevel::Debug);
-            logger.debug(
-                "main",
-                "DEBUG MODE ENABLED - Showing compilation and execution details",
-            );
-        }
+        logger.set_level(verbosity);
+        logger.low("main", &format!("Verbosity mode: {}", verbosity.as_str()));
         if cli.trace_log {
-            logger.debug(
+            logger.low(
                 "main",
                 "Trace output routing enabled: logs are written to trace.log",
+            );
+        }
+        if verbosity == Verbosity::Debug {
+            logger.trace(
+                "main",
+                "TRACE/DEBUG VERBOSITY ENABLED - exhaustive logging active",
+            );
+        } else if verbosity >= Verbosity::High {
+            logger.debug(
+                "main",
+                "HIGH VERBOSITY ENABLED - detailed compile/execute logging active",
             );
         }
     }

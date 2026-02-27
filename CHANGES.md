@@ -14,6 +14,35 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Added UVM-style multi-level verbosity and structured tracing helpers
+- Scope: first-class tracing ergonomics and observability depth in `rgx-core` + `rgx-cli`
+- Changes:
+  - Refactored `rgx-core/src/log.rs` to support UVM-style verbosity levels:
+    - `Verbosity::{None, Low, Medium, High, Debug}`
+    - `RGX_VERBOSITY=none|low|medium|high|debug` env control
+    - backward-compatible mapping for `RGX_DEBUG`/`RGX_TRACE`
+  - Added structured tracing helpers/macros in `rgx-core/src/log.rs`:
+    - `trace_enter!`, `trace_exit!`, `trace_decision!`
+    - low/medium/high log macros for tiered output curation
+    - consistent emoji-tagged level formatting in emitted lines
+  - Updated `rgx-cli/src/main.rs`:
+    - added `--verbosity <none|low|medium|high|debug>`
+    - added `--quiet` for forced silence
+    - retained compatibility aliases (`--debug` => high, `--trace` => debug)
+    - routes CLI messages through verbosity-filtered core sink (`emit_external_at`)
+  - Instrumented compiler/VM hotspots with function-entry/function-exit/decision logs:
+    - compiler compile path (`compile`, `compile_ast`, `compile_ast_with_label`)
+    - VM execution path (`find_first`, strategy selection, scanning, anchored/SIMD entry points, `find_all`, `is_match`)
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - `cargo run --bin rgx-cli -- --verbosity debug --trace-log \"a\" \"a\"`
+  - `cargo run --bin rgx-cli -- --verbosity low --trace-log \"a\" \"a\"`
+  - `cargo run --bin rgx-cli -- --quiet --trace-log \"a\" \"a\"`
+  - verified `trace.log` filtering behavior by level (debug = exhaustive, low = milestones, quiet = empty file)
+- Notes/impact:
+  - Delivers user-controllable trace depth consistent with UVM-style workflow expectations
+  - Improves post-run diagnostics by making function flow and decision rationale explicitly visible
 ### 2026-02-27 - Added trace.log routing for debug/trace output
 - Scope: tracing usability and output control in `rgx-core` + `rgx-cli`
 - Changes:

@@ -9,7 +9,7 @@
 //! - Memoization for backtracking
 
 use crate::ast::{AnchorType, CharClass, CharRange, GroupKind, Quantifier, Regex};
-use crate::{debug_log, trace_log};
+use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use std::collections::HashMap;
 
 /// High-performance bytecode instruction optimized for cache efficiency
@@ -362,6 +362,15 @@ impl RegexVM {
 
     /// Find first match using adaptive execution strategy
     pub fn find_first(&self, text: &str) -> Option<Match> {
+        trace_enter!(
+            "vm",
+            "RegexVM::find_first",
+            "text_len={}, code_len={}",
+            text.len(),
+            self.program.code.len()
+        );
+        low_log!("vm", "");
+        low_log!("vm", "=== FIND_FIRST PIPELINE START ===");
         debug_log!("vm", "=== VM FIND_FIRST STARTED ===");
         debug_log!(
             "vm",
@@ -395,6 +404,12 @@ impl RegexVM {
 
         // Adaptive strategy selection based on program characteristics
         let result = if self.should_use_simd_search(&ctx) {
+            trace_decision!(
+                "vm",
+                "should_use_simd_search(ctx)",
+                true,
+                "SIMD capability and literal pre-filter conditions satisfied"
+            );
             debug_log!(
                 "vm",
                 "Strategy: SIMD search (text>{} bytes, literals>0)",
@@ -402,9 +417,21 @@ impl RegexVM {
             );
             self.find_first_simd(&mut ctx)
         } else if self.should_use_start_anchored_search() {
+            trace_decision!(
+                "vm",
+                "should_use_start_anchored_search()",
+                true,
+                "program begins with start anchor opcode"
+            );
             debug_log!("vm", "Strategy: Start-anchored search");
             self.find_first_anchored(&mut ctx)
         } else {
+            trace_decision!(
+                "vm",
+                "fallback to scanning strategy",
+                true,
+                "SIMD/anchored fast paths not applicable"
+            );
             debug_log!("vm", "Strategy: Standard scanning");
             self.find_first_scanning(&mut ctx)
         };
@@ -413,13 +440,16 @@ impl RegexVM {
             Some(m) => debug_log!("vm", "=== MATCH FOUND: {}..{} ===", m.start, m.end),
             None => debug_log!("vm", "=== NO MATCH FOUND ==="),
         }
+        low_log!("vm", "=== FIND_FIRST PIPELINE COMPLETE ===");
+        low_log!("vm", "");
+        trace_exit!("vm", "RegexVM::find_first", "matched={}", result.is_some());
 
         result
     }
 
     /// Determine if SIMD pre-filtering would be beneficial  
     fn should_use_simd_search(&self, ctx: &ExecContext) -> bool {
-        self.simd_support.sse2 && 
+        self.simd_support.sse2 &&
         ctx.text.len() > 64 && // Worth SIMD overhead
         self.program.stats.literal_chars > 0 // Has literal content to search for
     }
@@ -446,12 +476,32 @@ impl RegexVM {
 
     /// SIMD-accelerated first match search using state-of-the-art algorithms
     fn find_first_simd(&self, ctx: &mut ExecContext) -> Option<Match> {
+        trace_enter!(
+            "vm",
+            "RegexVM::find_first_simd",
+            "text_len={}, code_len={}",
+            ctx.text.len(),
+            self.program.code.len()
+        );
         // Extract first literal or character class from bytecode for SIMD pre-filtering
         let (literal_bytes, literal_len) = self.extract_first_literal();
 
         if literal_len == 0 {
             // No literal to search for, fall back to scanning
-            return self.find_first_scanning(ctx);
+            trace_decision!(
+                "vm",
+                "literal_len == 0",
+                true,
+                "falling back to full scanning path"
+            );
+            let result = self.find_first_scanning(ctx);
+            trace_exit!(
+                "vm",
+                "RegexVM::find_first_simd",
+                "fallback_scan_matched={}",
+                result.is_some()
+            );
+            return result;
         }
 
         // Use SIMD to find all potential match positions
@@ -472,35 +522,64 @@ impl RegexVM {
             self.reset_captures(ctx);
 
             if self.execute_at(ctx, candidate_pos) {
-                return Some(Match {
+                let matched = Some(Match {
                     start: candidate_pos,
                     end: ctx.pos,
                     groups: self.extract_captures_with_match(ctx, candidate_pos, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                 });
+                trace_exit!(
+                    "vm",
+                    "RegexVM::find_first_simd",
+                    "matched=true, start={}, end={}",
+                    candidate_pos,
+                    ctx.pos
+                );
+                return matched;
             }
         }
 
+        trace_exit!("vm", "RegexVM::find_first_simd", "matched=false");
         None
     }
 
     /// Optimized search for anchored patterns
     fn find_first_anchored(&self, ctx: &mut ExecContext) -> Option<Match> {
+        trace_enter!(
+            "vm",
+            "RegexVM::find_first_anchored",
+            "text_len={}",
+            ctx.text.len()
+        );
         // Only try match at start for ^ anchor
         if self.execute_at(ctx, 0) {
-            Some(Match {
+            let matched = Some(Match {
                 start: 0,
                 end: ctx.pos,
                 groups: self.extract_captures(ctx),
                 matched_alternative: ctx.current_alternative,
-            })
+            });
+            trace_exit!(
+                "vm",
+                "RegexVM::find_first_anchored",
+                "matched=true, end={}",
+                ctx.pos
+            );
+            matched
         } else {
+            trace_exit!("vm", "RegexVM::find_first_anchored", "matched=false");
             None
         }
     }
 
     /// Standard scanning approach - try match at each position
     fn find_first_scanning(&self, ctx: &mut ExecContext) -> Option<Match> {
+        trace_enter!(
+            "vm",
+            "RegexVM::find_first_scanning",
+            "positions={}",
+            ctx.text.len() + 1
+        );
         debug_log!(
             "vm",
             "Scanning {} positions (0..={})",
@@ -515,17 +594,26 @@ impl RegexVM {
 
             if self.execute_at(ctx, start) {
                 debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
-                return Some(Match {
+                let matched = Some(Match {
                     start,
                     end: ctx.pos,
                     groups: self.extract_captures_with_match(ctx, start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                 });
+                trace_exit!(
+                    "vm",
+                    "RegexVM::find_first_scanning",
+                    "matched=true, start={}, end={}",
+                    start,
+                    ctx.pos
+                );
+                return matched;
             } else {
                 trace_log!("vm", "✗ No match at position {}", start);
             }
         }
         debug_log!("vm", "Scanning complete - no match found");
+        trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
         None
     }
 
@@ -1360,6 +1448,13 @@ impl RegexVM {
 
     /// Find all non-overlapping matches
     pub fn find_all(&self, text: &str) -> Vec<Match> {
+        trace_enter!(
+            "vm",
+            "RegexVM::find_all",
+            "text_len={}, code_len={}",
+            text.len(),
+            self.program.code.len()
+        );
         let mut matches = Vec::new();
         let mut start = 0;
 
@@ -1382,13 +1477,23 @@ impl RegexVM {
                 break;
             }
         }
+        trace_exit!("vm", "RegexVM::find_all", "match_count={}", matches.len());
 
         matches
     }
 
     /// Test if pattern matches text
     pub fn is_match(&self, text: &str) -> bool {
-        self.find_first(text).is_some()
+        trace_enter!(
+            "vm",
+            "RegexVM::is_match",
+            "text_len={}, code_len={}",
+            text.len(),
+            self.program.code.len()
+        );
+        let matched = self.find_first(text).is_some();
+        trace_exit!("vm", "RegexVM::is_match", "matched={}", matched);
+        matched
     }
 
     /// Execute a sub-expression (used for quantifiers)
