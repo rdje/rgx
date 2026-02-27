@@ -46,6 +46,7 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 
 ## Documentation map
 - `CHANGES.md`: living progress ledger (authoritative change history)
+- `COMMIT.md`: authoritative commit-workflow contract (steps, invariants, and involved files)
 - `MEMORY.md`: live session continuity memory for fast post-interruption resume
 - `ROADMAP.md`: live forward-looking roadmap tracker (`Now` / `Next` / `Later`)
 - `DEVELOPMENT_NOTES.md`: technical knowledge base and current engineering notes

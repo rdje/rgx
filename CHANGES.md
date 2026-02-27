@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-26 - Added `COMMIT.md` as authoritative commit-workflow contract
+- Scope: workflow/documentation hardening for deterministic commits and AI handoff consistency
+- Changes:
+  - Added root-level `COMMIT.md` defining:
+    - commit workflow purpose and cadence
+    - files involved in commit operations and precise role of each file
+    - exact ordered pre-commit, commit, and post-commit verification steps
+    - non-negotiable commit invariants
+  - Integrated references to `COMMIT.md` in:
+    - `README.md` documentation map
+    - `DEVELOPMENT_NOTES.md` documentation policy
+    - `MEMORY.md` deep-reference list and session entry
+- Validation:
+  - Documentation consistency review across `COMMIT.md`, `README.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md`
+- Notes/impact:
+  - Makes commit behavior explicit for successor AI instances and reduces commit-process ambiguity
+  - Improves reliability of staged-file integrity and post-commit cleanup practices
 ### 2026-02-22 - Added differential parity guardrails for greedy quantifier suffix backtracking
 - Scope: PCRE2 differential test coverage expansion for `*`, `+`, and `?` backtracking semantics
 - Changes:

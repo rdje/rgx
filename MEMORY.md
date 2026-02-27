@@ -12,6 +12,7 @@ Live continuity memory for `rgx` sessions.
 - Keep entries compact, concrete, and execution-oriented.
 - Prefer links/references to live docs for deep detail:
   - `CHANGES.md`
+  - `COMMIT.md`
   - `DEVELOPMENT_NOTES.md`
   - `docs/USER_GUIDE.md`
   - `ROADMAP.md`
@@ -54,6 +55,14 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-02-26
+- Added root-level `COMMIT.md` as authoritative commit-workflow contract for AI handoff and process consistency.
+- `COMMIT.md` now defines:
+  - when to run commit workflow (after completed tasks)
+  - exact workflow steps and post-commit checks
+  - involved files and precise responsibilities (`git_message_brief.txt`, `CHANGES.md`, `MEMORY.md`, `DEVELOPMENT_NOTES.md`, task files)
+  - commit invariants (fresh status, exact staging, brief-file cleanup, untracked verification)
+- Integrated references in `README.md` and `DEVELOPMENT_NOTES.md` so successor AI instances can discover workflow rules quickly.
 ### 2026-02-22
 - Completed differential parity-hardening increment for greedy quantifier suffix behavior:
   - added `pcre2_parity_supported_quantifier_suffix_backtracking_behavior` in `rgx-bench/tests/pcre2_parity.rs`
