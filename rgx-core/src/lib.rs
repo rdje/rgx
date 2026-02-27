@@ -110,13 +110,28 @@ impl Regex {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile(pattern: &str) -> Result<Self> {
-        let compiled = Compiler::new().compile(pattern)?;
-        let engine = Engine::new(&compiled)?;
+        trace_enter!("api", "Regex::compile", "pattern_len={}", pattern.len());
+        let compiled = match Compiler::new().compile(pattern) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                trace_exit!("api", "Regex::compile", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
+        let engine = match Engine::new(&compiled) {
+            Ok(engine) => engine,
+            Err(err) => {
+                trace_exit!("api", "Regex::compile", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
-        Ok(Self {
+        let regex = Self {
             pattern: compiled,
             engine,
-        })
+        };
+        trace_exit!("api", "Regex::compile", "ok=true");
+        Ok(regex)
     }
 
     /// Compile a regex with specific execution mode.
@@ -126,13 +141,34 @@ impl Regex {
     /// - `ExecutionMode::Safe`: Code execution in sandboxed environments only
     /// - `ExecutionMode::Full`: All features enabled, including native callbacks
     pub fn with_mode(pattern: &str, mode: ExecutionMode) -> Result<Self> {
-        let compiled = Compiler::with_mode(mode).compile(pattern)?;
-        let engine = Engine::new(&compiled)?;
+        trace_enter!(
+            "api",
+            "Regex::with_mode",
+            "pattern_len={},mode={:?}",
+            pattern.len(),
+            mode
+        );
+        let compiled = match Compiler::with_mode(mode).compile(pattern) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                trace_exit!("api", "Regex::with_mode", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
+        let engine = match Engine::new(&compiled) {
+            Ok(engine) => engine,
+            Err(err) => {
+                trace_exit!("api", "Regex::with_mode", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
-        Ok(Self {
+        let regex = Self {
             pattern: compiled,
             engine,
-        })
+        };
+        trace_exit!("api", "Regex::with_mode", "ok=true");
+        Ok(regex)
     }
 
     /// Compile a regex directly from a pre-built AST.
@@ -140,24 +176,54 @@ impl Regex {
     /// This enables parser-independent development, testing, and benchmarking
     /// of the compiler/VM/engine pipeline.
     pub fn from_ast(ast: ast::Regex) -> Result<Self> {
-        let compiled = Compiler::new().compile_ast(ast)?;
-        let engine = Engine::new(&compiled)?;
+        trace_enter!("api", "Regex::from_ast");
+        let compiled = match Compiler::new().compile_ast(ast) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                trace_exit!("api", "Regex::from_ast", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
+        let engine = match Engine::new(&compiled) {
+            Ok(engine) => engine,
+            Err(err) => {
+                trace_exit!("api", "Regex::from_ast", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
-        Ok(Self {
+        let regex = Self {
             pattern: compiled,
             engine,
-        })
+        };
+        trace_exit!("api", "Regex::from_ast", "ok=true");
+        Ok(regex)
     }
 
     /// Compile a regex from AST using a specific execution mode.
     pub fn from_ast_with_mode(ast: ast::Regex, mode: ExecutionMode) -> Result<Self> {
-        let compiled = Compiler::with_mode(mode).compile_ast(ast)?;
-        let engine = Engine::new(&compiled)?;
+        trace_enter!("api", "Regex::from_ast_with_mode", "mode={:?}", mode);
+        let compiled = match Compiler::with_mode(mode).compile_ast(ast) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                trace_exit!("api", "Regex::from_ast_with_mode", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
+        let engine = match Engine::new(&compiled) {
+            Ok(engine) => engine,
+            Err(err) => {
+                trace_exit!("api", "Regex::from_ast_with_mode", "ok=false,error={}", err);
+                return Err(err);
+            }
+        };
 
-        Ok(Self {
+        let regex = Self {
             pattern: compiled,
             engine,
-        })
+        };
+        trace_exit!("api", "Regex::from_ast_with_mode", "ok=true");
+        Ok(regex)
     }
 
     /// Find all matches in the given text.
@@ -165,14 +231,43 @@ impl Regex {
     /// This method is optimized for bulk processing and will use SIMD
     /// instructions when beneficial.
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
-        self.engine.find_all(text.as_bytes())
+        trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
+        let matches = self.engine.find_all(text.as_bytes());
+        trace_decision!(
+            "api",
+            "matches.is_empty()",
+            matches.is_empty(),
+            "find_all result cardinality={}",
+            matches.len()
+        );
+        trace_exit!(
+            "api",
+            "Regex::find_all",
+            "ok=true,matches={}",
+            matches.len()
+        );
+        matches
     }
 
     /// Find the first match in the given text.
     ///
     /// Optimized for early termination when only one match is needed.
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
-        self.engine.find_first(text.as_bytes())
+        trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
+        let first = self.engine.find_first(text.as_bytes());
+        trace_decision!(
+            "api",
+            "first.is_some()",
+            first.is_some(),
+            "find_first completed"
+        );
+        trace_exit!(
+            "api",
+            "Regex::find_first",
+            "ok=true,found={}",
+            first.is_some()
+        );
+        first
     }
 
     /// Test if the pattern matches the text (boolean result only).
@@ -180,7 +275,16 @@ impl Regex {
     /// This is the fastest possible operation as it can terminate as soon
     /// as any match is found without capturing details.
     pub fn is_match(&self, text: &str) -> bool {
-        self.engine.is_match(text.as_bytes())
+        trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
+        let matched = self.engine.is_match(text.as_bytes());
+        trace_decision!(
+            "api",
+            "engine.is_match(text)",
+            matched,
+            "boolean API match result"
+        );
+        trace_exit!("api", "Regex::is_match", "ok=true,matched={}", matched);
+        matched
     }
 }
 
@@ -474,7 +578,8 @@ mod tests {
 
     #[test]
     fn parser_star_quantifier_backtracks_for_suffix() {
-        let regex = Regex::compile("a*a").expect("Failed to compile star-quantifier suffix pattern");
+        let regex =
+            Regex::compile("a*a").expect("Failed to compile star-quantifier suffix pattern");
         let m = regex
             .find_first("a")
             .expect("Expected star-quantifier suffix backtracking match");
@@ -484,7 +589,8 @@ mod tests {
 
     #[test]
     fn parser_plus_quantifier_backtracks_for_suffix() {
-        let regex = Regex::compile("a+a").expect("Failed to compile plus-quantifier suffix pattern");
+        let regex =
+            Regex::compile("a+a").expect("Failed to compile plus-quantifier suffix pattern");
         let m = regex
             .find_first("aa")
             .expect("Expected plus-quantifier suffix backtracking match");
@@ -549,7 +655,9 @@ mod tests {
         let result = Regex::compile("(?(1)a|b)");
         assert!(result.is_err(), "Conditional should not silently compile");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("conditional syntax is parsed but not yet integrated into VM execution"));
+        assert!(
+            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
+        );
     }
 
     #[test]
@@ -560,7 +668,9 @@ mod tests {
             "Lookahead conditional should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("conditional syntax is parsed but not yet integrated into VM execution"));
+        assert!(
+            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
+        );
     }
 
     #[test]
@@ -571,7 +681,9 @@ mod tests {
             "Negative lookbehind conditional should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("conditional syntax is parsed but not yet integrated into VM execution"));
+        assert!(
+            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
+        );
     }
 
     #[test]
@@ -602,8 +714,9 @@ mod tests {
         ];
 
         for (pattern, input, expected) in cases {
-            let regex = Regex::compile(pattern)
-                .unwrap_or_else(|e| panic!("expected supported pattern '{pattern}' to compile: {e}"));
+            let regex = Regex::compile(pattern).unwrap_or_else(|e| {
+                panic!("expected supported pattern '{pattern}' to compile: {e}")
+            });
             assert_eq!(
                 regex.is_match(input),
                 expected,

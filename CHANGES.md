@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Extended structured tracing into API and engine execution path
+- Scope: high-level API/engine observability and UTF-8 gate decision visibility
+- Changes:
+  - Instrumented `rgx-core/src/lib.rs` API boundaries with structured tracing:
+    - compile constructors: `Regex::compile`, `Regex::with_mode`, `Regex::from_ast`, `Regex::from_ast_with_mode`
+    - execution API calls: `Regex::find_all`, `Regex::find_first`, `Regex::is_match`
+  - Instrumented `rgx-core/src/engine.rs` runtime dispatch boundaries:
+    - `Engine::new`, `Engine::find_all`, `Engine::find_first`, `Engine::is_match`
+    - added explicit decision logs for UTF-8 validation gates and match/no-match outcomes
+    - added structured exits that preserve reasons for invalid UTF-8 early returns
+  - Corrected interrupted partial edit fallout in `lib.rs`/`engine.rs` while applying the tracing increment (duplicate/fragmented return path cleanup)
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a dog"`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a dog"`
+  - verified low filtering (`[LOW]` retained, no `[MEDIUM]/[HIGH]/[TRACE]`) and quiet sink behavior (`trace.log` size `0`)
+- Notes/impact:
+  - Completes structured trace continuity from API ingress through engine dispatch to VM internals
+  - Improves root-cause diagnosis for invalid-input and boundary outcomes without changing matching semantics
 ### 2026-02-27 - Extended structured tracing into lexer-path pipeline
 - Scope: lexer observability and trace continuity before parser/compile stages
 - Changes:

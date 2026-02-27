@@ -56,6 +56,19 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-27
+- Extended structured tracing into API + engine path:
+  - `rgx-core/src/lib.rs` now traces `Regex::compile`, `with_mode`, `from_ast`, `from_ast_with_mode`, `find_all`, `find_first`, and `is_match`
+  - `rgx-core/src/engine.rs` now traces `Engine::new`, `find_all`, `find_first`, and `is_match`
+  - added decision reasoning for UTF-8 validity gates and match outcome summaries at engine/API boundaries
+- Resolved interrupted partial edit artifacts during implementation:
+  - cleaned malformed constructor/return fragments introduced mid-edit in `lib.rs` and `engine.rs`
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - debug/low/quiet trace-log matrix using `rgx-cli` with `cat|dog` on `I have a dog`
+  - low filtering check passed (no `[MEDIUM]/[HIGH]/[TRACE]` in `trace.log`)
+  - quiet mode left `trace.log` at `0` bytes
+### 2026-02-27
 - Extended structured tracing into lexer-path pipeline:
   - added lexer boundary traces for `Lexer::new`, `Lexer::next_token`, and `Lexer::parse_escape`
   - added quantifier/class traces for `parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`, and `parse_character_class`

@@ -62,6 +62,10 @@ Pipeline in `rgx-core`:
   - token flow (`Lexer::new`, `Lexer::next_token`, `Lexer::parse_escape`)
   - quantifier and class parsing (`parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`, `parse_character_class`)
   - group/conditional parsing boundaries (`parse_group`, `parse_conditional_start`, `parse_conditional_subexpression_ast`)
+- API/engine-path tracing now covers high-level public dispatch and boundary decisions:
+  - API boundaries in `rgx-core/src/lib.rs` (`Regex::compile`, `with_mode`, `from_ast`, `from_ast_with_mode`, `find_all`, `find_first`, `is_match`)
+  - engine boundaries in `rgx-core/src/engine.rs` (`Engine::new`, `find_all`, `find_first`, `is_match`)
+  - explicit decision logs for UTF-8 validity gates and boolean/cardinality outcome summaries
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
