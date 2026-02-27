@@ -6,6 +6,7 @@
 
 use crate::ast::{AnchorType, CharRange, ConditionalTest, RecursionTarget, Regex};
 use crate::token::{LexError, Position, Token, TokenWithPos};
+use crate::{trace_decision, trace_enter, trace_exit};
 use std::str::Chars;
 
 /// Regex lexer that converts pattern strings to tokens
@@ -23,6 +24,7 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     /// Create a new lexer for the given input
     pub fn new(input: &'a str) -> Self {
+        trace_enter!("lexer", "Lexer::new", "input_len={}", input.len());
         let mut lexer = Self {
             input,
             chars: input.chars(),
@@ -30,7 +32,62 @@ impl<'a> Lexer<'a> {
             position: Position::start(),
         };
         lexer.advance(); // Prime the first character
+        trace_exit!(
+            "lexer",
+            "Lexer::new",
+            "ok=true,current={:?},offset={}",
+            lexer.current,
+            lexer.position.offset
+        );
         lexer
+    }
+
+    fn current_char_snapshot(&self) -> String {
+        self.current
+            .map(|c| format!("{c:?}"))
+            .unwrap_or_else(|| "<eof>".to_string())
+    }
+
+    fn token_kind(token: &Token) -> &'static str {
+        match token {
+            Token::Char(_) => "Char",
+            Token::CharClass { .. } => "CharClass",
+            Token::Dot => "Dot",
+            Token::Digit => "Digit",
+            Token::DigitNeg => "DigitNeg",
+            Token::Word => "Word",
+            Token::WordNeg => "WordNeg",
+            Token::Space => "Space",
+            Token::SpaceNeg => "SpaceNeg",
+            Token::WordBoundary => "WordBoundary",
+            Token::WordBoundaryNeg => "WordBoundaryNeg",
+            Token::UnicodeClass { .. } => "UnicodeClass",
+            Token::UnicodeClassNeg { .. } => "UnicodeClassNeg",
+            Token::Star => "Star",
+            Token::Plus => "Plus",
+            Token::Question => "Question",
+            Token::StarLazy => "StarLazy",
+            Token::PlusLazy => "PlusLazy",
+            Token::QuestionLazy => "QuestionLazy",
+            Token::Repeat { .. } => "Repeat",
+            Token::GroupStart => "GroupStart",
+            Token::NamedGroupStart { .. } => "NamedGroupStart",
+            Token::NonCapturingGroupStart => "NonCapturingGroupStart",
+            Token::AtomicGroupStart => "AtomicGroupStart",
+            Token::GroupEnd => "GroupEnd",
+            Token::LookaheadPos => "LookaheadPos",
+            Token::LookaheadNeg => "LookaheadNeg",
+            Token::LookbehindPos => "LookbehindPos",
+            Token::LookbehindNeg => "LookbehindNeg",
+            Token::CodeBlock { .. } => "CodeBlock",
+            Token::ConditionalStart { .. } => "ConditionalStart",
+            Token::Recursion { .. } => "Recursion",
+            Token::Alternation => "Alternation",
+            Token::Anchor(_) => "Anchor",
+            Token::Backreference(_) => "Backreference",
+            Token::FlagModifier { .. } => "FlagModifier",
+            Token::EOF => "EOF",
+        }
     }
 
     /// Advance to the next character
@@ -60,56 +117,87 @@ impl<'a> Lexer<'a> {
 
     /// Get the next token from the input
     pub fn next_token(&mut self) -> Result<TokenWithPos, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::next_token",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let start_pos = self.current_position();
-
-        let token = match self.current {
-            None => Token::EOF,
-
-            Some('\\') => self.parse_escape()?,
+        let token_result: Result<Token, LexError> = match self.current {
+            None => {
+                trace_decision!(
+                    "lexer",
+                    "self.current.is_none()",
+                    true,
+                    "emit EOF token at lexical boundary"
+                );
+                Ok(Token::EOF)
+            }
+            Some('\\') => self.parse_escape(),
             Some('.') => {
                 self.advance();
-                Token::Dot
+                Ok(Token::Dot)
             }
             Some('^') => {
                 self.advance();
-                Token::Anchor(AnchorType::Start)
+                Ok(Token::Anchor(AnchorType::Start))
             }
             Some('$') => {
                 self.advance();
-                Token::Anchor(AnchorType::End)
+                Ok(Token::Anchor(AnchorType::End))
             }
-            Some('*') => self.parse_star()?,
-            Some('+') => self.parse_plus()?,
-            Some('?') => self.parse_question()?,
+            Some('*') => self.parse_star(),
+            Some('+') => self.parse_plus(),
+            Some('?') => self.parse_question(),
             Some('|') => {
                 self.advance();
-                Token::Alternation
+                Ok(Token::Alternation)
             }
 
-            Some('(') => self.parse_group()?,
+            Some('(') => self.parse_group(),
             Some(')') => {
                 self.advance();
-                Token::GroupEnd
+                Ok(Token::GroupEnd)
             }
 
-            Some('[') => self.parse_character_class()?,
-            Some('{') => self.parse_repeat_quantifier()?,
+            Some('[') => self.parse_character_class(),
+            Some('{') => self.parse_repeat_quantifier(),
 
             Some(c) => {
                 self.advance();
-                Token::Char(c)
+                Ok(Token::Char(c))
             }
         };
 
-        Ok(TokenWithPos::new(token, start_pos))
+        let result = token_result.map(|token| TokenWithPos::new(token, start_pos));
+        match &result {
+            Ok(token) => trace_exit!(
+                "lexer",
+                "Lexer::next_token",
+                "ok=true,token_kind={},offset={}",
+                Self::token_kind(&token.token),
+                token.position.offset
+            ),
+            Err(err) => trace_exit!("lexer", "Lexer::next_token", "ok=false,error={}", err),
+        }
+        result
     }
 
     /// Parse escape sequences like \d, \w, \n, etc.
     fn parse_escape(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_escape",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let start_pos = self.current_position();
         self.advance(); // Skip the backslash
 
-        match self.current {
+        let result = match self.current {
             None => Err(LexError::UnexpectedEOF {
                 expected: "escape sequence".to_string(),
                 position: start_pos,
@@ -218,7 +306,17 @@ impl<'a> Lexer<'a> {
                     position: start_pos,
                 })
             }
+        };
+        match &result {
+            Ok(token) => trace_exit!(
+                "lexer",
+                "Lexer::parse_escape",
+                "ok=true,token_kind={}",
+                Self::token_kind(token)
+            ),
+            Err(err) => trace_exit!("lexer", "Lexer::parse_escape", "ok=false,error={}", err),
         }
+        result
     }
 
     /// Parse Unicode property class \p{Name} or \P{Name}
@@ -398,50 +496,117 @@ impl<'a> Lexer<'a> {
 
     /// Parse * and *? quantifiers
     fn parse_star(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_star",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         self.advance(); // Skip '*'
-        if self.current == Some('?') {
+        let token = if self.current == Some('?') {
             self.advance(); // Skip '?'
-            Ok(Token::StarLazy)
+            Token::StarLazy
         } else {
-            Ok(Token::Star)
-        }
+            Token::Star
+        };
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_star",
+            "ok=true,token_kind={}",
+            Self::token_kind(&token)
+        );
+        Ok(token)
     }
 
     /// Parse + and +? quantifiers
     fn parse_plus(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_plus",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         self.advance(); // Skip '+'
-        if self.current == Some('?') {
+        let token = if self.current == Some('?') {
             self.advance(); // Skip '?'
-            Ok(Token::PlusLazy)
+            Token::PlusLazy
         } else {
-            Ok(Token::Plus)
-        }
+            Token::Plus
+        };
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_plus",
+            "ok=true,token_kind={}",
+            Self::token_kind(&token)
+        );
+        Ok(token)
     }
 
     /// Parse ? and ?? quantifiers
     fn parse_question(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_question",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         self.advance(); // Skip '?'
-        if self.current == Some('?') {
+        let token = if self.current == Some('?') {
             self.advance(); // Skip second '?'
-            Ok(Token::QuestionLazy)
+            Token::QuestionLazy
         } else {
-            Ok(Token::Question)
-        }
+            Token::Question
+        };
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_question",
+            "ok=true,token_kind={}",
+            Self::token_kind(&token)
+        );
+        Ok(token)
     }
 
     /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_group",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let start_pos = self.current_position();
         self.advance(); // Skip '('
 
         // Simple capturing group
         if self.current != Some('?') {
+            trace_decision!(
+                "lexer",
+                "self.current != Some('?')",
+                true,
+                "emit capturing group start token"
+            );
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_group",
+                "ok=true,token_kind={}",
+                Self::token_kind(&Token::GroupStart)
+            );
             return Ok(Token::GroupStart);
         }
+        trace_decision!(
+            "lexer",
+            "self.current != Some('?')",
+            false,
+            "dispatching to special group syntax parser"
+        );
 
         self.advance(); // Skip '?'
 
-        match self.current {
+        let result = match self.current {
             Some('(') => self.parse_conditional_start(start_pos),
             Some('{') => {
                 self.advance(); // Skip '{'
@@ -626,7 +791,17 @@ impl<'a> Lexer<'a> {
             _ => Err(LexError::InvalidGroupSyntax {
                 position: start_pos,
             }),
+        };
+        match &result {
+            Ok(token) => trace_exit!(
+                "lexer",
+                "Lexer::parse_group",
+                "ok=true,token_kind={}",
+                Self::token_kind(token)
+            ),
+            Err(err) => trace_exit!("lexer", "Lexer::parse_group", "ok=false,error={}", err),
         }
+        result
     }
 
     /// Parse conditional start:
@@ -641,6 +816,13 @@ impl<'a> Lexer<'a> {
     /// This returns only the condition-start token. Branch expressions and
     /// the closing group ')' are parsed by the parser stage.
     fn parse_conditional_start(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_conditional_start",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         self.advance(); // Skip '(' after "(?"
 
         let condition = match self.current {
@@ -762,12 +944,32 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        if self.current != Some(')') {
+        let has_condition_close = self.current == Some(')');
+        trace_decision!(
+            "lexer",
+            "self.current == Some(')')",
+            has_condition_close,
+            "conditional test must terminate with ')'"
+        );
+        if !has_condition_close {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_conditional_start",
+                "ok=false,error=missing ')' after condition test"
+            );
             return Err(LexError::InvalidGroupSyntax {
                 position: start_pos,
             });
         }
         self.advance(); // Skip ')' ending condition test
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_conditional_start",
+            "ok=true,token_kind={}",
+            Self::token_kind(&Token::ConditionalStart {
+                condition: condition.clone()
+            })
+        );
 
         Ok(Token::ConditionalStart { condition })
     }
@@ -780,6 +982,13 @@ impl<'a> Lexer<'a> {
         &mut self,
         start_pos: Position,
     ) -> Result<Regex, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_conditional_subexpression_ast",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let mut expr_text = String::new();
         let mut paren_depth = 0usize;
         let mut in_char_class = false;
@@ -788,6 +997,11 @@ impl<'a> Lexer<'a> {
         loop {
             match self.current {
                 None => {
+                    trace_exit!(
+                        "lexer",
+                        "Lexer::parse_conditional_subexpression_ast",
+                        "ok=false,error=unterminated conditional subexpression"
+                    );
                     return Err(LexError::UnterminatedGroup {
                         position: start_pos,
                     });
@@ -844,12 +1058,45 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let mut parser = crate::parser::Parser::new(&expr_text)?;
-        parser.parse()
+        let mut parser = match crate::parser::Parser::new(&expr_text) {
+            Ok(parser) => parser,
+            Err(err) => {
+                trace_exit!(
+                    "lexer",
+                    "Lexer::parse_conditional_subexpression_ast",
+                    "ok=false,error={}",
+                    err
+                );
+                return Err(err);
+            }
+        };
+        let result = parser.parse();
+        match &result {
+            Ok(_) => trace_exit!(
+                "lexer",
+                "Lexer::parse_conditional_subexpression_ast",
+                "ok=true,expr_len={}",
+                expr_text.len()
+            ),
+            Err(err) => trace_exit!(
+                "lexer",
+                "Lexer::parse_conditional_subexpression_ast",
+                "ok=false,error={}",
+                err
+            ),
+        }
+        result
     }
 
     /// Parse character class [abc], [^abc], [a-z], etc.
     fn parse_character_class(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_character_class",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let start_pos = self.current_position();
         self.advance(); // Skip '['
 
@@ -892,6 +1139,13 @@ impl<'a> Lexer<'a> {
                     self.advance(); // Skip '-'
                     if let Some(end_char) = self.current {
                         if end_char < start_char {
+                            trace_exit!(
+                                "lexer",
+                                "Lexer::parse_character_class",
+                                "ok=false,error=invalid range {}-{}",
+                                start_char,
+                                end_char
+                            );
                             return Err(LexError::InvalidCharRange {
                                 start: start_char,
                                 end: end_char,
@@ -901,6 +1155,11 @@ impl<'a> Lexer<'a> {
                         ranges.push(CharRange::range(start_char, end_char));
                         self.advance();
                     } else {
+                        trace_exit!(
+                            "lexer",
+                            "Lexer::parse_character_class",
+                            "ok=false,error=unterminated character class after '-'"
+                        );
                         return Err(LexError::UnterminatedCharClass {
                             position: start_pos,
                         });
@@ -913,16 +1172,34 @@ impl<'a> Lexer<'a> {
         }
 
         if ranges.is_empty() {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_character_class",
+                "ok=false,error=empty or unterminated character class"
+            );
             return Err(LexError::UnterminatedCharClass {
                 position: start_pos,
             });
         }
-
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_character_class",
+            "ok=true,ranges={},negated={}",
+            ranges.len(),
+            negated
+        );
         Ok(Token::CharClass { ranges, negated })
     }
 
     /// Parse repeat quantifier {n}, {n,}, {n,m}, {n,m}?
     fn parse_repeat_quantifier(&mut self) -> Result<Token, LexError> {
+        trace_enter!(
+            "lexer",
+            "Lexer::parse_repeat_quantifier",
+            "current={},offset={}",
+            self.current_char_snapshot(),
+            self.position.offset
+        );
         let start_pos = self.current_position();
         self.advance(); // Skip '{'
 
@@ -938,6 +1215,12 @@ impl<'a> Lexer<'a> {
 
         // Parse the content: "n", "n,", "n,m"
         let parts: Vec<&str> = content.split(',').collect();
+        trace_decision!(
+            "lexer",
+            "parts.len() <= 2",
+            parts.len() <= 2,
+            "repeat quantifier form must be one of {{n}}, {{n,}}, {{n,m}}"
+        );
 
         let (min, max) = match parts.as_slice() {
             [min_str] => {
@@ -975,6 +1258,12 @@ impl<'a> Lexer<'a> {
                 (min, Some(max))
             }
             _ => {
+                trace_exit!(
+                    "lexer",
+                    "Lexer::parse_repeat_quantifier",
+                    "ok=false,error=invalid repeat text {}",
+                    content
+                );
                 return Err(LexError::InvalidRepeat {
                     text: content,
                     position: start_pos,
@@ -989,7 +1278,14 @@ impl<'a> Lexer<'a> {
         } else {
             false
         };
-
+        trace_exit!(
+            "lexer",
+            "Lexer::parse_repeat_quantifier",
+            "ok=true,min={},max={:?},lazy={}",
+            min,
+            max,
+            lazy
+        );
         Ok(Token::Repeat { min, max, lazy })
     }
 }

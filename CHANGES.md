@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Extended structured tracing into lexer-path pipeline
+- Scope: lexer observability and trace continuity before parser/compile stages
+- Changes:
+  - Instrumented `rgx-core/src/lexer.rs` with structured tracing on lexer hotspots:
+    - `Lexer::new`, `Lexer::next_token`, `Lexer::parse_escape`
+    - quantifier token helpers (`parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`)
+    - character-class parsing (`parse_character_class`)
+    - group/conditional paths (`parse_group`, `parse_conditional_start`, `parse_conditional_subexpression_ast`)
+  - Added lexer decision logs for:
+    - EOF token emission in `next_token`
+    - simple-vs-special group parsing branch
+    - conditional-start close-token validation
+    - repeat-quantifier form validation
+  - Added structured success/error exits for key lexer parse helpers to improve boundary diagnosability
+- Validation:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - `cargo run --bin rgx-cli -- --verbosity debug --trace-log \"a{2,3}\" \"aaa\"`
+  - `cargo run --bin rgx-cli -- --verbosity low --trace-log \"a{2,3}\" \"aaa\"`
+  - `cargo run --bin rgx-cli -- --quiet --trace-log \"a{2,3}\" \"aaa\"`
+  - verified lexer trace lines appear in `trace.log` at debug and are filtered at low/quiet
+- Notes/impact:
+  - Improves trace readability for tokenization decisions and lexer parse failures
+  - Strengthens first-class tracing coverage from lexer through parser, compiler, and VM paths
 ### 2026-02-27 - Extended structured tracing into parser-path pipeline
 - Scope: parser-path observability depth in `rgx-core` parsing stack
 - Changes:

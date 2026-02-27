@@ -56,6 +56,18 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-27
+- Extended structured tracing into lexer-path pipeline:
+  - added lexer boundary traces for `Lexer::new`, `Lexer::next_token`, and `Lexer::parse_escape`
+  - added quantifier/class traces for `parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`, and `parse_character_class`
+  - added group/conditional traces for `parse_group`, `parse_conditional_start`, and `parse_conditional_subexpression_ast`
+- Added lexer decision tracing for EOF token emission, simple-vs-special group dispatch, conditional close validation, and repeat-quantifier form checks.
+- Validation confirmed:
+  - `cargo test -p rgx-core`
+  - `cargo test -p rgx-cli`
+  - `--verbosity debug --trace-log` includes lexer trace lines in `trace.log`
+  - `--verbosity low --trace-log` filters to low-level milestones
+  - `--quiet --trace-log` leaves `trace.log` empty
+### 2026-02-27
 - Extended structured tracing into parser-path pipeline:
   - `rgx-core/src/parser.rs` now emits structured entry/exit/decision logs for parser hotspots (`new`, `parse`, `parse_alternation`, `parse_sequence`, `parse_quantified`, `parse_atom`)
   - `rgx-core/src/parsing.rs` now emits parser-backend selection and parse-boundary logs in both recursive-descent and `pgen-parser` feature paths

@@ -58,6 +58,10 @@ Pipeline in `rgx-core`:
   - parser stack hotspots (`Parser::new/parse/parse_alternation/parse_sequence/parse_quantified/parse_atom`)
   - compile-time parsing entry (`parsing::parse_pattern`) and trait adapter path (`RecursiveDescentParser::parse_pattern`)
   - backend-selection and parse-boundary decision logs visible at medium/high/debug verbosity levels
+- Lexer-path tracing now covers tokenization boundaries and high-branch parse helpers:
+  - token flow (`Lexer::new`, `Lexer::next_token`, `Lexer::parse_escape`)
+  - quantifier and class parsing (`parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`, `parse_character_class`)
+  - group/conditional parsing boundaries (`parse_group`, `parse_conditional_start`, `parse_conditional_subexpression_ast`)
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
