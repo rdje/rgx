@@ -66,6 +66,11 @@ Pipeline in `rgx-core`:
   - API boundaries in `rgx-core/src/lib.rs` (`Regex::compile`, `with_mode`, `from_ast`, `from_ast_with_mode`, `find_all`, `find_first`, `is_match`)
   - engine boundaries in `rgx-core/src/engine.rs` (`Engine::new`, `find_all`, `find_first`, `is_match`)
   - explicit decision logs for UTF-8 validity gates and boolean/cardinality outcome summaries
+- Execution-layer tracing now covers code-execution runtime boundaries:
+  - context and lookup boundaries in `rgx-core/src/execution.rs` (`ExecContext::new/current_match/group/named`)
+  - callback-registry boundaries (`NativeCallbackRegistry::new/register/call/has`)
+  - manager dispatch boundaries (`ExecutionManager::new/execute/register_native/is_language_available`)
+  - explicit decision logs for callback replacement/lookup outcomes and language backend routing choices
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

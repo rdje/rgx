@@ -33,6 +33,7 @@
 //! ```
 
 use crate::error::{Result, RgxError};
+use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -64,28 +65,100 @@ pub struct ExecContext {
 impl ExecContext {
     /// Create a new execution context
     pub fn new(text: String, position: usize) -> Self {
-        Self {
+        trace_enter!(
+            "execution",
+            "ExecContext::new",
+            "text_len={},position={}",
+            text.len(),
+            position
+        );
+        let context = Self {
             text,
             position,
             captures: Vec::new(),
             named_captures: HashMap::new(),
             variables: Arc::new(RwLock::new(HashMap::new())),
-        }
+        };
+        trace_exit!(
+            "execution",
+            "ExecContext::new",
+            "ok=true,captures=0,named_captures=0"
+        );
+        context
     }
 
     /// Get the current match (group 0)
     pub fn current_match(&self) -> Option<&str> {
-        self.captures.get(0)?.as_deref()
+        trace_enter!(
+            "execution",
+            "ExecContext::current_match",
+            "capture_slots={}",
+            self.captures.len()
+        );
+        let current = self.captures.first().and_then(Option::as_deref);
+        trace_decision!(
+            "execution",
+            "current_match.is_some()",
+            current.is_some(),
+            "group-0 capture availability check"
+        );
+        trace_exit!(
+            "execution",
+            "ExecContext::current_match",
+            "ok=true,found={}",
+            current.is_some()
+        );
+        current
     }
 
     /// Get a capture group by index
     pub fn group(&self, index: usize) -> Option<&str> {
-        self.captures.get(index)?.as_deref()
+        trace_enter!(
+            "execution",
+            "ExecContext::group",
+            "index={},capture_slots={}",
+            index,
+            self.captures.len()
+        );
+        let value = self.captures.get(index).and_then(Option::as_deref);
+        trace_decision!(
+            "execution",
+            "group(index).is_some()",
+            value.is_some(),
+            "indexed capture lookup completed"
+        );
+        trace_exit!(
+            "execution",
+            "ExecContext::group",
+            "ok=true,found={}",
+            value.is_some()
+        );
+        value
     }
 
     /// Get a named capture group
     pub fn named(&self, name: &str) -> Option<&str> {
-        self.named_captures.get(name).map(|s| s.as_str())
+        trace_enter!(
+            "execution",
+            "ExecContext::named",
+            "name={},named_capture_slots={}",
+            name,
+            self.named_captures.len()
+        );
+        let value = self.named_captures.get(name).map(String::as_str);
+        trace_decision!(
+            "execution",
+            "named(name).is_some()",
+            value.is_some(),
+            "named capture lookup completed"
+        );
+        trace_exit!(
+            "execution",
+            "ExecContext::named",
+            "ok=true,found={}",
+            value.is_some()
+        );
+        value
     }
 }
 
@@ -106,6 +179,16 @@ pub enum ExecResult {
     Numeric(f64),
     /// Code execution error - treated as failure
     Error(String),
+}
+
+fn exec_result_kind(result: &ExecResult) -> &'static str {
+    match result {
+        ExecResult::Success => "Success",
+        ExecResult::Failure => "Failure",
+        ExecResult::Replacement(_) => "Replacement",
+        ExecResult::Numeric(_) => "Numeric",
+        ExecResult::Error(_) => "Error",
+    }
 }
 
 // ============================================================================
@@ -430,9 +513,16 @@ pub struct NativeCallbackRegistry {
 impl NativeCallbackRegistry {
     /// Create a new callback registry
     pub fn new() -> Self {
-        Self {
+        trace_enter!("execution", "NativeCallbackRegistry::new");
+        let registry = Self {
             callbacks: HashMap::new(),
-        }
+        };
+        trace_exit!(
+            "execution",
+            "NativeCallbackRegistry::new",
+            "ok=true,registered_callbacks=0"
+        );
+        registry
     }
 
     /// Register a native callback function
@@ -440,20 +530,94 @@ impl NativeCallbackRegistry {
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
-        self.callbacks.insert(name, Box::new(callback));
+        trace_enter!(
+            "execution",
+            "NativeCallbackRegistry::register",
+            "name={}",
+            name
+        );
+        let replaced_existing = self
+            .callbacks
+            .insert(name.clone(), Box::new(callback))
+            .is_some();
+        trace_decision!(
+            "execution",
+            "callbacks.insert(name,...).is_some()",
+            replaced_existing,
+            "true means an existing callback with the same name was replaced"
+        );
+        trace_exit!(
+            "execution",
+            "NativeCallbackRegistry::register",
+            "ok=true,name={},registered_callbacks={}",
+            name,
+            self.callbacks.len()
+        );
     }
 
     /// Call a registered callback
     pub fn call(&self, name: &str, context: &ExecContext) -> ExecResult {
+        trace_enter!(
+            "execution",
+            "NativeCallbackRegistry::call",
+            "name={},registered_callbacks={},capture_slots={}",
+            name,
+            self.callbacks.len(),
+            context.captures.len()
+        );
         match self.callbacks.get(name) {
-            Some(callback) => callback(context),
-            None => ExecResult::Error(format!("Unknown native function: {}", name)),
+            Some(callback) => {
+                trace_decision!(
+                    "execution",
+                    "callbacks.get(name).is_some()",
+                    true,
+                    "dispatching to registered native callback"
+                );
+                let result = callback(context);
+                trace_exit!(
+                    "execution",
+                    "NativeCallbackRegistry::call",
+                    "ok=true,result_kind={}",
+                    exec_result_kind(&result)
+                );
+                result
+            }
+            None => {
+                trace_decision!(
+                    "execution",
+                    "callbacks.get(name).is_some()",
+                    false,
+                    "native callback name is not registered"
+                );
+                let result = ExecResult::Error(format!("Unknown native function: {}", name));
+                trace_exit!(
+                    "execution",
+                    "NativeCallbackRegistry::call",
+                    "ok=true,result_kind={}",
+                    exec_result_kind(&result)
+                );
+                result
+            }
         }
     }
 
     /// Check if a callback is registered
     pub fn has(&self, name: &str) -> bool {
-        self.callbacks.contains_key(name)
+        trace_enter!(
+            "execution",
+            "NativeCallbackRegistry::has",
+            "name={},registered_callbacks={}",
+            name,
+            self.callbacks.len()
+        );
+        let is_registered = self.callbacks.contains_key(name);
+        trace_exit!(
+            "execution",
+            "NativeCallbackRegistry::has",
+            "ok=true,registered={}",
+            is_registered
+        );
+        is_registered
     }
 }
 
@@ -482,42 +646,161 @@ pub struct ExecutionManager {
 impl ExecutionManager {
     /// Create a new execution manager with all available engines
     pub fn new() -> Self {
-        Self {
+        trace_enter!("execution", "ExecutionManager::new");
+        let manager = Self {
             #[cfg(feature = "lua")]
             lua_engine: lua::LuaEngine::new().ok(),
             #[cfg(feature = "javascript")]
             js_engine: javascript::JavaScriptEngine::new().ok(),
             native_callbacks: NativeCallbackRegistry::new(),
-        }
+        };
+        let lua_available = {
+            #[cfg(feature = "lua")]
+            {
+                manager.lua_engine.is_some()
+            }
+            #[cfg(not(feature = "lua"))]
+            {
+                false
+            }
+        };
+        let js_available = {
+            #[cfg(feature = "javascript")]
+            {
+                manager.js_engine.is_some()
+            }
+            #[cfg(not(feature = "javascript"))]
+            {
+                false
+            }
+        };
+        trace_exit!(
+            "execution",
+            "ExecutionManager::new",
+            "ok=true,lua_available={},javascript_available={},native_available=true",
+            lua_available,
+            js_available
+        );
+        manager
     }
 
     /// Execute code in the specified language
     pub fn execute(&self, language: &str, code: &str, context: &ExecContext) -> ExecResult {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::execute",
+            "language={},code_len={},capture_slots={}",
+            language,
+            code.len(),
+            context.captures.len()
+        );
         match language {
             #[cfg(feature = "lua")]
             "lua" => {
                 if let Some(engine) = &self.lua_engine {
-                    engine.execute(code, context)
+                    trace_decision!(
+                        "execution",
+                        "self.lua_engine.is_some()",
+                        true,
+                        "dispatching code to Lua execution backend"
+                    );
+                    let result = engine.execute(code, context);
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=lua,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
                 } else {
-                    ExecResult::Error("Lua engine not available".to_string())
+                    trace_decision!(
+                        "execution",
+                        "self.lua_engine.is_some()",
+                        false,
+                        "lua feature enabled but engine initialization unavailable"
+                    );
+                    let result = ExecResult::Error("Lua engine not available".to_string());
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=lua,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
                 }
             }
 
             #[cfg(feature = "javascript")]
             "js" | "javascript" => {
                 if let Some(engine) = &self.js_engine {
-                    engine.execute(code, context)
+                    trace_decision!(
+                        "execution",
+                        "self.js_engine.is_some()",
+                        true,
+                        "dispatching code to JavaScript execution backend"
+                    );
+                    let result = engine.execute(code, context);
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=javascript,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
                 } else {
-                    ExecResult::Error("JavaScript engine not available".to_string())
+                    trace_decision!(
+                        "execution",
+                        "self.js_engine.is_some()",
+                        false,
+                        "javascript feature enabled but engine initialization unavailable"
+                    );
+                    let result = ExecResult::Error("JavaScript engine not available".to_string());
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=javascript,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
                 }
             }
 
             "native" => {
                 // For native, the 'code' is the function name
-                self.native_callbacks.call(code, context)
+                trace_decision!(
+                    "execution",
+                    "language == native",
+                    true,
+                    "treat code argument as native callback identifier"
+                );
+                let result = self.native_callbacks.call(code, context);
+                trace_exit!(
+                    "execution",
+                    "ExecutionManager::execute",
+                    "ok=true,language=native,result_kind={}",
+                    exec_result_kind(&result)
+                );
+                result
             }
 
-            _ => ExecResult::Error(format!("Unknown language: {}", language)),
+            _ => {
+                trace_decision!(
+                    "execution",
+                    "language is known backend",
+                    false,
+                    "unsupported language dispatch attempted: {}",
+                    language
+                );
+                let result = ExecResult::Error(format!("Unknown language: {}", language));
+                trace_exit!(
+                    "execution",
+                    "ExecutionManager::execute",
+                    "ok=true,language={},result_kind={}",
+                    language,
+                    exec_result_kind(&result)
+                );
+                result
+            }
         }
     }
 
@@ -526,19 +809,51 @@ impl ExecutionManager {
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::register_native",
+            "name={}",
+            name
+        );
+        let replaced_existing = self.native_callbacks.callbacks.contains_key(&name);
         self.native_callbacks.register(name, callback);
+        trace_decision!(
+            "execution",
+            "native_callbacks.contains_key(name) before register",
+            replaced_existing,
+            "true means this registration replaced an existing callback"
+        );
+        trace_exit!(
+            "execution",
+            "ExecutionManager::register_native",
+            "ok=true,registered_callbacks={}",
+            self.native_callbacks.callbacks.len()
+        );
     }
 
     /// Check if a language is available
     pub fn is_language_available(&self, language: &str) -> bool {
-        match language {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::is_language_available",
+            "language={}",
+            language
+        );
+        let available = match language {
             #[cfg(feature = "lua")]
             "lua" => self.lua_engine.is_some(),
             #[cfg(feature = "javascript")]
             "js" | "javascript" => self.js_engine.is_some(),
             "native" => true,
             _ => false,
-        }
+        };
+        trace_exit!(
+            "execution",
+            "ExecutionManager::is_language_available",
+            "ok=true,available={}",
+            available
+        );
+        available
     }
 }
 

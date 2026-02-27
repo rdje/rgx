@@ -14,6 +14,31 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Extended structured tracing into execution manager and callback runtime
+- Scope: execution-module boundary observability for context access, callback dispatch, and language routing
+- Changes:
+  - Instrumented `rgx-core/src/execution.rs` with structured tracing at public/runtime boundaries:
+    - `ExecContext::{new,current_match,group,named}`
+    - `NativeCallbackRegistry::{new,register,call,has}`
+    - `ExecutionManager::{new,execute,register_native,is_language_available}`
+  - Added decision traces for:
+    - capture/named-capture lookup outcomes
+    - callback replacement/registration behavior
+    - callback existence checks and native dispatch fallback
+    - language backend routing (native vs supported/unsupported backend)
+    - backend-availability outcomes during execution manager construction
+  - Added internal execution-result kind classification helper for consistent exit trace summaries (`Success|Failure|Replacement|Numeric|Error`)
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a dog"`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a dog"`
+  - verified low filtering (`[LOW]` only) and quiet sink behavior (`trace.log` size `0`)
+- Notes/impact:
+  - Extends trace continuity into the code-execution subsystem so callback/language-dispatch decisions are now externally diagnosable
+  - Preserves runtime behavior while improving branch-level observability for future execution-feature integration
 ### 2026-02-27 - Extended structured tracing into API and engine execution path
 - Scope: high-level API/engine observability and UTF-8 gate decision visibility
 - Changes:

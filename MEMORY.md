@@ -56,6 +56,18 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-27
+- Extended structured tracing into execution-runtime path in `rgx-core/src/execution.rs`:
+  - context boundaries: `ExecContext::new`, `current_match`, `group`, `named`
+  - callback registry boundaries: `NativeCallbackRegistry::new`, `register`, `call`, `has`
+  - manager boundaries: `ExecutionManager::new`, `execute`, `register_native`, `is_language_available`
+- Added decision-level trace reasoning for callback replacement, callback existence/lookup outcomes, and language backend routing/availability branches.
+- Added consistent execution-result kind summary helper for trace exits (`Success|Failure|Replacement|Numeric|Error`).
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - debug/low/quiet trace-log smoke matrix with `rgx-cli` and `cat|dog` on `I have a dog`
+  - low filtering retained only `[LOW]` entries; quiet mode left `trace.log` at `0` bytes
+### 2026-02-27
 - Extended structured tracing into API + engine path:
   - `rgx-core/src/lib.rs` now traces `Regex::compile`, `with_mode`, `from_ast`, `from_ast_with_mode`, `find_all`, `find_first`, and `is_match`
   - `rgx-core/src/engine.rs` now traces `Engine::new`, `find_all`, `find_first`, and `is_match`
