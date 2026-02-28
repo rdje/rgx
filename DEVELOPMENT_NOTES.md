@@ -75,6 +75,10 @@ Pipeline in `rgx-core`:
   - `OptimizingCompiler::new` and `OptimizingCompiler::compile` in `rgx-core/src/vm.rs`
   - compile-boundary summaries include AST kind, bytecode size, string/class counts, group count, and JIT-worthiness
   - decision logging now exposes post-analysis JIT heuristic outcome (`jit_worthy`) with supporting stats
+- VM runtime initialization tracing now covers startup boundaries:
+  - `RegexVM::new` and `RegexVM::detect_simd_support` emit structured entry/exit traces
+  - startup traces include bytecode/context metadata and detected SIMD capabilities (`sse2`, `avx2`, `neon`)
+  - decision logging now explicitly indicates whether SIMD capability is available on the runtime host
 - CLI-path tracing now covers top-level command execution boundaries:
   - `rgx-cli/src/main.rs` `main()` emits structured entry/exit traces and branch decisions
   - branch decisions include execution mode path (`pure` vs others), input source (stdin vs positional arg), and boolean match outcome

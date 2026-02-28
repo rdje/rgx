@@ -57,6 +57,17 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-28
+- Added structured tracing for VM startup boundaries in `rgx-core/src/vm.rs`:
+  - instrumented `RegexVM::new` with construction-context entry/exit summaries
+  - instrumented `RegexVM::detect_simd_support` with capability-boundary entry/exit traces
+  - added explicit decision trace for SIMD capability availability at VM construction
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug trace includes `RegexVM::new` and `RegexVM::detect_simd_support` boundary lines
+  - low/quiet filtering remains correct (`[LOW]`-only at low, `trace.log` size `0` at quiet)
+### 2026-02-28
 - User requested clippy integration into workflow with strict policy: clippy warnings acceptable for now, clippy errors must be fixed promptly and must not remain.
 - Updated workflow docs to enforce this:
   - `COMMIT.md` now includes a mandatory `cargo clippy --workspace --all-targets` step and no-clippy-error invariant

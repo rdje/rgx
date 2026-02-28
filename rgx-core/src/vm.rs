@@ -359,15 +359,46 @@ pub struct SimdSupport {
 impl RegexVM {
     /// Create new VM with compiled program
     pub fn new(program: Program) -> Self {
-        Self {
+        trace_enter!(
+            "vm",
+            "RegexVM::new",
+            "bytecode_len={},char_classes={},string_literals={},groups={},has_anchors={},has_lookarounds={}",
+            program.code.len(),
+            program.char_classes.len(),
+            program.string_literals.len(),
+            program.num_groups,
+            program.flags.has_anchors,
+            program.flags.has_lookarounds
+        );
+        let simd_support = Self::detect_simd_support();
+        trace_decision!(
+            "vm",
+            "simd capability detected",
+            simd_support.sse2 || simd_support.avx2 || simd_support.neon,
+            "sse2={},avx2={},neon={}",
+            simd_support.sse2,
+            simd_support.avx2,
+            simd_support.neon
+        );
+        let vm = Self {
             program,
-            simd_support: Self::detect_simd_support(),
-        }
+            simd_support,
+        };
+        trace_exit!(
+            "vm",
+            "RegexVM::new",
+            "ok=true,sse2={},avx2={},neon={}",
+            vm.simd_support.sse2,
+            vm.simd_support.avx2,
+            vm.simd_support.neon
+        );
+        vm
     }
 
     /// Detect available SIMD instruction sets
     fn detect_simd_support() -> SimdSupport {
-        SimdSupport {
+        trace_enter!("vm", "RegexVM::detect_simd_support");
+        let support = SimdSupport {
             #[cfg(target_arch = "x86_64")]
             sse2: std::arch::is_x86_feature_detected!("sse2"),
             #[cfg(target_arch = "x86_64")]
@@ -381,7 +412,16 @@ impl RegexVM {
             neon: std::arch::is_aarch64_feature_detected!("neon"),
             #[cfg(not(target_arch = "aarch64"))]
             neon: false,
-        }
+        };
+        trace_exit!(
+            "vm",
+            "RegexVM::detect_simd_support",
+            "ok=true,sse2={},avx2={},neon={}",
+            support.sse2,
+            support.avx2,
+            support.neon
+        );
+        support
     }
 
     /// Find first match using adaptive execution strategy

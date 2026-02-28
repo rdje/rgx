@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-28 - Added structured tracing to RegexVM initialization and SIMD detection
+- Scope: VM construction-path observability in `rgx-core/src/vm.rs`
+- Changes:
+  - Instrumented `RegexVM::new` with structured tracing:
+    - compile-program context at VM construction entry (bytecode/classes/literals/groups/anchor+lookaround flags)
+    - SIMD-availability decision summary
+    - VM-construction exit summary including detected SIMD flags
+  - Instrumented `RegexVM::detect_simd_support` with structured entry/exit traces and capability summary fields.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"`
+  - `grep -n 'RegexVM::new' /Users/richarddje/Documents/github/rgx/trace.log` and `grep -n 'RegexVM::detect_simd_support' /Users/richarddje/Documents/github/rgx/trace.log` (verified boundary traces)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a dog"`
+  - `grep -nE '\[(TRACE|HIGH|MEDIUM)\]' /Users/richarddje/Documents/github/rgx/trace.log` (verified filtered)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a dog"`
+  - `wc -c /Users/richarddje/Documents/github/rgx/trace.log` (verified `0`)
+- Notes/impact:
+  - Extends tracing continuity into VM startup so runtime capability detection and initialization context are now visible in debug traces.
+  - Improves first-hop diagnosis for architecture-specific execution behavior without changing matching semantics.
 ### 2026-02-28 - Added clippy error gate to commit workflow
 - Scope: workflow policy and commit-quality gates
 - Changes:
