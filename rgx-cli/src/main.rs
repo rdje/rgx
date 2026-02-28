@@ -156,6 +156,17 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize rgx_core logging system after env is ready.
     rgx_core::log::init();
+    rgx_core::trace_enter!(
+        "cli",
+        "main",
+        "mode_arg={},pattern_len={},input_arg_len={},verbosity={},quiet={},trace_log={}",
+        cli.mode,
+        cli.pattern.len(),
+        cli.text.len(),
+        verbosity.as_str(),
+        cli.quiet,
+        cli.trace_log
+    );
 
     // Set up logging based on resolved verbosity.
     {
@@ -196,8 +207,15 @@ fn main() -> anyhow::Result<()> {
         "safe" => ExecutionMode::Safe,
         _ => ExecutionMode::Full,
     };
+    rgx_core::trace_decision!(
+        "cli",
+        "mode == ExecutionMode::Pure",
+        mode == ExecutionMode::Pure,
+        "resolved execution mode from cli.mode={}",
+        cli.mode
+    );
 
-    let regex = if mode == ExecutionMode::Pure {
+    let regex_result = if mode == ExecutionMode::Pure {
         LOGGER
             .lock()
             .unwrap()
@@ -210,8 +228,15 @@ fn main() -> anyhow::Result<()> {
             .debug("main", &format!("Compiling pattern in {:?} mode...", mode));
         Regex::with_mode(&cli.pattern, mode)?
     };
+    let regex = regex_result;
 
     let input = if cli.text.is_empty() {
+        rgx_core::trace_decision!(
+            "cli",
+            "cli.text.is_empty()",
+            true,
+            "read candidate input from stdin"
+        );
         use std::io::{self, Read};
         let mut buf = String::new();
         io::stdin().read_to_string(&mut buf)?;
@@ -221,6 +246,12 @@ fn main() -> anyhow::Result<()> {
             .debug("main", &format!("Read {} bytes from stdin", buf.len()));
         buf
     } else {
+        rgx_core::trace_decision!(
+            "cli",
+            "cli.text.is_empty()",
+            false,
+            "use positional CLI input argument"
+        );
         cli.text
     };
 
@@ -228,8 +259,15 @@ fn main() -> anyhow::Result<()> {
         "main",
         &format!("Testing pattern against {} bytes of input", input.len()),
     );
-
-    if regex.is_match(&input) {
+    let matched = regex.is_match(&input);
+    rgx_core::trace_decision!(
+        "cli",
+        "regex.is_match(input)",
+        matched,
+        "input_len={}",
+        input.len()
+    );
+    if matched {
         LOGGER
             .lock()
             .unwrap()
@@ -259,6 +297,7 @@ fn main() -> anyhow::Result<()> {
             .unwrap()
             .debug("main", "Pattern does NOT match");
     }
+    rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
 
     Ok(())
 }

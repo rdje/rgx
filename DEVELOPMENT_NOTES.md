@@ -75,6 +75,10 @@ Pipeline in `rgx-core`:
   - `OptimizingCompiler::new` and `OptimizingCompiler::compile` in `rgx-core/src/vm.rs`
   - compile-boundary summaries include AST kind, bytecode size, string/class counts, group count, and JIT-worthiness
   - decision logging now exposes post-analysis JIT heuristic outcome (`jit_worthy`) with supporting stats
+- CLI-path tracing now covers top-level command execution boundaries:
+  - `rgx-cli/src/main.rs` `main()` emits structured entry/exit traces and branch decisions
+  - branch decisions include execution mode path (`pure` vs others), input source (stdin vs positional arg), and boolean match outcome
+  - tracing is emitted after log environment initialization to preserve expected verbosity semantics
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

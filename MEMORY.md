@@ -55,6 +55,17 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-02-28
+- Added structured tracing at CLI ingress/egress in `rgx-cli/src/main.rs`:
+  - `main()` now emits structured ENTER/EXIT traces
+  - added decision traces for execution mode branch (`pure` vs non-pure), input source branch (stdin vs positional arg), and boolean match outcome
+- Preserved logging semantics by emitting structured traces only after environment-based logging initialization.
+- Resolved patch artifact during implementation (duplicate nested match conditional in `main`) and revalidated.
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - debug trace contains CLI `ENTER main`/`EXIT main` lines in `trace.log`
+  - low/quiet filtering remains correct (`[LOW]`-only at low, `trace.log` size `0` at quiet)
 ### 2026-02-27
 - Added structured tracing at VM optimizing compiler boundaries in `rgx-core/src/vm.rs`:
   - instrumented `OptimizingCompiler::new`

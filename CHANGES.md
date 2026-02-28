@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-28 - Added structured tracing to CLI main control-flow path
+- Scope: top-level `rgx-cli` execution-flow observability in `rgx-cli/src/main.rs`
+- Changes:
+  - Instrumented CLI `main()` with structured tracing:
+    - function entry summary (mode argument, pattern/input lengths, verbosity, quiet/trace-log flags)
+    - mode-selection decision tracing (`pure` vs other execution modes)
+    - input-source decision tracing (stdin vs positional argument)
+    - match-outcome decision tracing (`regex.is_match(input)`)
+    - function exit summary with final match boolean
+  - Preserved existing logger output behavior and ensured structured tracing is emitted only after logging env initialization.
+  - Fixed an in-progress patch artifact during implementation (duplicate nested `if regex.is_match(...)` branch).
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"`
+  - `grep -n 'ENTER main' /Users/richarddje/Documents/github/rgx/trace.log` and `grep -n 'EXIT main' /Users/richarddje/Documents/github/rgx/trace.log` (verified CLI boundary traces)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a dog"`
+  - `grep -nE '\[(TRACE|HIGH|MEDIUM)\]' /Users/richarddje/Documents/github/rgx/trace.log` (verified filtered)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a dog"`
+  - `wc -c /Users/richarddje/Documents/github/rgx/trace.log` (verified `0`)
+- Notes/impact:
+  - Extends structured tracing all the way to CLI ingress/egress, improving whole-pipeline flow diagnosis from command invocation through match result.
+  - Keeps verbosity semantics unchanged while making top-level branch decisions explicit in `trace.log`.
 ### 2026-02-27 - Added structured tracing at VM OptimizingCompiler boundaries
 - Scope: compile-time VM bytecode generation observability in `rgx-core/src/vm.rs`
 - Changes:
