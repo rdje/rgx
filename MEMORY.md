@@ -56,6 +56,17 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-27
+- Added structured tracing at VM optimizing compiler boundaries in `rgx-core/src/vm.rs`:
+  - instrumented `OptimizingCompiler::new`
+  - instrumented `OptimizingCompiler::compile` with AST-kind entry context, JIT-worthiness decision trace, and compile summary exit
+- Added internal AST-kind helper for concise compile-boundary trace output.
+- Resolved an in-progress patch artifact during implementation (duplicate `Program` initializer token), then revalidated.
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - debug trace contains `OptimizingCompiler::compile` ENTER/EXIT lines in `trace.log`
+  - low/quiet filtering remained correct (`[LOW]`-only at low, `trace.log` size `0` at quiet)
+### 2026-02-27
 - Extended structured tracing into execution-runtime path in `rgx-core/src/execution.rs`:
   - context boundaries: `ExecContext::new`, `current_match`, `group`, `named`
   - callback registry boundaries: `NativeCallbackRegistry::new`, `register`, `call`, `has`

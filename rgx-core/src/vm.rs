@@ -160,6 +160,30 @@ pub enum OpCode {
     /// Halt execution (for debugging)
     Halt = 0xFF,
 }
+fn regex_kind(node: &Regex) -> &'static str {
+    match node {
+        Regex::Empty => "Empty",
+        Regex::Char(_) => "Char",
+        Regex::Dot => "Dot",
+        Regex::CharClass(_) => "CharClass",
+        Regex::Digit { .. } => "Digit",
+        Regex::Word { .. } => "Word",
+        Regex::Space { .. } => "Space",
+        Regex::UnicodeClass { .. } => "UnicodeClass",
+        Regex::Anchor(_) => "Anchor",
+        Regex::WordBoundary { .. } => "WordBoundary",
+        Regex::Sequence(_) => "Sequence",
+        Regex::Alternation(_) => "Alternation",
+        Regex::Quantified { .. } => "Quantified",
+        Regex::Group { .. } => "Group",
+        Regex::Backreference(_) => "Backreference",
+        Regex::Lookahead { .. } => "Lookahead",
+        Regex::Lookbehind { .. } => "Lookbehind",
+        Regex::CodeBlock { .. } => "CodeBlock",
+        Regex::Conditional { .. } => "Conditional",
+        Regex::Recursion { .. } => "Recursion",
+    }
+}
 
 /// Bytecode instruction with operands
 #[derive(Debug, Clone)]
@@ -2110,7 +2134,8 @@ pub struct OptimizingCompiler {
 impl OptimizingCompiler {
     /// Create new optimizing compiler
     pub fn new() -> Self {
-        Self {
+        trace_enter!("vm", "OptimizingCompiler::new");
+        let compiler = Self {
             code: Vec::new(),
             char_classes: Vec::new(),
             strings: Vec::new(),
@@ -2130,11 +2155,25 @@ impl OptimizingCompiler {
                 estimated_cycles: 0,
                 jit_worthy: false,
             },
-        }
+        };
+        trace_exit!(
+            "vm",
+            "OptimizingCompiler::new",
+            "ok=true,simd_enabled={},jit_worthy={}",
+            compiler.flags.simd_enabled,
+            compiler.stats.jit_worthy
+        );
+        compiler
     }
 
     /// Compile AST to optimized program with multiple passes
     pub fn compile(&mut self, ast: &Regex) -> Program {
+        trace_enter!(
+            "vm",
+            "OptimizingCompiler::compile",
+            "ast_kind={}",
+            regex_kind(ast)
+        );
         // Reset state
         self.code.clear();
         self.char_classes.clear();
@@ -2143,6 +2182,15 @@ impl OptimizingCompiler {
 
         // Pass 1: Analysis - gather statistics and detect features
         self.analyze_pass(ast);
+        trace_decision!(
+            "vm",
+            "stats.jit_worthy after analysis",
+            self.stats.jit_worthy,
+            "literal_chars={},quantifiers={},char_classes={}",
+            self.stats.literal_chars,
+            self.stats.quantifiers,
+            self.stats.char_classes
+        );
 
         // Pass 2: Optimization - apply peephole optimizations
         self.optimize_ast(ast);
@@ -2155,15 +2203,25 @@ impl OptimizingCompiler {
 
         // Emit final Match instruction
         self.emit_op(OpCode::Match);
-
-        Program {
+        let program = Program {
             code: self.code.clone(),
             char_classes: self.char_classes.clone(),
             string_literals: self.strings.clone(),
             num_groups: self.group_counter,
             flags: self.flags,
             stats: self.stats,
-        }
+        };
+        trace_exit!(
+            "vm",
+            "OptimizingCompiler::compile",
+            "ok=true,bytecode_len={},char_classes={},string_literals={},groups={},jit_worthy={}",
+            program.code.len(),
+            program.char_classes.len(),
+            program.string_literals.len(),
+            program.num_groups,
+            program.stats.jit_worthy
+        );
+        program
     }
 
     /// Analysis pass - gather statistics for optimization decisions

@@ -71,6 +71,10 @@ Pipeline in `rgx-core`:
   - callback-registry boundaries (`NativeCallbackRegistry::new/register/call/has`)
   - manager dispatch boundaries (`ExecutionManager::new/execute/register_native/is_language_available`)
   - explicit decision logs for callback replacement/lookup outcomes and language backend routing choices
+- VM compile-path tracing now covers optimizing compiler boundaries:
+  - `OptimizingCompiler::new` and `OptimizingCompiler::compile` in `rgx-core/src/vm.rs`
+  - compile-boundary summaries include AST kind, bytecode size, string/class counts, group count, and JIT-worthiness
+  - decision logging now exposes post-analysis JIT heuristic outcome (`jit_worthy`) with supporting stats
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-27 - Added structured tracing at VM OptimizingCompiler boundaries
+- Scope: compile-time VM bytecode generation observability in `rgx-core/src/vm.rs`
+- Changes:
+  - Instrumented `OptimizingCompiler::new` with structured entry/exit tracing and initialization summary fields.
+  - Instrumented `OptimizingCompiler::compile` with:
+    - function entry including AST-kind context
+    - decision trace for post-analysis JIT-worthiness and collected stats
+    - function exit summary (bytecode length, char classes, string literals, groups, jit_worthy)
+  - Added internal AST-kind classifier helper used by compile-boundary traces for concise node-type reporting.
+  - Fixed interrupted patch artifacts during implementation (duplicate `Program` initializer token in compile path).
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"`
+  - `grep -n 'OptimizingCompiler::compile' /Users/richarddje/Documents/github/rgx/trace.log` (verified ENTER/EXIT lines)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a dog"`
+  - `grep -nE '\[(TRACE|HIGH|MEDIUM)\]' /Users/richarddje/Documents/github/rgx/trace.log` (verified filtered)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a dog"`
+  - `wc -c /Users/richarddje/Documents/github/rgx/trace.log` (verified `0`)
+- Notes/impact:
+  - Extends trace continuity into compiler internals, making bytecode-generation phase boundaries diagnosable from `trace.log`.
+  - Improves reasoning visibility around VM JIT-heuristic decisions without changing codegen behavior.
 ### 2026-02-27 - Extended structured tracing into execution manager and callback runtime
 - Scope: execution-module boundary observability for context access, callback dispatch, and language routing
 - Changes:
