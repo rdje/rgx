@@ -33,6 +33,7 @@ Live continuity memory for `rgx` sessions.
 - Always run `git --no-pager status` before every commit.
 - Stage from that exact status output (no hidden extras).
 - Use `git_message_brief.txt` with `git commit -F git_message_brief.txt`.
+- Run `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` before commit and fix all clippy errors first (warnings tolerated for now).
 - Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
 - After commit:
   - clear `git_message_brief.txt`
@@ -55,6 +56,14 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-02-28
+- User requested clippy integration into workflow with strict policy: clippy warnings acceptable for now, clippy errors must be fixed promptly and must not remain.
+- Updated workflow docs to enforce this:
+  - `COMMIT.md` now includes a mandatory `cargo clippy --workspace --all-targets` step and no-clippy-error invariant
+  - `DEVELOPMENT_NOTES.md` and persistent workflow agreements in `MEMORY.md` now mirror the same policy
+- Validation confirmed:
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0`
+  - warnings remain, but no clippy errors were produced
 ### 2026-02-28
 - Added structured tracing at CLI ingress/egress in `rgx-cli/src/main.rs`:
   - `main()` now emits structured ENTER/EXIT traces

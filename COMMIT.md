@@ -33,23 +33,29 @@ Live commit workflow contract for `rgx`.
 
 ## Exact commit workflow (ordered)
 1. Finish the task implementation and validation.
-2. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, optionally `DEVELOPMENT_NOTES.md` and relevant docs).
-3. Run pre-commit status:
+2. Run mandatory quality gate commands:
+   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+   - policy: clippy warnings are currently tolerated; clippy errors are not allowed.
+3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, optionally `DEVELOPMENT_NOTES.md` and relevant docs).
+4. Run pre-commit status:
    - `git --no-pager status --short`
-4. Stage exactly the files shown in that status output (no hidden extras).
-5. Prepare `git_message_brief.txt` with:
+5. Stage exactly the files shown in that status output (no hidden extras).
+6. Prepare `git_message_brief.txt` with:
    - concise title
    - brief bullet summary
    - required `Co-Authored-By` trailer(s)
-6. Commit:
+7. Commit:
    - `git commit -F git_message_brief.txt`
-7. Post-commit cleanup:
+8. Post-commit cleanup:
    - clear brief file: `: > git_message_brief.txt`
-8. Post-commit verification:
+9. Post-commit verification:
    - `git --no-pager status --short git_message_brief.txt`
    - `git ls-files --error-unmatch git_message_brief.txt >/dev/null 2>&1; echo TRACKED:$?`
    - expected: `TRACKED:1` (untracked)
-9. Final repository check:
+10. Final repository check:
    - `git --no-pager status --short`
    - expected clean working tree.
 
@@ -58,6 +64,8 @@ Live commit workflow contract for `rgx`.
 - Never stage files that were not in the captured pre-commit status set.
 - Never leave `git_message_brief.txt` populated after commit.
 - Never allow `git_message_brief.txt` to become tracked.
+- Never proceed to commit with unresolved clippy errors.
+- Clippy warnings are tolerated for now unless policy changes.
 - Keep commits task-scoped and validation-backed.
 
 ## Handoff usage

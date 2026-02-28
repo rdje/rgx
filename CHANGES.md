@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-28 - Added clippy error gate to commit workflow
+- Scope: workflow policy and commit-quality gates
+- Changes:
+  - Updated `COMMIT.md` commit workflow to include a mandatory clippy step:
+    - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - Added explicit workflow policy:
+    - clippy warnings are tolerated for now
+    - clippy errors are not allowed before commit
+  - Mirrored policy in:
+    - `DEVELOPMENT_NOTES.md` documentation policy section
+    - `MEMORY.md` persistent workflow agreements
+- Validation:
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (completed, exit code `0`; warnings present, no clippy errors)
+- Notes/impact:
+  - Establishes an explicit lint-quality floor in the standard workflow while preserving short-term flexibility on warning volume.
+  - Prevents clippy regressions from entering history as hard errors.
 ### 2026-02-28 - Added structured tracing to CLI main control-flow path
 - Scope: top-level `rgx-cli` execution-flow observability in `rgx-cli/src/main.rs`
 - Changes:
