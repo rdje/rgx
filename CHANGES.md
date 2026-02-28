@@ -14,6 +14,32 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-28 - Added structured tracing to compiler constructors and parser utility boundaries
+- Scope: compile-time configuration/selection observability in `rgx-core/src/compiler.rs` and `rgx-core/src/parsing.rs`
+- Changes:
+  - Instrumented compiler constructors:
+    - `Compiler::new`
+    - `Compiler::with_mode` (including mode-selection decision trace)
+  - Instrumented parsing utility boundaries:
+    - `parser_name` (recursive-descent + pgen-feature variants)
+    - `parser_capabilities` (recursive-descent + pgen-feature variants, including perl-advanced capability decision)
+    - `RecursiveDescentParser::new`, `RecursiveDescentParser::parser_name`, `RecursiveDescentParser::capabilities`
+    - `PgenParser::new`, `PgenParser::parser_name`, `PgenParser::capabilities` (feature-gated)
+    - `ParserConfig::default`
+  - Resolved an in-progress patch artifact in `parsing.rs` while applying this increment (corrupted capability block merge), then revalidated.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a dog"` + `grep -n 'Compiler::new' /Users/richarddje/Documents/github/rgx/trace.log`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --mode safe --verbosity debug --trace-log "cat" "I have a cat"` + `grep -n 'Compiler::with_mode' /Users/richarddje/Documents/github/rgx/trace.log`
+  - low/quiet filter checks preserved:
+    - `grep -nE '\[(TRACE|HIGH|MEDIUM)\]' /Users/richarddje/Documents/github/rgx/trace.log` after low run (no matches)
+    - `wc -c /Users/richarddje/Documents/github/rgx/trace.log` after quiet run (`0`)
+- Notes/impact:
+  - Improves diagnosis of compile-time mode/backend/capability selection before heavy parser/compiler execution begins.
+  - Preserves runtime behavior while extending structured trace continuity into configuration and constructor phases.
 ### 2026-02-28 - Added structured tracing to RegexVM initialization and SIMD detection
 - Scope: VM construction-path observability in `rgx-core/src/vm.rs`
 - Changes:

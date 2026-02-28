@@ -57,6 +57,19 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-28
+- Added structured tracing for compiler/parsing configuration boundaries:
+  - `Compiler::new` and `Compiler::with_mode` now emit constructor boundary traces
+  - parsing utility boundaries now traced: `parser_name`, `parser_capabilities`, `ParserConfig::default`
+  - parser-object constructor/capability boundaries traced: `RecursiveDescentParser::*` and feature-gated `PgenParser::*`
+- Added capability-level decision tracing for parser utility capability reporting (`perl_advanced` flag path visibility).
+- Resolved an intermediate patch artifact in `parsing.rs` (corrupted capability block insertion), then revalidated.
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug traces include `Compiler::new` (pure path) and `Compiler::with_mode` (safe path) boundary lines
+  - low/quiet filtering remained correct (`[LOW]`-only at low, `trace.log` size `0` at quiet)
+### 2026-02-28
 - Added structured tracing for VM startup boundaries in `rgx-core/src/vm.rs`:
   - instrumented `RegexVM::new` with construction-context entry/exit summaries
   - instrumented `RegexVM::detect_simd_support` with capability-boundary entry/exit traces

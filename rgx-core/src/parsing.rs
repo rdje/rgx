@@ -157,18 +157,35 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
 /// Get the active parser name (compile-time)
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parser_name() -> &'static str {
-    "recursive-descent"
+    trace_enter!("parsing", "parsing::parser_name[recursive-descent]");
+    let name = "recursive-descent";
+    trace_exit!(
+        "parsing",
+        "parsing::parser_name[recursive-descent]",
+        "ok=true,name={}",
+        name
+    );
+    name
 }
 
 #[cfg(feature = "pgen-parser")]
 pub fn parser_name() -> &'static str {
-    "pgen"
+    trace_enter!("parsing", "parsing::parser_name[pgen-feature]");
+    let name = "pgen";
+    trace_exit!(
+        "parsing",
+        "parsing::parser_name[pgen-feature]",
+        "ok=true,name={}",
+        name
+    );
+    name
 }
 
 /// Get active parser capabilities (compile-time)
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parser_capabilities() -> ParserCapabilities {
-    ParserCapabilities {
+    trace_enter!("parsing", "parsing::parser_capabilities[recursive-descent]");
+    let capabilities = ParserCapabilities {
         code_blocks: true,
         named_groups: true,
         perl_advanced: false,
@@ -176,12 +193,32 @@ pub fn parser_capabilities() -> ParserCapabilities {
         lookarounds: true,
         error_recovery: false,
         syntax_highlighting: false,
-    }
+    };
+    trace_decision!(
+        "parsing",
+        "capabilities.perl_advanced",
+        capabilities.perl_advanced,
+        "recursive-descent advanced perl support flag"
+    );
+    trace_exit!(
+        "parsing",
+        "parsing::parser_capabilities[recursive-descent]",
+        "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
+        capabilities.code_blocks,
+        capabilities.named_groups,
+        capabilities.lookarounds,
+        capabilities.unicode_properties,
+        capabilities.perl_advanced,
+        capabilities.error_recovery,
+        capabilities.syntax_highlighting
+    );
+    capabilities
 }
 
 #[cfg(feature = "pgen-parser")]
 pub fn parser_capabilities() -> ParserCapabilities {
-    ParserCapabilities {
+    trace_enter!("parsing", "parsing::parser_capabilities[pgen-feature]");
+    let capabilities = ParserCapabilities {
         // Current pgen-parser path is still a recursive-descent fallback.
         // Keep capability flags truthful until a real PGEN backend lands.
         code_blocks: true,
@@ -191,7 +228,26 @@ pub fn parser_capabilities() -> ParserCapabilities {
         lookarounds: true,
         error_recovery: true,
         syntax_highlighting: true,
-    }
+    };
+    trace_decision!(
+        "parsing",
+        "capabilities.perl_advanced",
+        capabilities.perl_advanced,
+        "pgen-feature advanced perl support flag"
+    );
+    trace_exit!(
+        "parsing",
+        "parsing::parser_capabilities[pgen-feature]",
+        "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
+        capabilities.code_blocks,
+        capabilities.named_groups,
+        capabilities.lookarounds,
+        capabilities.unicode_properties,
+        capabilities.perl_advanced,
+        capabilities.error_recovery,
+        capabilities.syntax_highlighting
+    );
+    capabilities
 }
 
 /// Analysis of pattern complexity and features for parser selection
@@ -226,7 +282,10 @@ pub struct RecursiveDescentParser {
 
 impl RecursiveDescentParser {
     pub fn new() -> Self {
-        Self {}
+        trace_enter!("parsing", "RecursiveDescentParser::new");
+        let parser = Self {};
+        trace_exit!("parsing", "RecursiveDescentParser::new", "ok=true");
+        parser
     }
 }
 
@@ -272,11 +331,20 @@ impl RegexParser for RecursiveDescentParser {
     }
 
     fn parser_name(&self) -> &'static str {
-        "recursive-descent"
+        trace_enter!("parsing", "RecursiveDescentParser::parser_name");
+        let name = "recursive-descent";
+        trace_exit!(
+            "parsing",
+            "RecursiveDescentParser::parser_name",
+            "ok=true,name={}",
+            name
+        );
+        name
     }
 
     fn capabilities(&self) -> ParserCapabilities {
-        ParserCapabilities {
+        trace_enter!("parsing", "RecursiveDescentParser::capabilities");
+        let capabilities = ParserCapabilities {
             code_blocks: true,
             named_groups: true,
             perl_advanced: false,
@@ -284,7 +352,20 @@ impl RegexParser for RecursiveDescentParser {
             lookarounds: true,
             error_recovery: false,
             syntax_highlighting: false,
-        }
+        };
+        trace_exit!(
+            "parsing",
+            "RecursiveDescentParser::capabilities",
+            "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
+            capabilities.code_blocks,
+            capabilities.named_groups,
+            capabilities.lookarounds,
+            capabilities.unicode_properties,
+            capabilities.perl_advanced,
+            capabilities.error_recovery,
+            capabilities.syntax_highlighting
+        );
+        capabilities
     }
 }
 
@@ -297,7 +378,10 @@ pub struct PgenParser {
 #[cfg(feature = "pgen-parser")]
 impl PgenParser {
     pub fn new() -> Self {
-        Self {}
+        trace_enter!("parsing", "PgenParser::new");
+        let parser = Self {};
+        trace_exit!("parsing", "PgenParser::new", "ok=true");
+        parser
     }
 }
 
@@ -311,11 +395,20 @@ impl RegexParser for PgenParser {
     }
 
     fn parser_name(&self) -> &'static str {
-        "pgen"
+        trace_enter!("parsing", "PgenParser::parser_name");
+        let name = "pgen";
+        trace_exit!(
+            "parsing",
+            "PgenParser::parser_name",
+            "ok=true,name={}",
+            name
+        );
+        name
     }
 
     fn capabilities(&self) -> ParserCapabilities {
-        ParserCapabilities {
+        trace_enter!("parsing", "PgenParser::capabilities");
+        let capabilities = ParserCapabilities {
             // Current pgen-parser path is still a recursive-descent fallback.
             // Keep capability flags truthful until a real PGEN backend lands.
             code_blocks: true,
@@ -325,7 +418,20 @@ impl RegexParser for PgenParser {
             lookarounds: true,
             error_recovery: false,
             syntax_highlighting: false,
-        }
+        };
+        trace_exit!(
+            "parsing",
+            "PgenParser::capabilities",
+            "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
+            capabilities.code_blocks,
+            capabilities.named_groups,
+            capabilities.lookarounds,
+            capabilities.unicode_properties,
+            capabilities.perl_advanced,
+            capabilities.error_recovery,
+            capabilities.syntax_highlighting
+        );
+        capabilities
     }
 }
 
@@ -342,11 +448,20 @@ pub struct ParserConfig {
 
 impl Default for ParserConfig {
     fn default() -> Self {
-        Self {
+        trace_enter!("parsing", "ParserConfig::default");
+        let config = Self {
             preferred_parser: None,
             allow_experimental: false,
             auto_select: true,
-        }
+        };
+        trace_exit!(
+            "parsing",
+            "ParserConfig::default",
+            "ok=true,preferred_parser=<none>,allow_experimental={},auto_select={}",
+            config.allow_experimental,
+            config.auto_select
+        );
+        config
     }
 }
 

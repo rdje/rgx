@@ -83,6 +83,11 @@ Pipeline in `rgx-core`:
   - `rgx-cli/src/main.rs` `main()` emits structured entry/exit traces and branch decisions
   - branch decisions include execution mode path (`pure` vs others), input source (stdin vs positional arg), and boolean match outcome
   - tracing is emitted after log environment initialization to preserve expected verbosity semantics
+- Compiler/parser utility tracing now covers constructor and capability-selection boundaries:
+  - compiler constructors in `rgx-core/src/compiler.rs` (`Compiler::new`, `Compiler::with_mode`)
+  - parser utility helpers in `rgx-core/src/parsing.rs` (`parser_name`, `parser_capabilities`, `ParserConfig::default`)
+  - parser object constructor/capability boundaries (`RecursiveDescentParser::*`, feature-gated `PgenParser::*`)
+  - capability traces explicitly expose advanced-feature flags (e.g., `perl_advanced`) for backend-selection diagnostics
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

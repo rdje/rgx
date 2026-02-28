@@ -14,14 +14,36 @@ pub struct Compiler {
 impl Compiler {
     /// Create new compiler with pure execution mode (maximum performance)
     pub fn new() -> Self {
-        Self {
+        trace_enter!("compiler", "Compiler::new");
+        let compiler = Self {
             mode: ExecutionMode::Pure,
-        }
+        };
+        trace_exit!(
+            "compiler",
+            "Compiler::new",
+            "ok=true,mode={:?}",
+            compiler.mode
+        );
+        compiler
     }
 
     /// Create compiler with specific execution mode
     pub fn with_mode(mode: ExecutionMode) -> Self {
-        Self { mode }
+        trace_enter!("compiler", "Compiler::with_mode", "mode={:?}", mode);
+        let compiler = Self { mode };
+        trace_decision!(
+            "compiler",
+            "mode == ExecutionMode::Pure",
+            mode == ExecutionMode::Pure,
+            "constructor mode selection"
+        );
+        trace_exit!(
+            "compiler",
+            "Compiler::with_mode",
+            "ok=true,mode={:?}",
+            compiler.mode
+        );
+        compiler
     }
 
     /// Compile regex pattern into optimized bytecode program
