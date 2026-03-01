@@ -14,6 +14,33 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-01 - Added structured tracing to parser token-cursor advance boundary
+- Scope: parser/lexer handoff observability in `rgx-core/src/parser.rs`
+- Changes:
+  - Root-cause gap: parser token-cursor advancement was not explicitly traced, making token-consumption transitions opaque between parser nodes and lexer fetches.
+  - Instrumented `Parser::advance` with structured tracing:
+    - function-entry snapshot of current parser token
+    - decision trace for whether advancing must fetch the next lexer token (`should_fetch_next`)
+    - explicit error exit when lexer `next_token()` fails during parser advancement
+    - function-exit summary with consumed token and resulting next token
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - debug smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log '(?<word>[a-z]+)' 'abc'`
+    - verified `trace.log` contains `Parser::advance` enter/exit lines with consumed/next token snapshots
+  - low smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log '(?<word>[a-z]+)' 'abc'`
+    - `grep -E '\\[(MEDIUM|HIGH|TRACE)\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `0`
+    - `grep -E '\\[LOW\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `11`
+  - quiet smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log '(?<word>[a-z]+)' 'abc'`
+    - `wc -l /Users/richarddje/Documents/github/rgx/trace.log` => `0`
+- Notes/impact:
+  - Extends structured tracing continuity across parser token-cursor transitions without changing parse semantics.
+  - Improves debugging of parser branch behavior by making token consumption and lexer-fetch boundaries explicit.
 ### 2026-02-28 - Added structured tracing to AST and token utility boundaries
 - Scope: AST/token construction-path observability in `rgx-core/src/ast.rs` and `rgx-core/src/token.rs`
 - Changes:

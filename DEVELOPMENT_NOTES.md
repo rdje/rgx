@@ -56,6 +56,7 @@ Pipeline in `rgx-core`:
   - structured trace helpers for function entry/exit and decision reasoning (`trace_enter!`, `trace_exit!`, `trace_decision!`)
 - Parser-path tracing now covers parser frontend boundaries:
   - parser stack hotspots (`Parser::new/parse/parse_alternation/parse_sequence/parse_quantified/parse_atom`)
+  - parser token-cursor boundary (`Parser::advance`) including lexer-fetch decision and consumed/next token summaries
   - compile-time parsing entry (`parsing::parse_pattern`) and trait adapter path (`RecursiveDescentParser::parse_pattern`)
   - backend-selection and parse-boundary decision logs visible at medium/high/debug verbosity levels
 - Lexer-path tracing now covers tokenization boundaries and high-branch parse helpers:

@@ -56,6 +56,20 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-01
+- Added structured tracing to parser token-cursor advancement in `rgx-core/src/parser.rs`:
+  - instrumented `Parser::advance` with entry/exit boundary traces and token snapshots
+  - added decision trace for lexer-fetch branch (`should_fetch_next`)
+  - added explicit error-exit tracing when `lexer.next_token()` fails during parser advancement
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug/low/quiet smoke matrix passed with `--trace-log`:
+    - debug includes `Parser::advance` boundary lines with consumed/next token detail
+    - low filters out medium/high/trace lines (`0`) while preserving low milestones (`11`)
+    - quiet leaves `trace.log` empty (`0` lines)
 ### 2026-02-28
 - Added structured tracing for AST/token utility boundaries in `rgx-core`:
   - `rgx-core/src/ast.rs`: instrumented `CharRange::single`, `CharRange::range`, `ParseContext::new`, `ParseContext::next_group_number`, `ParseContext::register_named_group`, and `ParseContext::get_named_group`

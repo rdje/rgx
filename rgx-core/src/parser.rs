@@ -83,14 +83,49 @@ impl<'a> Parser<'a> {
 
     /// Consume the current token and advance to the next
     fn advance(&mut self) -> Result<Option<TokenWithPos>, LexError> {
+        trace_enter!(
+            "parser",
+            "Parser::advance",
+            "current_token={}",
+            self.current_token_snapshot()
+        );
         let current = self.current_token.take();
+        let consumed_token = current
+            .as_ref()
+            .map(|token| format!("{:?}", token.token))
+            .unwrap_or_else(|| "<none>".to_string());
+        let should_fetch_next = current
+            .as_ref()
+            .is_some_and(|token| token.token != Token::EOF);
+        trace_decision!(
+            "parser",
+            "should_fetch_next",
+            should_fetch_next,
+            "fetch lexer token unless consumed token is EOF/None"
+        );
 
-        if let Some(ref token) = current {
-            if token.token != Token::EOF {
-                self.current_token = Some(self.lexer.next_token()?);
-            }
+        if should_fetch_next {
+            self.current_token = match self.lexer.next_token() {
+                Ok(token) => Some(token),
+                Err(err) => {
+                    trace_exit!("parser", "Parser::advance", "ok=false,error={}", err);
+                    return Err(err);
+                }
+            };
         }
 
+        let next_token = self
+            .current_token
+            .as_ref()
+            .map(|token| format!("{:?}", token.token))
+            .unwrap_or_else(|| "<none>".to_string());
+        trace_exit!(
+            "parser",
+            "Parser::advance",
+            "ok=true,consumed_token={},next_token={}",
+            consumed_token,
+            next_token
+        );
         Ok(current)
     }
 
