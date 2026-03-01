@@ -3,6 +3,7 @@
 //! This module defines the complete AST for representing any regex pattern,
 //! including all Perl regex features and our custom code execution blocks.
 
+use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
 
 /// Main regex AST node representing any regex pattern
@@ -139,12 +140,48 @@ pub struct CharRange {
 impl CharRange {
     /// Create a single character range
     pub fn single(ch: char) -> Self {
-        Self { start: ch, end: ch }
+        trace_enter!("ast", "CharRange::single", "ch='{}'({})", ch, ch as u32);
+        let range = Self { start: ch, end: ch };
+        trace_exit!(
+            "ast",
+            "CharRange::single",
+            "ok=true,start='{}'({}),end='{}'({})",
+            range.start,
+            range.start as u32,
+            range.end,
+            range.end as u32
+        );
+        range
     }
 
     /// Create a character range from start to end
     pub fn range(start: char, end: char) -> Self {
-        Self { start, end }
+        trace_enter!(
+            "ast",
+            "CharRange::range",
+            "start='{}'({}),end='{}'({})",
+            start,
+            start as u32,
+            end,
+            end as u32
+        );
+        trace_decision!(
+            "ast",
+            "start <= end",
+            start <= end,
+            "character range ordering check"
+        );
+        let range = Self { start, end };
+        trace_exit!(
+            "ast",
+            "CharRange::range",
+            "ok=true,start='{}'({}),end='{}'({})",
+            range.start,
+            range.start as u32,
+            range.end,
+            range.end as u32
+        );
+        range
     }
 }
 
@@ -199,25 +236,91 @@ pub struct ParseContext {
 impl ParseContext {
     /// Create a new parse context
     pub fn new() -> Self {
-        Self::default()
+        trace_enter!("ast", "ParseContext::new");
+        let context = Self::default();
+        trace_exit!(
+            "ast",
+            "ParseContext::new",
+            "ok=true,group_counter={},named_groups_len={}",
+            context.group_counter,
+            context.named_groups.len()
+        );
+        context
     }
 
     /// Allocate a new capture group number
     pub fn next_group_number(&mut self) -> u32 {
+        trace_enter!(
+            "ast",
+            "ParseContext::next_group_number",
+            "group_counter_before={}",
+            self.group_counter
+        );
         self.group_counter += 1;
+        trace_exit!(
+            "ast",
+            "ParseContext::next_group_number",
+            "ok=true,group_counter_after={}",
+            self.group_counter
+        );
         self.group_counter
     }
 
     /// Register a named group
     pub fn register_named_group(&mut self, name: String) -> u32 {
+        trace_enter!(
+            "ast",
+            "ParseContext::register_named_group",
+            "name={},group_counter_before={},named_groups_len_before={}",
+            name,
+            self.group_counter,
+            self.named_groups.len()
+        );
         let number = self.next_group_number();
-        self.named_groups.insert(name, number);
+        let replaced_existing = self.named_groups.insert(name.clone(), number).is_some();
+        trace_decision!(
+            "ast",
+            "replaced_existing",
+            replaced_existing,
+            "named group registration replacement check for name={}",
+            name
+        );
+        trace_exit!(
+            "ast",
+            "ParseContext::register_named_group",
+            "ok=true,name={},number={},named_groups_len_after={}",
+            name,
+            number,
+            self.named_groups.len()
+        );
         number
     }
 
     /// Look up a named group number
     pub fn get_named_group(&self, name: &str) -> Option<u32> {
-        self.named_groups.get(name).copied()
+        trace_enter!(
+            "ast",
+            "ParseContext::get_named_group",
+            "name={},named_groups_len={}",
+            name,
+            self.named_groups.len()
+        );
+        let group_number = self.named_groups.get(name).copied();
+        trace_decision!(
+            "ast",
+            "group_number.is_some()",
+            group_number.is_some(),
+            "named group lookup for name={}",
+            name
+        );
+        trace_exit!(
+            "ast",
+            "ParseContext::get_named_group",
+            "ok=true,name={},group_number={:?}",
+            name,
+            group_number
+        );
+        group_number
     }
 }
 

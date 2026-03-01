@@ -14,6 +14,38 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-02-28 - Added structured tracing to AST and token utility boundaries
+- Scope: AST/token construction-path observability in `rgx-core/src/ast.rs` and `rgx-core/src/token.rs`
+- Changes:
+  - Observability-gap root cause: utility-level constructors/context helpers were not yet in the structured trace chain, so parser/lexer traces skipped part of object-creation context.
+  - Instrumented AST utility boundaries:
+    - `CharRange::single`
+    - `CharRange::range` (includes ordering decision trace)
+    - `ParseContext::new`
+    - `ParseContext::next_group_number`
+    - `ParseContext::register_named_group` (includes replacement decision trace)
+    - `ParseContext::get_named_group` (includes lookup-hit decision trace)
+  - Instrumented token/position utility boundaries:
+    - `Position::new`
+    - `Position::start`
+    - `TokenWithPos::new`
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - debug smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log '(?<word>[a-z]+)' 'abc'`
+    - verified `trace.log` includes new boundary lines for `Position::start/new`, `TokenWithPos::new`, and `CharRange::range`
+  - low smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log '(?<word>[a-z]+)' 'abc'`
+    - `grep -E '\\[(MEDIUM|HIGH|TRACE)\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `0`
+  - quiet smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log '(?<word>[a-z]+)' 'abc'`
+    - `wc -l /Users/richarddje/Documents/github/rgx/trace.log` => `0`
+- Notes/impact:
+  - Extends structured trace continuity through AST/token utility construction and parse-context mutation/lookup paths.
+  - Improves root-cause visibility for parser/lexer behavior without changing regex semantics.
 ### 2026-02-28 - Added structured tracing to compiler constructors and parser utility boundaries
 - Scope: compile-time configuration/selection observability in `rgx-core/src/compiler.rs` and `rgx-core/src/parsing.rs`
 - Changes:

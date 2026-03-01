@@ -4,6 +4,7 @@
 //! from simple characters to complex constructs like code blocks.
 
 use crate::ast::{AnchorType, CharRange, ConditionalTest, RecursionTarget};
+use crate::{trace_enter, trace_exit};
 
 /// Tokens produced by the lexer
 #[derive(Debug, Clone, PartialEq)]
@@ -142,16 +143,43 @@ pub struct Position {
 impl Position {
     /// Create a new position
     pub fn new(offset: usize, line: usize, column: usize) -> Self {
-        Self {
+        trace_enter!(
+            "token",
+            "Position::new",
+            "offset={},line={},column={}",
+            offset,
+            line,
+            column
+        );
+        let position = Self {
             offset,
             line,
             column,
-        }
+        };
+        trace_exit!(
+            "token",
+            "Position::new",
+            "ok=true,offset={},line={},column={}",
+            position.offset,
+            position.line,
+            position.column
+        );
+        position
     }
 
     /// Create position at start of input
     pub fn start() -> Self {
-        Self::new(0, 1, 1)
+        trace_enter!("token", "Position::start");
+        let position = Self::new(0, 1, 1);
+        trace_exit!(
+            "token",
+            "Position::start",
+            "ok=true,offset={},line={},column={}",
+            position.offset,
+            position.line,
+            position.column
+        );
+        position
     }
 }
 
@@ -167,7 +195,26 @@ pub struct TokenWithPos {
 impl TokenWithPos {
     /// Create a new token with position
     pub fn new(token: Token, position: Position) -> Self {
-        Self { token, position }
+        trace_enter!(
+            "token",
+            "TokenWithPos::new",
+            "token={:?},offset={},line={},column={}",
+            token,
+            position.offset,
+            position.line,
+            position.column
+        );
+        let token_with_pos = Self { token, position };
+        trace_exit!(
+            "token",
+            "TokenWithPos::new",
+            "ok=true,token={:?},offset={},line={},column={}",
+            token_with_pos.token,
+            token_with_pos.position.offset,
+            token_with_pos.position.line,
+            token_with_pos.position.column
+        );
+        token_with_pos
     }
 }
 

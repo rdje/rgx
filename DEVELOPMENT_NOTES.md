@@ -88,6 +88,10 @@ Pipeline in `rgx-core`:
   - parser utility helpers in `rgx-core/src/parsing.rs` (`parser_name`, `parser_capabilities`, `ParserConfig::default`)
   - parser object constructor/capability boundaries (`RecursiveDescentParser::*`, feature-gated `PgenParser::*`)
   - capability traces explicitly expose advanced-feature flags (e.g., `perl_advanced`) for backend-selection diagnostics
+- AST/token utility tracing now covers constructor and parse-context boundaries:
+  - AST utilities in `rgx-core/src/ast.rs` (`CharRange::single/range`, `ParseContext::new/next_group_number/register_named_group/get_named_group`)
+  - token/position utilities in `rgx-core/src/token.rs` (`Position::new/start`, `TokenWithPos::new`)
+  - decision traces now expose range-order checks, named-group replacement behavior, and named-group lookup-hit outcomes
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)

@@ -57,6 +57,23 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-02-28
+- Added structured tracing for AST/token utility boundaries in `rgx-core`:
+  - `rgx-core/src/ast.rs`: instrumented `CharRange::single`, `CharRange::range`, `ParseContext::new`, `ParseContext::next_group_number`, `ParseContext::register_named_group`, and `ParseContext::get_named_group`
+  - `rgx-core/src/token.rs`: instrumented `Position::new`, `Position::start`, and `TokenWithPos::new`
+- Added decision-level tracing where utility branches matter:
+  - range-order check in `CharRange::range`
+  - replacement check in `ParseContext::register_named_group`
+  - lookup-hit check in `ParseContext::get_named_group`
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug/low/quiet smoke matrix passed with `--trace-log`:
+    - debug includes new AST/token boundary lines in `trace.log`
+    - low contains only `[LOW]` entries (no `[MEDIUM]/[HIGH]/[TRACE]`)
+    - quiet leaves `trace.log` empty (`0` lines)
+### 2026-02-28
 - Added structured tracing for compiler/parsing configuration boundaries:
   - `Compiler::new` and `Compiler::with_mode` now emit constructor boundary traces
   - parsing utility boundaries now traced: `parser_name`, `parser_capabilities`, `ParserConfig::default`
