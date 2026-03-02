@@ -14,6 +14,39 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-02 - Added structured tracing to lexer escape-helper boundaries
+- Scope: escape-sequence utility observability in `rgx-core/src/lexer.rs`
+- Changes:
+  - Root-cause gap: helper-level escape parsing boundaries were not explicitly traced, making it harder to diagnose failures inside specific escape subparsers.
+  - Instrumented helper boundaries:
+    - `Lexer::parse_unicode_class`
+    - `Lexer::parse_backreference`
+    - `Lexer::parse_hex_escape`
+    - `Lexer::parse_octal_escape`
+  - Added decision traces for critical branches:
+    - unicode-class opening-brace validation
+    - backreference range validation (`1..=99`)
+    - braced-vs-short hex format dispatch
+    - octal byte-range validation (`<= 255`)
+  - Added explicit traced error exits for parse/validation failure paths in the above helpers.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - debug smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log '\\x41' 'A'`
+    - verified `trace.log` includes `Lexer::parse_hex_escape` enter/exit lines with code-point summary
+  - low smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log 'cat|dog' 'I have a dog'`
+    - `grep -E '\\[(MEDIUM|HIGH|TRACE)\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `0`
+    - `grep -E '\\[LOW\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `19`
+  - quiet smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log 'cat|dog' 'I have a dog'`
+    - `wc -l /Users/richarddje/Documents/github/rgx/trace.log` => `0`
+- Notes/impact:
+  - Extends structured tracing continuity to escape-subparser internals without changing matching semantics.
+  - During debug verification, `\\101` continued to route through backreference handling (existing behavior), confirming this increment is observability-only.
 ### 2026-03-01 - Added structured tracing to parser token-cursor advance boundary
 - Scope: parser/lexer handoff observability in `rgx-core/src/parser.rs`
 - Changes:

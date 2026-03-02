@@ -56,6 +56,21 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-02
+- Added structured tracing at lexer escape-helper boundaries in `rgx-core/src/lexer.rs`:
+  - instrumented `parse_unicode_class`, `parse_backreference`, `parse_hex_escape`, and `parse_octal_escape`
+  - added decision traces for unicode-brace validation, backreference range validation, hex-format branch selection, and octal byte-range validation
+  - added explicit traced error exits for helper-parse failure paths
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug smoke includes `Lexer::parse_hex_escape` boundary lines in `trace.log`
+  - low filtering remained correct (`MEDIUM/HIGH/TRACE = 0`, `LOW = 19`)
+  - quiet mode left `trace.log` empty (`0` lines)
+- Observed behavior note:
+  - `\\101` still routes through backreference handling and errors as invalid backreference (existing semantics; unchanged by this tracing-only increment).
 ### 2026-03-01
 - Added structured tracing to parser token-cursor advancement in `rgx-core/src/parser.rs`:
   - instrumented `Parser::advance` with entry/exit boundary traces and token snapshots

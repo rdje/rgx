@@ -61,6 +61,7 @@ Pipeline in `rgx-core`:
   - backend-selection and parse-boundary decision logs visible at medium/high/debug verbosity levels
 - Lexer-path tracing now covers tokenization boundaries and high-branch parse helpers:
   - token flow (`Lexer::new`, `Lexer::next_token`, `Lexer::parse_escape`)
+  - escape helpers (`parse_unicode_class`, `parse_backreference`, `parse_hex_escape`, `parse_octal_escape`) with explicit decision/error exits
   - quantifier and class parsing (`parse_star`, `parse_plus`, `parse_question`, `parse_repeat_quantifier`, `parse_character_class`)
   - group/conditional parsing boundaries (`parse_group`, `parse_conditional_start`, `parse_conditional_subexpression_ast`)
 - API/engine-path tracing now covers high-level public dispatch and boundary decisions:
