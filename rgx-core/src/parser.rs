@@ -46,13 +46,28 @@ impl<'a> Parser<'a> {
     }
 
     fn current_token_snapshot(&self) -> String {
-        self.peek()
+        trace_enter!(
+            "parser",
+            "Parser::current_token_snapshot",
+            "has_current_token={}",
+            self.current_token.is_some()
+        );
+        let snapshot = self
+            .peek()
             .map(|token| format!("{token:?}"))
-            .unwrap_or_else(|| "<none>".to_string())
+            .unwrap_or_else(|| "<none>".to_string());
+        trace_exit!(
+            "parser",
+            "Parser::current_token_snapshot",
+            "ok=true,snapshot={}",
+            snapshot
+        );
+        snapshot
     }
 
     fn regex_kind(node: &Regex) -> &'static str {
-        match node {
+        trace_enter!("parser", "Parser::regex_kind");
+        let kind = match node {
             Regex::Empty => "Empty",
             Regex::Char(_) => "Char",
             Regex::Dot => "Dot",
@@ -73,12 +88,31 @@ impl<'a> Parser<'a> {
             Regex::CodeBlock { .. } => "CodeBlock",
             Regex::Conditional { .. } => "Conditional",
             Regex::Recursion { .. } => "Recursion",
-        }
+        };
+        trace_exit!("parser", "Parser::regex_kind", "ok=true,kind={}", kind);
+        kind
     }
 
     /// Get the current token without consuming it
     fn peek(&self) -> Option<&Token> {
-        self.current_token.as_ref().map(|t| &t.token)
+        trace_enter!(
+            "parser",
+            "Parser::peek",
+            "has_current_token={}",
+            self.current_token.is_some()
+        );
+        let token = self.current_token.as_ref().map(|t| &t.token);
+        trace_decision!(
+            "parser",
+            "token.is_some()",
+            token.is_some(),
+            "peek current-token availability"
+        );
+        let token_snapshot = token
+            .map(|current| format!("{current:?}"))
+            .unwrap_or_else(|| "<none>".to_string());
+        trace_exit!("parser", "Parser::peek", "ok=true,token={}", token_snapshot);
+        token
     }
 
     /// Consume the current token and advance to the next

@@ -57,6 +57,19 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-02
+- Added structured tracing for parser token-inspection helpers in `rgx-core/src/parser.rs`:
+  - instrumented `Parser::peek`, `Parser::current_token_snapshot`, and `Parser::regex_kind`
+  - added token-availability decision tracing in `Parser::peek`
+  - added entry/exit snapshots for helper-derived token/kind values
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - debug smoke includes `Parser::peek`, `Parser::current_token_snapshot`, and `Parser::regex_kind` boundary lines in `trace.log`
+  - low filtering remained correct (`MEDIUM/HIGH/TRACE = 0`, `LOW = 19`)
+  - quiet mode left `trace.log` empty (`0` lines)
+### 2026-03-02
 - Added structured tracing at lexer escape-helper boundaries in `rgx-core/src/lexer.rs`:
   - instrumented `parse_unicode_class`, `parse_backreference`, `parse_hex_escape`, and `parse_octal_escape`
   - added decision traces for unicode-brace validation, backreference range validation, hex-format branch selection, and octal byte-range validation

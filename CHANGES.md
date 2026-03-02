@@ -14,6 +14,34 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-02 - Added structured tracing to parser token-inspection helpers
+- Scope: parser utility-boundary observability in `rgx-core/src/parser.rs`
+- Changes:
+  - Root-cause gap: token-inspection helper calls were not explicitly traced, so parser state-introspection transitions were implicit in parent-function logs only.
+  - Instrumented parser helper boundaries:
+    - `Parser::peek`
+    - `Parser::current_token_snapshot`
+    - `Parser::regex_kind`
+  - Added decision tracing in `Parser::peek` for token-availability branch (`token.is_some()`).
+  - Added entry/exit argument/result snapshots for helper-return values (token snapshot and regex-kind labels).
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - debug smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity debug --trace-log 'a|b' 'a'`
+    - verified `trace.log` contains `Parser::peek`, `Parser::current_token_snapshot`, and `Parser::regex_kind` enter/exit lines
+  - low smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --verbosity low --trace-log 'cat|dog' 'I have a dog'`
+    - `grep -E '\\[(MEDIUM|HIGH|TRACE)\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `0`
+    - `grep -E '\\[LOW\\]' /Users/richarddje/Documents/github/rgx/trace.log | wc -l` => `19`
+  - quiet smoke:
+    - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --bin rgx-cli -- --quiet --trace-log 'cat|dog' 'I have a dog'`
+    - `wc -l /Users/richarddje/Documents/github/rgx/trace.log` => `0`
+- Notes/impact:
+  - Extends parser trace continuity into token/AST introspection helpers without changing parse or match semantics.
+  - Improves debug-time diagnostics when following parser control-flow and node-kind classification decisions.
 ### 2026-03-02 - Added structured tracing to lexer escape-helper boundaries
 - Scope: escape-sequence utility observability in `rgx-core/src/lexer.rs`
 - Changes:
