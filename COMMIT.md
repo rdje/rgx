@@ -39,7 +39,9 @@ Live commit workflow contract for `rgx`.
    - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
    - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
    - policy: clippy warnings are currently tolerated; clippy errors are not allowed.
-3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, optionally `DEVELOPMENT_NOTES.md` and relevant docs).
+3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, optionally `DEVELOPMENT_NOTES.md`, `README.md`, and relevant docs).
+   - `README.md` should be updated when project objective, onboarding links, or key path maps change.
+   - `README.md` does not need updates on every commit.
 4. Run pre-commit status:
    - `git --no-pager status --short`
 5. Stage exactly the files shown in that status output (no hidden extras).

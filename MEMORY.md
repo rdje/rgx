@@ -56,6 +56,15 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-06
+- Updated documentation policy around onboarding entry point:
+  - `README.md` is the single project entry point and now contains objective, ramp-up order, complete markdown map, and key path references.
+  - README maintenance is now explicitly “update when needed” (not every commit), with triggers tied to objective/onboarding/path-map changes.
+- Workflow alignment:
+  - `COMMIT.md` now explicitly mirrors the same rule: `README.md` should be updated when relevant, not as a per-commit requirement.
+- Verification confirmed:
+  - README references all tracked markdown files (`ALL_MARKDOWN_REFERENCED`)
+  - README is git-tracked (`TRACKED:0`)
 ### 2026-03-02
 - Added structured tracing for parser token-inspection helpers in `rgx-core/src/parser.rs`:
   - instrumented `Parser::peek`, `Parser::current_token_snapshot`, and `Parser::regex_kind`

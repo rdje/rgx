@@ -125,6 +125,7 @@ Pipeline in `rgx-core`:
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
+- `README.md` is the single entry point for project onboarding/navigation and should be updated when objective/onboarding/path maps change (not required on every commit)
 - `COMMIT.md` is the authoritative commit-workflow contract and should be followed for every commit
 - Commit workflow now includes `cargo clippy --workspace --all-targets` with a hard gate: no clippy errors before commit (warnings currently tolerated).
 - `MEMORY.md` is the live cross-session continuity memory and must be updated after completed tasks before commit workflow

@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-06 - Promoted README to single project entry point and clarified update policy
+- Scope: onboarding/documentation navigation in `README.md` and commit policy in `COMMIT.md`
+- Changes:
+  - Reworked `README.md` as the central entry point with:
+    - explicit project objective
+    - fast ramp-up sequence
+    - project file-path map for key crates/modules
+    - complete markdown index covering all version-controlled `.md` files
+  - Added explicit maintenance rule in `README.md`:
+    - update when objective, onboarding links, or key path maps change
+    - no requirement to update on every commit
+  - Updated `COMMIT.md` to align commit workflow language with this rule (`README.md` updated when needed, not per-commit).
+- Validation:
+  - markdown coverage verification against tracked markdown files:
+    - `ALL_MARKDOWN_REFERENCED`
+  - git tracking verification:
+    - `git ls-files --error-unmatch README.md >/dev/null 2>&1; echo TRACKED:$?` => `TRACKED:0`
+- Notes/impact:
+  - Establishes a stable single onboarding hub while keeping commit overhead practical.
+  - Reduces ambiguity for future contributors/AI sessions about when README maintenance is required.
 ### 2026-03-02 - Added structured tracing to parser token-inspection helpers
 - Scope: parser utility-boundary observability in `rgx-core/src/parser.rs`
 - Changes:

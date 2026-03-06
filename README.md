@@ -1,65 +1,94 @@
 # rgx
-rgx is a Rust regex engine project focused on a high-performance VM backend and a clean compile pipeline.
+`rgx` is a Rust regex engine project focused on a high-performance VM backend with a clean compile pipeline.
 
-## Current status
-This repository has a working end-to-end path for core regex features:
-- lexer -> parser -> AST -> compiler -> VM execution
-- `Regex::compile`, `is_match`, `find_first`, `find_all`
-- VM-focused tests passing (12 VM tests)
-- workspace tests passing at the time of this update
+## Project objective
+Build a robust, high-performance, extensible regex engine that:
+- compiles patterns through `lexer -> parser -> AST -> compiler -> VM`,
+- targets practical compatibility with mainstream regex behavior (with explicit known gaps),
+- supports strict observability/tracing for fast debugging and safe evolution.
 
-The most mature component is the VM/compiler path in `rgx-core`.
+## Start here (fast ramp-up)
+If you are new to the repo, use this order:
+1. `README.md` (this file) for the full navigation map.
+2. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
+3. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
+4. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
+5. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
+6. [`COMMIT.md`](COMMIT.md) before making/committing changes.
 
-## What works well today
-- Literal matching, alternation, anchors, basic character classes
-- Core quantifiers (`*`, `+`, `?`, simple `{n,m}` paths)
-- Capture group tracking in VM tests
-- Group support for capturing, non-capturing `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)` (no-backtracking semantics)
-- Parser-independent compilation from AST via public API (`Regex::from_ast`)
-- Parser recognizes code-block syntax `(?{lang:code})`
-- Parser recognizes recursion syntax (`(?R)`, `(?1)`, `(?&name)`)
-- Parser recognizes conditional syntax (group/named-group/lookaround condition forms, including negative lookaround variants)
-- Lookaround support (positive/negative lookahead + lookbehind) via parser syntax and AST
-- Built-in top-level alternation branch reporting via `MatchResult.matched_branch_number` (1-based)
-- CLI usage for basic regex matching via `rgx-cli`
+## Repository path map (project files)
+### Workspace / crates
+- [`Cargo.toml`](Cargo.toml) — workspace manifest
+- [`rgx-core/`](rgx-core/) — engine core crate
+- [`rgx-cli/`](rgx-cli/) — command-line interface
+- [`rgx-bench/`](rgx-bench/) — benchmark/parity harnesses
+- [`rgx-wasm/`](rgx-wasm/) — wasm crate scaffold
+- [`docs/`](docs/) — focused technical/user documentation
 
-## Current limitations
-- Advanced parser syntax is still partial (conditional variants and other advanced forms remain incomplete)
-- Backreference, recursion, conditional, and code-block constructs are parsed, but VM execution is not yet integrated (compile returns explicit unsupported errors)
-- A number of advanced opcodes/features are declared but not fully implemented
-- JavaScript/WASM integration is scaffolded but not production-ready in the user-facing regex path
+### Core engine code paths
+- [`rgx-core/src/lib.rs`](rgx-core/src/lib.rs) — public API (`Regex`, compile/match entry points)
+- [`rgx-core/src/lexer.rs`](rgx-core/src/lexer.rs) — lexical analysis
+- [`rgx-core/src/parser.rs`](rgx-core/src/parser.rs) — recursive-descent parser
+- [`rgx-core/src/ast.rs`](rgx-core/src/ast.rs) — AST definitions
+- [`rgx-core/src/token.rs`](rgx-core/src/token.rs) — lexer token model + positional types
+- [`rgx-core/src/parsing.rs`](rgx-core/src/parsing.rs) — parser abstraction and backend selection
+- [`rgx-core/src/compiler.rs`](rgx-core/src/compiler.rs) — AST-to-program compiler boundary
+- [`rgx-core/src/vm.rs`](rgx-core/src/vm.rs) — VM bytecode execution engine
+- [`rgx-core/src/engine.rs`](rgx-core/src/engine.rs) — runtime dispatch on compiled patterns
+- [`rgx-core/src/execution.rs`](rgx-core/src/execution.rs) — execution/callback runtime layer
+- [`rgx-core/src/log.rs`](rgx-core/src/log.rs) — structured tracing and verbosity control
+- [`rgx-core/src/error.rs`](rgx-core/src/error.rs) — error types
+- [`rgx-core/src/pattern.rs`](rgx-core/src/pattern.rs) — compiled pattern model
 
-## Quick start
+### CLI / benchmark / parity paths
+- [`rgx-cli/src/main.rs`](rgx-cli/src/main.rs) — CLI argument handling and invocation path
+- [`rgx-bench/tests/pcre2_parity.rs`](rgx-bench/tests/pcre2_parity.rs) — differential parity checks vs PCRE2
+
+## Documentation index (all `.md` files)
+### Root markdown files
+- [`README.md`](README.md) — single entry point and navigation hub
+- [`CHANGES.md`](CHANGES.md) — authoritative change ledger
+- [`COMMIT.md`](COMMIT.md) — commit workflow contract and invariants
+- [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) — technical knowledge base
+- [`MEMORY.md`](MEMORY.md) — continuity memory across sessions
+- [`PROJECT_VISION.md`](PROJECT_VISION.md) — long-term project direction
+- [`ROADMAP.md`](ROADMAP.md) — execution roadmap (`Now`/`Next`/`Later`)
+- [`WARP.md`](WARP.md) — Warp-specific repository guidance
+
+### `docs/` markdown files
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — end-user guide
+- [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) — feature status matrix
+- [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) — PCRE2 parity matrix
+- [`docs/PARSER_CONTRACT.md`](docs/PARSER_CONTRACT.md) — parser interoperability contract
+- [`docs/TECHNICAL_DECISIONS.md`](docs/TECHNICAL_DECISIONS.md) — architecture/design decisions
+- [`docs/architecture.md`](docs/architecture.md) — architecture and data flow
+## README maintenance policy
+`README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:
+- project objective/scope,
+- repository structure or important file paths,
+- markdown documentation inventory or onboarding order.
+
+It does **not** need to be updated on every commit—only when those entry-point concerns change.
+
+## Build, test, run
 ```bash
 cargo build
 cargo test --workspace
 cargo test -p rgx-core vm::
 cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+```
+
+Tracing examples:
+```bash
 cargo run --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a cat"
 cargo run --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a cat"
 cargo run --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a cat"
 ```
-- Legacy flags remain available:
-  - `--debug` is equivalent to `--verbosity high`
-  - `--trace` is equivalent to `--verbosity debug`
 
-## Repository structure
-- `rgx-core/`: regex engine core (AST, parser, compiler, VM)
-- `rgx-cli/`: command-line interface
-- `rgx-bench/`: benchmarks (including PCRE2 comparison harness)
-- `rgx-wasm/`: WASM crate scaffold
-- `docs/`: concise technical docs
+Legacy CLI aliases:
+- `--debug` == `--verbosity high`
+- `--trace` == `--verbosity debug`
 
-## Documentation map
-- `CHANGES.md`: living progress ledger (authoritative change history)
-- `COMMIT.md`: authoritative commit-workflow contract (steps, invariants, and involved files)
-- `MEMORY.md`: live session continuity memory for fast post-interruption resume
-- `ROADMAP.md`: live forward-looking roadmap tracker (`Now` / `Next` / `Later`)
-- `DEVELOPMENT_NOTES.md`: technical knowledge base and current engineering notes
-- `PROJECT_VISION.md`: long-term direction and goals
-- `docs/USER_GUIDE.md`: live end-user guide (layered by depth from quick start to gory details)
-- `docs/PARSER_CONTRACT.md`: canonical parser interoperability contract for RGX <-> PGEN integration
-- `docs/CAPABILITY_MATRIX.md`: live shipped-vs-scaffolded feature matrix
-- `docs/PCRE2_COMPATIBILITY_MATRIX.md`: live rgx-vs-PCRE2 parity matrix
-- `docs/architecture.md`: current architecture and data flow
-- `docs/TECHNICAL_DECISIONS.md`: major design decisions and tradeoffs
+## Current status snapshot
+Most mature path today is the VM/compiler pipeline in `rgx-core`, with public API and CLI integrated.
+Some advanced constructs are parsed but intentionally not yet integrated into VM execution (tracked explicitly in docs/matrices above).
