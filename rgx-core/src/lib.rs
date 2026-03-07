@@ -469,6 +469,63 @@ mod tests {
     }
 
     #[test]
+    fn parser_negated_shorthand_character_classes() {
+        let first_cases = [
+            (r"\D+", "123abc45", (3, 6)),
+            (r"\W+", "ab!!cd", (2, 4)),
+            (r"\S+", "  ab  ", (2, 4)),
+        ];
+
+        for (pattern, input, expected_span) in first_cases {
+            let regex = Regex::compile(pattern)
+                .unwrap_or_else(|e| panic!("failed to compile {pattern}: {e}"));
+            let m = regex
+                .find_first(input)
+                .unwrap_or_else(|| panic!("expected first match for pattern {pattern}"));
+            assert_eq!((m.start, m.end), expected_span);
+        }
+
+        let all_cases = [
+            (r"\D+", "123abc45!!", vec![(3, 6), (8, 10)]),
+            (r"\W+", "ab!!cd??", vec![(2, 4), (6, 8)]),
+            (r"\S+", "  ab\tcd  ", vec![(2, 4), (5, 7)]),
+        ];
+
+        for (pattern, input, expected_spans) in all_cases {
+            let regex = Regex::compile(pattern)
+                .unwrap_or_else(|e| panic!("failed to compile {pattern}: {e}"));
+            let spans: Vec<(usize, usize)> = regex
+                .find_all(input)
+                .into_iter()
+                .map(|m| (m.start, m.end))
+                .collect();
+            assert_eq!(spans, expected_spans);
+        }
+    }
+
+    #[test]
+    fn parser_negated_shorthand_character_classes_no_match() {
+        let cases = [(r"\D+", "123"), (r"\W+", "abc_123"), (r"\S+", " \t\n")];
+
+        for (pattern, input) in cases {
+            let regex = Regex::compile(pattern)
+                .unwrap_or_else(|e| panic!("failed to compile {pattern}: {e}"));
+            assert!(
+                !regex.is_match(input),
+                "unexpected match for pattern {pattern}"
+            );
+            assert!(
+                regex.find_first(input).is_none(),
+                "unexpected first match for pattern {pattern}"
+            );
+            assert!(
+                regex.find_all(input).is_empty(),
+                "unexpected find_all matches for pattern {pattern}"
+            );
+        }
+    }
+
+    #[test]
     fn parser_end_anchor_suffix_match() {
         let regex = Regex::compile("dog$").expect("Failed to compile end-anchor syntax");
         let m = regex
@@ -486,6 +543,42 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].start, 7);
         assert_eq!(matches[0].end, 10);
+    }
+
+    #[test]
+    fn parser_absolute_start_anchor_matches_only_at_text_start() {
+        let regex =
+            Regex::compile(r"\Acat").expect("Failed to compile absolute-start anchor syntax");
+        let m = regex
+            .find_first("cat dog")
+            .expect("Expected absolute-start anchor match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+        assert!(!regex.is_match("xxcat"));
+    }
+
+    #[test]
+    fn parser_absolute_end_anchor_requires_true_end_of_text() {
+        let regex = Regex::compile(r"dog\z").expect("Failed to compile absolute-end anchor syntax");
+        let m = regex
+            .find_first("cat dog")
+            .expect("Expected absolute-end anchor match");
+        assert_eq!(m.start, 4);
+        assert_eq!(m.end, 7);
+        assert!(!regex.is_match("cat dog\n"));
+    }
+
+    #[test]
+    fn parser_absolute_end_or_newline_anchor_allows_one_final_newline() {
+        let regex =
+            Regex::compile(r"dog\Z").expect("Failed to compile end-or-final-newline anchor syntax");
+        let m = regex
+            .find_first("cat dog\n")
+            .expect("Expected end-or-final-newline anchor match");
+        assert_eq!(m.start, 4);
+        assert_eq!(m.end, 7);
+        assert!(regex.is_match("cat dog"));
+        assert!(!regex.is_match("cat dog\nx"));
     }
 
     #[test]
@@ -709,8 +802,14 @@ mod tests {
             ("(?<!x)a", "ba", true),
             ("(?=cat)c", "xxcat", true),
             ("(?<!x)a", "xa", false),
+            (r"\Acat", "cat dog", true),
+            (r"\Acat", "xxcat", false),
             ("dog$", "cat dog", true),
             ("dog$", "cat dog x", false),
+            (r"dog\z", "cat dog", true),
+            (r"dog\z", "cat dog\n", false),
+            (r"dog\Z", "cat dog\n", true),
+            (r"dog\Z", "cat dog\nx", false),
         ];
 
         for (pattern, input, expected) in cases {

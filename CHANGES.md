@@ -14,6 +14,53 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-07 - Fixed absolute text anchor support for `\A`, `\Z`, and `\z`
+- Scope: absolute-anchor execution in `rgx-core/src/vm.rs`, parser-path/API regressions in `rgx-core/src/lib.rs`, PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`, and capability/parity continuity docs.
+- Changes:
+  - Root cause: the compiler/parser already accepted absolute anchors, but `RegexVM::execute_at()` and `execute_subexpr()` did not execute `StartText`, `EndText`, or `EndTextOrNL`, so `\A`, `\Z`, and `\z` compiled but produced no matches.
+  - Secondary bug: the compiler emitted the wrong opcodes for `\Z` and `\z`, swapping “before final newline” with “true end-of-text” behavior.
+  - Added VM runtime support for `StartText`, `EndText`, and `EndTextOrNL` plus helper logic for absolute end-of-text and final-newline handling.
+  - Corrected compiler anchor mapping so `\Z` emits `EndTextOrNL` and `\z` emits `EndText`.
+  - Added parser-path/API regression coverage for `\A`, `\Z`, and `\z`, including final-newline behavior and no-match cases.
+  - Added PCRE2 differential coverage for positive and negative cases of `\A`, `\Z`, and `\z`.
+  - Updated `docs/CAPABILITY_MATRIX.md` and `docs/PCRE2_COMPATIBILITY_MATRIX.md` so absolute anchors are reflected as shipped/parity-verified behavior.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - CLI smoke via `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli`:
+    - `--verbosity debug --trace-log '\Acat' 'cat dog'` => stdout `0..3`; `trace.log` counts: `LOW=19`, `MEDIUM=57`, `HIGH=258`, `TRACE=30`
+    - `--verbosity low --trace-log 'dog\Z' 'cat dog\n'` => stdout `4..7`; `MEDIUM/HIGH/TRACE = 0`
+    - `--quiet --trace-log 'dog\z' 'cat dog'` => stdout `4..7`; `trace.log` size `0`
+- Notes/impact:
+  - Closes a public parser-path/runtime parity gap for absolute text anchors.
+  - Reinforces that lexer/parser/AST anchor semantics, compiler opcode mapping, and VM execution paths must stay synchronized.
+### 2026-03-06 - Fixed negated shorthand class runtime parity for `\D`, `\W`, and `\S`
+- Scope: VM shorthand opcode execution in `rgx-core/src/vm.rs`, public API regression coverage in `rgx-core/src/lib.rs`, differential parity coverage in `rgx-bench/tests/pcre2_parity.rs`, and capability/parity docs.
+- Changes:
+  - Root cause: code generation already emitted `DigitAsciiNeg`, `WordAsciiNeg`, and `SpaceAsciiNeg`, but `RegexVM::execute_subexpr()` did not handle `WordAsciiNeg`, `SpaceAscii`, or `SpaceAsciiNeg`, so quantified shorthand patterns such as `\W+` and `\S+` failed even though the main execution loop had shorthand support.
+  - Normalized `RegexVM::execute_at()` by removing duplicate negated-shorthand opcode branches left by a partial edit and keeping a single runtime path for those opcodes.
+  - Extended `RegexVM::execute_subexpr()` to handle `WordAsciiNeg`, `SpaceAscii`, and `SpaceAsciiNeg`, aligning quantifier/assertion subexpression execution with the main VM loop.
+  - Added parser-path/API regression tests for `\D+`, `\W+`, and `\S+` first-match, find-all, and no-match behavior in `rgx-core/src/lib.rs`.
+  - Added PCRE2 differential parity cases for `\D+`, `\W+`, and `\S+` in `rgx-bench/tests/pcre2_parity.rs`.
+  - Updated `docs/CAPABILITY_MATRIX.md` and `docs/PCRE2_COMPATIBILITY_MATRIX.md` to classify negated shorthand classes as shipped/parity-verified.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - CLI smoke via `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli`:
+    - `--verbosity debug --trace-log '\W+' 'ab!!cd'` => stdout `2..4`; `trace.log` counts: `LOW=19`, `MEDIUM=35`, `HIGH=188`, `TRACE=72`
+    - `--verbosity low --trace-log '\D+' '123abc456'` => stdout `3..6`; `MEDIUM/HIGH/TRACE = 0`
+    - `--quiet --trace-log '\S+' '  abc  '` => stdout `2..5`; `trace.log` size `0`
+- Notes/impact:
+  - Closes a real public API/CLI parity bug for negated shorthand classes under quantified execution.
+  - Reinforces that opcode support must stay synchronized between main-loop and subexpression execution paths.
 ### 2026-03-06 - Promoted README to single project entry point and clarified update policy
 - Scope: onboarding/documentation navigation in `README.md` and commit policy in `COMMIT.md`
 - Changes:

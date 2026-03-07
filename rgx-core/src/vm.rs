@@ -841,6 +841,18 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::SpaceAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !ch.is_ascii_whitespace() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
 
                 OpCode::DigitAscii => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -854,10 +866,34 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::DigitAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !ch.is_ascii_digit() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
 
                 OpCode::WordAscii => {
                     if let Some(ch) = self.current_char(ctx) {
                         if ch.is_ascii_alphanumeric() || ch == '_' {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::WordAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !(ch.is_ascii_alphanumeric() || ch == '_') {
                             self.advance_char(ctx);
                             continue;
                         }
@@ -890,9 +926,36 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::StartText => {
+                    if ctx.pos == 0 {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
 
                 OpCode::EndLine => {
                     if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::EndText => {
+                    if self.is_at_absolute_end(ctx) {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::EndTextOrNL => {
+                    if self.is_at_absolute_end_or_before_final_newline(ctx) {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -1352,6 +1415,22 @@ impl RegexVM {
         ctx.current_alternative = None;
     }
 
+    /// Check if current position is at the absolute end of the input text.
+    fn is_at_absolute_end(&self, ctx: &ExecContext) -> bool {
+        ctx.pos == ctx.text.len()
+    }
+
+    /// Check if current position is at the absolute end of the input text,
+    /// or immediately before one final trailing newline sequence.
+    fn is_at_absolute_end_or_before_final_newline(&self, ctx: &ExecContext) -> bool {
+        let len = ctx.text.len();
+        ctx.pos == len
+            || (ctx.pos + 1 == len && ctx.text.get(ctx.pos) == Some(&b'\n'))
+            || (ctx.pos + 2 == len
+                && ctx.text.get(ctx.pos) == Some(&b'\r')
+                && ctx.text.get(ctx.pos + 1) == Some(&b'\n'))
+    }
+
     /// Extract capture groups from context
     fn extract_captures(&self, ctx: &ExecContext) -> Vec<Option<(usize, usize)>> {
         let mut groups = Vec::new();
@@ -1582,10 +1661,46 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::WordAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !(ch.is_ascii_alphanumeric() || ch == '_') {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
 
                 OpCode::DigitAscii => {
                     if let Some(ch) = self.current_char(ctx) {
                         if ch.is_ascii_digit() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                OpCode::DigitAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !ch.is_ascii_digit() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                OpCode::SpaceAscii => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if ch.is_ascii_whitespace() {
+                            self.advance_char(ctx);
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                OpCode::SpaceAsciiNeg => {
+                    if let Some(ch) = self.current_char(ctx) {
+                        if !ch.is_ascii_whitespace() {
                             self.advance_char(ctx);
                             continue;
                         }
@@ -1612,6 +1727,24 @@ impl RegexVM {
                             self.advance_char(ctx);
                             continue;
                         }
+                    }
+                    return false;
+                }
+                OpCode::StartText => {
+                    if ctx.pos == 0 {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::EndText => {
+                    if self.is_at_absolute_end(ctx) {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::EndTextOrNL => {
+                    if self.is_at_absolute_end_or_before_final_newline(ctx) {
+                        continue;
                     }
                     return false;
                 }
@@ -2354,8 +2487,8 @@ impl OptimizingCompiler {
                 AnchorType::Start => self.emit_op(OpCode::StartLine),
                 AnchorType::End => self.emit_op(OpCode::EndLine),
                 AnchorType::AbsStart => self.emit_op(OpCode::StartText),
-                AnchorType::AbsEnd => self.emit_op(OpCode::EndText),
-                AnchorType::AbsEndNoNL => self.emit_op(OpCode::EndTextOrNL),
+                AnchorType::AbsEnd => self.emit_op(OpCode::EndTextOrNL),
+                AnchorType::AbsEndNoNL => self.emit_op(OpCode::EndText),
             },
 
             Regex::Sequence(items) => {

@@ -24,7 +24,7 @@ Pipeline in `rgx-core`:
 ## What is currently reliable
 - Core compile-and-run flow for basic regex patterns
 - Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
-- VM execution paths for literals, alternation, anchors, word boundaries, basic classes, and core quantifiers
+- VM execution paths for literals, alternation, anchors (including `\A`, `\Z`, `\z`), word boundaries, shorthand/custom character classes (including `\D`, `\W`, `\S`), and core quantifiers
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
@@ -45,9 +45,11 @@ Pipeline in `rgx-core`:
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
 - Differential known-gap parity checks currently cover backreference, recursion, and conditional syntax families
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
+- Differential supported-syntax parity now includes absolute text anchors (`\A`, `\Z`, `\z`) including final-newline behavior for `\Z`
 - Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
 - Differential supported-syntax parity now also includes unbounded range coverage (`{n,}`) including suffix-sensitive `{n,}3` behavior
 - Differential supported-syntax parity now includes dedicated suffix-backtracking guardrails for greedy `*`, `+`, and `?` quantifiers
+- Differential supported-syntax parity now includes negated shorthand character classes (`\D`, `\W`, `\S`) for first-match, find-all, and explicit no-match behavior
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
 - Core/CLI logging now supports UVM-style verbosity control and file routing:
   - `RGX_VERBOSITY=none|low|medium|high|debug`

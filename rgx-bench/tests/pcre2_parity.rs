@@ -26,6 +26,21 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "a1 bb22 c333",
         },
         ParityCase {
+            name: "digit_class_neg_all",
+            pattern: r"\D+",
+            input: "123abc45!!",
+        },
+        ParityCase {
+            name: "word_class_neg_all",
+            pattern: r"\W+",
+            input: "ab!!cd??",
+        },
+        ParityCase {
+            name: "space_class_neg_all",
+            pattern: r"\S+",
+            input: "  ab\tcd  ",
+        },
+        ParityCase {
             name: "word_boundary_all",
             pattern: r"\bcat\b",
             input: "cat scat cat",
@@ -66,9 +81,24 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "cat dog cat",
         },
         ParityCase {
+            name: "anchor_abs_start_all",
+            pattern: r"\Acat",
+            input: "cat dog",
+        },
+        ParityCase {
             name: "anchor_end_all",
             pattern: "dog$",
             input: "cat dog",
+        },
+        ParityCase {
+            name: "anchor_abs_end_all",
+            pattern: r"dog\z",
+            input: "cat dog",
+        },
+        ParityCase {
+            name: "anchor_abs_end_or_newline_all",
+            pattern: r"dog\Z",
+            input: "cat dog\n",
         },
         ParityCase {
             name: "quantifier_plus_all",
@@ -124,6 +154,36 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "xcat",
         },
         ParityCase {
+            name: "no_match_anchor_abs_start",
+            pattern: r"\Acat",
+            input: "xxcat",
+        },
+        ParityCase {
+            name: "no_match_anchor_abs_end",
+            pattern: r"dog\z",
+            input: "cat dog\n",
+        },
+        ParityCase {
+            name: "no_match_anchor_abs_end_or_newline",
+            pattern: r"dog\Z",
+            input: "cat dog\nx",
+        },
+        ParityCase {
+            name: "no_match_digit_class_neg",
+            pattern: r"\D+",
+            input: "12345",
+        },
+        ParityCase {
+            name: "no_match_word_class_neg",
+            pattern: r"\W+",
+            input: "abc_123",
+        },
+        ParityCase {
+            name: "no_match_space_class_neg",
+            pattern: r"\S+",
+            input: " \t\n",
+        },
+        ParityCase {
             name: "no_match_lookbehind",
             pattern: "(?<=x)a",
             input: "ba",
@@ -176,14 +236,14 @@ struct KnownGapCase {
 }
 
 fn rgx_first_span(pattern: &str, input: &str) -> Result<Option<(usize, usize)>, String> {
-    let regex =
-        RgxRegex::compile(pattern).map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
+    let regex = RgxRegex::compile(pattern)
+        .map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
     Ok(regex.find_first(input).map(|m| (m.start, m.end)))
 }
 
 fn rgx_all_spans(pattern: &str, input: &str) -> Result<Vec<(usize, usize)>, String> {
-    let regex =
-        RgxRegex::compile(pattern).map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
+    let regex = RgxRegex::compile(pattern)
+        .map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
     Ok(regex
         .find_all(input)
         .into_iter()
@@ -260,6 +320,21 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             input: "id 1234",
         },
         ParityCase {
+            name: "digit_class_neg",
+            pattern: r"\D+",
+            input: "123abc45",
+        },
+        ParityCase {
+            name: "word_class_neg",
+            pattern: r"\W+",
+            input: "ab!!cd",
+        },
+        ParityCase {
+            name: "space_class_neg",
+            pattern: r"\S+",
+            input: "  ab  ",
+        },
+        ParityCase {
             name: "word_boundary",
             pattern: r"\bcat\b",
             input: "a cat nap",
@@ -300,9 +375,24 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             input: "cat dog",
         },
         ParityCase {
+            name: "anchor_abs_start",
+            pattern: r"\Acat",
+            input: "cat dog",
+        },
+        ParityCase {
             name: "anchor_end",
             pattern: "dog$",
             input: "cat dog",
+        },
+        ParityCase {
+            name: "anchor_abs_end",
+            pattern: r"dog\z",
+            input: "cat dog",
+        },
+        ParityCase {
+            name: "anchor_abs_end_or_newline",
+            pattern: r"dog\Z",
+            input: "cat dog\n",
         },
         ParityCase {
             name: "quantifier_plus",
@@ -356,19 +446,22 @@ fn pcre2_parity_known_gap_recursion_compile_behavior() {
             name: "recursion_entire_pattern",
             pattern: "a(?R)?b",
             input: "ab",
-            expected_rgx_error: "recursion syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "recursion syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "recursion_group_number",
             pattern: "(a(?1)?b)",
             input: "ab",
-            expected_rgx_error: "recursion syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "recursion syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "recursion_named_group",
             pattern: "(?<word>a(?&word)?b)",
             input: "ab",
-            expected_rgx_error: "recursion syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "recursion syntax is parsed but not yet integrated into VM execution",
         },
     ];
 
@@ -376,7 +469,6 @@ fn pcre2_parity_known_gap_recursion_compile_behavior() {
         assert_known_gap_case(&case);
     }
 }
-
 
 #[test]
 fn pcre2_parity_supported_range_quantifier_scan_behavior() {
@@ -415,21 +507,17 @@ fn pcre2_parity_supported_unbounded_range_quantifier_behavior() {
     let all_input = "x1 y22 z333 w4444";
     let rgx_all = rgx_all_spans(pattern, all_input)
         .unwrap_or_else(|e| panic!("[unbounded_range_quantifier_supported] rgx all error: {e}"));
-    let pcre2_all = pcre2_all_spans(pattern, all_input).unwrap_or_else(|e| {
-        panic!("[unbounded_range_quantifier_supported] pcre2 all error: {e}")
-    });
+    let pcre2_all = pcre2_all_spans(pattern, all_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_quantifier_supported] pcre2 all error: {e}"));
     assert_eq!(pcre2_all, vec![(4, 6), (8, 11), (13, 17)]);
     assert_eq!(rgx_all, pcre2_all);
 
     let suffix_pattern = r"\d{2,}3";
     let suffix_first_input = "x123 y2233";
-    let rgx_suffix_first = rgx_first_span(suffix_pattern, suffix_first_input).unwrap_or_else(|e| {
-        panic!("[unbounded_range_suffix_supported] rgx first error: {e}")
-    });
-    let pcre2_suffix_first =
-        pcre2_first_span(suffix_pattern, suffix_first_input).unwrap_or_else(|e| {
-            panic!("[unbounded_range_suffix_supported] pcre2 first error: {e}")
-        });
+    let rgx_suffix_first = rgx_first_span(suffix_pattern, suffix_first_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_suffix_supported] rgx first error: {e}"));
+    let pcre2_suffix_first = pcre2_first_span(suffix_pattern, suffix_first_input)
+        .unwrap_or_else(|e| panic!("[unbounded_range_suffix_supported] pcre2 first error: {e}"));
     assert_eq!(pcre2_suffix_first, Some((1, 4)));
     assert_eq!(rgx_suffix_first, pcre2_suffix_first);
 
@@ -544,43 +632,50 @@ fn pcre2_parity_known_gap_conditional_compile_behavior() {
             name: "conditional_group_exists",
             pattern: "(a)?(?(1)b|c)",
             input: "ab",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_named_group_exists_angle_bracket",
             pattern: "(?<g>a)?(?(<g>)b|c)",
             input: "ab",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_named_group_exists_bare",
             pattern: "(?<g>a)?(?(g)b|c)",
             input: "ab",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_lookahead",
             pattern: "(?(?=ab)a|z)b",
             input: "ab",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_negative_lookahead",
             pattern: "(?(?!ab)z|a)b",
             input: "ab",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_lookbehind",
             pattern: "(?(?<=x)a|b)",
             input: "b",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
         KnownGapCase {
             name: "conditional_negative_lookbehind",
             pattern: "(?(?<!x)b|a)",
             input: "b",
-            expected_rgx_error: "conditional syntax is parsed but not yet integrated into VM execution",
+            expected_rgx_error:
+                "conditional syntax is parsed but not yet integrated into VM execution",
         },
     ];
 

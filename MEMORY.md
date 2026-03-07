@@ -42,8 +42,10 @@ Live continuity memory for `rgx` sessions.
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
+- Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
+- Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -56,7 +58,43 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-07
+- Closed the absolute text-anchor runtime/parity gap for `\A`, `\Z`, and `\z`.
+  - Root cause: the parser/compiler already accepted absolute anchors, but `RegexVM` did not execute the corresponding absolute-anchor opcodes, so these patterns compiled and then matched nothing.
+  - Secondary bug: compiler codegen had `\Z` and `\z` mapped to the wrong VM opcodes, reversing “before final newline” vs “true end-of-text” semantics.
+  - Added absolute-anchor execution in both main-loop and subexpression VM paths, and corrected compiler mapping for `\Z` vs `\z`.
+  - Added parser-path/API regressions in `rgx-core/src/lib.rs` and PCRE2 differential cases in `rgx-bench/tests/pcre2_parity.rs`.
+  - Updated capability/parity docs so absolute anchors are explicitly tracked as shipped/parity-verified.
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - direct CLI smoke on `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli`:
+    - debug `\Acat` on `cat dog` => `0..3`, with `trace.log` containing `LOW/MEDIUM/HIGH/TRACE`
+    - low `dog\Z` on `cat dog\n` => `4..7`, with `MEDIUM/HIGH/TRACE = 0`
+    - quiet `dog\z` on `cat dog` => `4..7`, with `trace.log` size `0`
 ### 2026-03-06
+- Closed the negated shorthand runtime/parity gap for `\D`, `\W`, and `\S`.
+  - Root cause: compiler/codegen already emitted negated shorthand opcodes, but `RegexVM::execute_subexpr()` lacked `WordAsciiNeg`, `SpaceAscii`, and `SpaceAsciiNeg`, so quantified patterns like `\W+` and `\S+` failed even though the main loop had shorthand support.
+  - Cleaned duplicate negated-opcode branches in `RegexVM::execute_at()` left by a partial patch and aligned subexpression handling with the main runtime path.
+  - Added parser-path/API regression tests in `rgx-core/src/lib.rs` and PCRE2 differential cases in `rgx-bench/tests/pcre2_parity.rs`.
+  - Updated `docs/CAPABILITY_MATRIX.md` and `docs/PCRE2_COMPATIBILITY_MATRIX.md` so negated shorthand classes are tracked as shipped/parity-verified.
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - direct CLI smoke on `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli`:
+    - debug `\W+` on `ab!!cd` => `2..4`, with `trace.log` containing `LOW/MEDIUM/HIGH/TRACE`
+    - low `\D+` on `123abc456` => `3..6`, with `MEDIUM/HIGH/TRACE = 0`
+    - quiet `\S+` on `  abc  ` => `2..5`, with `trace.log` size `0`
+- Resume note:
+  - After library-oriented validation (`cargo test` / `cargo clippy`), run `cargo build -p rgx-cli` before validating the standalone `target/debug/rgx-cli` binary so smoke checks use the current executable.
 - Updated documentation policy around onboarding entry point:
   - `README.md` is the single project entry point and now contains objective, ramp-up order, complete markdown map, and key path references.
   - README maintenance is now explicitly “update when needed” (not every commit), with triggers tied to objective/onboarding/path-map changes.
