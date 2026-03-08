@@ -14,7 +14,8 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 ## Core regex features (user API path)
 - Literals, concatenation, alternation: `shipped`
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) and word boundaries: `shipped`
-- Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes, unicode-class parsing): `shipped`
+- Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
+- Unicode property classes (`\p{...}`, `\P{...}`): `parsed-only`
 - Quantifiers (`?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`

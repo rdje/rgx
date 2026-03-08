@@ -754,6 +754,42 @@ mod tests {
     }
 
     #[test]
+    fn parser_unicode_property_syntax_reports_explicit_unsupported_error() {
+        for pattern in [r"\p{L}+", r"\P{L}+"] {
+            let result = Regex::compile(pattern);
+            assert!(
+                result.is_err(),
+                "Unicode property class should not silently compile: {pattern}"
+            );
+            let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(
+                msg.contains(
+                    "unicode property classes are parsed but not yet integrated into VM execution"
+                ),
+                "unexpected compile message for pattern {pattern}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn ast_unicode_property_class_reports_explicit_unsupported_error() {
+        let ast = RegexAst::CharClass(crate::ast::CharClass::UnicodeClass {
+            name: "L".to_string(),
+            negated: false,
+        });
+
+        let result = Regex::from_ast(ast);
+        assert!(
+            result.is_err(),
+            "AST Unicode property class should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains(
+            "unicode property classes are parsed but not yet integrated into VM execution"
+        ));
+    }
+
+    #[test]
     fn parser_conditional_lookahead_syntax_reports_explicit_unsupported_error() {
         let result = Regex::compile("(?(?=ab)x|y)");
         assert!(
@@ -874,6 +910,14 @@ mod tests {
             (
                 "(?(?<!z)a|b)",
                 "conditional syntax is parsed but not yet integrated into VM execution",
+            ),
+            (
+                r"\p{L}+",
+                "unicode property classes are parsed but not yet integrated into VM execution",
+            ),
+            (
+                r"\P{L}+",
+                "unicode property classes are parsed but not yet integrated into VM execution",
             ),
         ];
 

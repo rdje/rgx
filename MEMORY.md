@@ -43,6 +43,7 @@ Live continuity memory for `rgx` sessions.
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
+- Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
@@ -58,6 +59,20 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-08
+- Hardened Unicode property classes (`\p{...}`, `\P{...}`) into an explicit compile boundary.
+  - Root cause: parser-path compilation allowed Unicode property classes through to VM codegen, where they were silently lowered to `Any`, causing incorrect public matches such as `\p{L}+` matching `123`.
+  - Added compile-boundary rejection in `Compiler::unsupported_feature_message()` for both parser-path and AST-first Unicode property-class forms.
+  - Added parser-path/API regressions in `rgx-core/src/lib.rs` and PCRE2 known-gap coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Updated capability/parity/user docs so Unicode property classes are tracked as parsed-only / rgx-gap until real execution support lands.
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` exited `0` (warnings only)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - direct CLI smoke should now fail explicitly for `\p{...}` / `\P{...}` instead of returning match spans
 ### 2026-03-07
 - Closed the absolute text-anchor runtime/parity gap for `\A`, `\Z`, and `\z`.
   - Root cause: the parser/compiler already accepted absolute anchors, but `RegexVM` did not execute the corresponding absolute-anchor opcodes, so these patterns compiled and then matched nothing.

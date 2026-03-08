@@ -440,6 +440,30 @@ fn pcre2_parity_known_gap_backreference_compile_behavior() {
 }
 
 #[test]
+fn pcre2_parity_known_gap_unicode_property_compile_behavior() {
+    let cases = [
+        KnownGapCase {
+            name: "unicode_property_letters",
+            pattern: r"\p{L}+",
+            input: "abc",
+            expected_rgx_error:
+                "unicode property classes are parsed but not yet integrated into VM execution",
+        },
+        KnownGapCase {
+            name: "unicode_property_negated_letters",
+            pattern: r"\P{L}+",
+            input: "123",
+            expected_rgx_error:
+                "unicode property classes are parsed but not yet integrated into VM execution",
+        },
+    ];
+
+    for case in cases {
+        assert_known_gap_case(&case);
+    }
+}
+
+#[test]
 fn pcre2_parity_known_gap_recursion_compile_behavior() {
     let cases = [
         KnownGapCase {

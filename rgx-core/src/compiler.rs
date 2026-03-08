@@ -198,6 +198,10 @@ impl Compiler {
             RegexAst::Backreference(_) => {
                 Some("backreferences are parsed but not yet integrated into VM execution")
             }
+            RegexAst::UnicodeClass { .. }
+            | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { .. }) => {
+                Some("unicode property classes are parsed but not yet integrated into VM execution")
+            }
             RegexAst::Recursion { .. } => {
                 Some("recursion syntax is parsed but not yet integrated into VM execution")
             }

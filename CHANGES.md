@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-08 - Hardened Unicode property classes into an explicit compile boundary
+- Scope: compile-boundary validation in `rgx-core/src/compiler.rs`, API regressions in `rgx-core/src/lib.rs`, PCRE2 known-gap coverage in `rgx-bench/tests/pcre2_parity.rs`, and user/capability/parity continuity docs.
+- Changes:
+  - Root cause: Unicode property classes (`\p{...}`, `\P{...}`) were parsed successfully but not actually executed by the VM. Instead, VM code generation silently lowered them to `Any`, causing public miscompiles such as `\p{L}+` matching `123`.
+  - Added an explicit compile boundary in `Compiler::unsupported_feature_message()` for both AST forms of Unicode property classes so parser-path and AST-first compilation now fail with a clear unsupported message.
+  - Added parser-path/API regression coverage for `\p{L}+` and `\P{L}+` explicit compile errors.
+  - Added AST-first regression coverage for Unicode property classes.
+  - Added PCRE2 differential known-gap coverage so Unicode property classes are tracked as a deliberate rgx gap instead of silently behaving like supported syntax.
+  - Updated docs to classify Unicode property classes as parsed-only / rgx-gap until real VM execution support exists.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --test pcre2_parity`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (exit `0`; warnings present, no clippy errors)
+  - `cargo build --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - CLI smoke via `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli`:
+    - `'\p{L}+' '123'` now exits nonzero with explicit unsupported compile error instead of returning `0..3`
+    - `'\P{L}+' 'abc'` now exits nonzero with the same explicit unsupported compile error
+- Notes/impact:
+  - Eliminates a dangerous silent miscompile in the public API/CLI path.
+  - Makes Unicode property classes accurately documented as parsed-only until real execution semantics land.
 ### 2026-03-07 - Fixed absolute text anchor support for `\A`, `\Z`, and `\z`
 - Scope: absolute-anchor execution in `rgx-core/src/vm.rs`, parser-path/API regressions in `rgx-core/src/lib.rs`, PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`, and capability/parity continuity docs.
 - Changes:

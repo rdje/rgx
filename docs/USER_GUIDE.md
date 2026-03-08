@@ -118,6 +118,7 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 
 ### Current constraints to keep in mind
 - Some advanced parser syntaxes are still incomplete (for example conditionals).
+- Unicode property classes (`\p{...}`, `\P{...}`) are parsed, but currently return explicit compile-time unsupported errors.
 - Backreference, recursion, and code-block syntax are parsed, but currently return explicit compile-time unsupported errors.
 - Declared opcodes/features should be treated as shipped only when parser/compiler/VM/API paths are all validated.
 

@@ -33,7 +33,7 @@ Pipeline in `rgx-core`:
   - group-exists forms (`(?(1)...)`)
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
-- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion and conditional syntax variants
+- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, conditional syntax, and Unicode property classes
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -43,7 +43,7 @@ Pipeline in `rgx-core`:
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
-- Differential known-gap parity checks currently cover backreference, recursion, and conditional syntax families
+- Differential known-gap parity checks currently cover backreference, recursion, conditional syntax families, and Unicode property classes
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
 - Differential supported-syntax parity now includes absolute text anchors (`\A`, `\Z`, `\z`) including final-newline behavior for `\Z`
 - Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
@@ -111,6 +111,7 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser support for advanced regex syntax remains incomplete beyond the currently covered conditional condition forms and lookaround syntax
+- Unicode property classes (`\p{...}`, `\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
 - Backreference, recursion, and code-block execution are not yet integrated into the VM runtime path (compile currently returns explicit unsupported errors)
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path

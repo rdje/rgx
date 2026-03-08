@@ -32,6 +32,9 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Explicit no-match parity checks (first-match = `None`, all-match = empty): `parity-verified`
 
 ## Known rgx gaps relative to PCRE2
+- Unicode property classes (`\p{...}`, `\P{...}`): `rgx-gap`
+  - rgx currently parses and returns explicit compile-time unsupported errors.
+  - PCRE2 executes these forms.
 - Backreferences (`\1`, etc.): `rgx-gap`
   - rgx currently parses and returns explicit compile-time unsupported errors.
   - PCRE2 executes these forms.
