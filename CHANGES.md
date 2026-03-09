@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-09 - Added local-first CI workflow and reproducible lockfile tracking
+- Scope: GitHub Actions workflow in `.github/workflows/ci.yml`, local CI helpers in `scripts/`, lockfile tracking via `.gitignore`/`Cargo.lock`, README onboarding, and continuity docs.
+- Changes:
+  - Root cause: the repository did not actually contain a GitHub Actions workflow, there was no single checked-in local CI entry point, and `Cargo.lock` was ignored, allowing local dependency resolution to differ from GitHub CI.
+  - Added `.github/workflows/ci.yml` to run workspace checks on GitHub Actions and delegate execution to the same checked-in local CI entry point used before pushing.
+  - Added `scripts/run-local-ci.sh` to run the local pre-push CI sequence from project root:
+    - CI path/tracking audit
+    - `cargo fmt --manifest-path Cargo.toml --all --check`
+    - `cargo test --manifest-path Cargo.toml --workspace`
+    - `cargo clippy --manifest-path Cargo.toml --workspace --all-targets`
+  - Added `scripts/check-ci-paths.sh` to verify CI-critical paths exist and are git-controlled, fail on non-ignored untracked files, report compile-time `include!`-style macro usage, and reject absolute filesystem paths in workspace Rust source and CI execution files.
+  - Stopped ignoring `Cargo.lock` so GitHub CI uses the same dependency lockfile as local validation.
+  - Updated `README.md` to document the CI workflow path and the local pre-push command.
+- Validation:
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Local and GitHub CI now share one command path, reducing drift between pre-push checks and hosted automation.
+  - CI reproducibility is improved because dependency resolution is now anchored by a tracked `Cargo.lock`.
 ### 2026-03-08 - Hardened Unicode property classes into an explicit compile boundary
 - Scope: compile-boundary validation in `rgx-core/src/compiler.rs`, API regressions in `rgx-core/src/lib.rs`, PCRE2 known-gap coverage in `rgx-bench/tests/pcre2_parity.rs`, and user/capability/parity continuity docs.
 - Changes:

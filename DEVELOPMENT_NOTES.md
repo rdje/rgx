@@ -51,6 +51,10 @@ Pipeline in `rgx-core`:
 - Differential supported-syntax parity now includes dedicated suffix-backtracking guardrails for greedy `*`, `+`, and `?` quantifiers
 - Differential supported-syntax parity now includes negated shorthand character classes (`\D`, `\W`, `\S`) for first-match, find-all, and explicit no-match behavior
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
+- Local-first CI path now exists:
+  - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
+  - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
+- `Cargo.lock` is intentionally tracked so local validation and GitHub CI share the same dependency resolution
 - Core/CLI logging now supports UVM-style verbosity control and file routing:
   - `RGX_VERBOSITY=none|low|medium|high|debug`
   - `rgx-cli --verbosity <level>` with legacy aliases `--debug` (high) and `--trace` (debug)

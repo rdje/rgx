@@ -44,6 +44,10 @@ Live continuity memory for `rgx` sessions.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
+- Local-first CI is now available:
+  - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
+  - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source/CI execution files, and currently reports that there are no compile-time `include!`-style macros in workspace source
+- `Cargo.lock` is now intentionally tracked so local and GitHub CI use the same dependency resolution
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
@@ -59,6 +63,14 @@ Live continuity memory for `rgx` sessions.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-09
+- Added a local-first CI workflow and matching pre-push path.
+  - Root cause: the repo had no actual GitHub Actions workflow, no single checked-in local CI command path, and `Cargo.lock` was ignored, which could make GitHub resolve different dependency versions than local validation.
+  - Added `.github/workflows/ci.yml` and wired it to `./scripts/run-local-ci.sh` so GitHub and local runs execute the same checks.
+  - Added `scripts/check-ci-paths.sh` to verify CI-critical paths are git-controlled, reject absolute filesystem paths in Rust source / CI execution files, and surface compile-time `include!` usage (currently none found).
+  - Removed `Cargo.lock` from `.gitignore` so the lockfile is git-controlled and available to GitHub CI.
+- Validation confirmed:
+  - `./scripts/run-local-ci.sh`
 ### 2026-03-08
 - Hardened Unicode property classes (`\p{...}`, `\P{...}`) into an explicit compile boundary.
   - Root cause: parser-path compilation allowed Unicode property classes through to VM codegen, where they were silently lowered to `Any`, causing incorrect public matches such as `\p{L}+` matching `123`.

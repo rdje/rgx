@@ -44,6 +44,11 @@ If you are new to the repo, use this order:
 - [`rgx-cli/src/main.rs`](rgx-cli/src/main.rs) — CLI argument handling and invocation path
 - [`rgx-bench/tests/pcre2_parity.rs`](rgx-bench/tests/pcre2_parity.rs) — differential parity checks vs PCRE2
 
+### CI / automation paths
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
+- [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point (same checks the workflow runs)
+- [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
+
 ## Documentation index (all `.md` files)
 ### Root markdown files
 - [`README.md`](README.md) — single entry point and navigation hub
@@ -76,6 +81,11 @@ cargo build
 cargo test --workspace
 cargo test -p rgx-core vm::
 cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+```
+
+Run the same CI checks locally before pushing:
+```bash
+./scripts/run-local-ci.sh
 ```
 
 Tracing examples:
