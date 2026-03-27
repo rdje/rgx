@@ -703,6 +703,68 @@ mod tests {
     }
 
     #[test]
+    fn parser_lazy_question_quantifier_prefers_zero_width_match() {
+        let regex =
+            Regex::compile("a??").expect("Failed to compile lazy question-quantifier pattern");
+
+        let first = regex
+            .find_first("b")
+            .expect("Expected zero-width lazy question match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 0);
+
+        let all = regex.find_all("b");
+        let spans: Vec<(usize, usize)> = all.into_iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 0), (1, 1)]);
+    }
+
+    #[test]
+    fn parser_lazy_star_quantifier_prefers_shortest_valid_span() {
+        let regex = Regex::compile("ab*?").expect("Failed to compile lazy star-quantifier pattern");
+        let first = regex.find_first("abbb").expect("Expected lazy star match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 1);
+    }
+
+    #[test]
+    fn parser_lazy_star_and_plus_quantifiers_backtrack_for_suffix() {
+        let star = Regex::compile("ab*?c").expect("Failed to compile lazy star suffix pattern");
+        let plus = Regex::compile("ab+?c").expect("Failed to compile lazy plus suffix pattern");
+
+        let star_match = star
+            .find_first("abbbc")
+            .expect("Expected lazy star suffix backtracking match");
+        assert_eq!(star_match.start, 0);
+        assert_eq!(star_match.end, 5);
+
+        let plus_match = plus
+            .find_first("abbbc")
+            .expect("Expected lazy plus suffix backtracking match");
+        assert_eq!(plus_match.start, 0);
+        assert_eq!(plus_match.end, 5);
+    }
+
+    #[test]
+    fn parser_lazy_bounded_and_unbounded_ranges_prefer_shortest_suffix_match() {
+        let bounded = Regex::compile(r"\d{2,3}?3")
+            .expect("Failed to compile lazy bounded range-quantifier suffix pattern");
+        let unbounded = Regex::compile(r"\d{2,}?3")
+            .expect("Failed to compile lazy unbounded range-quantifier suffix pattern");
+
+        let bounded_match = bounded
+            .find_first("2233")
+            .expect("Expected lazy bounded-range suffix match");
+        assert_eq!(bounded_match.start, 0);
+        assert_eq!(bounded_match.end, 3);
+
+        let unbounded_match = unbounded
+            .find_first("2233")
+            .expect("Expected lazy unbounded-range suffix match");
+        assert_eq!(unbounded_match.start, 0);
+        assert_eq!(unbounded_match.end, 3);
+    }
+
+    #[test]
     fn parser_atomic_group_blocks_backtracking() {
         let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
         let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");

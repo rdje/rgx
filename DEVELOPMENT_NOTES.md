@@ -24,7 +24,7 @@ Pipeline in `rgx-core`:
 ## What is currently reliable
 - Core compile-and-run flow for basic regex patterns
 - Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
-- VM execution paths for literals, alternation, anchors (including `\A`, `\Z`, `\z`), word boundaries, shorthand/custom character classes (including `\D`, `\W`, `\S`), and core quantifiers
+- VM execution paths for literals, alternation, anchors (including `\\A`, `\\Z`, `\\z`), word boundaries, shorthand/custom character classes (including `\\D`, `\\W`, `\\S`), and greedy/lazy quantifiers
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
@@ -49,8 +49,11 @@ Pipeline in `rgx-core`:
 - Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
 - Differential supported-syntax parity now also includes unbounded range coverage (`{n,}`) including suffix-sensitive `{n,}3` behavior
 - Differential supported-syntax parity now includes dedicated suffix-backtracking guardrails for greedy `*`, `+`, and `?` quantifiers
+- Differential supported-syntax parity now includes lazy quantifiers and lazy counted-range suffix behavior
 - Differential supported-syntax parity now includes negated shorthand character classes (`\D`, `\W`, `\S`) for first-match, find-all, and explicit no-match behavior
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
+- Parser-path regressions now explicitly cover lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`
+- `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
 - Local-first CI path now exists:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
@@ -119,7 +122,7 @@ Pipeline in `rgx-core`:
 - Backreference, recursion, and code-block execution are not yet integrated into the VM runtime path (compile currently returns explicit unsupported errors)
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path
-- JavaScript/WASM modules remain scaffold-level in user-facing flow
+- JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
 
 ## Immediate priorities
 1. Expand and maintain the PCRE2 compatibility matrix with explicit exceptions/gaps and executable differential tests
@@ -135,6 +138,7 @@ Pipeline in `rgx-core`:
 - `README.md` is the single entry point for project onboarding/navigation and should be updated when objective/onboarding/path maps change (not required on every commit)
 - `COMMIT.md` is the authoritative commit-workflow contract and should be followed for every commit
 - Commit workflow now includes `cargo clippy --workspace --all-targets` with a hard gate: no clippy errors before commit (warnings currently tolerated).
+- `RUST_CODEBASE_ANALYSIS.md` is the live roadmap-grounded assessment of the Rust workspace and should be updated when implementation status, feature-flag readiness, or roadmap alignment materially changes.
 - `MEMORY.md` is the live cross-session continuity memory and must be updated after completed tasks before commit workflow
 - `ROADMAP.md` is the live forward-looking planning tracker
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth

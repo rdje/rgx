@@ -32,7 +32,7 @@
 //! .{8,}(?{lua:return string.match(arg[0], "[A-Z]") and string.match(arg[0], "[0-9]")})
 //! ```
 
-use crate::error::{Result, RgxError};
+use crate::error::Result;
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -353,7 +353,7 @@ pub mod lua {
 #[cfg(feature = "javascript")]
 pub mod javascript {
     use super::*;
-    use rquickjs::{Array, Context, Object, Runtime, Value};
+    use rquickjs::{Array, Context, Object, Runtime, Undefined, Value};
 
     /// JavaScript execution engine using QuickJS.
     ///
@@ -369,27 +369,35 @@ pub mod javascript {
     /// - Lightweight JS engine (QuickJS)
     /// - Fast startup, small memory footprint
     pub struct JavaScriptEngine {
-        runtime: Runtime,
+        memory_limit_bytes: usize,
+        max_stack_size_bytes: usize,
     }
 
     impl JavaScriptEngine {
         /// Create a new sandboxed JavaScript engine
         pub fn new() -> Result<Self> {
-            let runtime = Runtime::new()
-                .map_err(|e| RgxError::Engine(format!("Failed to create JS runtime: {}", e)))?;
+            Ok(Self {
+                memory_limit_bytes: 10 * 1024 * 1024,
+                max_stack_size_bytes: 256 * 1024,
+            })
+        }
 
-            // Set memory limit (10MB)
-            runtime.set_memory_limit(10 * 1024 * 1024);
-
-            // Set max stack size
-            runtime.set_max_stack_size(256 * 1024);
-
-            Ok(Self { runtime })
+        fn new_runtime(&self) -> Result<Runtime> {
+            let runtime = Runtime::new().map_err(|e| {
+                crate::error::RgxError::Engine(format!("Failed to create JS runtime: {}", e))
+            })?;
+            runtime.set_memory_limit(self.memory_limit_bytes);
+            runtime.set_max_stack_size(self.max_stack_size_bytes);
+            Ok(runtime)
         }
 
         /// Execute JavaScript code in sandboxed context
         fn execute_sandboxed(&self, code: &str, context: &ExecContext) -> ExecResult {
-            let ctx_result = Context::base(&self.runtime);
+            let runtime = match self.new_runtime() {
+                Ok(runtime) => runtime,
+                Err(err) => return ExecResult::Error(err.to_string()),
+            };
+            let ctx_result = Context::full(&runtime);
 
             let ctx = match ctx_result {
                 Ok(ctx) => ctx,
@@ -401,10 +409,10 @@ pub mod javascript {
                 let globals = ctx.globals();
 
                 // Create arg array with captures
-                if let Ok(arg_array) = Array::new(ctx) {
+                if let Ok(arg_array) = Array::new(ctx.clone()) {
                     for (i, capture) in context.captures.iter().enumerate() {
                         if let Some(text) = capture {
-                            arg_array.set(i as u32, text.clone()).ok();
+                            arg_array.set(i, text.clone()).ok();
                         }
                     }
                     globals.set("arg", arg_array).ok();
@@ -415,7 +423,7 @@ pub mod javascript {
                 globals.set("text", context.text.clone()).ok();
 
                 // Create named captures object
-                if let Ok(named_obj) = Object::new(ctx) {
+                if let Ok(named_obj) = Object::new(ctx.clone()) {
                     for (name, value) in &context.named_captures {
                         named_obj.set(name.clone(), value.clone()).ok();
                     }
@@ -423,13 +431,13 @@ pub mod javascript {
                 }
 
                 // Remove dangerous functions
-                globals.set("eval", Value::Undefined).ok();
-                globals.set("Function", Value::Undefined).ok();
-                globals.set("fetch", Value::Undefined).ok();
-                globals.set("XMLHttpRequest", Value::Undefined).ok();
+                globals.set("eval", Undefined).ok();
+                globals.set("Function", Undefined).ok();
+                globals.set("fetch", Undefined).ok();
+                globals.set("XMLHttpRequest", Undefined).ok();
 
                 // Execute the code
-                match ctx.eval::<Value>(code) {
+                match ctx.eval::<Value, _>(code) {
                     Ok(val) => {
                         if val.is_bool() {
                             if let Some(b) = val.as_bool() {
@@ -479,12 +487,7 @@ pub mod javascript {
         }
 
         fn reset(&mut self) {
-            // QuickJS doesn't provide direct reset, create new runtime
-            if let Ok(new_runtime) = Runtime::new() {
-                new_runtime.set_memory_limit(10 * 1024 * 1024);
-                new_runtime.set_max_stack_size(256 * 1024);
-                self.runtime = new_runtime;
-            }
+            // Stateless engine: each execution creates a fresh sandboxed runtime.
         }
     }
 

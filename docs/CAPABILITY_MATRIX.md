@@ -16,7 +16,7 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) and word boundaries: `shipped`
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `parsed-only`
-- Quantifiers (`?`, `*`, `+`, counted ranges): `shipped`
+- Quantifiers (greedy/lazy `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`
   - atomic groups `(?>...)` with no-backtracking semantics: `shipped`

@@ -106,6 +106,26 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "ab abb abbb a",
         },
         ParityCase {
+            name: "quantifier_question_lazy_all",
+            pattern: "a??",
+            input: "ba",
+        },
+        ParityCase {
+            name: "quantifier_star_lazy_all",
+            pattern: "ab*?",
+            input: "abbb ab a",
+        },
+        ParityCase {
+            name: "range_bounded_lazy_suffix_all",
+            pattern: r"\d{2,3}?3",
+            input: "123 2233 993 4443",
+        },
+        ParityCase {
+            name: "range_unbounded_lazy_suffix_all",
+            pattern: r"\d{2,}?3",
+            input: "123 2233 993 4443",
+        },
+        ParityCase {
             name: "range_bounded_suffix_backtrack_all",
             pattern: r"\d{2,3}3",
             input: "123 2233 993 4443",

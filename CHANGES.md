@@ -14,6 +14,52 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-26 - Fixed lazy quantifier parity and restored JavaScript feature builds
+- Scope: VM/compiler/runtime changes in `rgx-core`, parity regressions in `rgx-core/src/lib.rs`, PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`, and live continuity/status docs.
+- Changes:
+  - Root cause: lazy quantifiers were parsed but not compiled/executed correctly in the public path because the VM compiler only had dedicated lowering for greedy quantifiers, while lazy forms effectively degraded or failed in real use.
+  - Added dedicated VM/compiler support for lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`, plus nested sub-expression backtracking support needed by quantified subprograms.
+  - Added public API regression coverage for lazy zero-width, shortest-match, and suffix-backtracking behavior.
+  - Added PCRE2 differential parity cases for lazy quantifiers and lazy counted ranges.
+  - Root cause for the feature-build failures: the QuickJS backend in `rgx-core/src/execution.rs` had drifted from `rquickjs` 0.4 APIs and also stored a non-`Send`/`Sync` runtime inside a trait implementation that required `Send + Sync`.
+  - Reworked the JavaScript backend to create a fresh sandboxed QuickJS runtime per execution, updated it to current `rquickjs` 0.4 APIs, and restored successful `javascript` / `all-languages` feature builds.
+  - Updated `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `MEMORY.md`, and parity/capability docs so future sessions do not re-open the already-fixed gaps.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+- Notes/impact:
+  - Closes a real public-path correctness gap for lazy quantifiers and counted lazy ranges.
+  - Restores feature-flag build confidence for JavaScript and combined multi-language configurations without yet claiming user-visible code-block execution support.
+### 2026-03-26 - Added live Rust codebase analysis and wired it into commit workflow
+- Scope: new `RUST_CODEBASE_ANALYSIS.md`, plus workflow/documentation updates in `README.md`, `COMMIT.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md`.
+- Changes:
+  - Added `RUST_CODEBASE_ANALYSIS.md` as a live roadmap-grounded assessment of the Rust workspace, covering crate/module maturity, roadmap alignment, feature-gated build status, warning debt, and concrete implementation gaps.
+  - Captured and documented current high-signal findings, including:
+    - default workspace and `pgen-parser` feature-path validation are green
+    - `lua` and `wasm` feature checks compile
+    - `javascript` and `all-languages` feature checks currently fail in `rgx-core/src/execution.rs`
+    - lazy quantifiers are parsed but not correctly compiled in the public path
+  - Updated `README.md` to include the new analysis doc in onboarding and markdown inventory.
+  - Updated `COMMIT.md` so Rust-focused commits explicitly review/update `RUST_CODEBASE_ANALYSIS.md` alongside `CHANGES.md` and `MEMORY.md`.
+  - Updated continuity/docs policy in `DEVELOPMENT_NOTES.md` and `MEMORY.md` to treat the analysis doc as live project infrastructure.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - investigative snapshots recorded in `RUST_CODEBASE_ANALYSIS.md`:
+    - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+    - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+    - `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli "a??" "b"`
+    - `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli "a*" "b"`
+    - `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli "ab*?c" "abbbc"`
+    - `/Users/richarddje/Documents/github/rgx/target/debug/rgx-cli "ab*c" "abbbc"`
+- Notes/impact:
+  - Rust-task commits now have a mandatory place to record roadmap alignment and implementation reality.
+  - Future sessions can distinguish supported default-path behavior from feature-gated/runtime scaffolding much faster.
 ### 2026-03-09 - Added local-first CI workflow and reproducible lockfile tracking
 - Scope: GitHub Actions workflow in `.github/workflows/ci.yml`, local CI helpers in `scripts/`, lockfile tracking via `.gitignore`/`Cargo.lock`, README onboarding, and continuity docs.
 - Changes:

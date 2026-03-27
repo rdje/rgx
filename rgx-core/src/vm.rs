@@ -695,6 +695,20 @@ impl RegexVM {
         }
     }
 
+    /// Clone the current execution state for speculative sub-expression execution.
+    fn clone_exec_context(&self, ctx: &ExecContext) -> ExecContext {
+        ExecContext {
+            text: ctx.text.clone(),
+            pos: ctx.pos,
+            end: ctx.end,
+            captures: ctx.captures.clone(),
+            memo_cache: HashMap::new(),
+            call_stack: ctx.call_stack.clone(),
+            backtrack_stack: Vec::new(),
+            current_alternative: ctx.current_alternative,
+        }
+    }
+
     /// Execute bytecode starting at given position
     fn execute_at(&self, ctx: &mut ExecContext, start: usize) -> bool {
         debug_log!(
@@ -1249,6 +1263,112 @@ impl RegexVM {
                     continue;
                 }
 
+                OpCode::QuestionLazy => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    if self
+                        .probe_subexpr(ctx, &code[expr_start..expr_end])
+                        .is_some()
+                    {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: expr_start,
+                            pos: ctx.pos,
+                            saved_captures: ctx.captures.clone(),
+                            saved_call_stack: ctx.call_stack.clone(),
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::StarLazy => {
+                    let opcode_start = ip - 1;
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    if let Some(probe_ctx) = self.probe_subexpr(ctx, &code[expr_start..expr_end]) {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: opcode_start,
+                            pos: probe_ctx.pos,
+                            saved_captures: probe_ctx.captures,
+                            saved_call_stack: ctx.call_stack.clone(),
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::PlusLazy => {
+                    let opcode_start = ip - 1;
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let before_pos = ctx.pos;
+                    let saved_captures = ctx.captures.clone();
+                    let saved_call_stack = ctx.call_stack.clone();
+                    let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    if !matched || ctx.pos == before_pos {
+                        ctx.pos = before_pos;
+                        ctx.captures = saved_captures;
+                        ctx.call_stack = saved_call_stack;
+                        if self.try_backtrack(ctx, &mut ip) {
+                            continue;
+                        }
+                        return false;
+                    }
+
+                    let after_first_pos = ctx.pos;
+                    let after_first_captures = ctx.captures.clone();
+                    let after_first_call_stack = ctx.call_stack.clone();
+                    if self
+                        .probe_subexpr(ctx, &code[expr_start..expr_end])
+                        .is_some()
+                    {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: opcode_start,
+                            pos: after_first_pos,
+                            saved_captures: after_first_captures,
+                            saved_call_stack: after_first_call_stack,
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
                 OpCode::SaveStart => {
                     // Read the group ID from operands
                     if ip >= code.len() {
@@ -1362,6 +1482,16 @@ impl RegexVM {
                     return false;
                 }
             }
+        }
+    }
+
+    /// Probe whether a sub-expression can match once while advancing the input.
+    fn probe_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> Option<ExecContext> {
+        let mut probe_ctx = self.clone_exec_context(ctx);
+        if self.execute_subexpr(&mut probe_ctx, code) && probe_ctx.pos != ctx.pos {
+            Some(probe_ctx)
+        } else {
+            None
         }
     }
 
@@ -1642,6 +1772,21 @@ impl RegexVM {
     /// Execute a sub-expression (used for quantifiers)
     fn execute_subexpr(&self, ctx: &mut ExecContext, code: &[u8]) -> bool {
         let mut ip = 0;
+        let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
+        let mut call_stack = Vec::new();
+
+        macro_rules! local_backtrack_or_return_false {
+            () => {
+                if let Some(frame) = backtrack_stack.pop() {
+                    ip = frame.ip;
+                    ctx.pos = frame.pos;
+                    ctx.captures = frame.saved_captures;
+                    call_stack = frame.saved_call_stack;
+                    continue;
+                }
+                return false;
+            };
+        }
 
         loop {
             if ip >= code.len() {
@@ -1659,7 +1804,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::WordAsciiNeg => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -1668,7 +1813,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::DigitAscii => {
@@ -1678,7 +1823,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::DigitAsciiNeg => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -1687,7 +1832,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::SpaceAscii => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -1696,7 +1841,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::SpaceAsciiNeg => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -1705,7 +1850,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::Char => {
@@ -1718,7 +1863,7 @@ impl RegexVM {
                             }
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::Any => {
@@ -1728,25 +1873,49 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
+                }
+                OpCode::StartLine => {
+                    if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::StartText => {
                     if ctx.pos == 0 {
                         continue;
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
+                }
+                OpCode::EndLine => {
+                    if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::EndText => {
                     if self.is_at_absolute_end(ctx) {
                         continue;
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
                 OpCode::EndTextOrNL => {
                     if self.is_at_absolute_end_or_before_final_newline(ctx) {
                         continue;
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
+                }
+                OpCode::WordBoundary => {
+                    if self.is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
+                OpCode::NonWordBoundary => {
+                    if !self.is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::CharClass | OpCode::CharClassNeg => {
@@ -1775,7 +1944,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    return false;
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::Lookahead
@@ -1812,7 +1981,7 @@ impl RegexVM {
                     };
 
                     if !assertion_holds {
-                        return false;
+                        local_backtrack_or_return_false!();
                     }
 
                     // Assertions do not consume input
@@ -1821,19 +1990,329 @@ impl RegexVM {
                 }
 
                 OpCode::AtomicStart => {
-                    ctx.call_stack.push(ctx.backtrack_stack.len());
+                    call_stack.push(backtrack_stack.len());
                     continue;
                 }
 
                 OpCode::AtomicEnd => {
-                    if let Some(mark) = ctx.call_stack.pop() {
-                        ctx.backtrack_stack.truncate(mark);
+                    if let Some(mark) = call_stack.pop() {
+                        backtrack_stack.truncate(mark);
                         continue;
                     }
                     return false;
                 }
 
-                // Add other opcodes as needed
+                OpCode::SaveStart => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    let start_idx = group_id * 2;
+                    if start_idx < ctx.captures.len() {
+                        ctx.captures[start_idx] = Some(ctx.pos);
+                    }
+                    continue;
+                }
+
+                OpCode::SaveEnd => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    let end_idx = group_id * 2 + 1;
+                    if end_idx < ctx.captures.len() {
+                        ctx.captures[end_idx] = Some(ctx.pos);
+                    }
+                    continue;
+                }
+
+                OpCode::Split => {
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+
+                    backtrack_stack.push(BacktrackFrame {
+                        ip: ip + offset,
+                        pos: ctx.pos,
+                        saved_captures: ctx.captures.clone(),
+                        saved_call_stack: call_stack.clone(),
+                    });
+                    continue;
+                }
+
+                OpCode::SplitLazy => {
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+
+                    backtrack_stack.push(BacktrackFrame {
+                        ip,
+                        pos: ctx.pos,
+                        saved_captures: ctx.captures.clone(),
+                        saved_call_stack: call_stack.clone(),
+                    });
+                    ip += offset;
+                    continue;
+                }
+
+                OpCode::Jump => {
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+                    ip += offset;
+                    continue;
+                }
+
+                OpCode::QuestionGreedy => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let before_pos = ctx.pos;
+                    let saved_captures = ctx.captures.clone();
+                    let saved_call_stack = call_stack.clone();
+                    let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    if !matched || ctx.pos == before_pos {
+                        ctx.pos = before_pos;
+                        ctx.captures = saved_captures;
+                        call_stack = saved_call_stack;
+                    } else {
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::QuestionLazy => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    if self
+                        .probe_subexpr(ctx, &code[expr_start..expr_end])
+                        .is_some()
+                    {
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: expr_start,
+                            pos: ctx.pos,
+                            saved_captures: ctx.captures.clone(),
+                            saved_call_stack: call_stack.clone(),
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::StarGreedy => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    loop {
+                        let before_pos = ctx.pos;
+                        let saved_captures = ctx.captures.clone();
+                        let saved_call_stack = call_stack.clone();
+                        if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            ctx.pos = before_pos;
+                            ctx.captures = saved_captures;
+                            call_stack = saved_call_stack;
+                            break;
+                        }
+                        if ctx.pos == before_pos {
+                            ctx.captures = saved_captures;
+                            call_stack = saved_call_stack;
+                            break;
+                        }
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::StarLazy => {
+                    let opcode_start = ip - 1;
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    if let Some(probe_ctx) = self.probe_subexpr(ctx, &code[expr_start..expr_end]) {
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: opcode_start,
+                            pos: probe_ctx.pos,
+                            saved_captures: probe_ctx.captures,
+                            saved_call_stack: call_stack.clone(),
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::PlusGreedy => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let first_pos = ctx.pos;
+                    let first_captures = ctx.captures.clone();
+                    let first_call_stack = call_stack.clone();
+                    if !self.execute_subexpr(ctx, &code[expr_start..expr_end])
+                        || ctx.pos == first_pos
+                    {
+                        ctx.pos = first_pos;
+                        ctx.captures = first_captures;
+                        let _ = first_call_stack;
+                        local_backtrack_or_return_false!();
+                    }
+
+                    loop {
+                        let before_pos = ctx.pos;
+                        let saved_captures = ctx.captures.clone();
+                        let saved_call_stack = call_stack.clone();
+                        if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
+                            ctx.pos = before_pos;
+                            ctx.captures = saved_captures;
+                            call_stack = saved_call_stack;
+                            break;
+                        }
+                        if ctx.pos == before_pos {
+                            ctx.captures = saved_captures;
+                            call_stack = saved_call_stack;
+                            break;
+                        }
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: expr_end,
+                            pos: before_pos,
+                            saved_captures,
+                            saved_call_stack,
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::PlusLazy => {
+                    let opcode_start = ip - 1;
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let expr_len = code[ip] as usize;
+                    ip += 1;
+
+                    let expr_start = ip;
+                    let expr_end = ip + expr_len;
+
+                    if expr_end > code.len() {
+                        return false;
+                    }
+
+                    let before_pos = ctx.pos;
+                    let saved_captures = ctx.captures.clone();
+                    let saved_call_stack = call_stack.clone();
+                    let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    if !matched || ctx.pos == before_pos {
+                        ctx.pos = before_pos;
+                        ctx.captures = saved_captures;
+                        let _ = saved_call_stack;
+                        local_backtrack_or_return_false!();
+                    }
+
+                    let after_first_pos = ctx.pos;
+                    let after_first_captures = ctx.captures.clone();
+                    let after_first_call_stack = call_stack.clone();
+                    if self
+                        .probe_subexpr(ctx, &code[expr_start..expr_end])
+                        .is_some()
+                    {
+                        backtrack_stack.push(BacktrackFrame {
+                            ip: opcode_start,
+                            pos: after_first_pos,
+                            saved_captures: after_first_captures,
+                            saved_call_stack: after_first_call_stack,
+                        });
+                    }
+
+                    ip = expr_end;
+                    continue;
+                }
+
+                OpCode::Fail => {
+                    local_backtrack_or_return_false!();
+                }
+
+                OpCode::Match => {
+                    return true;
+                }
+
                 _ => {
                     return false;
                 }
@@ -1844,16 +2323,7 @@ impl RegexVM {
     /// Execute an assertion sub-expression without consuming input
     /// or mutating the parent execution context.
     fn execute_assertion_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> bool {
-        let mut assertion_ctx = ExecContext {
-            text: ctx.text.clone(),
-            pos: ctx.pos,
-            end: ctx.end,
-            captures: ctx.captures.clone(),
-            memo_cache: HashMap::new(),
-            call_stack: Vec::new(),
-            backtrack_stack: Vec::new(),
-            current_alternative: ctx.current_alternative,
-        };
+        let mut assertion_ctx = self.clone_exec_context(ctx);
 
         self.execute_subexpr(&mut assertion_ctx, code)
     }
@@ -1864,16 +2334,9 @@ impl RegexVM {
         let assertion_end = ctx.pos;
 
         for start in (0..=assertion_end).rev() {
-            let mut lookbehind_ctx = ExecContext {
-                text: ctx.text.clone(),
-                pos: start,
-                end: assertion_end,
-                captures: ctx.captures.clone(),
-                memo_cache: HashMap::new(),
-                call_stack: Vec::new(),
-                backtrack_stack: Vec::new(),
-                current_alternative: ctx.current_alternative,
-            };
+            let mut lookbehind_ctx = self.clone_exec_context(ctx);
+            lookbehind_ctx.pos = start;
+            lookbehind_ctx.end = assertion_end;
 
             if self.execute_subexpr(&mut lookbehind_ctx, code)
                 && lookbehind_ctx.pos == assertion_end
@@ -2618,50 +3081,44 @@ impl OptimizingCompiler {
 
             Regex::Quantified { expr, quantifier } => {
                 match quantifier {
+                    Quantifier::OneOrMore { lazy: true } => {
+                        self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
+                    }
                     Quantifier::OneOrMore { lazy: false } => {
-                        // For A+, emit special PlusGreedy opcode
-                        self.emit_op(OpCode::PlusGreedy);
-
-                        // First, collect the sub-expression bytecode
-                        let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr, false);
-                        let sub_code = sub_compiler.code;
-
-                        // Emit the length of the sub-expression
-                        self.code.push(sub_code.len() as u8);
-
-                        // Then emit the sub-expression bytecode
-                        self.code.extend(sub_code);
+                        self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                    }
+                    Quantifier::ZeroOrMore { lazy: true } => {
+                        self.emit_subexpr_opcode(OpCode::StarLazy, expr);
                     }
                     Quantifier::ZeroOrMore { lazy: false } => {
-                        // For A*, emit special StarGreedy opcode
-                        self.emit_op(OpCode::StarGreedy);
-
-                        // First, collect the sub-expression bytecode
-                        let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr, false);
-                        let sub_code = sub_compiler.code;
-
-                        // Emit the length of the sub-expression
-                        self.code.push(sub_code.len() as u8);
-
-                        // Then emit the sub-expression bytecode
-                        self.code.extend(sub_code);
+                        self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                    }
+                    Quantifier::ZeroOrOne { lazy: true } => {
+                        self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
                     }
                     Quantifier::ZeroOrOne { lazy: false } => {
-                        // For A?, emit special QuestionGreedy opcode
-                        self.emit_op(OpCode::QuestionGreedy);
-
-                        // First, collect the sub-expression bytecode
-                        let mut sub_compiler = OptimizingCompiler::new();
-                        sub_compiler.codegen_pass(expr, false);
-                        let sub_code = sub_compiler.code;
-
-                        // Emit the length of the sub-expression
-                        self.code.push(sub_code.len() as u8);
-
-                        // Then emit the sub-expression bytecode
-                        self.code.extend(sub_code);
+                        self.emit_subexpr_opcode(OpCode::QuestionGreedy, expr);
+                    }
+                    Quantifier::Range {
+                        min,
+                        max,
+                        lazy: true,
+                    } => {
+                        let min_count = *min as usize;
+                        for _ in 0..min_count {
+                            self.codegen_pass(expr, false);
+                        }
+                        match max {
+                            Some(max_value) => {
+                                let max_count = *max_value as usize;
+                                for _ in min_count..max_count {
+                                    self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
+                                }
+                            }
+                            None => {
+                                self.emit_subexpr_opcode(OpCode::StarLazy, expr);
+                            }
+                        }
                     }
                     Quantifier::Range {
                         min,
@@ -2709,10 +3166,6 @@ impl OptimizingCompiler {
                                 self.code.extend(sub_code);
                             }
                         }
-                    }
-                    _ => {
-                        // TODO: Implement other quantifiers
-                        self.codegen_pass(expr, false);
                     }
                 }
             }
@@ -2772,6 +3225,18 @@ impl OptimizingCompiler {
     fn emit_op(&mut self, op: OpCode) {
         self.code.push(op as u8);
         self.flags.instruction_count += 1;
+    }
+
+    /// Emit an opcode followed by an inlined compiled sub-expression.
+    fn emit_subexpr_opcode(&mut self, op: OpCode, expr: &Regex) {
+        self.emit_op(op);
+
+        let mut sub_compiler = OptimizingCompiler::new();
+        sub_compiler.codegen_pass(expr, false);
+        let sub_code = sub_compiler.code;
+
+        self.code.push(sub_code.len() as u8);
+        self.code.extend(sub_code);
     }
 
     /// Emit opcode with character operand
@@ -2879,11 +3344,15 @@ impl TryFrom<u8> for OpCode {
             0x65 => Ok(AtomicEnd),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
+            0x42 => Ok(SplitLazy),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),
+            0x81 => Ok(QuestionLazy),
             0x82 => Ok(StarGreedy),
+            0x83 => Ok(StarLazy),
             0x84 => Ok(PlusGreedy),
+            0x85 => Ok(PlusLazy),
             0x90 => Ok(SetAlternative),
             0xF0 => Ok(Match),
             0xF1 => Ok(Fail),

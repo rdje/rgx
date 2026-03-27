@@ -13,8 +13,9 @@ If you are new to the repo, use this order:
 2. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
 3. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
 4. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
-5. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
-6. [`COMMIT.md`](COMMIT.md) before making/committing changes.
+5. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
+6. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
+7. [`COMMIT.md`](COMMIT.md) before making/committing changes.
 
 ## Repository path map (project files)
 ### Workspace / crates
@@ -58,6 +59,7 @@ If you are new to the repo, use this order:
 - [`MEMORY.md`](MEMORY.md) — continuity memory across sessions
 - [`PROJECT_VISION.md`](PROJECT_VISION.md) — long-term project direction
 - [`ROADMAP.md`](ROADMAP.md) — execution roadmap (`Now`/`Next`/`Later`)
+- [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) — live roadmap-grounded Rust workspace analysis
 - [`WARP.md`](WARP.md) — Warp-specific repository guidance
 
 ### `docs/` markdown files

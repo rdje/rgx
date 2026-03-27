@@ -14,6 +14,7 @@ Live continuity memory for `rgx` sessions.
   - `CHANGES.md`
   - `COMMIT.md`
   - `DEVELOPMENT_NOTES.md`
+  - `RUST_CODEBASE_ANALYSIS.md`
   - `docs/USER_GUIDE.md`
   - `ROADMAP.md`
   - `docs/CAPABILITY_MATRIX.md`
@@ -23,10 +24,11 @@ Live continuity memory for `rgx` sessions.
 ## Fast resume checklist
 1. Read this file top-to-bottom.
 2. Check current working tree and branch state (`git --no-pager status --short`).
-3. Read newest entries in `CHANGES.md` and `ROADMAP.md`.
+3. Read newest entries in `CHANGES.md`, `ROADMAP.md`, and `RUST_CODEBASE_ANALYSIS.md`.
 4. Confirm current known gaps and active priorities from:
    - `DEVELOPMENT_NOTES.md`
    - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
+   - `RUST_CODEBASE_ANALYSIS.md`
 5. Continue with the next concrete task, then update this file before commit workflow.
 
 ## Persistent workflow agreements with user
@@ -48,9 +50,12 @@ Live continuity memory for `rgx` sessions.
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source/CI execution files, and currently reports that there are no compile-time `include!`-style macros in workspace source
 - `Cargo.lock` is now intentionally tracked so local and GitHub CI use the same dependency resolution
+- `RUST_CODEBASE_ANALYSIS.md` now exists as the live roadmap-grounded assessment of the Rust workspace and is part of the Rust commit workflow review path.
+- Lazy quantifier support is now fixed end-to-end in the public path for `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`, with API regressions and PCRE2 differential coverage updated accordingly.
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
+- `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again; the execution layer is still compile-gated at the regex language level because code blocks remain unsupported in compiler/VM flow.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -58,11 +63,42 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Continue expanding differential parity coverage for additional backtracking-sensitive quantifier and grouped-pattern combinations.
 - Continue closing remaining parsed-but-unintegrated parity gaps (backreferences, recursion, conditionals).
+- Decide whether to start wiring the existing execution-layer infrastructure into compiler/VM/API flow or keep it explicitly compile-gated for now.
 - Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
 
 ## Session memory entries (newest first)
+### 2026-03-26
+- Fixed lazy quantifier execution in the default public path:
+  - implemented VM/compiler support for lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`
+  - expanded API regressions in `rgx-core/src/lib.rs`
+  - added PCRE2 differential parity cases in `rgx-bench/tests/pcre2_parity.rs`
+- Repaired the JavaScript feature path in `rgx-core/src/execution.rs`:
+  - aligned the QuickJS backend with `rquickjs` 0.4 APIs
+  - moved JavaScript runtime creation to per-execution sandbox setup so `ExecutionEngine: Send + Sync` no longer blocks compilation
+  - `javascript` and `all-languages` feature builds now compile again
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+### 2026-03-26
+- Added `RUST_CODEBASE_ANALYSIS.md` as a live roadmap-grounded Rust workspace assessment and wired it into `README.md`, `COMMIT.md`, `DEVELOPMENT_NOTES.md`, and this continuity file.
+- Captured current high-signal findings for future Rust work:
+  - default workspace tests pass
+  - `pgen-parser` feature path builds/tests pass as a fallback-backed conformance path
+  - `lua` and `wasm` feature checks compile, but `javascript` and `all-languages` currently fail in `rgx-core/src/execution.rs`
+  - lazy quantifiers are parsed but not correctly compiled in the public path (`a??` on `b` and `ab*?c` on `abbbc` both return no match, while greedy counterparts work)
+  - `execution.rs` remains disconnected from compiler/VM/API flow, so execution modes are mostly scaffolding today
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - investigative failures intentionally captured in the analysis doc:
+    - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+    - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
 ### 2026-03-09
 - Added a local-first CI workflow and matching pre-push path.
   - Root cause: the repo had no actual GitHub Actions workflow, no single checked-in local CI command path, and `Cargo.lock` was ignored, which could make GitHub resolve different dependency versions than local validation.

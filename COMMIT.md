@@ -22,6 +22,9 @@ Live commit workflow contract for `rgx`.
 - `CHANGES.md`
   - Living historical change ledger (what changed, why, validation, impact).
   - Update before commit when a task changes behavior/tests/docs.
+- `RUST_CODEBASE_ANALYSIS.md`
+  - Live roadmap-grounded analysis of the Rust workspace.
+  - Update before Rust-focused commits when code changes alter architecture, feature readiness, validation results, or roadmap alignment.
 - `MEMORY.md`
   - Live continuity memory for cross-session resume/handoff.
   - Update before commit for any completed task.
@@ -39,9 +42,10 @@ Live commit workflow contract for `rgx`.
    - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
    - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
    - policy: clippy warnings are currently tolerated; clippy errors are not allowed.
-3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, optionally `DEVELOPMENT_NOTES.md`, `README.md`, and relevant docs).
+3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, `RUST_CODEBASE_ANALYSIS.md`, optionally `DEVELOPMENT_NOTES.md`, `README.md`, and relevant docs).
    - `README.md` should be updated when project objective, onboarding links, or key path maps change.
    - `README.md` does not need updates on every commit.
+   - `RUST_CODEBASE_ANALYSIS.md` should be reviewed for every Rust-focused commit and updated whenever the roadmap-alignment picture materially changed.
 4. Run pre-commit status:
    - `git --no-pager status --short`
 5. Stage exactly the files shown in that status output (no hidden extras).
@@ -69,8 +73,10 @@ Live commit workflow contract for `rgx`.
 - Never proceed to commit with unresolved clippy errors.
 - Clippy warnings are tolerated for now unless policy changes.
 - Keep commits task-scoped and validation-backed.
+- Never finalize a Rust-focused commit without deciding whether `RUST_CODEBASE_ANALYSIS.md` changed.
 
 ## Handoff usage
 - New AI should read `MEMORY.md` first, then `COMMIT.md`.
 - `MEMORY.md` explains *what* is happening now.
 - `COMMIT.md` explains *how* to finalize work safely and consistently.
+- `RUST_CODEBASE_ANALYSIS.md` explains how the current Rust workspace lines up with `ROADMAP.md`.
