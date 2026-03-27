@@ -35,6 +35,7 @@ Live continuity memory for `rgx` sessions.
 - Always run `git --no-pager status` before every commit.
 - Stage from that exact status output (no hidden extras).
 - Use `git_message_brief.txt` with `git commit -F git_message_brief.txt`.
+- Do not wait for an explicit user prompt to start the commit workflow after a completed task; begin it automatically once task work, validation, and doc updates are done.
 - Run `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` before commit and fix all clippy errors first (warnings tolerated for now).
 - Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
 - After commit:
@@ -43,6 +44,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
+- Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
+- Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
+- Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
+- Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered/named captures through the execution context.
+- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the initial wasm ABI is intentionally limited to registered `module:function` predicates returning `i32`.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
@@ -55,7 +61,7 @@ Live continuity memory for `rgx` sessions.
 - `{n,m}` range-quantifier scanning/earliest-match parity gap has now been fixed and reclassified as supported.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
-- `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again; the execution layer is still compile-gated at the regex language level because code blocks remain unsupported in compiler/VM flow.
+- `cargo test -p rgx-core --features lua`, `cargo test -p rgx-core --features javascript`, `cargo test -p rgx-core --features wasm`, and `cargo check -p rgx-core --features all-languages` now validate the shipped code-block slice.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -63,11 +69,73 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Continue closing remaining parsed-but-unintegrated parity gaps (backreferences, recursion, conditionals).
-- Decide whether to start wiring the existing execution-layer infrastructure into compiler/VM/API flow or keep it explicitly compile-gated for now.
-- Maintain strict compile-boundary explicit errors for parsed-but-unintegrated advanced features.
+- Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
+- Expand the wasm ABI beyond the current zero-argument `i32` predicate contract.
+- Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
+### 2026-03-27
+- Shipped Rust-API wasm module registration for `(?{wasm:module:function})` in `ExecutionMode::Safe` / `ExecutionMode::Full`:
+  - added a shared wasm module registry and wasmtime-backed runtime path inside `ExecutionManager`
+  - added public `Regex::register_wasm_module(...)` threading through `Engine` and `RegexVM`
+  - lifted compiler gating so `wasm` now compiles in `ExecutionMode::Safe` / `ExecutionMode::Full` when the `wasm` cargo feature is enabled
+  - initial ABI is intentionally small: registered `module:function` plus exported `() -> i32` predicate (`0` = fail, non-zero = success)
+  - added regression coverage for successful execution, missing modules, malformed specs, invalid export signatures, and registration attempts on regexes without an attached execution manager
+  - refreshed state/docs so wasm support is described as Rust-API-only and no longer as a parsed-only placeholder
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+### 2026-03-27
+- Shipped Rust-API native callbacks for `(?{native:...})` in `ExecutionMode::Full`:
+  - refactored native callback storage to support registration through the shared `Arc<ExecutionManager>` already attached to VM-backed regexes
+  - added public `Regex::register_native(...)` threading through `Engine` and `RegexVM`
+  - lifted compile gating so `native` is accepted only in `ExecutionMode::Full`, while `ExecutionMode::Safe` still rejects it
+  - added regression coverage for successful callback execution, capture/named-capture visibility, missing callbacks, safe-mode rejection, and registration attempts on regexes without an attached execution manager
+  - refreshed state/docs so native support is described as Rust-API-only and the CLI remains explicitly unconfigured
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+### 2026-03-27
+- Shipped phase-1 embedded code-block execution in the public regex path:
+  - compiler now validates code blocks against execution mode and cargo features
+  - VM now lowers code blocks into an inline opcode and executes them during matching
+  - engine now attaches `ExecutionManager` only when compiled programs actually contain code blocks
+  - Lua and JavaScript predicate blocks now work through `Regex::with_mode(..., ExecutionMode::Safe | Full)` when the corresponding feature is enabled
+  - current overall match, numbered captures, and named captures are materialized into the execution context for callouts
+- Explicit boundaries after this slice:
+  - `ExecutionMode::Pure` still rejects code blocks
+  - `native` code blocks remained blocked until the follow-on Rust-API callback-registration slice landed later the same day
+  - `wasm` code blocks remained blocked until the follow-on Rust-API module-registration slice landed later the same day
+  - numeric/replacement code-block results are rejected in match mode
+- Refreshed the live state docs so future sessions start from the new reality:
+  - `RUST_CODEBASE_ANALYSIS.md`
+  - `WARP.md`
+  - `README.md`
+  - `docs/CAPABILITY_MATRIX.md`
+  - `docs/USER_GUIDE.md`
+  - `DEVELOPMENT_NOTES.md`
+  - this file
+- Validation confirmed:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 ### 2026-03-26
 - Fixed lazy quantifier execution in the default public path:
   - implemented VM/compiler support for lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`

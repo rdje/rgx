@@ -32,7 +32,7 @@
 //! .{8,}(?{lua:return string.match(arg[0], "[A-Z]") and string.match(arg[0], "[0-9]")})
 //! ```
 
-use crate::error::Result;
+use crate::error::{Result, RgxError};
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -220,7 +220,7 @@ pub trait ExecutionEngine: Send + Sync {
 #[cfg(feature = "lua")]
 pub mod lua {
     use super::*;
-    use mlua::{Function, Lua, Table, Value};
+    use mlua::{Lua, Value};
 
     ///
     /// **Security Features:**
@@ -231,18 +231,18 @@ pub mod lua {
     ///
     /// **Performance:**
     /// - ~1-5 microseconds per execution
-    /// - Cached Lua state for efficiency
+    /// - Fresh sandboxed Lua state per execution
     /// - JIT compilation via LuaJIT (if available)
-    pub struct LuaEngine {
-        lua: std::sync::Arc<std::sync::Mutex<Lua>>,
-    }
+    pub struct LuaEngine;
 
     impl LuaEngine {
         /// Create a new sandboxed Lua engine
         pub fn new() -> Result<Self> {
-            let lua = Lua::new();
+            Ok(Self)
+        }
 
-            // Remove dangerous standard libraries
+        fn new_sandboxed_lua(&self) -> Lua {
+            let lua = Lua::new();
             lua.globals().set("io", Value::Nil).ok();
             lua.globals().set("os", Value::Nil).ok();
             lua.globals().set("debug", Value::Nil).ok();
@@ -250,15 +250,11 @@ pub mod lua {
             lua.globals().set("loadfile", Value::Nil).ok();
             lua.globals().set("dofile", Value::Nil).ok();
             lua.globals().set("package", Value::Nil).ok();
-
-            Ok(Self {
-                lua: std::sync::Arc::new(std::sync::Mutex::new(lua)),
-            })
+            lua
         }
 
         /// Set up the execution context in Lua globals
-        fn setup_context(&self, context: &ExecContext) -> mlua::Result<()> {
-            let lua = self.lua.lock().unwrap();
+        fn setup_context(&self, lua: &Lua, context: &ExecContext) -> mlua::Result<()> {
             let globals = lua.globals();
 
             // Create arg table with captures
@@ -289,13 +285,13 @@ pub mod lua {
 
     impl ExecutionEngine for LuaEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
+            let lua = self.new_sandboxed_lua();
             // Set up context
-            if let Err(e) = self.setup_context(context) {
+            if let Err(e) = self.setup_context(&lua, context) {
                 return ExecResult::Error(format!("Context setup failed: {}", e));
             }
 
             // Execute the code
-            let lua = self.lua.lock().unwrap();
             let result = lua.load(code).eval::<Value>();
             match result {
                 Ok(Value::Boolean(b)) => {
@@ -305,6 +301,7 @@ pub mod lua {
                         ExecResult::Failure
                     }
                 }
+                Ok(Value::Integer(n)) => ExecResult::Numeric(n as f64),
                 Ok(Value::Number(n)) => ExecResult::Numeric(n),
                 Ok(Value::String(s)) => ExecResult::Replacement(s.to_string_lossy().to_string()),
                 Ok(Value::Nil) => ExecResult::Success,
@@ -322,20 +319,7 @@ pub mod lua {
         }
 
         fn reset(&mut self) {
-            // TODO: Implement proper reset functionality
-            // For now, just create a new Lua instance
-            let mut new_lua = Lua::new();
-
-            // Remove dangerous standard libraries
-            new_lua.globals().set("io", Value::Nil).ok();
-            new_lua.globals().set("os", Value::Nil).ok();
-            new_lua.globals().set("debug", Value::Nil).ok();
-            new_lua.globals().set("require", Value::Nil).ok();
-            new_lua.globals().set("loadfile", Value::Nil).ok();
-            new_lua.globals().set("dofile", Value::Nil).ok();
-            new_lua.globals().set("package", Value::Nil).ok();
-
-            *self.lua.lock().unwrap() = new_lua;
+            // Stateless engine: each execution creates a fresh sandboxed runtime.
         }
     }
 
@@ -436,8 +420,10 @@ pub mod javascript {
                 globals.set("fetch", Undefined).ok();
                 globals.set("XMLHttpRequest", Undefined).ok();
 
-                // Execute the code
-                match ctx.eval::<Value, _>(code) {
+                // Execute the code inside an IIFE so `return ...` works
+                // consistently with the documented `(?{js:return ...})` style.
+                let wrapped_code = format!("(function(){{\n{code}\n}})()");
+                match ctx.eval::<Value, _>(wrapped_code) {
                     Ok(val) => {
                         if val.is_bool() {
                             if let Some(b) = val.as_bool() {
@@ -502,15 +488,310 @@ pub mod javascript {
 // NATIVE CALLBACK EXECUTION
 // ============================================================================
 
+#[cfg(feature = "wasm")]
+pub mod wasm {
+    use super::*;
+    use wasmtime::{Config, Engine, Instance, Module, Store};
+
+    type WasmModuleHandle = Arc<Module>;
+
+    /// Registry for named wasm modules that can be referenced from regex patterns.
+    pub struct WasmModuleRegistry {
+        modules: RwLock<HashMap<String, WasmModuleHandle>>,
+    }
+
+    impl WasmModuleRegistry {
+        /// Create an empty wasm module registry.
+        pub fn new() -> Self {
+            trace_enter!("execution", "WasmModuleRegistry::new");
+            let registry = Self {
+                modules: RwLock::new(HashMap::new()),
+            };
+            trace_exit!(
+                "execution",
+                "WasmModuleRegistry::new",
+                "ok=true,registered_modules=0"
+            );
+            registry
+        }
+
+        /// Register or replace a compiled wasm module.
+        pub fn register(&self, name: String, module: Module) {
+            trace_enter!("execution", "WasmModuleRegistry::register", "name={}", name);
+            let mut modules = self.modules.write().unwrap();
+            let replaced_existing = modules.insert(name.clone(), Arc::new(module)).is_some();
+            trace_decision!(
+                "execution",
+                "modules.insert(name,...).is_some()",
+                replaced_existing,
+                "true means an existing wasm module with the same name was replaced"
+            );
+            trace_exit!(
+                "execution",
+                "WasmModuleRegistry::register",
+                "ok=true,name={},registered_modules={}",
+                name,
+                modules.len()
+            );
+        }
+
+        /// Get a registered wasm module by name.
+        pub fn get(&self, name: &str) -> Option<WasmModuleHandle> {
+            trace_enter!(
+                "execution",
+                "WasmModuleRegistry::get",
+                "name={},registered_modules={}",
+                name,
+                self.len()
+            );
+            let module = self.modules.read().unwrap().get(name).cloned();
+            trace_exit!(
+                "execution",
+                "WasmModuleRegistry::get",
+                "ok=true,found={}",
+                module.is_some()
+            );
+            module
+        }
+
+        /// Count registered wasm modules.
+        pub fn len(&self) -> usize {
+            self.modules.read().unwrap().len()
+        }
+    }
+
+    impl Default for WasmModuleRegistry {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// WebAssembly execution engine using wasmtime.
+    ///
+    /// Initial ABI contract:
+    /// - patterns refer to `(?{wasm:module:function})`
+    /// - `module` is a Rust-registered module name
+    /// - `function` is an exported zero-argument function
+    /// - function result must be `i32` where `0` means failure and non-zero means success
+    pub struct WasmEngine {
+        engine: Engine,
+        modules: WasmModuleRegistry,
+    }
+
+    impl WasmEngine {
+        /// Create a new wasm execution engine.
+        pub fn new() -> Result<Self> {
+            trace_enter!("execution", "WasmEngine::new");
+            let config = Config::new();
+            let engine = Engine::new(&config)
+                .map_err(|e| RgxError::Engine(format!("Failed to create WASM runtime: {e}")))?;
+            let wasm_engine = Self {
+                engine,
+                modules: WasmModuleRegistry::new(),
+            };
+            trace_exit!(
+                "execution",
+                "WasmEngine::new",
+                "ok=true,registered_modules=0"
+            );
+            Ok(wasm_engine)
+        }
+
+        /// Register a named wasm module from binary bytes.
+        pub fn register_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
+            trace_enter!(
+                "execution",
+                "WasmEngine::register_module",
+                "name={},byte_len={}",
+                name,
+                module_bytes.len()
+            );
+            let module = Module::from_binary(&self.engine, &module_bytes).map_err(|e| {
+                RgxError::Engine(format!("Failed to compile WASM module {name}: {e}"))
+            })?;
+            self.modules.register(name, module);
+            trace_exit!(
+                "execution",
+                "WasmEngine::register_module",
+                "ok=true,registered_modules={}",
+                self.modules.len()
+            );
+            Ok(())
+        }
+
+        fn parse_call_spec<'a>(
+            &self,
+            code: &'a str,
+        ) -> std::result::Result<(&'a str, &'a str), String> {
+            trace_enter!(
+                "execution",
+                "WasmEngine::parse_call_spec",
+                "code_len={}",
+                code.len()
+            );
+            let Some((module_name, function_name)) = code.split_once(':') else {
+                let message = "WASM code blocks require module:function syntax".to_string();
+                trace_exit!(
+                    "execution",
+                    "WasmEngine::parse_call_spec",
+                    "ok=false,error={}",
+                    message
+                );
+                return Err(message);
+            };
+            let valid = !module_name.is_empty() && !function_name.is_empty();
+            trace_decision!(
+                "execution",
+                "!module_name.is_empty() && !function_name.is_empty()",
+                valid,
+                "module_name={},function_name={}",
+                module_name,
+                function_name
+            );
+            if !valid {
+                let message = "WASM code blocks require module:function syntax".to_string();
+                trace_exit!(
+                    "execution",
+                    "WasmEngine::parse_call_spec",
+                    "ok=false,error={}",
+                    message
+                );
+                return Err(message);
+            }
+            trace_exit!(
+                "execution",
+                "WasmEngine::parse_call_spec",
+                "ok=true,module_name={},function_name={}",
+                module_name,
+                function_name
+            );
+            Ok((module_name, function_name))
+        }
+
+        fn execute_predicate(&self, module_name: &str, function_name: &str) -> ExecResult {
+            trace_enter!(
+                "execution",
+                "WasmEngine::execute_predicate",
+                "module_name={},function_name={}",
+                module_name,
+                function_name
+            );
+            let Some(module) = self.modules.get(module_name) else {
+                let result = ExecResult::Error(format!("Unknown WASM module: {module_name}"));
+                trace_exit!(
+                    "execution",
+                    "WasmEngine::execute_predicate",
+                    "ok=true,result_kind={}",
+                    exec_result_kind(&result)
+                );
+                return result;
+            };
+            let mut store = Store::new(&self.engine, ());
+            let instance = match Instance::new(&mut store, module.as_ref(), &[]) {
+                Ok(instance) => instance,
+                Err(err) => {
+                    let result = ExecResult::Error(format!(
+                        "Failed to instantiate WASM module {module_name}: {err}"
+                    ));
+                    trace_exit!(
+                        "execution",
+                        "WasmEngine::execute_predicate",
+                        "ok=true,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    return result;
+                }
+            };
+            let function = match instance.get_typed_func::<(), i32>(&mut store, function_name) {
+                Ok(function) => function,
+                Err(err) => {
+                    let result = ExecResult::Error(format!(
+                        "WASM export {module_name}:{function_name} must have signature () -> i32: {err}"
+                    ));
+                    trace_exit!(
+                        "execution",
+                        "WasmEngine::execute_predicate",
+                        "ok=true,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    return result;
+                }
+            };
+            let result = match function.call(&mut store, ()) {
+                Ok(value) => {
+                    if value != 0 {
+                        ExecResult::Success
+                    } else {
+                        ExecResult::Failure
+                    }
+                }
+                Err(err) => ExecResult::Error(format!(
+                    "WASM call failed for {module_name}:{function_name}: {err}"
+                )),
+            };
+            trace_exit!(
+                "execution",
+                "WasmEngine::execute_predicate",
+                "ok=true,result_kind={}",
+                exec_result_kind(&result)
+            );
+            result
+        }
+    }
+
+    impl ExecutionEngine for WasmEngine {
+        fn execute(&self, code: &str, _context: &ExecContext) -> ExecResult {
+            trace_enter!(
+                "execution",
+                "WasmEngine::execute",
+                "code_len={},registered_modules={}",
+                code.len(),
+                self.modules.len()
+            );
+            let result = match self.parse_call_spec(code) {
+                Ok((module_name, function_name)) => {
+                    self.execute_predicate(module_name, function_name)
+                }
+                Err(error) => ExecResult::Error(error),
+            };
+            trace_exit!(
+                "execution",
+                "WasmEngine::execute",
+                "ok=true,result_kind={}",
+                exec_result_kind(&result)
+            );
+            result
+        }
+
+        fn language(&self) -> &str {
+            "wasm"
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn reset(&mut self) {
+            // Registered modules persist across executions for a compiled regex.
+        }
+    }
+
+    impl Default for WasmEngine {
+        fn default() -> Self {
+            Self::new().expect("Failed to create WASM engine")
+        }
+    }
+}
+
 /// Native function callback type
-pub type NativeCallback = Box<dyn Fn(&ExecContext) -> ExecResult + Send + Sync>;
+pub type NativeCallback = Arc<dyn Fn(&ExecContext) -> ExecResult + Send + Sync>;
 
 /// Registry for native callbacks that can be called from patterns.
 ///
 /// This allows users to register Rust functions that can be called
 /// from regex patterns using `(?{native:function_name})`.
 pub struct NativeCallbackRegistry {
-    callbacks: HashMap<String, NativeCallback>,
+    callbacks: RwLock<HashMap<String, NativeCallback>>,
 }
 
 impl NativeCallbackRegistry {
@@ -518,7 +799,7 @@ impl NativeCallbackRegistry {
     pub fn new() -> Self {
         trace_enter!("execution", "NativeCallbackRegistry::new");
         let registry = Self {
-            callbacks: HashMap::new(),
+            callbacks: RwLock::new(HashMap::new()),
         };
         trace_exit!(
             "execution",
@@ -529,7 +810,7 @@ impl NativeCallbackRegistry {
     }
 
     /// Register a native callback function
-    pub fn register<F>(&mut self, name: String, callback: F)
+    pub fn register<F>(&self, name: String, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -539,10 +820,8 @@ impl NativeCallbackRegistry {
             "name={}",
             name
         );
-        let replaced_existing = self
-            .callbacks
-            .insert(name.clone(), Box::new(callback))
-            .is_some();
+        let mut callbacks = self.callbacks.write().unwrap();
+        let replaced_existing = callbacks.insert(name.clone(), Arc::new(callback)).is_some();
         trace_decision!(
             "execution",
             "callbacks.insert(name,...).is_some()",
@@ -554,7 +833,7 @@ impl NativeCallbackRegistry {
             "NativeCallbackRegistry::register",
             "ok=true,name={},registered_callbacks={}",
             name,
-            self.callbacks.len()
+            callbacks.len()
         );
     }
 
@@ -565,10 +844,11 @@ impl NativeCallbackRegistry {
             "NativeCallbackRegistry::call",
             "name={},registered_callbacks={},capture_slots={}",
             name,
-            self.callbacks.len(),
+            self.len(),
             context.captures.len()
         );
-        match self.callbacks.get(name) {
+        let callback = self.callbacks.read().unwrap().get(name).cloned();
+        match callback {
             Some(callback) => {
                 trace_decision!(
                     "execution",
@@ -592,7 +872,7 @@ impl NativeCallbackRegistry {
                     false,
                     "native callback name is not registered"
                 );
-                let result = ExecResult::Error(format!("Unknown native function: {}", name));
+                let result = ExecResult::Error(format!("Unknown native function: {name}"));
                 trace_exit!(
                     "execution",
                     "NativeCallbackRegistry::call",
@@ -611,9 +891,9 @@ impl NativeCallbackRegistry {
             "NativeCallbackRegistry::has",
             "name={},registered_callbacks={}",
             name,
-            self.callbacks.len()
+            self.len()
         );
-        let is_registered = self.callbacks.contains_key(name);
+        let is_registered = self.callbacks.read().unwrap().contains_key(name);
         trace_exit!(
             "execution",
             "NativeCallbackRegistry::has",
@@ -621,6 +901,16 @@ impl NativeCallbackRegistry {
             is_registered
         );
         is_registered
+    }
+
+    /// Count registered callbacks.
+    pub fn len(&self) -> usize {
+        self.callbacks.read().unwrap().len()
+    }
+
+    /// Whether no callbacks are currently registered.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -639,6 +929,8 @@ impl Default for NativeCallbackRegistry {
 /// This coordinates between different language backends and provides
 /// a unified interface for the regex engine to execute embedded code.
 pub struct ExecutionManager {
+    #[cfg(feature = "wasm")]
+    wasm_engine: Option<wasm::WasmEngine>,
     #[cfg(feature = "lua")]
     lua_engine: Option<lua::LuaEngine>,
     #[cfg(feature = "javascript")]
@@ -651,6 +943,8 @@ impl ExecutionManager {
     pub fn new() -> Self {
         trace_enter!("execution", "ExecutionManager::new");
         let manager = Self {
+            #[cfg(feature = "wasm")]
+            wasm_engine: wasm::WasmEngine::new().ok(),
             #[cfg(feature = "lua")]
             lua_engine: lua::LuaEngine::new().ok(),
             #[cfg(feature = "javascript")]
@@ -663,6 +957,16 @@ impl ExecutionManager {
                 manager.lua_engine.is_some()
             }
             #[cfg(not(feature = "lua"))]
+            {
+                false
+            }
+        };
+        let wasm_available = {
+            #[cfg(feature = "wasm")]
+            {
+                manager.wasm_engine.is_some()
+            }
+            #[cfg(not(feature = "wasm"))]
             {
                 false
             }
@@ -680,7 +984,8 @@ impl ExecutionManager {
         trace_exit!(
             "execution",
             "ExecutionManager::new",
-            "ok=true,lua_available={},javascript_available={},native_available=true",
+            "ok=true,wasm_available={},lua_available={},javascript_available={},native_available=true",
+            wasm_available,
             lua_available,
             js_available
         );
@@ -698,6 +1003,40 @@ impl ExecutionManager {
             context.captures.len()
         );
         match language {
+            #[cfg(feature = "wasm")]
+            "wasm" => {
+                if let Some(engine) = &self.wasm_engine {
+                    trace_decision!(
+                        "execution",
+                        "self.wasm_engine.is_some()",
+                        true,
+                        "dispatching code to WASM execution backend"
+                    );
+                    let result = engine.execute(code, context);
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=wasm,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
+                } else {
+                    trace_decision!(
+                        "execution",
+                        "self.wasm_engine.is_some()",
+                        false,
+                        "wasm feature enabled but engine initialization unavailable"
+                    );
+                    let result = ExecResult::Error("WASM engine not available".to_string());
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=wasm,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
+                }
+            }
             #[cfg(feature = "lua")]
             "lua" => {
                 if let Some(engine) = &self.lua_engine {
@@ -808,7 +1147,7 @@ impl ExecutionManager {
     }
 
     /// Register a native callback
-    pub fn register_native<F>(&mut self, name: String, callback: F)
+    pub fn register_native<F>(&self, name: String, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -818,7 +1157,7 @@ impl ExecutionManager {
             "name={}",
             name
         );
-        let replaced_existing = self.native_callbacks.callbacks.contains_key(&name);
+        let replaced_existing = self.native_callbacks.has(&name);
         self.native_callbacks.register(name, callback);
         trace_decision!(
             "execution",
@@ -830,8 +1169,54 @@ impl ExecutionManager {
             "execution",
             "ExecutionManager::register_native",
             "ok=true,registered_callbacks={}",
-            self.native_callbacks.callbacks.len()
+            self.native_callbacks.len()
         );
+    }
+
+    /// Register a named wasm module.
+    pub fn register_wasm_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::register_wasm_module",
+            "name={},byte_len={}",
+            name,
+            module_bytes.len()
+        );
+        #[cfg(feature = "wasm")]
+        {
+            let Some(engine) = &self.wasm_engine else {
+                let error = RgxError::Engine("WASM engine not available".to_string());
+                trace_exit!(
+                    "execution",
+                    "ExecutionManager::register_wasm_module",
+                    "ok=false,error={}",
+                    error
+                );
+                return Err(error);
+            };
+            let result = engine.register_module(name, module_bytes);
+            trace_exit!(
+                "execution",
+                "ExecutionManager::register_wasm_module",
+                "ok={}",
+                result.is_ok()
+            );
+            result
+        }
+        #[cfg(not(feature = "wasm"))]
+        {
+            let _ = (name, module_bytes);
+            let error = RgxError::Engine(
+                "WASM module registration requires the `wasm` cargo feature".to_string(),
+            );
+            trace_exit!(
+                "execution",
+                "ExecutionManager::register_wasm_module",
+                "ok=false,error={}",
+                error
+            );
+            Err(error)
+        }
     }
 
     /// Check if a language is available
@@ -843,6 +1228,8 @@ impl ExecutionManager {
             language
         );
         let available = match language {
+            #[cfg(feature = "wasm")]
+            "wasm" => self.wasm_engine.is_some(),
             #[cfg(feature = "lua")]
             "lua" => self.lua_engine.is_some(),
             #[cfg(feature = "javascript")]

@@ -631,7 +631,7 @@ mod tests {
         let cases = [
             (
                 "(?{lua:return true})",
-                "code-block syntax is parsed but not yet integrated into VM execution",
+                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
             ),
             (
                 r"(a)\1",

@@ -35,7 +35,7 @@
 //!
 //! // With code execution - enhanced functionality  
 //! let validator = Regex::with_mode(
-//!     r"(\d{4})-(\d{2})-(\d{2})(?{native:validate_date})",
+//!     r#"(\d{4})-(\d{2})-(\d{2})(?{lua:return tonumber(arg[2]) <= 12 and tonumber(arg[3]) <= 31})"#,
 //!     ExecutionMode::Safe
 //! )?;
 //! let dates = validator.find_all("Born on 1985-03-15 and graduated 2007-06-22");
@@ -81,6 +81,7 @@ pub mod log;
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
+pub use execution::{ExecContext, ExecResult};
 pub use pattern::{CompiledPattern, Pattern};
 
 /// High-performance regex matcher with optional code execution capabilities.
@@ -139,7 +140,7 @@ impl Regex {
     /// This allows you to control the performance/feature tradeoff:
     /// - `ExecutionMode::Pure`: Maximum performance, no code execution
     /// - `ExecutionMode::Safe`: Code execution in sandboxed environments only
-    /// - `ExecutionMode::Full`: All features enabled, including native callbacks
+    /// - `ExecutionMode::Full`: enables the native-callback path in addition to the sandboxed backends
     pub fn with_mode(pattern: &str, mode: ExecutionMode) -> Result<Self> {
         trace_enter!(
             "api",
@@ -285,6 +286,43 @@ impl Regex {
         );
         trace_exit!("api", "Regex::is_match", "ok=true,matched={}", matched);
         matched
+    }
+
+    /// Register a native callback for `(?{native:...})` code blocks on this compiled regex.
+    pub fn register_native<F>(&self, name: impl Into<String>, callback: F) -> Result<()>
+    where
+        F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
+    {
+        let name = name.into();
+        trace_enter!("api", "Regex::register_native", "name={}", name);
+        let result = self.engine.register_native(name, callback);
+        trace_exit!("api", "Regex::register_native", "ok={}", result.is_ok());
+        result
+    }
+
+    /// Register a named wasm module for `(?{wasm:module:function})` code blocks on this compiled regex.
+    pub fn register_wasm_module(
+        &self,
+        name: impl Into<String>,
+        module_bytes: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let name = name.into();
+        let module_bytes = module_bytes.as_ref().to_vec();
+        trace_enter!(
+            "api",
+            "Regex::register_wasm_module",
+            "name={},byte_len={}",
+            name,
+            module_bytes.len()
+        );
+        let result = self.engine.register_wasm_module(name, module_bytes);
+        trace_exit!(
+            "api",
+            "Regex::register_wasm_module",
+            "ok={}",
+            result.is_ok()
+        );
+        result
     }
 }
 
@@ -780,15 +818,228 @@ mod tests {
     }
 
     #[test]
-    fn parser_code_block_syntax_reports_explicit_unsupported_error() {
+    fn parser_code_block_syntax_requires_non_pure_mode() {
         let result = Regex::compile("(?{lua:return true})");
         assert!(result.is_err(), "Code block should not silently compile");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains("code-block syntax is parsed but not yet integrated into VM execution")
-        );
+        assert!(msg.contains("code blocks require ExecutionMode::Safe or ExecutionMode::Full"));
     }
 
+    #[test]
+    fn safe_mode_native_code_blocks_require_full_mode() {
+        let result = Regex::with_mode("(?{native:validate})", ExecutionMode::Safe);
+        assert!(
+            result.is_err(),
+            "Native code block should require Full mode"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("native code blocks require ExecutionMode::Full"));
+    }
+
+    #[test]
+    fn full_mode_native_code_block_can_use_registered_callback() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{native:validate_word})"#,
+            ExecutionMode::Full,
+        )
+        .expect("Failed to compile native code block pattern");
+        regex
+            .register_native("validate_word", |ctx| {
+                if ctx.current_match() == Some("cat")
+                    && ctx.group(1) == Some("cat")
+                    && ctx.named("word") == Some("cat")
+                {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("Failed to register native callback");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
+
+    #[test]
+    fn full_mode_native_code_block_fails_when_callback_is_missing() {
+        let regex = Regex::with_mode("(?{native:missing})", ExecutionMode::Full)
+            .expect("Failed to compile native code block pattern");
+        assert!(!regex.is_match(""));
+    }
+
+    #[test]
+    fn register_native_requires_attached_execution_manager() {
+        let regex = Regex::with_mode("cat", ExecutionMode::Full).expect("Failed to compile regex");
+        let result = regex.register_native("noop", |_| ExecResult::Success);
+        assert!(
+            result.is_err(),
+            "Registration should fail without runtime manager"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("native callback registration is unavailable for this compiled regex"));
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[test]
+    fn safe_mode_wasm_code_blocks_require_wasm_feature() {
+        let result = Regex::with_mode("(?{wasm:module:function})", ExecutionMode::Safe);
+        assert!(
+            result.is_err(),
+            "WASM code block should require the wasm feature"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("wasm code blocks require the `wasm` cargo feature"));
+    }
+
+    #[cfg(feature = "wasm")]
+    fn test_wasm_module_bytes(source: &str) -> Vec<u8> {
+        wat::parse_str(source).expect("Failed to assemble WAT test module")
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_use_registered_module() {
+        let regex = Regex::with_mode("(?{wasm:truthy:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM code block pattern");
+        regex
+            .register_wasm_module(
+                "truthy",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (func (export "evaluate") (result i32)
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM module");
+        assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_missing_module() {
+        let regex = Regex::with_mode("(?{wasm:missing:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM code block pattern");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_malformed_spec() {
+        let regex = Regex::with_mode("(?{wasm:malformed})", ExecutionMode::Safe)
+            .expect("Failed to compile malformed WASM code block pattern");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_invalid_export_signature() {
+        let regex = Regex::with_mode("(?{wasm:bad_sig:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM code block pattern");
+        regex
+            .register_wasm_module(
+                "bad_sig",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (func (export "evaluate"))
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register bad-signature WASM module");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn register_wasm_module_requires_attached_execution_manager() {
+        let regex = Regex::with_mode("cat", ExecutionMode::Full).expect("Failed to compile regex");
+        let result = regex.register_wasm_module(
+            "noop",
+            test_wasm_module_bytes(
+                r#"
+                (module
+                    (func (export "evaluate") (result i32)
+                        i32.const 1
+                    )
+                )
+                "#,
+            ),
+        );
+        assert!(
+            result.is_err(),
+            "WASM registration should fail without runtime manager"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("WASM module registration is unavailable for this compiled regex"));
+    }
+
+    #[cfg(not(feature = "lua"))]
+    #[test]
+    fn safe_mode_lua_code_blocks_require_lua_feature() {
+        let result = Regex::with_mode("(?{lua:return true})", ExecutionMode::Safe);
+        assert!(
+            result.is_err(),
+            "Lua code block should require the lua feature"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("lua code blocks require the `lua` cargo feature"));
+    }
+
+    #[cfg(not(feature = "javascript"))]
+    #[test]
+    fn safe_mode_javascript_code_blocks_require_javascript_feature() {
+        let result = Regex::with_mode("(?{js:return true})", ExecutionMode::Safe);
+        assert!(
+            result.is_err(),
+            "JavaScript code block should require the javascript feature"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("javascript code blocks require the `javascript` cargo feature"));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_code_block_can_access_named_captures() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{lua:return named.word == "cat"})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua code block pattern");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_code_block_participates_in_backtracking() {
+        let regex = Regex::with_mode(r#"a*(?{lua:return arg[0] == ""})a"#, ExecutionMode::Safe)
+            .expect("Failed to compile Lua backtracking pattern");
+        assert!(regex.is_match("a"));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_code_block_rejects_numeric_results_in_match_mode() {
+        let regex = Regex::with_mode(r"(?{lua:return 1})", ExecutionMode::Safe)
+            .expect("Failed to compile Lua numeric-result pattern");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_code_block_can_match() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{js:return named.word === "cat";})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript code block pattern");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
     #[test]
     fn parser_backreference_syntax_reports_explicit_unsupported_error() {
         let result = Regex::compile(r"(a)\1");
@@ -943,7 +1194,7 @@ mod tests {
             ),
             (
                 "(?{lua:return true})",
-                "code-block syntax is parsed but not yet integrated into VM execution",
+                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
             ),
             (
                 "(?(1)a|b)",

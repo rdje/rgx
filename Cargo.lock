@@ -1154,6 +1154,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "wasmtime",
+ "wat",
  "wide",
 ]
 

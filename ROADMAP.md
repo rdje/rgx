@@ -66,18 +66,19 @@ Live forward-looking tracker for rgx.
   - run and track `rgx-bench` baselines against recent changes
   - prioritize optimizations with measurable impact
 
-### Embedded code-path integration clarity
+### Embedded code-path expansion beyond phase 1
 - Status: `planned`
-- Goal: define explicit readiness gates for multi-language code-block paths (JavaScript, Lua, Julia, and additional languages).
+- Goal: extend the newly shipped predicate code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
-  - parser/VM integration boundaries
-  - safety model and capability boundaries in docs
+  - richer wasm ABI beyond the initial registered `module:function` / `() -> i32` predicate contract
+  - richer result semantics beyond predicate success/failure
+  - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
 ### Multi-language code-block runtime expansion
 - Status: `planned`
 - Goal: extend code-block runtime support beyond initial languages while preserving deterministic behavior and safety guarantees.
 - Scope:
-  - language runtime integration sequence (JS/Lua first, Julia and others next)
+  - language runtime integration sequence after the current shipped Lua/JavaScript/native/wasm slice
   - shared execution contracts, resource limits, and sandbox controls
 
 ## Later (strategic)
@@ -90,6 +91,9 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Rust-API wasm module registration and dispatch for `(?{wasm:module:function})` in `ExecutionMode::Safe` / `ExecutionMode::Full`, including runtime wiring, tests, and doc refreshes.
+- Rust-API native callback registration for `(?{native:...})` in `ExecutionMode::Full`, including runtime wiring, tests, and doc refreshes.
+- Phase-1 embedded code-block execution for `(?{lua:...})` and `(?{js:...})` / `(?{javascript:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` with feature-gated validation.
 - Built-in top-level branch reporting with user-facing 1-based branch number.
 - AST-first lookahead support in compiler/VM and API tests.
 - AST-first lookbehind support in compiler/VM and API tests.

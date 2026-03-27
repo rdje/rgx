@@ -9,8 +9,10 @@
 //! - Memoization for backtracking
 
 use crate::ast::{AnchorType, CharClass, CharRange, GroupKind, Quantifier, Regex};
+use crate::execution::{ExecContext as CodeExecContext, ExecResult, ExecutionManager};
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// High-performance bytecode instruction optimized for cache efficiency
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,6 +119,8 @@ pub enum OpCode {
     AtomicEnd = 0x65,
     /// Backreference (group ID follows)
     Backref = 0x66,
+    /// Execute an embedded code block predicate
+    CodeBlock = 0x67,
 
     // === OPTIMIZATION HINTS (0x70-0x7F) ===
     /// Mark hot path for JIT compilation
@@ -250,6 +254,8 @@ pub struct Program {
     pub char_classes: Vec<CompiledCharClass>,
     /// String literals extracted for SIMD matching
     pub string_literals: Vec<String>,
+    /// Named capture group mapping
+    pub named_groups: HashMap<String, u32>,
     /// Number of capture groups
     pub num_groups: u32,
     /// Optimization flags
@@ -269,6 +275,8 @@ pub struct ProgramFlags {
     pub has_backrefs: bool,
     /// Contains lookarounds
     pub has_lookarounds: bool,
+    /// Contains embedded code blocks
+    pub has_code_blocks: bool,
     /// Estimated instruction count for JIT threshold
     pub instruction_count: u32,
     /// Maximum capture group number
@@ -297,6 +305,8 @@ pub struct ExecContext {
     pub text: Vec<u8>,
     /// Current position in bytes (not characters!)
     pub pos: usize,
+    /// Current match-attempt start position in bytes
+    pub match_start: usize,
     /// End position for bounded matching
     pub end: usize,
     /// Capture group positions [start, end, start, end, ...]
@@ -341,6 +351,8 @@ pub struct Match {
 pub struct RegexVM {
     /// Compiled program
     pub program: Program,
+    /// Optional execution manager for embedded code blocks
+    execution_manager: Option<Arc<ExecutionManager>>,
     /// SIMD instruction support detected at runtime
     simd_support: SimdSupport,
 }
@@ -359,16 +371,25 @@ pub struct SimdSupport {
 impl RegexVM {
     /// Create new VM with compiled program
     pub fn new(program: Program) -> Self {
+        Self::with_execution_manager(program, None)
+    }
+
+    /// Create new VM with compiled program and optional execution manager
+    pub fn with_execution_manager(
+        program: Program,
+        execution_manager: Option<Arc<ExecutionManager>>,
+    ) -> Self {
         trace_enter!(
             "vm",
-            "RegexVM::new",
-            "bytecode_len={},char_classes={},string_literals={},groups={},has_anchors={},has_lookarounds={}",
+            "RegexVM::with_execution_manager",
+            "bytecode_len={},char_classes={},string_literals={},groups={},has_anchors={},has_lookarounds={},has_code_blocks={}",
             program.code.len(),
             program.char_classes.len(),
             program.string_literals.len(),
             program.num_groups,
             program.flags.has_anchors,
-            program.flags.has_lookarounds
+            program.flags.has_lookarounds,
+            program.flags.has_code_blocks
         );
         let simd_support = Self::detect_simd_support();
         trace_decision!(
@@ -382,11 +403,12 @@ impl RegexVM {
         );
         let vm = Self {
             program,
+            execution_manager,
             simd_support,
         };
         trace_exit!(
             "vm",
-            "RegexVM::new",
+            "RegexVM::with_execution_manager",
             "ok=true,sse2={},avx2={},neon={}",
             vm.simd_support.sse2,
             vm.simd_support.avx2,
@@ -458,6 +480,7 @@ impl RegexVM {
         let mut ctx = ExecContext {
             text: bytes.to_vec(),
             pos: 0,
+            match_start: 0,
             end: bytes.len(),
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             memo_cache: HashMap::new(),
@@ -620,7 +643,7 @@ impl RegexVM {
             let matched = Some(Match {
                 start: 0,
                 end: ctx.pos,
-                groups: self.extract_captures(ctx),
+                groups: self.extract_captures_with_match(ctx, 0, ctx.pos),
                 matched_alternative: ctx.current_alternative,
             });
             trace_exit!(
@@ -700,6 +723,7 @@ impl RegexVM {
         ExecContext {
             text: ctx.text.clone(),
             pos: ctx.pos,
+            match_start: ctx.match_start,
             end: ctx.end,
             captures: ctx.captures.clone(),
             memo_cache: HashMap::new(),
@@ -718,6 +742,7 @@ impl RegexVM {
             self.program.code.len()
         );
         ctx.pos = start;
+        ctx.match_start = start;
         let mut ip = 0;
         let code = &self.program.code;
 
@@ -837,6 +862,17 @@ impl RegexVM {
                     ip = expr_end;
                     continue;
                 }
+
+                OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
+                    Some(true) => continue,
+                    Some(false) => {
+                        if self.try_backtrack(ctx, &mut ip) {
+                            continue;
+                        }
+                        return false;
+                    }
+                    None => return false,
+                },
 
                 OpCode::Any => {
                     if let Some(ch) = self.current_char(ctx) {
@@ -1495,6 +1531,111 @@ impl RegexVM {
         }
     }
 
+    /// Read a raw byte slice from bytecode operands.
+    fn read_bytes_operand<'a>(
+        &self,
+        code: &'a [u8],
+        ip: &mut usize,
+        len: usize,
+    ) -> Option<&'a [u8]> {
+        if *ip + len > code.len() {
+            return None;
+        }
+        let bytes = &code[*ip..*ip + len];
+        *ip += len;
+        Some(bytes)
+    }
+
+    /// Decode and execute an inline code-block operand.
+    fn execute_inline_code_block(
+        &self,
+        ctx: &ExecContext,
+        code: &[u8],
+        ip: &mut usize,
+    ) -> Option<bool> {
+        if *ip >= code.len() {
+            return None;
+        }
+        let lang_len = code[*ip] as usize;
+        *ip += 1;
+        let lang = std::str::from_utf8(self.read_bytes_operand(code, ip, lang_len)?).ok()?;
+        let body_len_bytes = self.read_bytes_operand(code, ip, 2)?;
+        let body_len = u16::from_le_bytes([body_len_bytes[0], body_len_bytes[1]]) as usize;
+        let body = std::str::from_utf8(self.read_bytes_operand(code, ip, body_len)?).ok()?;
+        Some(self.evaluate_code_block(ctx, lang, body))
+    }
+
+    /// Execute a code-block predicate using the shared execution manager.
+    fn evaluate_code_block(&self, ctx: &ExecContext, language: &str, code: &str) -> bool {
+        let Some(execution_manager) = &self.execution_manager else {
+            debug_log!(
+                "vm",
+                "CodeBlock execution requested without an attached execution manager"
+            );
+            return false;
+        };
+        let exec_ctx = self.build_code_exec_context(ctx);
+        match execution_manager.execute(language, code, &exec_ctx) {
+            ExecResult::Success => true,
+            ExecResult::Failure => false,
+            ExecResult::Error(error) => {
+                debug_log!("vm", "CodeBlock {} execution error: {}", language, error);
+                false
+            }
+            ExecResult::Replacement(_) => {
+                debug_log!(
+                    "vm",
+                    "CodeBlock {} returned a replacement value, which is not yet supported in match mode",
+                    language
+                );
+                false
+            }
+            ExecResult::Numeric(_) => {
+                debug_log!(
+                    "vm",
+                    "CodeBlock {} returned a numeric value, which is not yet supported in match mode",
+                    language
+                );
+                false
+            }
+        }
+    }
+
+    /// Materialize the current VM state into the execution-layer context.
+    fn build_code_exec_context(&self, ctx: &ExecContext) -> CodeExecContext {
+        let mut exec_ctx =
+            CodeExecContext::new(String::from_utf8_lossy(&ctx.text).into_owned(), ctx.pos);
+        let mut captures = Vec::with_capacity(self.program.num_groups as usize + 1);
+        captures.push(self.capture_text(ctx, ctx.match_start, ctx.pos));
+        for group_id in 1..=self.program.num_groups {
+            let start_idx = (group_id * 2) as usize;
+            let end_idx = start_idx + 1;
+            let capture = match (
+                ctx.captures.get(start_idx).and_then(|&x| x),
+                ctx.captures.get(end_idx).and_then(|&x| x),
+            ) {
+                (Some(start), Some(end)) => self.capture_text(ctx, start, end),
+                _ => None,
+            };
+            captures.push(capture);
+        }
+        exec_ctx.captures = captures;
+        for (name, group_id) in &self.program.named_groups {
+            if let Some(Some(value)) = exec_ctx.captures.get(*group_id as usize).cloned() {
+                exec_ctx.named_captures.insert(name.clone(), value);
+            }
+        }
+        exec_ctx
+    }
+
+    /// Convert a capture byte range into owned UTF-8 text.
+    fn capture_text(&self, ctx: &ExecContext, start: usize, end: usize) -> Option<String> {
+        if start > end || end > ctx.text.len() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&ctx.text[start..end]).into_owned())
+    }
+
     /// Read UTF-8 character from bytecode operands
     fn read_char_operand(&self, code: &[u8], ip: &mut usize) -> Option<char> {
         if *ip >= code.len() {
@@ -1769,6 +1910,34 @@ impl RegexVM {
         matched
     }
 
+    /// Register a native callback on the attached execution manager.
+    pub fn register_native<F>(&self, name: String, callback: F) -> crate::error::Result<()>
+    where
+        F: Fn(&CodeExecContext) -> ExecResult + Send + Sync + 'static,
+    {
+        let Some(execution_manager) = &self.execution_manager else {
+            return Err(crate::error::RgxError::Engine(
+                "native callback registration is unavailable for this compiled regex".to_string(),
+            ));
+        };
+        execution_manager.register_native(name, callback);
+        Ok(())
+    }
+
+    /// Register a named wasm module on the attached execution manager.
+    pub fn register_wasm_module(
+        &self,
+        name: String,
+        module_bytes: Vec<u8>,
+    ) -> crate::error::Result<()> {
+        let Some(execution_manager) = &self.execution_manager else {
+            return Err(crate::error::RgxError::Engine(
+                "WASM module registration is unavailable for this compiled regex".to_string(),
+            ));
+        };
+        execution_manager.register_wasm_module(name, module_bytes)
+    }
+
     /// Execute a sub-expression (used for quantifiers)
     fn execute_subexpr(&self, ctx: &mut ExecContext, code: &[u8]) -> bool {
         let mut ip = 0;
@@ -1988,6 +2157,14 @@ impl RegexVM {
                     ip = expr_end;
                     continue;
                 }
+
+                OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
+                    Some(true) => continue,
+                    Some(false) => {
+                        local_backtrack_or_return_false!();
+                    }
+                    None => return false,
+                },
 
                 OpCode::AtomicStart => {
                     call_stack.push(backtrack_stack.len());
@@ -2781,6 +2958,7 @@ impl OptimizingCompiler {
                 has_anchors: false,
                 has_backrefs: false,
                 has_lookarounds: false,
+                has_code_blocks: false,
                 instruction_count: 0,
                 max_capture_group: 0,
             },
@@ -2843,6 +3021,7 @@ impl OptimizingCompiler {
             code: self.code.clone(),
             char_classes: self.char_classes.clone(),
             string_literals: self.strings.clone(),
+            named_groups: HashMap::new(),
             num_groups: self.group_counter,
             flags: self.flags,
             stats: self.stats,
@@ -2871,6 +3050,7 @@ impl OptimizingCompiler {
                 self.flags.has_lookarounds = true;
                 self.analyze_pass(expr);
             }
+            Regex::CodeBlock { .. } => self.flags.has_code_blocks = true,
             Regex::Sequence(items) => {
                 for item in items {
                     self.analyze_pass(item);
@@ -3079,6 +3259,10 @@ impl OptimizingCompiler {
                 self.code.extend(sub_code);
             }
 
+            Regex::CodeBlock { lang, code } => {
+                self.emit_code_block(lang, code);
+            }
+
             Regex::Quantified { expr, quantifier } => {
                 match quantifier {
                     Quantifier::OneOrMore { lazy: true } => {
@@ -3239,6 +3423,18 @@ impl OptimizingCompiler {
         self.code.extend(sub_code);
     }
 
+    /// Emit an inline code-block operand payload.
+    fn emit_code_block(&mut self, lang: &str, code: &str) {
+        self.emit_op(OpCode::CodeBlock);
+        debug_assert!(u8::try_from(lang.len()).is_ok());
+        debug_assert!(u16::try_from(code.len()).is_ok());
+        self.code.push(lang.len() as u8);
+        self.code.extend_from_slice(lang.as_bytes());
+        self.code
+            .extend_from_slice(&(code.len() as u16).to_le_bytes());
+        self.code.extend_from_slice(code.as_bytes());
+    }
+
     /// Emit opcode with character operand
     fn emit_char_op(&mut self, op: OpCode, ch: char) {
         self.code.push(op as u8);
@@ -3342,6 +3538,7 @@ impl TryFrom<u8> for OpCode {
             0x63 => Ok(LookbehindNeg),
             0x64 => Ok(AtomicStart),
             0x65 => Ok(AtomicEnd),
+            0x67 => Ok(CodeBlock),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x42 => Ok(SplitLazy),

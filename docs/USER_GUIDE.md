@@ -2,20 +2,16 @@
 Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
-
 ## Living-document policy
-- Last updated: 2026-02-20
+- Last updated: 2026-03-27
 - This is a live document and should be updated as user-visible behavior changes.
 - Keep examples and feature-status notes aligned with current shipped behavior.
-- Update cadence: revise this guide whenever behavior changes land, and at minimum once per roadmap milestone.
-- For recent changes and validation details, cross-check `CHANGES.md`.
-
+- For recent changes and validation details, cross-check `CHANGES.md` and `RUST_CODEBASE_ANALYSIS.md`.
 ## Guide levels
 - Level 0: quick start
 - Level 1: practical day-to-day usage
-- Level 2: advanced patterns and AST-first workflows
+- Level 2: advanced patterns and execution modes
 - Level 3: deep behavior notes ("gory details")
-
 ## Level 0 - Quick start
 Build and run a simple match:
 
@@ -29,7 +25,6 @@ Run tests:
 ```bash
 cargo test --workspace
 ```
-
 ## Level 1 - Practical usage
 ### CLI
 Basic form:
@@ -41,10 +36,9 @@ cargo run --bin rgx-cli -- "<pattern>" "<text>"
 Examples:
 
 ```bash
-cargo run --bin rgx-cli -- "\\d+" "abc123def"
+cargo run --bin rgx-cli -- "\d+" "abc123def"
 cargo run --bin rgx-cli -- "(?:cat|dog)" "pet dog"
 ```
-
 ### Rust API
 Use the high-level API for normal matching:
 
@@ -59,20 +53,17 @@ if let Some(m) = re.find_first("abc123def") {
 }
 # Ok::<(), rgx_core::RgxError>(())
 ```
-
 ### Match results
 - Positions are byte offsets.
 - `find_all` returns non-overlapping matches.
-- For top-level alternation patterns, `matched_branch_number` is:
-  - 1-based
-  - `None` if no top-level alternation branch selection applies
+- For top-level alternation patterns, `matched_branch_number` is 1-based.
+## Level 2 - Advanced usage
+### AST-first workflows
+When parser syntax is not yet complete for a feature family, you can still compile from AST directly.
 
-## Level 2 - Advanced usage (current best path)
-When parser syntax is not yet complete for advanced constructs, use AST-first APIs.
-
-### Compile from AST directly
 ```rust
-use rgx_core::{Regex, RegexAst};
+use rgx_core::Regex;
+use rgx_core::ast::Regex as RegexAst;
 
 let ast = RegexAst::Alternation(vec![
     RegexAst::Sequence(vec![RegexAst::Char('c'), RegexAst::Char('a'), RegexAst::Char('t')]),
@@ -83,54 +74,128 @@ let re = Regex::from_ast(ast)?;
 assert!(re.is_match("dog"));
 # Ok::<(), rgx_core::RgxError>(())
 ```
+### Predicate code blocks
+Embedded predicate execution is now available for Lua, JavaScript, Rust-native callbacks, and registered wasm modules.
 
-### Lookaround status
-- Parser syntax supports positive/negative lookahead and lookbehind:
-  - `(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)`
-- AST-first lookahead/lookbehind support remains available via `Regex::from_ast`.
-- Parser also recognizes code-block syntax `(?{lang:code})`, but execution is not yet wired into VM runtime.
-- Parser also recognizes recursion syntax (`(?R)`, `(?1)`, `(?&name)`), but execution is not yet wired into VM runtime.
+Requirements:
+- `ExecutionMode::Pure` rejects all code blocks.
+- Use `Regex::with_mode(..., ExecutionMode::Safe)` or `ExecutionMode::Full` for `lua` / `js` / `javascript` / `wasm`.
+- Use `ExecutionMode::Full` for `native`.
+- Enable the matching cargo feature:
+  - `lua` for `(?{lua:...})`
+  - `javascript` for `(?{js:...})` / `(?{javascript:...})`
+  - `wasm` for `(?{wasm:...})`
+- Register native callbacks or wasm modules on the compiled `Regex` before matching.
+- Write code as a predicate body and use `return ...` style in both Lua and JavaScript.
 
-## Level 3 - Gory details (behavior semantics)
+Lua example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<word>cat)(?{lua:return named.word == "cat"})"#,
+    ExecutionMode::Safe,
+)?;
+assert!(re.is_match("cat"));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Wasm example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode("(?{wasm:truthy:evaluate})", ExecutionMode::Safe)?;
+re.register_wasm_module("truthy", include_bytes!("truthy.wasm"))?;
+assert!(re.is_match(""));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+For the initial wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
+
+JavaScript example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<word>cat)(?{js:return named.word === "cat";})"#,
+    ExecutionMode::Safe,
+)?;
+assert!(re.is_match("cat"));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Native callback example:
+
+```rust
+use rgx_core::{ExecResult, ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<word>cat)(?{native:validate_word})"#,
+    ExecutionMode::Full,
+)?;
+re.register_native("validate_word", |ctx| {
+    if ctx.named("word") == Some("cat") {
+        ExecResult::Success
+    } else {
+        ExecResult::Failure
+    }
+})?;
+assert!(re.is_match("cat"));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+What the execution context exposes today:
+- `arg[0]`: current overall match prefix for the current match attempt
+- `arg[1]`, `arg[2]`, ...: completed numbered captures
+- `named.<group_name>` / `named[group_name]`: completed named captures
+- `pos`: current byte position in the input
+- `text`: full input text
+- These bindings are currently available to Lua/JavaScript/native callbacks; the initial wasm slice uses the smaller registered-module ABI above instead of exposing `ExecContext`.
+
+Current limits for this slice:
+- The CLI does not yet expose native or wasm registration.
+- The initial wasm ABI is limited to `module:function` with an exported `() -> i32` predicate.
+- Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
+- Numeric and replacement return values are rejected in match mode.
+- Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
+### Current parsed-but-unintegrated syntax
+The parser still recognizes several advanced constructs that are not runtime-integrated yet:
+- backreferences
+- recursion
+- conditionals
+- Unicode property classes
+These continue to fail with explicit compile-time messages.
+## Level 3 - Gory details
 ### Execution model
 Pipeline:
 - pattern text -> lexer -> parser -> AST -> compiler -> VM bytecode -> VM execution
 
 In AST-first mode, parser steps are bypassed and AST goes directly to compiler/VM.
-
 ### Assertion semantics
 - Lookahead and lookbehind are assertions: they do not consume input themselves.
 - Positive assertion requires assertion sub-expression to match.
 - Negative assertion requires assertion sub-expression to not match.
-- Lookbehind specifically requires a sub-expression match that ends exactly at the current position.
-
+- Lookbehind requires a sub-expression match that ends exactly at the current position.
 ### Atomic-group semantics
 - Atomic groups `(?>...)` are supported.
 - Once an atomic group succeeds, rgx does not backtrack into alternatives/paths created inside that group.
-- Example consequence:
-  - `(?>a|ab)c` does not match `abc`
-  - `(a|ab)c` can match `abc`
-
+### Predicate code-block semantics
+- Code blocks are zero-width predicate checkpoints in the VM path.
+- They can fail the current path and allow normal regex backtracking to continue.
+- Current implementation only treats boolean-style success/failure as shipped behavior.
 ### Branch reporting semantics
 - Branch reporting is intentionally scoped to top-level alternations.
-- User-facing field is `matched_branch_number` and is 1-based.
-- Nested alternations do not override top-level branch selection in the reported value.
-
-### Current constraints to keep in mind
-- Some advanced parser syntaxes are still incomplete (for example conditionals).
-- Unicode property classes (`\p{...}`, `\P{...}`) are parsed, but currently return explicit compile-time unsupported errors.
-- Backreference, recursion, and code-block syntax are parsed, but currently return explicit compile-time unsupported errors.
-- Declared opcodes/features should be treated as shipped only when parser/compiler/VM/API paths are all validated.
-
+- `matched_branch_number` is 1-based and nested alternations do not override it.
 ## Troubleshooting checklist
-- If a pattern compiles but behavior is surprising, verify whether you are using parser path or AST-first path.
-- Validate with API-level tests (`Regex::compile` / `Regex::from_ast`) before assuming feature parity.
-- Check `CHANGES.md` for recently shipped behavior and `ROADMAP.md` for what is planned next.
-
+- If a code block compiles in one build and not another, check whether the corresponding cargo feature is enabled.
+- If a code block behaves unexpectedly, verify the execution mode first (`Pure` vs `Safe` / `Full`).
+- If a pattern compiles but behavior is surprising, compare it against `docs/CAPABILITY_MATRIX.md` and `RUST_CODEBASE_ANALYSIS.md`.
 ## Related docs
-- `README.md`: project overview
+- `README.md`: project overview and navigation
+- `docs/CAPABILITY_MATRIX.md`: shipped vs parsed-only status
+- `RUST_CODEBASE_ANALYSIS.md`: live implementation assessment
 - `ROADMAP.md`: forward-looking tracker
 - `CHANGES.md`: shipped changes and validation history
-- `DEVELOPMENT_NOTES.md`: engineering context
-- `docs/architecture.md`: architectural responsibilities
-- `docs/TECHNICAL_DECISIONS.md`: key design tradeoffs

@@ -1,7 +1,9 @@
 use crate::error::Result;
+use crate::execution::{ExecContext, ExecResult, ExecutionManager};
 use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
 use crate::{trace_decision, trace_enter, trace_exit};
+use std::sync::Arc;
 
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -10,7 +12,7 @@ pub enum ExecutionMode {
     Pure,
     /// Code execution in sandboxed environments only
     Safe,
-    /// All features including native callbacks
+    /// Enables the native-callback path in addition to the sandboxed backends
     Full,
 }
 
@@ -45,7 +47,13 @@ impl Engine {
             pattern.mode,
             pattern.program.code.len()
         );
-        let vm = RegexVM::new(pattern.program.clone());
+        let execution_manager =
+            if pattern.program.flags.has_code_blocks && pattern.mode != ExecutionMode::Pure {
+                Some(Arc::new(ExecutionManager::new()))
+            } else {
+                None
+            };
+        let vm = RegexVM::with_execution_manager(pattern.program.clone(), execution_manager);
         let engine = Self {
             vm,
             mode: pattern.mode,
@@ -214,5 +222,18 @@ impl Engine {
             );
             false // Invalid UTF-8 cannot match
         }
+    }
+
+    /// Register a native callback on the engine's execution manager.
+    pub fn register_native<F>(&self, name: String, callback: F) -> Result<()>
+    where
+        F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
+    {
+        self.vm.register_native(name, callback)
+    }
+
+    /// Register a named wasm module on the engine's execution manager.
+    pub fn register_wasm_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
+        self.vm.register_wasm_module(name, module_bytes)
     }
 }

@@ -119,12 +119,12 @@ impl Compiler {
             self.mode
         );
         debug_log!("compiler", "AST: {:?}", ast);
-        if let Some(msg) = Self::unsupported_feature_message(&ast) {
+        if let Some(msg) = self.feature_validation_message(&ast) {
             trace_decision!(
                 "compiler",
-                "unsupported_feature_message(ast).is_some()",
+                "feature_validation_message(ast).is_some()",
                 true,
-                "rejecting unsupported AST node: {}",
+                "rejecting AST at compile boundary: {}",
                 msg
             );
             trace_exit!(
@@ -137,7 +137,7 @@ impl Compiler {
         }
         trace_decision!(
             "compiler",
-            "unsupported_feature_message(ast).is_some()",
+            "feature_validation_message(ast).is_some()",
             false,
             "AST is eligible for VM compilation"
         );
@@ -145,7 +145,8 @@ impl Compiler {
         // Compile AST into optimized VM bytecode
         debug_log!("compiler", "Compiling AST to VM bytecode...");
         let mut vm_compiler = VMCompiler::new();
-        let program = vm_compiler.compile(&ast);
+        let mut program = vm_compiler.compile(&ast);
+        program.named_groups = Self::collect_named_groups(&ast);
 
         debug_log!("compiler", "Program compiled:");
         debug_log!(
@@ -189,33 +190,171 @@ impl Compiler {
             program,
         })
     }
-
-    fn unsupported_feature_message(ast: &RegexAst) -> Option<&'static str> {
+    fn feature_validation_message(&self, ast: &RegexAst) -> Option<String> {
         match ast {
-            RegexAst::CodeBlock { .. } => {
-                Some("code-block syntax is parsed but not yet integrated into VM execution")
-            }
-            RegexAst::Backreference(_) => {
-                Some("backreferences are parsed but not yet integrated into VM execution")
-            }
+            RegexAst::CodeBlock { lang, code } => self.code_block_validation_message(lang, code),
+            RegexAst::Backreference(_) => Some(
+                "backreferences are parsed but not yet integrated into VM execution".to_string(),
+            ),
             RegexAst::UnicodeClass { .. }
-            | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { .. }) => {
-                Some("unicode property classes are parsed but not yet integrated into VM execution")
-            }
-            RegexAst::Recursion { .. } => {
-                Some("recursion syntax is parsed but not yet integrated into VM execution")
-            }
-            RegexAst::Conditional { .. } => {
-                Some("conditional syntax is parsed but not yet integrated into VM execution")
-            }
-            RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
-                items.iter().find_map(Self::unsupported_feature_message)
-            }
+            | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { .. }) => Some(
+                "unicode property classes are parsed but not yet integrated into VM execution"
+                    .to_string(),
+            ),
+            RegexAst::Recursion { .. } => Some(
+                "recursion syntax is parsed but not yet integrated into VM execution".to_string(),
+            ),
+            RegexAst::Conditional { .. } => Some(
+                "conditional syntax is parsed but not yet integrated into VM execution".to_string(),
+            ),
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
+                .iter()
+                .find_map(|item| self.feature_validation_message(item)),
             RegexAst::Quantified { expr, .. }
             | RegexAst::Group { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => Self::unsupported_feature_message(expr),
+            | RegexAst::Lookbehind { expr, .. } => self.feature_validation_message(expr),
             _ => None,
+        }
+    }
+
+    fn code_block_validation_message(&self, lang: &str, code: &str) -> Option<String> {
+        if lang.len() > usize::from(u8::MAX) {
+            return Some(
+                "code-block language identifier exceeds VM operand size limits".to_string(),
+            );
+        }
+        if code.len() > usize::from(u16::MAX) {
+            return Some("code-block body exceeds VM operand size limits".to_string());
+        }
+        match self.mode {
+            ExecutionMode::Pure => {
+                Some("code blocks require ExecutionMode::Safe or ExecutionMode::Full".to_string())
+            }
+            ExecutionMode::Safe => match lang {
+                "lua" => {
+                    if cfg!(feature = "lua") {
+                        None
+                    } else {
+                        Some("lua code blocks require the `lua` cargo feature".to_string())
+                    }
+                }
+                "js" | "javascript" => {
+                    if cfg!(feature = "javascript") {
+                        None
+                    } else {
+                        Some(
+                            "javascript code blocks require the `javascript` cargo feature"
+                                .to_string(),
+                        )
+                    }
+                }
+                "wasm" => {
+                    if cfg!(feature = "wasm") {
+                        None
+                    } else {
+                        Some("wasm code blocks require the `wasm` cargo feature".to_string())
+                    }
+                }
+                "native" => Some("native code blocks require ExecutionMode::Full".to_string()),
+                other => Some(format!("unsupported code-block language: {other}")),
+            },
+            ExecutionMode::Full => match lang {
+                "lua" => {
+                    if cfg!(feature = "lua") {
+                        None
+                    } else {
+                        Some("lua code blocks require the `lua` cargo feature".to_string())
+                    }
+                }
+                "js" | "javascript" => {
+                    if cfg!(feature = "javascript") {
+                        None
+                    } else {
+                        Some(
+                            "javascript code blocks require the `javascript` cargo feature"
+                                .to_string(),
+                        )
+                    }
+                }
+                "wasm" => {
+                    if cfg!(feature = "wasm") {
+                        None
+                    } else {
+                        Some("wasm code blocks require the `wasm` cargo feature".to_string())
+                    }
+                }
+                "native" => None,
+                other => Some(format!("unsupported code-block language: {other}")),
+            },
+        }
+    }
+
+    fn collect_named_groups(ast: &RegexAst) -> std::collections::HashMap<String, u32> {
+        let mut named_groups = std::collections::HashMap::new();
+        let mut next_group = 0;
+        Self::collect_named_groups_inner(ast, &mut next_group, &mut named_groups);
+        named_groups
+    }
+
+    fn collect_named_groups_inner(
+        ast: &RegexAst,
+        next_group: &mut u32,
+        named_groups: &mut std::collections::HashMap<String, u32>,
+    ) {
+        match ast {
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
+                for item in items {
+                    Self::collect_named_groups_inner(item, next_group, named_groups);
+                }
+            }
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. } => {
+                Self::collect_named_groups_inner(expr, next_group, named_groups);
+            }
+            RegexAst::Group {
+                expr, kind, name, ..
+            } => {
+                if matches!(kind, crate::ast::GroupKind::Capturing) {
+                    *next_group += 1;
+                    if let Some(name) = name {
+                        named_groups.insert(name.clone(), *next_group);
+                    }
+                }
+                Self::collect_named_groups_inner(expr, next_group, named_groups);
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::collect_named_groups_inner(expr, next_group, named_groups);
+                    }
+                    crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::NamedGroupExists(_) => {}
+                }
+                Self::collect_named_groups_inner(true_branch, next_group, named_groups);
+                if let Some(false_branch) = false_branch {
+                    Self::collect_named_groups_inner(false_branch, next_group, named_groups);
+                }
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Backreference(_)
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => {}
         }
     }
 }

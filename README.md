@@ -103,4 +103,5 @@ Legacy CLI aliases:
 
 ## Current status snapshot
 Most mature path today is the VM/compiler pipeline in `rgx-core`, with public API and CLI integrated.
-Some advanced constructs are parsed but intentionally not yet integrated into VM execution (tracked explicitly in docs/matrices above).
+Embedded predicate execution is now available on the public path for Lua and JavaScript code blocks in `ExecutionMode::Safe` / `ExecutionMode::Full` when the corresponding cargo feature is enabled, for registered wasm modules in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `wasm` feature enabled, and for `native` callbacks in `ExecutionMode::Full` through the Rust API after registration on a compiled `Regex`.
+Some advanced constructs still remain intentionally parsed-but-unintegrated, including backreferences, recursion, conditionals, and Unicode property classes. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).

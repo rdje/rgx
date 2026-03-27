@@ -28,12 +28,17 @@ Pipeline in `rgx-core`:
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
+- Public-path predicate execution for `(?{lua:...})` and `(?{js:...})` / `(?{javascript:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` when the matching cargo feature is enabled
+- Public-path native callback execution for `(?{native:...})` in `ExecutionMode::Full` through `Regex::register_native(...)` on the Rust API path
+- Public-path wasm module execution for `(?{wasm:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` through `Regex::register_wasm_module(...)` on the Rust API path
+- Code-block execution contexts now expose current overall match text, numbered captures, and named captures to the execution layer
+- Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
 - Parser-path support for conditional syntax tokenization/parsing:
   - group-exists forms (`(?(1)...)`)
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
-- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, conditional syntax, and Unicode property classes
+- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, conditional syntax, Unicode property classes, and disallowed code-block modes/languages
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -118,10 +123,12 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser support for advanced regex syntax remains incomplete beyond the currently covered conditional condition forms and lookaround syntax
-- Unicode property classes (`\p{...}`, `\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
-- Backreference, recursion, and code-block execution are not yet integrated into the VM runtime path (compile currently returns explicit unsupported errors)
+- Unicode property classes (`\\p{...}`, `\\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
+- Backreference, recursion, and conditional syntax are still parsed-but-unintegrated at runtime
+- Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
+- The initial wasm ABI is still intentionally small and does not yet expose `ExecContext` to wasm modules
+- Numeric/replacement code-block return kinds are still explicitly out of scope for match mode
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
-- Inline code execution infrastructure exists but is not fully integrated into parser-to-VM user path
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
 
 ## Immediate priorities
@@ -131,7 +138,7 @@ Pipeline in `rgx-core`:
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
 5. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 6. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-7. Define staged rollout for multi-language code-block runtime support with shared safety controls
+7. Expand the staged code-block rollout beyond the current Lua/JavaScript/native/wasm predicate slice (richer wasm ABI, richer result handling, and any future non-Rust configuration surface)
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
