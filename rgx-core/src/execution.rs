@@ -652,6 +652,61 @@ pub mod wasm {
                         "Failed to define WASM import rgx.capture_read: {e}"
                     ))
                 })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "named_capture_count",
+                    Self::named_capture_count_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.named_capture_count: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "named_capture_name_length",
+                    Self::named_capture_name_length_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.named_capture_name_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "named_capture_name_read",
+                    Self::named_capture_name_read_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.named_capture_name_read: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "named_capture_value_length",
+                    Self::named_capture_value_length_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.named_capture_value_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "named_capture_value_read",
+                    Self::named_capture_value_read_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.named_capture_value_read: {e}"
+                    ))
+                })?;
             trace_exit!("execution", "WasmEngine::build_linker", "ok=true");
             Ok(linker)
         }
@@ -721,6 +776,16 @@ pub mod wasm {
             Self::usize_to_i32(caller.data().context.captures.len(), "capture count")
         }
 
+        fn sorted_named_capture_entries<'a>(context: &'a ExecContext) -> Vec<(&'a str, &'a str)> {
+            let mut entries = context
+                .named_captures
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect::<Vec<_>>();
+            entries.sort_unstable_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+            entries
+        }
+
         fn capture_length_import(
             caller: Caller<'_, WasmStoreData>,
             index: i32,
@@ -765,6 +830,93 @@ pub mod wasm {
             };
             Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
             Self::usize_to_i32(bytes.len(), "copied capture length")
+        }
+
+        fn named_capture_count_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(
+                caller.data().context.named_captures.len(),
+                "named capture count",
+            )
+        }
+
+        fn named_capture_name_length_import(
+            caller: Caller<'_, WasmStoreData>,
+            index: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "named capture index")?;
+            match Self::sorted_named_capture_entries(&caller.data().context)
+                .get(index)
+                .map(|(name, _)| *name)
+            {
+                Some(name) => Self::usize_to_i32(name.len(), "named capture name length"),
+                None => Ok(-1),
+            }
+        }
+
+        fn named_capture_name_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            index: i32,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "named capture index")?;
+            let offset = Self::nonnegative_i32_to_usize(offset, "named capture name offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "named capture name read length")?;
+            let Some((name, _)) = Self::sorted_named_capture_entries(&caller.data().context)
+                .get(index)
+                .copied()
+            else {
+                return Ok(-1);
+            };
+            let bytes = if offset >= name.len() {
+                Vec::new()
+            } else {
+                let end = offset.saturating_add(len).min(name.len());
+                name.as_bytes()[offset..end].to_vec()
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied named capture name length")
+        }
+
+        fn named_capture_value_length_import(
+            caller: Caller<'_, WasmStoreData>,
+            index: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "named capture index")?;
+            match Self::sorted_named_capture_entries(&caller.data().context)
+                .get(index)
+                .map(|(_, value)| *value)
+            {
+                Some(value) => Self::usize_to_i32(value.len(), "named capture value length"),
+                None => Ok(-1),
+            }
+        }
+
+        fn named_capture_value_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            index: i32,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "named capture index")?;
+            let offset = Self::nonnegative_i32_to_usize(offset, "named capture value offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "named capture value read length")?;
+            let Some((_, value)) = Self::sorted_named_capture_entries(&caller.data().context)
+                .get(index)
+                .copied()
+            else {
+                return Ok(-1);
+            };
+            let bytes = if offset >= value.len() {
+                Vec::new()
+            } else {
+                let end = offset.saturating_add(len).min(value.len());
+                value.as_bytes()[offset..end].to_vec()
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied named capture value length")
         }
 
         /// Register a named wasm module from binary bytes.

@@ -112,7 +112,6 @@ assert!(re.is_match(""));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 For the current wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
-For the initial wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
 
 JavaScript example:
 
@@ -161,13 +160,19 @@ What the execution context exposes today:
   - `capture_count() -> i32`
   - `capture_length(index) -> i32` (`-1` when the capture slot is unavailable)
   - `capture_read(index, ptr, offset, len) -> i32` (`-1` when the capture slot is unavailable)
-- `text_read` and `capture_read` require the wasm module to export linear memory as `memory`.
+  - `named_capture_count() -> i32`
+  - `named_capture_name_length(index) -> i32` (`-1` when the named-capture slot is unavailable)
+  - `named_capture_name_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
+  - `named_capture_value_length(index) -> i32` (`-1` when the named-capture slot is unavailable)
+  - `named_capture_value_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
+- Named captures are exposed to wasm through a deterministic lexicographic ordering by group name.
+- `text_read`, `capture_read`, `named_capture_name_read`, and `named_capture_value_read` require the wasm module to export linear memory as `memory`.
 - Capture slot `0` in the wasm ABI is still the current overall match prefix for the current match attempt.
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.
 - The current wasm ABI is still limited to `module:function` with an exported `() -> i32` predicate plus the read-only import helpers above.
-- Named captures, variables, and richer non-boolean result handling are not yet exposed to wasm modules.
+- Variables and richer non-boolean result handling are not yet exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
 - Numeric and replacement return values are rejected in match mode.

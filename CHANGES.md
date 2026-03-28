@@ -14,6 +14,34 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Expanded the wasm ABI with named-capture imports
+- Scope: wasm runtime ABI expansion in `rgx-core`, wasm regression coverage, and project-state documentation refreshes.
+- Changes:
+  - Root cause: the VM was already materializing named captures into `ExecContext` for code-block execution, but the shipped wasm ABI still stopped at position, full input text, and numbered captures. That left wasm predicates narrower than the Lua/JavaScript/native backends even though the runtime already had the necessary named-capture data.
+  - Extended `rgx-core/src/execution.rs` with deterministic named-capture host imports in the `rgx` namespace:
+    - `named_capture_count() -> i32`
+    - `named_capture_name_length(index) -> i32`
+    - `named_capture_name_read(index, ptr, offset, len) -> i32`
+    - `named_capture_value_length(index) -> i32`
+    - `named_capture_value_read(index, ptr, offset, len) -> i32`
+  - Exposed named captures to wasm through a stable lexicographic ordering by group name so guest-visible indices are deterministic across runs even though the host stores named captures in a `HashMap`.
+  - Reused the existing guest-memory/error-handling model so read-style named-capture helpers still require exported linear memory `memory`, unavailable slots still report `-1`, and malformed guest interactions continue to fail explicitly.
+  - Added new wasm regressions in `rgx-core/src/lib.rs` for successful name/value reads across multiple named captures plus explicit `-1` behavior for missing named-capture slots.
+  - Refreshed `README.md`, `WARP.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the repository now describes the wasm slice truthfully as position/text/numbered-capture/named-capture aware.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Wasm predicates can now inspect named-group context without changing the public regex syntax or the Rust-API registration model.
+  - The wasm slice is still intentionally smaller than the Lua/JavaScript/native surface: variables and richer result semantics remain future work.
 ### 2026-03-27 - Expanded the wasm ABI with read-only `rgx` host imports
 - Scope: wasm runtime ABI expansion in `rgx-core`, wasm regression coverage, and project-state documentation refreshes.
 - Changes:

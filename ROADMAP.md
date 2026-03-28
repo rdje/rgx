@@ -70,7 +70,7 @@ Live forward-looking tracker for rgx.
 - Status: `planned`
 - Goal: extend the newly shipped predicate code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
-  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, and numbered captures
+  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, and named captures
   - richer result semantics beyond predicate success/failure
   - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
@@ -91,6 +91,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Expanded the wasm ABI with `rgx` host imports for named captures, including deterministic named-capture ordering and regression coverage for name/value reads.
 - Expanded the wasm ABI with `rgx` host imports for current position, full input text, and numbered captures, including safe guest-memory failure handling and regression coverage.
 - Rust-API wasm module registration and dispatch for `(?{wasm:module:function})` in `ExecutionMode::Safe` / `ExecutionMode::Full`, including runtime wiring, tests, and doc refreshes.
 - Rust-API native callback registration for `(?{native:...})` in `ExecutionMode::Full`, including runtime wiring, tests, and doc refreshes.

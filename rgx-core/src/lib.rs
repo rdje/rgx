@@ -1099,6 +1099,238 @@ mod tests {
 
     #[cfg(feature = "wasm")]
     #[test]
+    fn safe_mode_wasm_code_block_can_read_named_captures() {
+        let regex = Regex::with_mode(
+            r#"(?<zeta>cat)(?<alpha>dog)(?{wasm:ctx:named_captures_are_sorted})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM named-capture pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "named_capture_count" (func $named_capture_count (result i32)))
+                        (import "rgx" "named_capture_name_length" (func $named_capture_name_length (param i32) (result i32)))
+                        (import "rgx" "named_capture_name_read" (func $named_capture_name_read (param i32 i32 i32 i32) (result i32)))
+                        (import "rgx" "named_capture_value_length" (func $named_capture_value_length (param i32) (result i32)))
+                        (import "rgx" "named_capture_value_read" (func $named_capture_value_read (param i32 i32 i32 i32) (result i32)))
+                        (memory (export "memory") 1)
+                        (func (export "named_captures_are_sorted") (result i32)
+                            (local $copied i32)
+                            call $named_capture_count
+                            i32.const 2
+                            i32.ne
+                            if (result i32)
+                                i32.const 0
+                            else
+                                i32.const 0
+                                call $named_capture_name_length
+                                i32.const 5
+                                i32.ne
+                                if (result i32)
+                                    i32.const 0
+                                else
+                                    i32.const 0
+                                    i32.const 0
+                                    i32.const 0
+                                    i32.const 5
+                                    call $named_capture_name_read
+                                    local.tee $copied
+                                    i32.const 5
+                                    i32.ne
+                                    if (result i32)
+                                        i32.const 0
+                                    else
+                                        i32.const 0
+                                        call $named_capture_value_length
+                                        i32.const 3
+                                        i32.ne
+                                        if (result i32)
+                                            i32.const 0
+                                        else
+                                            i32.const 0
+                                            i32.const 16
+                                            i32.const 0
+                                            i32.const 3
+                                            call $named_capture_value_read
+                                            local.tee $copied
+                                            i32.const 3
+                                            i32.ne
+                                            if (result i32)
+                                                i32.const 0
+                                            else
+                                                i32.const 1
+                                                call $named_capture_name_length
+                                                i32.const 4
+                                                i32.ne
+                                                if (result i32)
+                                                    i32.const 0
+                                                else
+                                                    i32.const 1
+                                                    i32.const 32
+                                                    i32.const 0
+                                                    i32.const 4
+                                                    call $named_capture_name_read
+                                                    local.tee $copied
+                                                    i32.const 4
+                                                    i32.ne
+                                                    if (result i32)
+                                                        i32.const 0
+                                                    else
+                                                        i32.const 1
+                                                        call $named_capture_value_length
+                                                        i32.const 3
+                                                        i32.ne
+                                                        if (result i32)
+                                                            i32.const 0
+                                                        else
+                                                            i32.const 1
+                                                            i32.const 48
+                                                            i32.const 0
+                                                            i32.const 3
+                                                            call $named_capture_value_read
+                                                            local.tee $copied
+                                                            i32.const 3
+                                                            i32.ne
+                                                            if (result i32)
+                                                                i32.const 0
+                                                            else
+                                                                i32.const 0
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.const 1
+                                                                i32.load8_u
+                                                                i32.const 108
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 2
+                                                                i32.load8_u
+                                                                i32.const 112
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 3
+                                                                i32.load8_u
+                                                                i32.const 104
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 4
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 16
+                                                                i32.load8_u
+                                                                i32.const 100
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 17
+                                                                i32.load8_u
+                                                                i32.const 111
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 18
+                                                                i32.load8_u
+                                                                i32.const 103
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 32
+                                                                i32.load8_u
+                                                                i32.const 122
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 33
+                                                                i32.load8_u
+                                                                i32.const 101
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 34
+                                                                i32.load8_u
+                                                                i32.const 116
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 35
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 48
+                                                                i32.load8_u
+                                                                i32.const 99
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 49
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 50
+                                                                i32.load8_u
+                                                                i32.const 116
+                                                                i32.eq
+                                                                i32.and
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM named-capture module");
+        assert!(regex.is_match("catdog"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_reports_missing_named_capture_slots() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{wasm:ctx:missing_named_capture_slot_is_unavailable})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM missing-named-capture pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "named_capture_count" (func $named_capture_count (result i32)))
+                        (import "rgx" "named_capture_name_length" (func $named_capture_name_length (param i32) (result i32)))
+                        (import "rgx" "named_capture_value_length" (func $named_capture_value_length (param i32) (result i32)))
+                        (func (export "missing_named_capture_slot_is_unavailable") (result i32)
+                            call $named_capture_count
+                            i32.const 1
+                            i32.eq
+                            i32.const 1
+                            call $named_capture_name_length
+                            i32.const -1
+                            i32.eq
+                            i32.and
+                            i32.const 1
+                            call $named_capture_value_length
+                            i32.const -1
+                            i32.eq
+                            i32.and
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM missing-named-capture module");
+        assert!(regex.is_match("cat"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
     fn safe_mode_wasm_code_block_fails_when_context_reads_require_exported_memory() {
         let regex = Regex::with_mode("(?{wasm:no_memory:evaluate})", ExecutionMode::Safe)
             .expect("Failed to compile WASM missing-memory pattern");
