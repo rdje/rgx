@@ -34,6 +34,7 @@ Current behavior contract for the shipped slice:
   - `lua` requires the `lua` feature
   - `js` / `javascript` requires the `javascript` feature
   - `wasm` requires the `wasm` feature plus a registered module on the compiled `Regex`
+  - host-provided execution variables can be set on the compiled `Regex` via `Regex::set_variable(...)`
   - current wasm ABI keeps `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
   - wasm modules may optionally import read-only context helpers from the `rgx` namespace:
     - `position() -> i32`
@@ -47,15 +48,20 @@ Current behavior contract for the shipped slice:
     - `named_capture_name_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
     - `named_capture_value_length(index) -> i32` (`-1` when the named-capture slot is unavailable)
     - `named_capture_value_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
-  - named captures are exposed to wasm through a deterministic lexicographic ordering by group name
-  - `text_read`, `capture_read`, `named_capture_name_read`, and `named_capture_value_read` require the module to export linear memory as `memory`
+    - `variable_count() -> i32`
+    - `variable_name_length(index) -> i32` (`-1` when the variable slot is unavailable)
+    - `variable_name_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+    - `variable_value_length(index) -> i32` (`-1` when the variable slot is unavailable)
+    - `variable_value_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+  - named captures and host-provided variables are exposed to wasm through deterministic lexicographic ordering by name
+  - `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, and `variable_value_read` require the module to export linear memory as `memory`
   - malformed wasm call specs, malformed context reads, unknown module names, and missing/invalid exports or guest-memory interactions fail the current match path at runtime
 - `ExecutionMode::Full` accepts the same sandboxed backends plus `native` code blocks on the Rust API path:
   - `native` requires registering a callback on the compiled `Regex`
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
-- Current overall match text (`arg[0]`), numbered captures, and named captures are exposed to the Lua/JavaScript/native execution layer via `ExecContext`.
-- Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures, named captures) rather than the fuller Lua/JavaScript/native binding surface.
+- Current overall match text (`arg[0]`), numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, the `vars` scripting binding, and `ExecContext::variable(...)`.
+- Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures, named captures, host-provided variables) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
 - Numeric and replacement return values are rejected in match mode for now.
 Representative test anchors:

@@ -104,5 +104,6 @@ Legacy CLI aliases:
 ## Current status snapshot
 Most mature path today is the VM/compiler pipeline in `rgx-core`, with public API and CLI integrated.
 Embedded predicate execution is now available on the public path for Lua and JavaScript code blocks in `ExecutionMode::Safe` / `ExecutionMode::Full` when the corresponding cargo feature is enabled, for registered wasm modules in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `wasm` feature enabled, and for `native` callbacks in `ExecutionMode::Full` through the Rust API after registration on a compiled `Regex`.
-The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing read-only host imports for current position, full input text, numbered captures, and named captures through the `rgx` namespace.
+Host-provided execution variables can now be set on compiled regexes via `Regex::set_variable(...)` and are snapshotted into Lua, JavaScript, native, and wasm code-block evaluation.
+The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing read-only host imports for current position, full input text, numbered captures, named captures, and host-provided variables through the `rgx` namespace.
 Some advanced constructs still remain intentionally parsed-but-unintegrated, including backreferences, recursion, conditionals, and Unicode property classes. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).

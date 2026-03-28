@@ -86,6 +86,7 @@ Requirements:
   - `javascript` for `(?{js:...})` / `(?{javascript:...})`
   - `wasm` for `(?{wasm:...})`
 - Register native callbacks or wasm modules on the compiled `Regex` before matching.
+- Optional host-provided variables can be set on the compiled `Regex` via `set_variable(...)`.
 - Write code as a predicate body and use `return ...` style in both Lua and JavaScript.
 
 Lua example:
@@ -98,6 +99,16 @@ let re = Regex::with_mode(
     ExecutionMode::Safe,
 )?;
 assert!(re.is_match("cat"));
+# Ok::<(), rgx_core::RgxError>(())
+```
+Host-provided variables come from the Rust API:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(r#"(?{js:return vars.env === "prod";})"#, ExecutionMode::Safe)?;
+re.set_variable("env", "prod")?;
+assert!(re.is_match(""));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 
@@ -150,9 +161,10 @@ What the execution context exposes today:
 - `arg[0]`: current overall match prefix for the current match attempt
 - `arg[1]`, `arg[2]`, ...: completed numbered captures
 - `named.<group_name>` / `named[group_name]`: completed named captures
+- `vars.<name>` / `vars[name]`: host-provided execution variables set through `Regex::set_variable(...)`
 - `pos`: current byte position in the input
 - `text`: full input text
-- These bindings are currently available to Lua/JavaScript/native callbacks.
+- Lua/JavaScript bindings expose `arg`, `named`, `vars`, `pos`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `group()`, `named()`, and `variable()`.
 - Wasm currently exposes a smaller import-based context slice through the `rgx` namespace:
   - `position() -> i32`
   - `text_length() -> i32`
@@ -165,14 +177,19 @@ What the execution context exposes today:
   - `named_capture_name_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
   - `named_capture_value_length(index) -> i32` (`-1` when the named-capture slot is unavailable)
   - `named_capture_value_read(index, ptr, offset, len) -> i32` (`-1` when the named-capture slot is unavailable)
-- Named captures are exposed to wasm through a deterministic lexicographic ordering by group name.
-- `text_read`, `capture_read`, `named_capture_name_read`, and `named_capture_value_read` require the wasm module to export linear memory as `memory`.
+  - `variable_count() -> i32`
+  - `variable_name_length(index) -> i32` (`-1` when the variable slot is unavailable)
+  - `variable_name_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+  - `variable_value_length(index) -> i32` (`-1` when the variable slot is unavailable)
+  - `variable_value_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+- Named captures and host-provided variables are exposed to wasm through deterministic lexicographic ordering by name.
+- `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, and `variable_value_read` require the wasm module to export linear memory as `memory`.
 - Capture slot `0` in the wasm ABI is still the current overall match prefix for the current match attempt.
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.
 - The current wasm ABI is still limited to `module:function` with an exported `() -> i32` predicate plus the read-only import helpers above.
-- Variables and richer non-boolean result handling are not yet exposed to wasm modules.
+- Host-provided variables are read-only snapshots for each code-block evaluation, and richer non-boolean result handling is still not exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
 - Numeric and replacement return values are rejected in match mode.

@@ -31,8 +31,9 @@ Pipeline in `rgx-core`:
 - Public-path predicate execution for `(?{lua:...})` and `(?{js:...})` / `(?{javascript:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` when the matching cargo feature is enabled
 - Public-path native callback execution for `(?{native:...})` in `ExecutionMode::Full` through `Regex::register_native(...)` on the Rust API path
 - Public-path wasm module execution for `(?{wasm:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` through `Regex::register_wasm_module(...)` on the Rust API path
-- Wasm predicates can now read current position, full input text, numbered captures, and named captures through `rgx` host imports while keeping the exported `() -> i32` predicate entrypoint stable
-- Code-block execution contexts now expose current overall match text, numbered captures, and named captures to the execution layer
+- Host-provided execution variables can now be registered through `Regex::set_variable(...)` and are snapshotted into each code-block evaluation
+- Wasm predicates can now read current position, full input text, numbered captures, named captures, and host-provided variables through `rgx` host imports while keeping the exported `() -> i32` predicate entrypoint stable
+- Code-block execution contexts now expose current overall match text, numbered captures, named captures, and host-provided variables to the execution layer
 - Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
 - Parser-path support for conditional syntax tokenization/parsing:
@@ -85,9 +86,10 @@ Pipeline in `rgx-core`:
   - engine boundaries in `rgx-core/src/engine.rs` (`Engine::new`, `find_all`, `find_first`, `is_match`)
   - explicit decision logs for UTF-8 validity gates and boolean/cardinality outcome summaries
 - Execution-layer tracing now covers code-execution runtime boundaries:
-  - context and lookup boundaries in `rgx-core/src/execution.rs` (`ExecContext::new/current_match/group/named`)
+  - context and lookup boundaries in `rgx-core/src/execution.rs` (`ExecContext::new/current_match/group/named/variable/variables_snapshot`)
   - callback-registry boundaries (`NativeCallbackRegistry::new/register/call/has`)
-  - manager dispatch boundaries (`ExecutionManager::new/execute/register_native/is_language_available`)
+  - execution-variable registry boundaries (`ExecutionVariableRegistry::new/set/snapshot`)
+  - manager dispatch boundaries (`ExecutionManager::new/execute/register_native/register_wasm_module/set_variable/variable_snapshot/is_language_available`)
   - explicit decision logs for callback replacement/lookup outcomes and language backend routing choices
 - VM compile-path tracing now covers optimizing compiler boundaries:
   - `OptimizingCompiler::new` and `OptimizingCompiler::compile` in `rgx-core/src/vm.rs`
@@ -127,7 +129,7 @@ Pipeline in `rgx-core`:
 - Unicode property classes (`\\p{...}`, `\\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
 - Backreference, recursion, and conditional syntax are still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
-- The wasm ABI now exposes position/text/numbered-capture/named-capture imports, but variables and richer result handling are still not exposed to wasm modules
+- The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports, but richer result handling is still not exposed to wasm modules
 - Numeric/replacement code-block return kinds are still explicitly out of scope for match mode
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
@@ -140,7 +142,7 @@ Pipeline in `rgx-core`:
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
 5. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 6. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-7. Expand the staged code-block rollout beyond the current Lua/JavaScript/native/wasm predicate slice (variable wasm imports, richer result handling, and any future non-Rust configuration surface)
+7. Expand the staged code-block rollout beyond the current Lua/JavaScript/native/wasm predicate slice (richer result handling, additional wasm context/result work, and any future non-Rust configuration surface)
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

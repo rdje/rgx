@@ -324,6 +324,22 @@ impl Regex {
         );
         result
     }
+
+    /// Register or replace a host-provided execution variable for code-block evaluation.
+    pub fn set_variable(&self, name: impl Into<String>, value: impl Into<String>) -> Result<()> {
+        let name = name.into();
+        let value = value.into();
+        trace_enter!(
+            "api",
+            "Regex::set_variable",
+            "name={},value_len={}",
+            name,
+            value.len()
+        );
+        let result = self.engine.set_variable(name, value);
+        trace_exit!("api", "Regex::set_variable", "ok={}", result.is_ok());
+        result
+    }
 }
 
 #[cfg(test)]
@@ -860,6 +876,29 @@ mod tests {
     }
 
     #[test]
+    fn full_mode_native_code_block_can_access_host_variables() {
+        let regex = Regex::with_mode(r#"(?{native:check_env})"#, ExecutionMode::Full)
+            .expect("Failed to compile native variable pattern");
+        regex
+            .set_variable("env", "prod")
+            .expect("Failed to register execution variable");
+        regex
+            .register_native("check_env", |ctx| {
+                if ctx.variable("env").as_deref() == Some("prod") {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("Failed to register native callback");
+        assert!(regex.is_match(""));
+        regex
+            .set_variable("env", "dev")
+            .expect("Failed to replace execution variable");
+        assert!(!regex.is_match(""));
+    }
+
+    #[test]
     fn full_mode_native_code_block_fails_when_callback_is_missing() {
         let regex = Regex::with_mode("(?{native:missing})", ExecutionMode::Full)
             .expect("Failed to compile native code block pattern");
@@ -876,6 +915,20 @@ mod tests {
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(msg.contains("native callback registration is unavailable for this compiled regex"));
+    }
+
+    #[test]
+    fn set_variable_requires_attached_execution_manager() {
+        let regex = Regex::with_mode("cat", ExecutionMode::Full).expect("Failed to compile regex");
+        let result = regex.set_variable("env", "prod");
+        assert!(
+            result.is_err(),
+            "Variable registration should fail without runtime manager"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains("execution variable registration is unavailable for this compiled regex")
+        );
     }
 
     #[cfg(not(feature = "wasm"))]
@@ -914,6 +967,244 @@ mod tests {
                 ),
             )
             .expect("Failed to register WASM module");
+        assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_read_variables() {
+        let regex = Regex::with_mode("(?{wasm:ctx:variables_are_sorted})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM variable pattern");
+        regex
+            .set_variable("zeta", "dog")
+            .expect("Failed to register execution variable");
+        regex
+            .set_variable("alpha", "cat")
+            .expect("Failed to register execution variable");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "variable_count" (func $variable_count (result i32)))
+                        (import "rgx" "variable_name_length" (func $variable_name_length (param i32) (result i32)))
+                        (import "rgx" "variable_name_read" (func $variable_name_read (param i32 i32 i32 i32) (result i32)))
+                        (import "rgx" "variable_value_length" (func $variable_value_length (param i32) (result i32)))
+                        (import "rgx" "variable_value_read" (func $variable_value_read (param i32 i32 i32 i32) (result i32)))
+                        (memory (export "memory") 1)
+                        (func (export "variables_are_sorted") (result i32)
+                            (local $copied i32)
+                            call $variable_count
+                            i32.const 2
+                            i32.ne
+                            if (result i32)
+                                i32.const 0
+                            else
+                                i32.const 0
+                                call $variable_name_length
+                                i32.const 5
+                                i32.ne
+                                if (result i32)
+                                    i32.const 0
+                                else
+                                    i32.const 0
+                                    i32.const 0
+                                    i32.const 0
+                                    i32.const 5
+                                    call $variable_name_read
+                                    local.tee $copied
+                                    i32.const 5
+                                    i32.ne
+                                    if (result i32)
+                                        i32.const 0
+                                    else
+                                        i32.const 0
+                                        call $variable_value_length
+                                        i32.const 3
+                                        i32.ne
+                                        if (result i32)
+                                            i32.const 0
+                                        else
+                                            i32.const 0
+                                            i32.const 16
+                                            i32.const 0
+                                            i32.const 3
+                                            call $variable_value_read
+                                            local.tee $copied
+                                            i32.const 3
+                                            i32.ne
+                                            if (result i32)
+                                                i32.const 0
+                                            else
+                                                i32.const 1
+                                                call $variable_name_length
+                                                i32.const 4
+                                                i32.ne
+                                                if (result i32)
+                                                    i32.const 0
+                                                else
+                                                    i32.const 1
+                                                    i32.const 32
+                                                    i32.const 0
+                                                    i32.const 4
+                                                    call $variable_name_read
+                                                    local.tee $copied
+                                                    i32.const 4
+                                                    i32.ne
+                                                    if (result i32)
+                                                        i32.const 0
+                                                    else
+                                                        i32.const 1
+                                                        call $variable_value_length
+                                                        i32.const 3
+                                                        i32.ne
+                                                        if (result i32)
+                                                            i32.const 0
+                                                        else
+                                                            i32.const 1
+                                                            i32.const 48
+                                                            i32.const 0
+                                                            i32.const 3
+                                                            call $variable_value_read
+                                                            local.tee $copied
+                                                            i32.const 3
+                                                            i32.ne
+                                                            if (result i32)
+                                                                i32.const 0
+                                                            else
+                                                                i32.const 0
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.const 1
+                                                                i32.load8_u
+                                                                i32.const 108
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 2
+                                                                i32.load8_u
+                                                                i32.const 112
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 3
+                                                                i32.load8_u
+                                                                i32.const 104
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 4
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 16
+                                                                i32.load8_u
+                                                                i32.const 99
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 17
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 18
+                                                                i32.load8_u
+                                                                i32.const 116
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 32
+                                                                i32.load8_u
+                                                                i32.const 122
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 33
+                                                                i32.load8_u
+                                                                i32.const 101
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 34
+                                                                i32.load8_u
+                                                                i32.const 116
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 35
+                                                                i32.load8_u
+                                                                i32.const 97
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 48
+                                                                i32.load8_u
+                                                                i32.const 100
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 49
+                                                                i32.load8_u
+                                                                i32.const 111
+                                                                i32.eq
+                                                                i32.and
+                                                                i32.const 50
+                                                                i32.load8_u
+                                                                i32.const 103
+                                                                i32.eq
+                                                                i32.and
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM variable module");
+        assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_reports_missing_variable_slots() {
+        let regex = Regex::with_mode(
+            r#"(?{wasm:ctx:missing_variable_slot_is_unavailable})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM missing-variable pattern");
+        regex
+            .set_variable("env", "prod")
+            .expect("Failed to register execution variable");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "variable_count" (func $variable_count (result i32)))
+                        (import "rgx" "variable_name_length" (func $variable_name_length (param i32) (result i32)))
+                        (import "rgx" "variable_value_length" (func $variable_value_length (param i32) (result i32)))
+                        (func (export "missing_variable_slot_is_unavailable") (result i32)
+                            call $variable_count
+                            i32.const 1
+                            i32.eq
+                            i32.const 1
+                            call $variable_name_length
+                            i32.const -1
+                            i32.eq
+                            i32.and
+                            i32.const 1
+                            call $variable_value_length
+                            i32.const -1
+                            i32.eq
+                            i32.and
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM missing-variable module");
         assert!(regex.is_match(""));
     }
 
@@ -1498,6 +1789,17 @@ mod tests {
 
     #[cfg(feature = "lua")]
     #[test]
+    fn safe_mode_lua_code_block_can_access_variables() {
+        let regex = Regex::with_mode(r#"(?{lua:return vars.env == "prod"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Lua variable pattern");
+        regex
+            .set_variable("env", "prod")
+            .expect("Failed to register execution variable");
+        assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
     fn safe_mode_lua_code_block_can_access_named_captures() {
         let regex = Regex::with_mode(
             r#"(?<word>cat)(?{lua:return named.word == "cat"})"#,
@@ -1522,6 +1824,20 @@ mod tests {
         let regex = Regex::with_mode(r"(?{lua:return 1})", ExecutionMode::Safe)
             .expect("Failed to compile Lua numeric-result pattern");
         assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_code_block_can_access_variables() {
+        let regex = Regex::with_mode(
+            r#"(?{js:return vars.env === "prod";})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript variable pattern");
+        regex
+            .set_variable("env", "prod")
+            .expect("Failed to register execution variable");
+        assert!(regex.is_match(""));
     }
 
     #[cfg(feature = "javascript")]

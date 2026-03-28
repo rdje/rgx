@@ -236,4 +236,9 @@ impl Engine {
     pub fn register_wasm_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
         self.vm.register_wasm_module(name, module_bytes)
     }
+
+    /// Register or replace a host-provided execution variable on the engine's execution manager.
+    pub fn set_variable(&self, name: String, value: String) -> Result<()> {
+        self.vm.set_variable(name, value)
+    }
 }

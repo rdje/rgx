@@ -47,6 +47,7 @@ use std::sync::{Arc, RwLock};
 /// - The matched text
 /// - Capture groups
 /// - Named captures
+/// - Host-provided variables
 /// - Match position
 #[derive(Debug, Clone)]
 pub struct ExecContext {
@@ -58,7 +59,7 @@ pub struct ExecContext {
     pub captures: Vec<Option<String>>,
     /// Named capture groups
     pub named_captures: HashMap<String, String>,
-    /// User-defined variables (persisted across executions)
+    /// Host-provided variable snapshot for this code-block execution
     pub variables: Arc<RwLock<HashMap<String, String>>>,
 }
 
@@ -159,6 +160,51 @@ impl ExecContext {
             value.is_some()
         );
         value
+    }
+
+    /// Get a host-provided execution variable by name.
+    pub fn variable(&self, name: &str) -> Option<String> {
+        let variable_slots = self.variables.read().unwrap().len();
+        trace_enter!(
+            "execution",
+            "ExecContext::variable",
+            "name={},variable_slots={}",
+            name,
+            variable_slots
+        );
+        let value = self.variables.read().unwrap().get(name).cloned();
+        trace_decision!(
+            "execution",
+            "variable(name).is_some()",
+            value.is_some(),
+            "execution variable lookup completed"
+        );
+        trace_exit!(
+            "execution",
+            "ExecContext::variable",
+            "ok=true,found={}",
+            value.is_some()
+        );
+        value
+    }
+
+    /// Clone the current execution-variable snapshot into an owned map.
+    pub fn variables_snapshot(&self) -> HashMap<String, String> {
+        let variable_slots = self.variables.read().unwrap().len();
+        trace_enter!(
+            "execution",
+            "ExecContext::variables_snapshot",
+            "variable_slots={}",
+            variable_slots
+        );
+        let snapshot = self.variables.read().unwrap().clone();
+        trace_exit!(
+            "execution",
+            "ExecContext::variables_snapshot",
+            "ok=true,variable_slots={}",
+            snapshot.len()
+        );
+        snapshot
     }
 }
 
@@ -278,6 +324,13 @@ pub mod lua {
                 named_table.set(name.clone(), value.clone())?;
             }
             globals.set("named", named_table)?;
+
+            // Create execution variables table
+            let vars_table = lua.create_table()?;
+            for (name, value) in context.variables_snapshot() {
+                vars_table.set(name, value)?;
+            }
+            globals.set("vars", vars_table)?;
 
             Ok(())
         }
@@ -412,6 +465,14 @@ pub mod javascript {
                         named_obj.set(name.clone(), value.clone()).ok();
                     }
                     globals.set("named", named_obj).ok();
+                }
+
+                // Create variables object
+                if let Ok(vars_obj) = Object::new(ctx.clone()) {
+                    for (name, value) in context.variables_snapshot() {
+                        vars_obj.set(name, value).ok();
+                    }
+                    globals.set("vars", vars_obj).ok();
                 }
 
                 // Remove dangerous functions
@@ -707,6 +768,53 @@ pub mod wasm {
                         "Failed to define WASM import rgx.named_capture_value_read: {e}"
                     ))
                 })?;
+            linker
+                .func_wrap("rgx", "variable_count", Self::variable_count_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.variable_count: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "variable_name_length",
+                    Self::variable_name_length_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.variable_name_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "variable_name_read", Self::variable_name_read_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.variable_name_read: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "variable_value_length",
+                    Self::variable_value_length_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.variable_value_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap(
+                    "rgx",
+                    "variable_value_read",
+                    Self::variable_value_read_import,
+                )
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.variable_value_read: {e}"
+                    ))
+                })?;
             trace_exit!("execution", "WasmEngine::build_linker", "ok=true");
             Ok(linker)
         }
@@ -776,12 +884,23 @@ pub mod wasm {
             Self::usize_to_i32(caller.data().context.captures.len(), "capture count")
         }
 
-        fn sorted_named_capture_entries<'a>(context: &'a ExecContext) -> Vec<(&'a str, &'a str)> {
-            let mut entries = context
-                .named_captures
+        fn sorted_string_map_entries<'a>(
+            map: &'a HashMap<String, String>,
+        ) -> Vec<(&'a str, &'a str)> {
+            let mut entries = map
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect::<Vec<_>>();
+            entries.sort_unstable_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+            entries
+        }
+
+        fn sorted_named_capture_entries<'a>(context: &'a ExecContext) -> Vec<(&'a str, &'a str)> {
+            Self::sorted_string_map_entries(&context.named_captures)
+        }
+
+        fn sorted_variable_entries(context: &ExecContext) -> Vec<(String, String)> {
+            let mut entries = context.variables_snapshot().into_iter().collect::<Vec<_>>();
             entries.sort_unstable_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
             entries
         }
@@ -917,6 +1036,91 @@ pub mod wasm {
             };
             Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
             Self::usize_to_i32(bytes.len(), "copied named capture value length")
+        }
+
+        fn variable_count_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            let variable_count = caller.data().context.variables.read().unwrap().len();
+            Self::usize_to_i32(variable_count, "variable count")
+        }
+
+        fn variable_name_length_import(
+            caller: Caller<'_, WasmStoreData>,
+            index: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "variable index")?;
+            match Self::sorted_variable_entries(&caller.data().context)
+                .get(index)
+                .map(|(name, _)| name)
+            {
+                Some(name) => Self::usize_to_i32(name.len(), "variable name length"),
+                None => Ok(-1),
+            }
+        }
+
+        fn variable_name_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            index: i32,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "variable index")?;
+            let offset = Self::nonnegative_i32_to_usize(offset, "variable name offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "variable name read length")?;
+            let Some((name, _)) = Self::sorted_variable_entries(&caller.data().context)
+                .get(index)
+                .cloned()
+            else {
+                return Ok(-1);
+            };
+            let bytes = if offset >= name.len() {
+                Vec::new()
+            } else {
+                let end = offset.saturating_add(len).min(name.len());
+                name.as_bytes()[offset..end].to_vec()
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied variable name length")
+        }
+
+        fn variable_value_length_import(
+            caller: Caller<'_, WasmStoreData>,
+            index: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "variable index")?;
+            match Self::sorted_variable_entries(&caller.data().context)
+                .get(index)
+                .map(|(_, value)| value)
+            {
+                Some(value) => Self::usize_to_i32(value.len(), "variable value length"),
+                None => Ok(-1),
+            }
+        }
+
+        fn variable_value_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            index: i32,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "variable index")?;
+            let offset = Self::nonnegative_i32_to_usize(offset, "variable value offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "variable value read length")?;
+            let Some((_, value)) = Self::sorted_variable_entries(&caller.data().context)
+                .get(index)
+                .cloned()
+            else {
+                return Ok(-1);
+            };
+            let bytes = if offset >= value.len() {
+                Vec::new()
+            } else {
+                let end = offset.saturating_add(len).min(value.len());
+                value.as_bytes()[offset..end].to_vec()
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied variable value length")
         }
 
         /// Register a named wasm module from binary bytes.
@@ -1247,6 +1451,87 @@ impl Default for NativeCallbackRegistry {
     }
 }
 
+/// Registry for host-provided execution variables.
+pub struct ExecutionVariableRegistry {
+    variables: RwLock<HashMap<String, String>>,
+}
+
+impl ExecutionVariableRegistry {
+    /// Create a new execution-variable registry.
+    pub fn new() -> Self {
+        trace_enter!("execution", "ExecutionVariableRegistry::new");
+        let registry = Self {
+            variables: RwLock::new(HashMap::new()),
+        };
+        trace_exit!(
+            "execution",
+            "ExecutionVariableRegistry::new",
+            "ok=true,registered_variables=0"
+        );
+        registry
+    }
+
+    /// Register or replace a host-provided execution variable.
+    pub fn set(&self, name: String, value: String) {
+        trace_enter!(
+            "execution",
+            "ExecutionVariableRegistry::set",
+            "name={},value_len={}",
+            name,
+            value.len()
+        );
+        let mut variables = self.variables.write().unwrap();
+        let replaced_existing = variables.insert(name.clone(), value).is_some();
+        trace_decision!(
+            "execution",
+            "variables.insert(name,...).is_some()",
+            replaced_existing,
+            "true means an existing execution variable with the same name was replaced"
+        );
+        trace_exit!(
+            "execution",
+            "ExecutionVariableRegistry::set",
+            "ok=true,name={},registered_variables={}",
+            name,
+            variables.len()
+        );
+    }
+
+    /// Clone the current execution-variable state into an owned map.
+    pub fn snapshot(&self) -> HashMap<String, String> {
+        trace_enter!(
+            "execution",
+            "ExecutionVariableRegistry::snapshot",
+            "registered_variables={}",
+            self.len()
+        );
+        let snapshot = self.variables.read().unwrap().clone();
+        trace_exit!(
+            "execution",
+            "ExecutionVariableRegistry::snapshot",
+            "ok=true,registered_variables={}",
+            snapshot.len()
+        );
+        snapshot
+    }
+
+    /// Count registered variables.
+    pub fn len(&self) -> usize {
+        self.variables.read().unwrap().len()
+    }
+
+    /// Whether no variables are currently registered.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for ExecutionVariableRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ============================================================================
 // EXECUTION MANAGER
 // ============================================================================
@@ -1263,6 +1548,7 @@ pub struct ExecutionManager {
     #[cfg(feature = "javascript")]
     js_engine: Option<javascript::JavaScriptEngine>,
     native_callbacks: NativeCallbackRegistry,
+    variables: ExecutionVariableRegistry,
 }
 
 impl ExecutionManager {
@@ -1277,6 +1563,7 @@ impl ExecutionManager {
             #[cfg(feature = "javascript")]
             js_engine: javascript::JavaScriptEngine::new().ok(),
             native_callbacks: NativeCallbackRegistry::new(),
+            variables: ExecutionVariableRegistry::new(),
         };
         let lua_available = {
             #[cfg(feature = "lua")]
@@ -1311,7 +1598,7 @@ impl ExecutionManager {
         trace_exit!(
             "execution",
             "ExecutionManager::new",
-            "ok=true,wasm_available={},lua_available={},javascript_available={},native_available=true",
+            "ok=true,wasm_available={},lua_available={},javascript_available={},native_available=true,registered_variables=0",
             wasm_available,
             lua_available,
             js_available
@@ -1544,6 +1831,42 @@ impl ExecutionManager {
             );
             Err(error)
         }
+    }
+
+    /// Register or replace a host-provided execution variable.
+    pub fn set_variable(&self, name: String, value: String) {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::set_variable",
+            "name={},value_len={}",
+            name,
+            value.len()
+        );
+        self.variables.set(name, value);
+        trace_exit!(
+            "execution",
+            "ExecutionManager::set_variable",
+            "ok=true,registered_variables={}",
+            self.variables.len()
+        );
+    }
+
+    /// Clone the current execution-variable snapshot.
+    pub fn variable_snapshot(&self) -> HashMap<String, String> {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::variable_snapshot",
+            "registered_variables={}",
+            self.variables.len()
+        );
+        let snapshot = self.variables.snapshot();
+        trace_exit!(
+            "execution",
+            "ExecutionManager::variable_snapshot",
+            "ok=true,variable_slots={}",
+            snapshot.len()
+        );
+        snapshot
     }
 
     /// Check if a language is available

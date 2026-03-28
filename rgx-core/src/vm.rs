@@ -12,7 +12,7 @@ use crate::ast::{AnchorType, CharClass, CharRange, GroupKind, Quantifier, Regex}
 use crate::execution::{ExecContext as CodeExecContext, ExecResult, ExecutionManager};
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// High-performance bytecode instruction optimized for cache efficiency
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1625,6 +1625,9 @@ impl RegexVM {
                 exec_ctx.named_captures.insert(name.clone(), value);
             }
         }
+        if let Some(execution_manager) = &self.execution_manager {
+            exec_ctx.variables = Arc::new(RwLock::new(execution_manager.variable_snapshot()));
+        }
         exec_ctx
     }
 
@@ -1936,6 +1939,18 @@ impl RegexVM {
             ));
         };
         execution_manager.register_wasm_module(name, module_bytes)
+    }
+
+    /// Register or replace a host-provided execution variable on the attached execution manager.
+    pub fn set_variable(&self, name: String, value: String) -> crate::error::Result<()> {
+        let Some(execution_manager) = &self.execution_manager else {
+            return Err(crate::error::RgxError::Engine(
+                "execution variable registration is unavailable for this compiled regex"
+                    .to_string(),
+            ));
+        };
+        execution_manager.set_variable(name, value);
+        Ok(())
     }
 
     /// Execute a sub-expression (used for quantifiers)

@@ -14,6 +14,36 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Shipped host-provided execution variables across code-block runtimes
+- Scope: shared execution-variable ownership in `rgx-core`, Rust API/runtime exposure across Lua/JavaScript/native/wasm, regression coverage, and project-state documentation refreshes.
+- Changes:
+  - Root cause: `ExecContext` already carried a `variables` field, but it was dead scaffolding. Variables were not owned by `ExecutionManager`, `RegexVM::build_code_exec_context()` rebuilt fresh contexts without shared variable state, and there was no public API on compiled regexes to set or update variables.
+  - Added a shared `ExecutionVariableRegistry` in `rgx-core/src/execution.rs` plus `ExecutionManager::set_variable(...)` / `ExecutionManager::variable_snapshot(...)` so variables are owned alongside the other runtime registrations.
+  - Extended the Rust API/runtime path through `rgx-core/src/vm.rs`, `rgx-core/src/engine.rs`, and `rgx-core/src/lib.rs` with `RegexVM::set_variable(...)`, `Engine::set_variable(...)`, and public `Regex::set_variable(...)`.
+  - Added `ExecContext::variable(...)` and `ExecContext::variables_snapshot()` helpers and exposed variables consistently across the shipped backends:
+    - Lua and JavaScript now receive read-only `vars`
+    - native callbacks can read variables through `ctx.variable("name")`
+    - wasm now exposes deterministic read-only `rgx` imports for variables:
+      - `variable_count() -> i32`
+      - `variable_name_length(index) -> i32`
+      - `variable_name_read(index, ptr, offset, len) -> i32`
+      - `variable_value_length(index) -> i32`
+      - `variable_value_read(index, ptr, offset, len) -> i32`
+  - Chose per-evaluation variable snapshots instead of shared mutable match-time state so callout inputs remain deterministic under backtracking while still allowing Rust API updates between matches.
+  - Added regressions in `rgx-core/src/lib.rs` for native/Lua/JavaScript/wasm variable access, wasm missing-slot behavior, and explicit unavailable-registration errors on regexes without an attached execution manager.
+  - Refreshed `README.md`, `WARP.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so variables are described truthfully as a shipped code-block-runtime capability.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Host applications can now provide stable read-only execution variables to all shipped embedded-code backends without changing regex syntax or the existing registration model.
+  - The wasm slice now covers position, full input text, numbered captures, named captures, and variables; richer non-boolean result semantics remain the next higher-value runtime expansion.
 ### 2026-03-28 - Expanded the wasm ABI with named-capture imports
 - Scope: wasm runtime ABI expansion in `rgx-core`, wasm regression coverage, and project-state documentation refreshes.
 - Changes:

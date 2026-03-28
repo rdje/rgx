@@ -47,8 +47,9 @@ Live continuity memory for `rgx` sessions.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
-- Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered/named captures through the execution context.
-- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, and named captures.
+- Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
+- Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered captures, named captures, and host-provided variables through the execution context.
+- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, and variables.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
@@ -71,11 +72,26 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
-- Expand the wasm ABI beyond the current position/text/numbered-capture/named-capture import slice, likely with variables or another higher-value context surface next.
+- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice, most likely with richer non-boolean result semantics next.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Shipped host-provided execution variables across the shared code-block runtime:
+  - added shared variable ownership in `ExecutionManager` plus public `Regex::set_variable(...)` threading through `Engine` and `RegexVM`
+  - chose per-evaluation variable snapshots in `ExecContext` so backtracking sees deterministic callout inputs instead of shared mutable match-time state
+  - exposed variables consistently across the shipped backends: read-only `vars` in Lua/JavaScript, `ctx.variable(...)` in native callbacks, and deterministic lexicographic wasm variable imports
+  - added regression coverage for successful variable reads across native/Lua/JavaScript/wasm, wasm missing-slot behavior, and registration attempts on regexes without an attached execution manager
+  - refreshed user-facing and repository-state docs so variables are now described truthfully as a shipped code-block capability
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 - Expanded the Rust-API wasm ABI for `(?{wasm:module:function})` with named-capture `rgx` host imports:
   - added deterministic named-capture enumeration and read helpers so wasm predicates can inspect named-group names and values in lexicographic name order
   - preserved the exported `() -> i32` predicate contract and reused the existing guest-memory failure model for the new read-style imports
