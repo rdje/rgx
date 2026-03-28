@@ -919,6 +919,269 @@ mod tests {
 
     #[cfg(feature = "wasm")]
     #[test]
+    fn safe_mode_wasm_code_block_can_read_current_position() {
+        let regex = Regex::with_mode("a(?{wasm:ctx:position_is_one})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM position pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "position" (func $position (result i32)))
+                        (func (export "position_is_one") (result i32)
+                            call $position
+                            i32.const 1
+                            i32.eq
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM position module");
+        assert!(regex.is_match("a"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_read_input_text() {
+        let regex = Regex::with_mode("cat(?{wasm:ctx:input_is_cat_dog})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM text-read pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "text_length" (func $text_length (result i32)))
+                        (import "rgx" "text_read" (func $text_read (param i32 i32 i32) (result i32)))
+                        (memory (export "memory") 1)
+                        (func (export "input_is_cat_dog") (result i32)
+                            (local $copied i32)
+                            call $text_length
+                            i32.const 7
+                            i32.ne
+                            if (result i32)
+                                i32.const 0
+                            else
+                                i32.const 0
+                                i32.const 0
+                                i32.const 7
+                                call $text_read
+                                local.tee $copied
+                                i32.const 7
+                                i32.ne
+                                if (result i32)
+                                    i32.const 0
+                                else
+                                    i32.const 0
+                                    i32.load8_u
+                                    i32.const 99
+                                    i32.eq
+                                    i32.const 1
+                                    i32.load8_u
+                                    i32.const 97
+                                    i32.eq
+                                    i32.and
+                                    i32.const 2
+                                    i32.load8_u
+                                    i32.const 116
+                                    i32.eq
+                                    i32.and
+                                    i32.const 3
+                                    i32.load8_u
+                                    i32.const 32
+                                    i32.eq
+                                    i32.and
+                                    i32.const 4
+                                    i32.load8_u
+                                    i32.const 100
+                                    i32.eq
+                                    i32.and
+                                    i32.const 5
+                                    i32.load8_u
+                                    i32.const 111
+                                    i32.eq
+                                    i32.and
+                                    i32.const 6
+                                    i32.load8_u
+                                    i32.const 103
+                                    i32.eq
+                                    i32.and
+                                end
+                            end
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM text-read module");
+        assert!(regex.is_match("cat dog"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_read_numbered_captures() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{wasm:ctx:capture_one_is_cat})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM capture-read pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "capture_count" (func $capture_count (result i32)))
+                        (import "rgx" "capture_length" (func $capture_length (param i32) (result i32)))
+                        (import "rgx" "capture_read" (func $capture_read (param i32 i32 i32 i32) (result i32)))
+                        (memory (export "memory") 1)
+                        (func (export "capture_one_is_cat") (result i32)
+                            (local $copied i32)
+                            call $capture_count
+                            i32.const 2
+                            i32.ne
+                            if (result i32)
+                                i32.const 0
+                            else
+                                i32.const 0
+                                call $capture_length
+                                i32.const 3
+                                i32.ne
+                                if (result i32)
+                                    i32.const 0
+                                else
+                                    i32.const 1
+                                    call $capture_length
+                                    i32.const 3
+                                    i32.ne
+                                    if (result i32)
+                                        i32.const 0
+                                    else
+                                        i32.const 1
+                                        i32.const 0
+                                        i32.const 0
+                                        i32.const 3
+                                        call $capture_read
+                                        local.tee $copied
+                                        i32.const 3
+                                        i32.ne
+                                        if (result i32)
+                                            i32.const 0
+                                        else
+                                            i32.const 0
+                                            i32.load8_u
+                                            i32.const 99
+                                            i32.eq
+                                            i32.const 1
+                                            i32.load8_u
+                                            i32.const 97
+                                            i32.eq
+                                            i32.and
+                                            i32.const 2
+                                            i32.load8_u
+                                            i32.const 116
+                                            i32.eq
+                                            i32.and
+                                        end
+                                    end
+                                end
+                            end
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM capture-read module");
+        assert!(regex.is_match("cat"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_when_context_reads_require_exported_memory() {
+        let regex = Regex::with_mode("(?{wasm:no_memory:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM missing-memory pattern");
+        regex
+            .register_wasm_module(
+                "no_memory",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "text_read" (func $text_read (param i32 i32 i32) (result i32)))
+                        (func (export "evaluate") (result i32)
+                            i32.const 0
+                            i32.const 0
+                            i32.const 1
+                            call $text_read
+                            drop
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM missing-memory module");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_invalid_guest_memory_writes() {
+        let regex = Regex::with_mode("(?{wasm:bad_write:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM invalid-write pattern");
+        regex
+            .register_wasm_module(
+                "bad_write",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "text_read" (func $text_read (param i32 i32 i32) (result i32)))
+                        (memory (export "memory") 1)
+                        (func (export "evaluate") (result i32)
+                            i32.const 70000
+                            i32.const 0
+                            i32.const 1
+                            call $text_read
+                            drop
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM invalid-write module");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_malformed_context_reads() {
+        let regex = Regex::with_mode("(?{wasm:bad_context:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM malformed-context pattern");
+        regex
+            .register_wasm_module(
+                "bad_context",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "capture_length" (func $capture_length (param i32) (result i32)))
+                        (func (export "evaluate") (result i32)
+                            i32.const -1
+                            call $capture_length
+                            drop
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM malformed-context module");
+        assert!(!regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
     fn safe_mode_wasm_code_block_fails_for_missing_module() {
         let regex = Regex::with_mode("(?{wasm:missing:evaluate})", ExecutionMode::Safe)
             .expect("Failed to compile WASM code block pattern");

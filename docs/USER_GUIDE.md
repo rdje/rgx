@@ -111,7 +111,7 @@ re.register_wasm_module("truthy", include_bytes!("truthy.wasm"))?;
 assert!(re.is_match(""));
 # Ok::<(), rgx_core::RgxError>(())
 ```
-
+For the current wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
 For the initial wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
 
 JavaScript example:
@@ -153,12 +153,23 @@ What the execution context exposes today:
 - `named.<group_name>` / `named[group_name]`: completed named captures
 - `pos`: current byte position in the input
 - `text`: full input text
-- These bindings are currently available to Lua/JavaScript/native callbacks; the initial wasm slice uses the smaller registered-module ABI above instead of exposing `ExecContext`.
+- These bindings are currently available to Lua/JavaScript/native callbacks.
+- Wasm currently exposes a smaller import-based context slice through the `rgx` namespace:
+  - `position() -> i32`
+  - `text_length() -> i32`
+  - `text_read(ptr, offset, len) -> i32`
+  - `capture_count() -> i32`
+  - `capture_length(index) -> i32` (`-1` when the capture slot is unavailable)
+  - `capture_read(index, ptr, offset, len) -> i32` (`-1` when the capture slot is unavailable)
+- `text_read` and `capture_read` require the wasm module to export linear memory as `memory`.
+- Capture slot `0` in the wasm ABI is still the current overall match prefix for the current match attempt.
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.
-- The initial wasm ABI is limited to `module:function` with an exported `() -> i32` predicate.
+- The current wasm ABI is still limited to `module:function` with an exported `() -> i32` predicate plus the read-only import helpers above.
+- Named captures, variables, and richer non-boolean result handling are not yet exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
+- Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
 - Numeric and replacement return values are rejected in match mode.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax

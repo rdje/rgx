@@ -19,7 +19,7 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
 - Explicit boundaries still in place:
   - `ExecutionMode::Pure` rejects all code blocks
   - the shipped native/wasm slices are currently Rust-API-only because the CLI does not expose registration
-  - the initial wasm ABI is still intentionally small (`module:function` -> exported `() -> i32`)
+  - the current wasm ABI keeps `module:function` -> exported `() -> i32` and adds `rgx` host imports for current position, full input text, and numbered captures; named captures are still deferred
   - backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated
 - `pgen-parser` is still a parser-contract validation path backed by fallback behavior, not a truly separate parser backend.
 ## Useful commands

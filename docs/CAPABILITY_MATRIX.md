@@ -34,14 +34,22 @@ Current behavior contract for the shipped slice:
   - `lua` requires the `lua` feature
   - `js` / `javascript` requires the `javascript` feature
   - `wasm` requires the `wasm` feature plus a registered module on the compiled `Regex`
-  - initial wasm ABI is `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
-  - malformed wasm call specs, unknown module names, and missing/invalid exports fail the current match path at runtime
+  - current wasm ABI keeps `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
+  - wasm modules may optionally import read-only context helpers from the `rgx` namespace:
+    - `position() -> i32`
+    - `text_length() -> i32`
+    - `text_read(ptr, offset, len) -> i32`
+    - `capture_count() -> i32`
+    - `capture_length(index) -> i32` (`-1` when the capture slot is unavailable)
+    - `capture_read(index, ptr, offset, len) -> i32` (`-1` when the capture slot is unavailable)
+  - `text_read` and `capture_read` require the module to export linear memory as `memory`
+  - malformed wasm call specs, malformed context reads, unknown module names, and missing/invalid exports or guest-memory interactions fail the current match path at runtime
 - `ExecutionMode::Full` accepts the same sandboxed backends plus `native` code blocks on the Rust API path:
   - `native` requires registering a callback on the compiled `Regex`
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), numbered captures, and named captures are exposed to the Lua/JavaScript/native execution layer via `ExecContext`.
-- The initial wasm slice currently uses the smaller registered-module ABI above rather than exposing `ExecContext` to wasm modules.
+- Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
 - Numeric and replacement return values are rejected in match mode for now.
 Representative test anchors:

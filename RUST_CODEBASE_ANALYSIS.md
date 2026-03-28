@@ -12,7 +12,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm` => pass (129 tests)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm` => pass (135 tests)
   - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
 - Current large-file concentration is still dominated by `rgx-core`:
@@ -20,7 +20,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `rgx-core/src/lexer.rs`: 1800+ lines
   - `rgx-core/src/parser.rs`: 1100+ lines
   - `rgx-core/src/lib.rs`: 1000+ lines
-  - `rgx-core/src/execution.rs`: 1200+ lines
+  - `rgx-core/src/execution.rs`: 1400+ lines
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, but it is no longer limited to pure regex only.
@@ -31,11 +31,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - engine now attaches a shared `ExecutionManager` when compiled programs actually contain code blocks
   - current match text, numbered captures, and named captures are materialized into the execution context
   - native callbacks can now be registered on compiled regex objects through the public Rust API and dispatched through the shared runtime
-  - wasm modules can now be registered on compiled regex objects through the public Rust API and dispatched through a wasmtime-backed runtime
+  - wasm modules can now be registered on compiled regex objects through the public Rust API and dispatched through a wasmtime-backed runtime with read-only `rgx` host imports for position, full input text, and numbered captures
 - The biggest remaining gaps are now narrower and clearer:
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` code blocks are shipped only on the Rust API path in `ExecutionMode::Full`; the CLI still has no native-registration surface
-  - `wasm` code blocks are shipped only on the Rust API path in `ExecutionMode::{Safe, Full}` with an intentionally minimal registered-module ABI; the CLI still has no wasm-registration surface
+  - `wasm` code blocks are shipped only on the Rust API path in `ExecutionMode::{Safe, Full}` with a smaller import-based ABI than Lua/JavaScript/native; the CLI still has no wasm-registration surface
   - numeric/replacement return kinds are explicitly rejected in match mode
   - `pgen-parser` is still a contract-validation path, not a true alternative parser backend
   - benchmark/process maturity still lags correctness maturity
@@ -60,12 +60,13 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `ExecResult::Success` continues matching
   - `Failure` and `Error` fail the current path
   - `Numeric` and `Replacement` are rejected in match mode for now
-  - the initial wasm ABI is `module:function` with an exported `() -> i32` predicate, rather than full `ExecContext` exposure
+  - the current wasm ABI keeps `module:function` with an exported `() -> i32` predicate and adds `rgx` imports for `position`, `text_length` / `text_read`, and `capture_count` / `capture_length` / `capture_read`
+  - wasm capture slot `0` is still the current overall match prefix, and `text_read` / `capture_read` require exported linear memory named `memory`
 ## Explicit boundaries that remain in place
 - `ExecutionMode::Pure` rejects code blocks with an explicit compile error.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
-- The initial wasm ABI is intentionally small and does not yet expose `ExecContext` to wasm modules.
+- The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still does not expose named captures or variables to wasm modules.
 - Backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
 - Registering a native callback on a regex that has no attached execution manager still returns an explicit engine error.
 - Registering a wasm module on a regex that has no attached execution manager still returns an explicit engine error.
@@ -75,7 +76,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening materially improved because `ExecutionMode::{Safe, Full}` now unlock a real shipped slice instead of pure scaffolding.
 - Embedded code execution moved from “parsed-only” to a truthful, validated shipped slice for Lua/JavaScript predicates plus Rust-API native/wasm registration.
 ### Next
-- Expand the initial wasm ABI beyond the current registered `module:function` / `() -> i32` predicate contract.
+- Expand the wasm ABI beyond the current position/text/numbered-capture import slice.
 - Design richer result semantics beyond boolean predicate checkpoints.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Replace the fallback-backed `pgen-parser` contract path with a real parser backend.
@@ -88,10 +89,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Lua execution is now sandboxed per invocation rather than reusing one mutable runtime, which makes speculative execution under backtracking/probing safer.
 - JavaScript execution is still per-invocation via QuickJS and is now wrapped so documented `return ...` style code works inside `(?{js:...})` blocks.
 - Native callback storage now uses shared interior mutability, so the `Arc<ExecutionManager>` attached to the VM can receive post-compilation registrations without swapping runtime instances.
-- Wasm module storage now follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime for predicate evaluation.
+- Wasm module storage now follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime.
+- Wasm execution now uses a linker plus per-call store data so host imports can expose read-only regex context and copy bytes into guest memory while trapping explicit malformed guest interactions.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs` remain scaffold-level despite the real execution logic living in `execution.rs`.
 ## High-confidence next actions
-1. Expand the wasm ABI beyond the current zero-argument `i32` predicate surface.
+1. Expand the wasm ABI beyond the current position/text/numbered-capture import slice, most likely with named-capture support next.
 2. Decide whether predicate code blocks should remain strictly boolean or grow a first-class replacement/evaluation API.
 3. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 4. Replace the fallback `pgen-parser` feature path with a real parser implementation.

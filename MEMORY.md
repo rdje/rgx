@@ -48,7 +48,7 @@ Live continuity memory for `rgx` sessions.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered/named captures through the execution context.
-- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the initial wasm ABI is intentionally limited to registered `module:function` predicates returning `i32`.
+- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, and numbered captures.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
@@ -70,10 +70,26 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
-- Expand the wasm ABI beyond the current zero-argument `i32` predicate contract.
+- Expand the wasm ABI beyond the current position/text/numbered-capture import slice, likely with named-capture support next.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
+### 2026-03-27
+- Expanded the Rust-API wasm ABI for `(?{wasm:module:function})` with `rgx` host imports:
+  - reworked the wasmtime path around a linker plus per-call store data so wasm predicates can read current position, full input text, and numbered captures while keeping exported `() -> i32` entrypoints stable
+  - added safe guest-memory handling with explicit runtime failure for missing exported memory, invalid guest-memory writes, and malformed context reads
+  - added regression coverage for position, full-input reads, numbered-capture reads, and the new failure paths
+  - refreshed user-facing and repository-state docs so wasm is described as an import-based context slice rather than a zero-context predicate-only backend
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 ### 2026-03-27
 - Shipped Rust-API wasm module registration for `(?{wasm:module:function})` in `ExecutionMode::Safe` / `ExecutionMode::Full`:
   - added a shared wasm module registry and wasmtime-backed runtime path inside `ExecutionManager`

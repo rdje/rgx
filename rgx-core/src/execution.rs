@@ -491,9 +491,21 @@ pub mod javascript {
 #[cfg(feature = "wasm")]
 pub mod wasm {
     use super::*;
-    use wasmtime::{Config, Engine, Instance, Module, Store};
+    use anyhow::anyhow;
+    use wasmtime::{Caller, Config, Engine, Extern, Linker, Memory, Module, Store};
 
     type WasmModuleHandle = Arc<Module>;
+
+    #[derive(Clone)]
+    struct WasmStoreData {
+        context: ExecContext,
+    }
+
+    impl WasmStoreData {
+        fn new(context: ExecContext) -> Self {
+            Self { context }
+        }
+    }
 
     /// Registry for named wasm modules that can be referenced from regex patterns.
     pub struct WasmModuleRegistry {
@@ -568,13 +580,15 @@ pub mod wasm {
 
     /// WebAssembly execution engine using wasmtime.
     ///
-    /// Initial ABI contract:
+    /// Current ABI contract:
     /// - patterns refer to `(?{wasm:module:function})`
     /// - `module` is a Rust-registered module name
     /// - `function` is an exported zero-argument function
     /// - function result must be `i32` where `0` means failure and non-zero means success
+    /// - modules may optionally import read-only execution-context helpers from the `rgx` namespace
     pub struct WasmEngine {
         engine: Engine,
+        linker: Linker<WasmStoreData>,
         modules: WasmModuleRegistry,
     }
 
@@ -585,8 +599,10 @@ pub mod wasm {
             let config = Config::new();
             let engine = Engine::new(&config)
                 .map_err(|e| RgxError::Engine(format!("Failed to create WASM runtime: {e}")))?;
+            let linker = Self::build_linker(&engine)?;
             let wasm_engine = Self {
                 engine,
+                linker,
                 modules: WasmModuleRegistry::new(),
             };
             trace_exit!(
@@ -595,6 +611,160 @@ pub mod wasm {
                 "ok=true,registered_modules=0"
             );
             Ok(wasm_engine)
+        }
+
+        fn build_linker(engine: &Engine) -> Result<Linker<WasmStoreData>> {
+            trace_enter!("execution", "WasmEngine::build_linker");
+            let mut linker = Linker::new(engine);
+            linker
+                .func_wrap("rgx", "position", Self::current_position_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.position: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "text_length", Self::text_length_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.text_length: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "text_read", Self::text_read_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.text_read: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "capture_count", Self::capture_count_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.capture_count: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "capture_length", Self::capture_length_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.capture_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "capture_read", Self::capture_read_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.capture_read: {e}"
+                    ))
+                })?;
+            trace_exit!("execution", "WasmEngine::build_linker", "ok=true");
+            Ok(linker)
+        }
+
+        fn usize_to_i32(value: usize, label: &str) -> wasmtime::Result<i32> {
+            i32::try_from(value).map_err(|_| anyhow!("{label} exceeds the wasm i32 ABI limit"))
+        }
+
+        fn nonnegative_i32_to_usize(value: i32, label: &str) -> wasmtime::Result<usize> {
+            usize::try_from(value).map_err(|_| anyhow!("{label} must be a non-negative i32 value"))
+        }
+
+        fn guest_memory(caller: &mut Caller<'_, WasmStoreData>) -> wasmtime::Result<Memory> {
+            match caller.get_export("memory") {
+                Some(Extern::Memory(memory)) => Ok(memory),
+                Some(_) => Err(anyhow!(
+                    "WASM module must export linear memory as `memory` to use rgx host imports"
+                )),
+                None => Err(anyhow!(
+                    "WASM module must export linear memory as `memory` to use rgx host imports"
+                )),
+            }
+        }
+
+        fn write_guest_bytes(
+            caller: &mut Caller<'_, WasmStoreData>,
+            guest_ptr: i32,
+            bytes: &[u8],
+        ) -> wasmtime::Result<()> {
+            let memory = Self::guest_memory(caller)?;
+            let guest_ptr = Self::nonnegative_i32_to_usize(guest_ptr, "guest pointer")?;
+            memory
+                .write(caller, guest_ptr, bytes)
+                .map_err(|e| anyhow!("Failed to write into guest memory: {e}"))
+        }
+
+        fn current_position_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.position, "current position")
+        }
+
+        fn text_length_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.text.len(), "input text length")
+        }
+
+        fn text_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let offset = Self::nonnegative_i32_to_usize(offset, "text offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "text read length")?;
+            let bytes = {
+                let text = caller.data().context.text.as_bytes();
+                if offset >= text.len() {
+                    Vec::new()
+                } else {
+                    let end = offset.saturating_add(len).min(text.len());
+                    text[offset..end].to_vec()
+                }
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied text length")
+        }
+
+        fn capture_count_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.captures.len(), "capture count")
+        }
+
+        fn capture_length_import(
+            caller: Caller<'_, WasmStoreData>,
+            index: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "capture index")?;
+            match caller
+                .data()
+                .context
+                .captures
+                .get(index)
+                .and_then(Option::as_deref)
+            {
+                Some(capture) => Self::usize_to_i32(capture.len(), "capture length"),
+                None => Ok(-1),
+            }
+        }
+
+        fn capture_read_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            index: i32,
+            guest_ptr: i32,
+            offset: i32,
+            len: i32,
+        ) -> wasmtime::Result<i32> {
+            let index = Self::nonnegative_i32_to_usize(index, "capture index")?;
+            let offset = Self::nonnegative_i32_to_usize(offset, "capture offset")?;
+            let len = Self::nonnegative_i32_to_usize(len, "capture read length")?;
+            let Some(capture) = caller
+                .data()
+                .context
+                .captures
+                .get(index)
+                .and_then(Option::as_deref)
+            else {
+                return Ok(-1);
+            };
+            let bytes = if offset >= capture.len() {
+                Vec::new()
+            } else {
+                let end = offset.saturating_add(len).min(capture.len());
+                capture.as_bytes()[offset..end].to_vec()
+            };
+            Self::write_guest_bytes(&mut caller, guest_ptr, &bytes)?;
+            Self::usize_to_i32(bytes.len(), "copied capture length")
         }
 
         /// Register a named wasm module from binary bytes.
@@ -668,7 +838,12 @@ pub mod wasm {
             Ok((module_name, function_name))
         }
 
-        fn execute_predicate(&self, module_name: &str, function_name: &str) -> ExecResult {
+        fn execute_predicate(
+            &self,
+            module_name: &str,
+            function_name: &str,
+            context: &ExecContext,
+        ) -> ExecResult {
             trace_enter!(
                 "execution",
                 "WasmEngine::execute_predicate",
@@ -686,8 +861,8 @@ pub mod wasm {
                 );
                 return result;
             };
-            let mut store = Store::new(&self.engine, ());
-            let instance = match Instance::new(&mut store, module.as_ref(), &[]) {
+            let mut store = Store::new(&self.engine, WasmStoreData::new(context.clone()));
+            let instance = match self.linker.instantiate(&mut store, module.as_ref()) {
                 Ok(instance) => instance,
                 Err(err) => {
                     let result = ExecResult::Error(format!(
@@ -740,7 +915,7 @@ pub mod wasm {
     }
 
     impl ExecutionEngine for WasmEngine {
-        fn execute(&self, code: &str, _context: &ExecContext) -> ExecResult {
+        fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             trace_enter!(
                 "execution",
                 "WasmEngine::execute",
@@ -750,7 +925,7 @@ pub mod wasm {
             );
             let result = match self.parse_call_spec(code) {
                 Ok((module_name, function_name)) => {
-                    self.execute_predicate(module_name, function_name)
+                    self.execute_predicate(module_name, function_name, context)
                 }
                 Err(error) => ExecResult::Error(error),
             };

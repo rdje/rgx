@@ -14,6 +14,41 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-27 - Expanded the wasm ABI with read-only `rgx` host imports
+- Scope: wasm runtime ABI expansion in `rgx-core`, wasm regression coverage, and project-state documentation refreshes.
+- Changes:
+  - Root cause: the shipped wasm slice could compile and dispatch `(?{wasm:module:function})`, but `WasmEngine::execute()` still discarded the regex execution context. That left wasm predicates limited to self-contained `() -> i32` exports instead of real match-aware logic, even though the VM was already materializing context for every code block.
+  - Reworked the wasmtime path in `rgx-core/src/execution.rs` around a linker plus per-call store data so registered wasm modules can import a read-only `rgx` host namespace while preserving the existing `module:function` / exported `() -> i32` predicate surface.
+  - Added the first context-aware wasm import slice:
+    - `position() -> i32`
+    - `text_length() -> i32`
+    - `text_read(ptr, offset, len) -> i32`
+    - `capture_count() -> i32`
+    - `capture_length(index) -> i32`
+    - `capture_read(index, ptr, offset, len) -> i32`
+  - Kept capture slot `0` aligned with the current overall match prefix and required exported linear memory `memory` only for the read-style imports that copy bytes into guest memory.
+  - Hardened the wasm runtime so malformed context reads, missing exported memory, and invalid guest-memory writes now fail explicitly at runtime rather than panicking or silently succeeding.
+  - Added real wasm regressions for:
+    - current-position access
+    - full-input reads
+    - numbered-capture reads
+    - missing exported memory
+    - invalid guest-memory writes
+    - malformed context reads
+  - Refreshed `README.md`, `docs/CAPABILITY_MATRIX.md`, `docs/USER_GUIDE.md`, `ROADMAP.md`, `WARP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the repository now describes wasm as an import-based context-aware slice rather than a zero-context predicate-only backend.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Wasm predicates can now make real match-aware decisions without changing the public regex syntax or the Rust-API registration model.
+  - The wasm slice is still intentionally narrower than the Lua/JavaScript/native `ExecContext` surface: named captures, variables, and richer non-boolean result semantics remain future work.
 ### 2026-03-27 - Shipped Rust-API wasm module registration in `ExecutionMode::Safe` / `ExecutionMode::Full`
 - Scope: wasm runtime ownership in `rgx-core`, public API exposure, compiler gating changes, regression coverage, and live project-state docs.
 - Changes:
