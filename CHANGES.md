@@ -14,17 +14,31 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Added a contract-scoped PGEN regex integration complaint
+- Scope: downstream PGEN integration review and RGX markdown cleanup.
+- Changes:
+  - Added a git-tracked RGX complaint document that records only the missing or unusable details found in `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the contract files it points to.
+  - Tightened RGX-side PGEN integration guidance so it points only to published upstream contract files such as `rust/docs/EMBEDDING_API_CONTRACT.md`, `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`, and `PGEN_RELEASED_PARSER_BUG_LEDGER.md`.
+  - Removed earlier markdown references to local RGX PGEN-tracking files from the PGEN-integration guidance surface.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - RGX now carries a precise git-tracked complaint PGEN can review without mixing in unpublished local integration assumptions.
+  - RGX-side PGEN guidance now stays anchored to the published contract surface instead of local workflow file references.
 ### 2026-03-28 - Added a git-tracked local PGEN parser issue workflow
 - Scope: parser-integration workflow, local issue recording infrastructure, and repository/parser-contract documentation refreshes.
 - Changes:
-  - Added `pgen-issues/TEMPLATE.yaml` as the canonical structured schema for one local RGX-side record per suspected PGEN parser bug.
-  - Added `scripts/new-pgen-issue.sh` to create the next numbered `PGEN-RGX-####.yaml` issue stub with timestamps, current `rgx` commit, required context fields, and upstream-reference placeholders.
-  - Added `docs/PGEN_ISSUE_TRACKING.md` to define the local ID scheme, required fields, status vocabulary, and update/closure workflow for PGEN-related issues observed from RGX.
-  - Updated `docs/PARSER_CONTRACT.md` so local PGEN issue recording and upstream handoff are part of the parser-boundary contract during real-backend rollout.
-  - Refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `WARP.md` so the new local PGEN issue workflow is discoverable in repo navigation and future-session guidance.
+  - Added a canonical structured schema for one local RGX-side record per suspected PGEN parser bug.
+  - Added a stub generator for the next numbered `PGEN-RGX-####.yaml` issue record with timestamps, current `rgx` commit, required context fields, and upstream-reference placeholders.
+  - Documented the local ID scheme, required fields, status vocabulary, and update/closure workflow for PGEN-related issues observed from RGX.
+  - Updated the parser contract so PGEN issue recording and upstream handoff are part of the parser-boundary story during real-backend rollout.
+  - Refreshed repository guidance so the local PGEN issue workflow is discoverable in project-state docs.
 - Validation:
-  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh`
-  - `/Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
+  - `bash -n <local PGEN issue stub generator>`
+  - `<local PGEN issue stub generator> --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`

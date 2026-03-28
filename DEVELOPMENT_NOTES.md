@@ -48,11 +48,11 @@ Pipeline in `rgx-core`:
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
-- Formal parser interoperability contract at `docs/PARSER_CONTRACT.md`
-- Git-tracked local PGEN parser issue workflow now exists through `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, and `scripts/new-pgen-issue.sh`
+- A formal parser interoperability contract is maintained in the repo
+- PGEN parser issue handoff is now constrained to the published upstream reporting protocol
 - Live shipped-vs-scaffolded matrix at `docs/CAPABILITY_MATRIX.md`
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
-- Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
+- Parser conformance harness scaffolding is in place
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
 - Differential known-gap parity checks currently cover backreference, recursion, conditional syntax families, and Unicode property classes
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
@@ -119,15 +119,14 @@ Pipeline in `rgx-core`:
 - VM test suite coverage for core behavior
 
 ## Parser interoperability contract (RGX <-> PGEN)
-- Contract source of truth: `docs/PARSER_CONTRACT.md`
-- Integration seam: `rgx-core/src/parsing.rs` (`RegexParser` trait + compile-time parser selection functions)
+- Current downstream review is constrained to the published PGEN regex contract surface.
 - Current conformance baseline:
   - fixture parity checks between active parser and recursive-descent reference output
   - parser AST metadata invariants required by downstream compiler/runtime
   - parse-fail error mapping consistency (`RgxError::Compile`)
   - explicit parse-success/compile-fail guardrails for unintegrated runtime features
-- Any suspected PGEN parser bug observed from RGX should receive a local `PGEN-RGX-####` record in `pgen-issues/` before or alongside upstream reporting.
-- Any backend swap that changes parser behavior must update the contract version, conformance tests, and changelog entries together.
+- Suspected PGEN parser misbehavior should be reported with the structured bundle described by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
+- Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
 - Parser support for advanced regex syntax remains incomplete beyond the currently covered conditional condition forms and lookaround syntax
@@ -145,7 +144,7 @@ Pipeline in `rgx-core`:
 2. Expand differential and integration tests to improve semantic parity and accuracy confidence
 3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
-5. Exercise the eventual real PGEN backend with the local `pgen-issues/` workflow so parser bugs can be tracked and handed upstream cleanly
+5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
 6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
 8. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm result work and any future non-Rust configuration surface
@@ -159,7 +158,7 @@ Pipeline in `rgx-core`:
 - `MEMORY.md` is the live cross-session continuity memory and must be updated after completed tasks before commit workflow
 - `ROADMAP.md` is the live forward-looking planning tracker
 - `docs/USER_GUIDE.md` is the live end-user guide with layered depth
-- `docs/PARSER_CONTRACT.md` is the parser interoperability source of truth
+- The parser interoperability contract is the parser-boundary source of truth
 - `docs/CAPABILITY_MATRIX.md` is the shipped-vs-scaffolded capability source of truth
 - `docs/PCRE2_COMPATIBILITY_MATRIX.md` is the rgx-vs-PCRE2 parity source of truth
 - This file is for technical understanding and implementation notes

@@ -88,7 +88,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `Compiler::feature_validation_message()` is a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families, including a dead `UnicodeClass -> Any` fallback and a default `_ => Fail` path.
 - The declared opcode surface in `rgx-core/src/vm.rs` still exceeds the emitted/decoded/runtime-used surface; several opcode families remain aspirational or only partially wired.
 - The `pgen-parser` feature path is still a recursive-descent fallback. `PatternAnalysis` and `ParserConfig` remain unused scaffolding, and `parsing::parser_capabilities()` under the feature flag still advertises `error_recovery` / `syntax_highlighting` differently from the actual fallback-backed `PgenParser::capabilities()` implementation.
-- Local git-tracked PGEN parser issue recording is now prepared through `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, and `scripts/new-pgen-issue.sh`, so real-backend rollout can preserve RGX-side bug context and upstream links consistently.
+- Current PGEN integration review is constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - The default local CI path in `scripts/run-local-ci.sh` validates `fmt`, default-feature workspace tests, and `clippy`, but it does not continuously cover `pgen-parser`, `lua`, `javascript`, `wasm`, or `all-languages`. Those checks are still a manual matrix.
 - Benchmark infrastructure exists in `rgx-bench`, but benchmark trend capture is still ad hoc and separate from automated validation.
 ## Roadmap alignment

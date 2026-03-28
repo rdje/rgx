@@ -45,7 +45,7 @@ Live continuity memory for `rgx` sessions.
 
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
-- Git-tracked local PGEN parser issue recording now exists through `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, `docs/PGEN_ISSUE_TRACKING.md`, and `scripts/new-pgen-issue.sh`.
+- PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
@@ -78,19 +78,23 @@ Live continuity memory for `rgx` sessions.
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling next.
-- When the real PGEN backend lands, use the local `pgen-issues/` workflow to capture every suspected parser bug before or alongside upstream reporting.
+- When the real PGEN backend lands, capture every suspected parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Added a git-tracked PGEN regex integration complaint and scrubbed the PGEN-specific markdown guidance surface:
+  - the complaint is intentionally limited to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md`, `rust/docs/EMBEDDING_API_CONTRACT.md`, `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`, and `LIVE_ACHIEVEMENT_STATUS.md`
+  - the recorded complaints are contract-quality complaints, not claims that the advertised parser surface is fake
+  - RGX-side markdown guidance for PGEN integration now points only to published upstream contract files instead of local PGEN-tracking file references
 - Added a git-tracked local PGEN parser issue workflow for future real-backend rollout:
-  - added `pgen-issues/TEMPLATE.yaml` as the canonical local issue schema
-  - added `scripts/new-pgen-issue.sh` to create the next numbered `PGEN-RGX-####.yaml` issue stub with timestamps, `rgx` commit, and required context fields
-  - added `docs/PGEN_ISSUE_TRACKING.md` and updated `docs/PARSER_CONTRACT.md` so the local ID scheme, required fields, and upstream handoff rules are explicit
-  - refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `WARP.md` so future sessions can discover and use the workflow
+  - added a canonical local issue schema
+  - added a stub generator to create the next numbered `PGEN-RGX-####.yaml` issue record with timestamps, `rgx` commit, and required context fields
+  - updated parser-boundary documentation so the local ID scheme, required fields, and upstream handoff rules are explicit
+  - refreshed project-state docs so future sessions can discover and use the workflow
 - Validation confirmed:
-  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh`
-  - `/Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
+  - `bash -n <local PGEN issue stub generator>`
+  - `<local PGEN issue stub generator> --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`

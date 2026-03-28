@@ -46,10 +46,10 @@ Live forward-looking tracker for rgx.
 - Status: `in-progress`
 - Goal: define and enforce a stable parser boundary so PGEN integration is seamless.
 - Scope:
-  - maintain a versioned contract in `docs/PARSER_CONTRACT.md`
-  - keep fixture-based parser conformance tests in `rgx-core/src/parsing.rs`
+  - maintain a versioned parser interoperability contract
+  - keep fixture-based parser conformance tests around the active parser boundary
   - enforce parse-success/compile-unsupported boundary checks for unintegrated runtime features
-  - keep git-tracked local PGEN issue records and upstream-report references in `pgen-issues/` during real-backend rollout
+  - keep downstream integration guidance aligned to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`
 
 ### Capability matrix hardening
 - Status: `in-progress`
@@ -92,7 +92,6 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
-- Added a git-tracked local PGEN parser issue workflow with `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, and `scripts/new-pgen-issue.sh`.
 - Added first dedicated numeric-result Rust APIs for code-block results by shipping `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` on top of winning-path `Numeric(f64)` payloads.
 - Added the first replacement-oriented Rust APIs for code-block results by shipping `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` on top of winning-path `Replacement(String)` payloads.
 - Added the first richer non-boolean code-block result slice for Lua/JavaScript/native by surfacing winning-path numeric/replacement values through `MatchResult.code_result` while keeping wasm predicate-only.

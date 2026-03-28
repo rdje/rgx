@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (current recur
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.4`
+- Version: `v0.1.5`
 - Last updated: `2026-03-28`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -13,7 +13,7 @@ Canonical interoperability contract between `rgx` parser backends (current recur
 - Keep parser backend swaps testable and low-risk.
 
 ## Public contract surface
-All parser backends must satisfy the behavior of these `rgx-core/src/parsing.rs` surfaces:
+All parser backends must satisfy the behavior of these parser-boundary surfaces:
 - `RegexParser::parse_pattern(&mut self, pattern: &str) -> Result<Regex>`
 - `RegexParser::parser_name(&self) -> &'static str`
 - `RegexParser::capabilities(&self) -> ParserCapabilities`
@@ -24,7 +24,7 @@ All parser backends must satisfy the behavior of these `rgx-core/src/parsing.rs`
 `Result<Regex>` here is `std::result::Result<Regex, RgxError>`.
 
 ## AST output contract
-Parser output is the canonical `Regex` AST in `rgx-core/src/ast.rs`. Backends may differ internally, but output must be contract-equivalent.
+Parser output is the canonical `Regex` AST. Backends may differ internally, but output must be contract-equivalent.
 
 Required invariants:
 - Equivalent input pattern semantics must produce equivalent AST semantics.
@@ -76,34 +76,17 @@ Important clarifications:
 - Capability flags do not imply runtime execution support in the VM/compiler path.
 
 ## Conformance harness
-The initial conformance harness lives in `rgx-core/src/parsing.rs` tests and checks:
+The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for unintegrated runtime features.
 
 When `pgen-parser` is enabled, the harness also checks the PGEN backend type against the same reference fixtures.
+## PGEN issue reporting and upstream handoff
+When RGX exercises a real PGEN-backed parser path, suspected parser misbehavior should be reported using the structured bundle described in `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 
-## PGEN issue recording and upstream handoff
-When RGX exercises a real PGEN-backed parser path, any suspected PGEN parser bug or misbehavior must be recorded locally before or alongside upstream reporting.
-
-Local recording contract:
-- One local issue file per suspected bug under `pgen-issues/`.
-- Local file name and local issue ID must match the form `PGEN-RGX-0001.yaml`.
-- IDs are never reused.
-- Each record must capture:
-  - summary and status
-  - `opened_at`, `first_seen_at`, and `last_updated_at`
-  - parser backend/version information
-  - current `rgx` commit
-  - precise RGX-side manifestation context
-  - minimal reproduction
-  - expected vs actual behavior
-  - impact on RGX integration or downstream behavior
-  - upstream issue reference once reported
-  - closing verification evidence when resolved
-- `scripts/new-pgen-issue.sh` is the canonical stub generator.
-- `pgen-issues/TEMPLATE.yaml` is the canonical schema/template.
+For parser-side release state, root cause, and fix proof, the canonical upstream ledger is `PGEN_RELEASED_PARSER_BUG_LEDGER.md`.
 
 ## Backend change policy
 Any parser backend change (including PGEN rollout) must do one of:
@@ -111,7 +94,7 @@ Any parser backend change (including PGEN rollout) must do one of:
 - Introduce a contract version bump and update:
   - this document,
   - conformance tests,
-  - `CHANGES.md`,
+  - the changelog,
   - and relevant roadmap/notes references.
 
 ## Suggested validation commands
