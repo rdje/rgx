@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Added replacement-oriented Rust APIs for code-block replacement payloads
+- Scope: public replacement-oriented API surface in `rgx-core`, regression coverage, and repository/user documentation refreshes.
+- Changes:
+  - Root cause: the first richer-result slice already surfaced winning-path `Replacement(String)` and `Numeric(f64)` values through `MatchResult.code_result`, but there was still no public API that could turn a winning-path replacement payload into rebuilt output text.
+  - Added `Regex::replace_first_with_code(&self, text: &str) -> String` and `Regex::replace_all_with_code(&self, text: &str) -> String` in `rgx-core/src/lib.rs`.
+  - Added an internal helper that rebuilds output text from match spans and only consumes `CodeBlockValue::Replacement(String)`; matches with no code result or only a numeric result keep their original matched text unchanged.
+  - Added regressions for first-match replacement, all-match replacement, numeric-result passthrough, and winning-path replacement selection under backtracking using native callbacks on the default Rust API path.
+  - Refreshed `README.md`, `WARP.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped replacement-oriented API layer and remaining wasm/numeric boundaries are described truthfully.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Host applications now have a first explicit code-driven replacement API on the Rust path without overloading future conventional replacement APIs.
+  - Numeric code-block results remain match metadata only, and wasm remains predicate-only on the result side for now.
 ### 2026-03-28 - Added a session-bootstrap entry point for new AI sessions
 - Scope: onboarding/documentation flow in the repository root.
 - Changes:

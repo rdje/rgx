@@ -3,7 +3,7 @@ Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
 ## Living-document policy
-- Last updated: 2026-03-27
+- Last updated: 2026-03-28
 - This is a live document and should be updated as user-visible behavior changes.
 - Keep examples and feature-status notes aligned with current shipped behavior.
 - For recent changes and validation details, cross-check `CHANGES.md` and `RUST_CODEBASE_ANALYSIS.md`.
@@ -58,6 +58,29 @@ if let Some(m) = re.find_first("abc123def") {
 - `find_all` returns non-overlapping matches.
 - For top-level alternation patterns, `matched_branch_number` is 1-based.
 - When Lua/JavaScript/native code blocks return non-boolean values on the winning path, `find_first` / `find_all` expose them through `code_result`.
+### Code-driven replacement
+When a winning match path emits `CodeBlockValue::Replacement`, the Rust API can rebuild output text directly:
+
+```rust
+use rgx_core::{ExecResult, ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<word>cat)(?{native:emit_upper})"#,
+    ExecutionMode::Full,
+)?;
+re.register_native("emit_upper", |ctx| {
+    ExecResult::Replacement(ctx.named("word").unwrap_or_default().to_uppercase())
+})?;
+
+assert_eq!(re.replace_first_with_code("cat dog cat"), "CAT dog cat");
+assert_eq!(re.replace_all_with_code("cat dog cat"), "CAT dog CAT");
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Current behavior:
+- `replace_first_with_code` replaces only the first match.
+- `replace_all_with_code` replaces every non-overlapping match.
+- Matches without a winning-path `Replacement(String)` payload are copied through unchanged.
 ## Level 2 - Advanced usage
 ### AST-first workflows
 When parser syntax is not yet complete for a feature family, you can still compile from AST directly.
@@ -193,7 +216,7 @@ Current limits for this slice:
 - Host-provided variables are read-only snapshots for each code-block evaluation, and richer non-boolean result handling is still not exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
-- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`; wasm still remains predicate-only.
+- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`; wasm still remains predicate-only.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:
@@ -221,6 +244,7 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - They can fail the current path and allow normal regex backtracking to continue.
 - Boolean-style success/failure still drives path control.
 - Lua/JavaScript/native `return 123` or `return "..."` also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
+- `replace_first_with_code` / `replace_all_with_code` consume only winning-path `Replacement(String)` values; numeric-only matches continue to round-trip unchanged in replacement mode.
 - Wasm currently remains predicate-only because its shipped ABI is still `module:function` with an exported `() -> i32`.
 ### Branch reporting semantics
 - Branch reporting is intentionally scoped to top-level alternations.

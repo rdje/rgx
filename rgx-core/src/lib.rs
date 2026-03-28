@@ -271,6 +271,54 @@ impl Regex {
         first
     }
 
+    /// Replace the first match using a winning-path `CodeBlockValue::Replacement`.
+    ///
+    /// Matches that do not surface a replacement payload are copied through
+    /// unchanged, which keeps this API safe to use with mixed predicate and
+    /// replacement-style code-block patterns.
+    pub fn replace_first_with_code(&self, text: &str) -> String {
+        trace_enter!(
+            "api",
+            "Regex::replace_first_with_code",
+            "text_len={}",
+            text.len()
+        );
+        let replaced = if let Some(first) = self.find_first(text) {
+            self.apply_code_replacements(text, std::iter::once(first))
+        } else {
+            text.to_string()
+        };
+        trace_exit!(
+            "api",
+            "Regex::replace_first_with_code",
+            "ok=true,output_len={}",
+            replaced.len()
+        );
+        replaced
+    }
+
+    /// Replace all matches using winning-path `CodeBlockValue::Replacement` values.
+    ///
+    /// Matches that do not surface a replacement payload are copied through
+    /// unchanged, which keeps this API safe to use with mixed predicate and
+    /// replacement-style code-block patterns.
+    pub fn replace_all_with_code(&self, text: &str) -> String {
+        trace_enter!(
+            "api",
+            "Regex::replace_all_with_code",
+            "text_len={}",
+            text.len()
+        );
+        let replaced = self.apply_code_replacements(text, self.find_all(text));
+        trace_exit!(
+            "api",
+            "Regex::replace_all_with_code",
+            "ok=true,output_len={}",
+            replaced.len()
+        );
+        replaced
+    }
+
     /// Test if the pattern matches the text (boolean result only).
     ///
     /// This is the fastest possible operation as it can terminate as soon
@@ -339,6 +387,30 @@ impl Regex {
         let result = self.engine.set_variable(name, value);
         trace_exit!("api", "Regex::set_variable", "ok={}", result.is_ok());
         result
+    }
+
+    fn apply_code_replacements<I>(&self, text: &str, matches: I) -> String
+    where
+        I: IntoIterator<Item = MatchResult>,
+    {
+        let mut output = String::with_capacity(text.len());
+        let mut cursor = 0;
+
+        for m in matches {
+            if m.start > cursor {
+                output.push_str(&text[cursor..m.start]);
+            }
+
+            match m.code_result {
+                Some(CodeBlockValue::Replacement(value)) => output.push_str(&value),
+                _ => output.push_str(&text[m.start..m.end]),
+            }
+
+            cursor = m.end;
+        }
+
+        output.push_str(&text[cursor..]);
+        output
     }
 }
 
@@ -923,6 +995,50 @@ mod tests {
                 Some(CodeBlockValue::Replacement("b".to_string())),
             ]
         );
+    }
+
+    #[test]
+    fn full_mode_native_replace_with_code_uses_replacement_payloads() {
+        let regex = Regex::with_mode(r#"(?<word>cat)(?{native:emit_upper})"#, ExecutionMode::Full)
+            .expect("Failed to compile native replacement pattern");
+        regex
+            .register_native("emit_upper", |ctx| {
+                ExecResult::Replacement(ctx.named("word").unwrap_or_default().to_uppercase())
+            })
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.replace_first_with_code("cat dog cat"), "CAT dog cat");
+        assert_eq!(regex.replace_all_with_code("cat dog cat"), "CAT dog CAT");
+    }
+
+    #[test]
+    fn full_mode_native_replace_with_code_preserves_original_match_without_replacement() {
+        let regex = Regex::with_mode(r#"cat(?{native:emit_numeric})"#, ExecutionMode::Full)
+            .expect("Failed to compile native numeric replacement-fallback pattern");
+        regex
+            .register_native("emit_numeric", |_| ExecResult::Numeric(7.0))
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.replace_first_with_code("cat dog"), "cat dog");
+        assert_eq!(regex.replace_all_with_code("cat dog cat"), "cat dog cat");
+    }
+
+    #[test]
+    fn full_mode_native_replace_first_with_code_uses_winning_path_replacement() {
+        let regex = Regex::with_mode(r#"a*(?{native:emit_path})a"#, ExecutionMode::Full)
+            .expect("Failed to compile native backtracking replacement pattern");
+        regex
+            .register_native("emit_path", |ctx| {
+                let replacement = if ctx.current_match() == Some("") {
+                    "EMPTY"
+                } else {
+                    "NONEMPTY"
+                };
+                ExecResult::Replacement(replacement.to_string())
+            })
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.replace_first_with_code("a"), "EMPTY");
     }
 
     #[test]
