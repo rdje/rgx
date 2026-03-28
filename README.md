@@ -49,6 +49,10 @@ If you are new to the repo, use this order:
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
 - [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point (same checks the workflow runs)
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
+- [`scripts/new-pgen-issue.sh`](scripts/new-pgen-issue.sh) — create the next numbered local PGEN parser issue stub
+
+### Tracking / interoperability paths
+- [`pgen-issues/`](pgen-issues/) — git-tracked local issue records for PGEN parser bugs/misbehavior observed from RGX
 
 ## Documentation index (all `.md` files)
 ### Root markdown files
@@ -67,6 +71,7 @@ If you are new to the repo, use this order:
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — end-user guide
 - [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) — feature status matrix
 - [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) — PCRE2 parity matrix
+- [`docs/PGEN_ISSUE_TRACKING.md`](docs/PGEN_ISSUE_TRACKING.md) — local PGEN parser issue workflow and record requirements
 - [`docs/PARSER_CONTRACT.md`](docs/PARSER_CONTRACT.md) — parser interoperability contract
 - [`docs/TECHNICAL_DECISIONS.md`](docs/TECHNICAL_DECISIONS.md) — architecture/design decisions
 - [`docs/architecture.md`](docs/architecture.md) — architecture and data flow
@@ -110,4 +115,5 @@ Lua, JavaScript, and native code blocks can now also return first-slice richer n
 The Rust API now also ships first dedicated numeric-result and replacement-oriented helpers on top of that slice: `find_first_numeric_with_code(...)` / `find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` payloads in match order, while `replace_first_with_code(...)` / `replace_all_with_code(...)` consume winning-path `Replacement(String)` payloads and preserve non-replacement matches unchanged.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing read-only host imports for current position, full input text, numbered captures, named captures, and host-provided variables through the `rgx` namespace; richer non-boolean results are still deferred there.
 Some advanced constructs still remain intentionally parsed-but-unintegrated, including backreferences, recursion, conditionals, and Unicode property classes. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).
+Local git-tracked issue records for suspected PGEN parser bugs now live under `pgen-issues/`, with `docs/PGEN_ISSUE_TRACKING.md` and `scripts/new-pgen-issue.sh` defining the local ID and record workflow for future real-backend rollout.
 Read SESSION_BOOTSTRAP.md and start from there.

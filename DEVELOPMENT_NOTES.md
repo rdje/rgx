@@ -49,6 +49,7 @@ Pipeline in `rgx-core`:
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
 - Formal parser interoperability contract at `docs/PARSER_CONTRACT.md`
+- Git-tracked local PGEN parser issue workflow now exists through `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, and `scripts/new-pgen-issue.sh`
 - Live shipped-vs-scaffolded matrix at `docs/CAPABILITY_MATRIX.md`
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding in `rgx-core/src/parsing.rs` tests
@@ -125,6 +126,7 @@ Pipeline in `rgx-core`:
   - parser AST metadata invariants required by downstream compiler/runtime
   - parse-fail error mapping consistency (`RgxError::Compile`)
   - explicit parse-success/compile-fail guardrails for unintegrated runtime features
+- Any suspected PGEN parser bug observed from RGX should receive a local `PGEN-RGX-####` record in `pgen-issues/` before or alongside upstream reporting.
 - Any backend swap that changes parser behavior must update the contract version, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
@@ -143,9 +145,10 @@ Pipeline in `rgx-core`:
 2. Expand differential and integration tests to improve semantic parity and accuracy confidence
 3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
-5. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
-6. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-7. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm result work and any future non-Rust configuration surface
+5. Exercise the eventual real PGEN backend with the local `pgen-issues/` workflow so parser bugs can be tracked and handed upstream cleanly
+6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
+7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
+8. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm result work and any future non-Rust configuration surface
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

@@ -41,6 +41,7 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 - `README.md` for repository navigation
 - `RUST_CODEBASE_ANALYSIS.md` for the live Rust implementation assessment
 - `docs/CAPABILITY_MATRIX.md` for shipped vs parsed-only vs scaffolded status
+- `docs/PGEN_ISSUE_TRACKING.md` and `pgen-issues/` for local PGEN parser bug tracking during integration
 - `docs/USER_GUIDE.md` for current user-facing semantics
 - `DEVELOPMENT_NOTES.md`, `MEMORY.md`, and `CHANGES.md` for continuity and recent changes
 ## Current priorities

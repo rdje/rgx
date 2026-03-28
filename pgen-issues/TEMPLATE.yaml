@@ -1,0 +1,38 @@
+# Canonical schema/template for git-tracked local PGEN parser issues in RGX.
+id: PGEN-RGX-0000
+summary: |
+  Replace with a concise summary of the suspected PGEN parser issue.
+status: open
+opened_at: 1970-01-01T00:00:00Z
+first_seen_at: 1970-01-01T00:00:00Z
+last_updated_at: 1970-01-01T00:00:00Z
+parser_backend: pgen
+parser_backend_version: unknown
+rgx_commit: unknown
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: ""
+  pattern: ""
+  input: ""
+  notes: |
+    Describe precisely where the issue manifests in RGX.
+expected_behavior: |
+  Describe the expected parse result, AST shape, compile error, or downstream behavior.
+actual_behavior: |
+  Describe the observed misbehavior, wrong AST, wrong error, wrong match behavior, or crash.
+reproduction: |
+  Provide the smallest reproducible pattern, inputs, commands, tests, and any relevant logs.
+impact: |
+  Explain why this matters for RGX integration or downstream behavior.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

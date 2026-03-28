@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Added a git-tracked local PGEN parser issue workflow
+- Scope: parser-integration workflow, local issue recording infrastructure, and repository/parser-contract documentation refreshes.
+- Changes:
+  - Added `pgen-issues/TEMPLATE.yaml` as the canonical structured schema for one local RGX-side record per suspected PGEN parser bug.
+  - Added `scripts/new-pgen-issue.sh` to create the next numbered `PGEN-RGX-####.yaml` issue stub with timestamps, current `rgx` commit, required context fields, and upstream-reference placeholders.
+  - Added `docs/PGEN_ISSUE_TRACKING.md` to define the local ID scheme, required fields, status vocabulary, and update/closure workflow for PGEN-related issues observed from RGX.
+  - Updated `docs/PARSER_CONTRACT.md` so local PGEN issue recording and upstream handoff are part of the parser-boundary contract during real-backend rollout.
+  - Refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `WARP.md` so the new local PGEN issue workflow is discoverable in repo navigation and future-session guidance.
+- Validation:
+  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh`
+  - `/Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - RGX can now keep a precise git-tracked local record for each suspected PGEN parser issue even before or alongside upstream filing.
+  - Real PGEN rollout can now preserve local context, local IDs, and upstream links without overloading `CHANGES.md` or `MEMORY.md`.
 ### 2026-03-28 - Added dedicated numeric-result Rust APIs for code-block results
 - Scope: public numeric-result API surface in `rgx-core`, regression coverage, and repository/user documentation refreshes.
 - Changes:

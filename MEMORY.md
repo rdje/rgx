@@ -45,6 +45,7 @@ Live continuity memory for `rgx` sessions.
 
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
+- Git-tracked local PGEN parser issue recording now exists through `pgen-issues/`, `pgen-issues/TEMPLATE.yaml`, `docs/PGEN_ISSUE_TRACKING.md`, and `scripts/new-pgen-issue.sh`.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
@@ -77,10 +78,24 @@ Live continuity memory for `rgx` sessions.
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling next.
+- When the real PGEN backend lands, use the local `pgen-issues/` workflow to capture every suspected parser bug before or alongside upstream reporting.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Added a git-tracked local PGEN parser issue workflow for future real-backend rollout:
+  - added `pgen-issues/TEMPLATE.yaml` as the canonical local issue schema
+  - added `scripts/new-pgen-issue.sh` to create the next numbered `PGEN-RGX-####.yaml` issue stub with timestamps, `rgx` commit, and required context fields
+  - added `docs/PGEN_ISSUE_TRACKING.md` and updated `docs/PARSER_CONTRACT.md` so the local ID scheme, required fields, and upstream handoff rules are explicit
+  - refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `WARP.md` so future sessions can discover and use the workflow
+- Validation confirmed:
+  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh`
+  - `/Users/richarddje/Documents/github/rgx/scripts/new-pgen-issue.sh --summary "Dry-run validation for local PGEN issue workflow" --dry-run`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 - Shipped the first dedicated numeric-result Rust APIs on top of winning-path code-block numeric results:
   - added `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` in `rgx-core/src/lib.rs`
   - implemented numeric collection behavior that extracts only `CodeBlockValue::Numeric(f64)` payloads and skips matches whose winning path produced only predicate or replacement results

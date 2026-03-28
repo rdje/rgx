@@ -3,8 +3,8 @@ Canonical interoperability contract between `rgx` parser backends (current recur
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.3`
-- Last updated: `2026-02-19`
+- Version: `v0.1.4`
+- Last updated: `2026-03-28`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -83,6 +83,27 @@ The initial conformance harness lives in `rgx-core/src/parsing.rs` tests and che
 - Parse-success/compile-fail boundary for unintegrated runtime features.
 
 When `pgen-parser` is enabled, the harness also checks the PGEN backend type against the same reference fixtures.
+
+## PGEN issue recording and upstream handoff
+When RGX exercises a real PGEN-backed parser path, any suspected PGEN parser bug or misbehavior must be recorded locally before or alongside upstream reporting.
+
+Local recording contract:
+- One local issue file per suspected bug under `pgen-issues/`.
+- Local file name and local issue ID must match the form `PGEN-RGX-0001.yaml`.
+- IDs are never reused.
+- Each record must capture:
+  - summary and status
+  - `opened_at`, `first_seen_at`, and `last_updated_at`
+  - parser backend/version information
+  - current `rgx` commit
+  - precise RGX-side manifestation context
+  - minimal reproduction
+  - expected vs actual behavior
+  - impact on RGX integration or downstream behavior
+  - upstream issue reference once reported
+  - closing verification evidence when resolved
+- `scripts/new-pgen-issue.sh` is the canonical stub generator.
+- `pgen-issues/TEMPLATE.yaml` is the canonical schema/template.
 
 ## Backend change policy
 Any parser backend change (including PGEN rollout) must do one of:
