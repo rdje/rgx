@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Added a session-bootstrap entry point for new AI sessions
+- Scope: onboarding/documentation flow in the repository root.
+- Changes:
+  - Added `SESSION_BOOTSTRAP.md` with the exact bootstrap instruction to read `README.md` and all referenced markdown files, analyze the Rust codebase, update `RUST_CODEBASE_ANALYSIS.md` if needed, and then work from the roadmap.
+  - Appended the requested end-of-file reminder to `README.md`: `Read SESSION_BOOTSTRAP.md and start from there.`
+  - Updated the root markdown inventory in `README.md` so the newly added bootstrap file is listed in the repository’s documentation index.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Future AI/LLM sessions now have an explicit repository-level bootstrap path instead of relying on implicit startup behavior.
 ### 2026-03-28 - Shipped first richer non-boolean code-block result slice
 - Scope: winning-path result retention in `rgx-core`, public match-result exposure, richer-result regressions, and repository/user documentation refreshes.
 - Changes:

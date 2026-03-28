@@ -36,6 +36,7 @@ Live continuity memory for `rgx` sessions.
 - Stage from that exact status output (no hidden extras).
 - Use `git_message_brief.txt` with `git commit -F git_message_brief.txt`.
 - Do not wait for an explicit user prompt to start the commit workflow after a completed task; begin it automatically once task work, validation, and doc updates are done.
+- New AI/LLM sessions should bootstrap through `SESSION_BOOTSTRAP.md`; `README.md` now ends with an explicit reminder to read that file and start there.
 - Run `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` before commit and fix all clippy errors first (warnings tolerated for now).
 - Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
 - After commit:
@@ -78,6 +79,15 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Added a repository-level bootstrap handoff for future sessions:
+  - created `SESSION_BOOTSTRAP.md` with the exact instruction to read `README.md` plus all referenced markdown files, analyze the Rust codebase, update `RUST_CODEBASE_ANALYSIS.md` if needed, and then work from `ROADMAP.md`
+  - appended the requested one-line reminder to the end of `README.md`
+  - updated the root markdown inventory in `README.md` so the new bootstrap file is listed truthfully
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 - Shipped the first richer non-boolean code-block result slice:
   - added public `CodeBlockValue` / `MatchResult.code_result` so `find_first` and `find_all` can expose the last winning-path numeric or replacement result without changing `is_match`
   - extended VM execution/backtracking state so richer results survive only on the successful match path and speculative paths restore prior values cleanly

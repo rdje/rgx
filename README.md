@@ -53,6 +53,7 @@ If you are new to the repo, use this order:
 ## Documentation index (all `.md` files)
 ### Root markdown files
 - [`README.md`](README.md) — single entry point and navigation hub
+- [`SESSION_BOOTSTRAP.md`](SESSION_BOOTSTRAP.md) — new-session bootstrap instructions for AI/LLM handoff
 - [`CHANGES.md`](CHANGES.md) — authoritative change ledger
 - [`COMMIT.md`](COMMIT.md) — commit workflow contract and invariants
 - [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) — technical knowledge base
@@ -108,3 +109,4 @@ Host-provided execution variables can now be set on compiled regexes via `Regex:
 Lua, JavaScript, and native code blocks can now also return first-slice richer non-boolean match metadata: `find_first` and `find_all` expose the last winning-path value through `MatchResult.code_result` / `CodeBlockValue`.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing read-only host imports for current position, full input text, numbered captures, named captures, and host-provided variables through the `rgx` namespace; richer non-boolean results are still deferred there.
 Some advanced constructs still remain intentionally parsed-but-unintegrated, including backreferences, recursion, conditionals, and Unicode property classes. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).
+Read SESSION_BOOTSTRAP.md and start from there.
