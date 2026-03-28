@@ -61,9 +61,10 @@ Current behavior contract for the shipped slice:
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, the `vars` scripting binding, and `ExecContext::variable(...)`.
+- `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native code blocks.
 - Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures, named captures, host-provided variables) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
-- Numeric and replacement return values are rejected in match mode for now.
+- Wasm remains predicate-only on the result side through the current exported `() -> i32` ABI.
 Representative test anchors:
 - `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests
 - `rgx-core/src/execution.rs` backend dispatch logic

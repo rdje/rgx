@@ -9,7 +9,9 @@
 //! - Memoization for backtracking
 
 use crate::ast::{AnchorType, CharClass, CharRange, GroupKind, Quantifier, Regex};
-use crate::execution::{ExecContext as CodeExecContext, ExecResult, ExecutionManager};
+use crate::execution::{
+    CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager,
+};
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -319,6 +321,8 @@ pub struct ExecContext {
     pub backtrack_stack: Vec<BacktrackFrame>,
     /// Track which alternative is currently being executed
     pub current_alternative: Option<usize>,
+    /// Last non-boolean code-block value observed on the current path.
+    pub code_result: Option<CodeBlockValue>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -332,6 +336,8 @@ pub struct BacktrackFrame {
     pub saved_captures: Vec<Option<usize>>,
     /// Saved atomic-group stack state
     pub saved_call_stack: Vec<usize>,
+    /// Saved winning-path non-boolean code-block value
+    pub saved_code_result: Option<CodeBlockValue>,
 }
 
 /// Match result with full capture information
@@ -345,6 +351,8 @@ pub struct Match {
     pub groups: Vec<Option<(usize, usize)>>,
     /// Which top-level alternative matched (0-based index), None if no alternation
     pub matched_alternative: Option<usize>,
+    /// Last non-boolean code-block value observed on the winning match path.
+    pub code_result: Option<CodeBlockValue>,
 }
 
 /// High-performance regex execution engine
@@ -487,6 +495,7 @@ impl RegexVM {
             call_stack: Vec::new(),
             backtrack_stack: Vec::new(),
             current_alternative: None,
+            code_result: None,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -614,6 +623,7 @@ impl RegexVM {
                     end: ctx.pos,
                     groups: self.extract_captures_with_match(ctx, candidate_pos, ctx.pos),
                     matched_alternative: ctx.current_alternative,
+                    code_result: ctx.code_result.clone(),
                 });
                 trace_exit!(
                     "vm",
@@ -645,6 +655,7 @@ impl RegexVM {
                 end: ctx.pos,
                 groups: self.extract_captures_with_match(ctx, 0, ctx.pos),
                 matched_alternative: ctx.current_alternative,
+                code_result: ctx.code_result.clone(),
             });
             trace_exit!(
                 "vm",
@@ -686,6 +697,7 @@ impl RegexVM {
                     end: ctx.pos,
                     groups: self.extract_captures_with_match(ctx, start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
+                    code_result: ctx.code_result.clone(),
                 });
                 trace_exit!(
                     "vm",
@@ -712,6 +724,7 @@ impl RegexVM {
             ctx.pos = frame.pos;
             ctx.captures = frame.saved_captures;
             ctx.call_stack = frame.saved_call_stack;
+            ctx.code_result = frame.saved_code_result;
             true
         } else {
             false
@@ -730,6 +743,7 @@ impl RegexVM {
             call_stack: ctx.call_stack.clone(),
             backtrack_stack: Vec::new(),
             current_alternative: ctx.current_alternative,
+            code_result: ctx.code_result.clone(),
         }
     }
 
@@ -743,6 +757,7 @@ impl RegexVM {
         );
         ctx.pos = start;
         ctx.match_start = start;
+        ctx.code_result = None;
         let mut ip = 0;
         let code = &self.program.code;
 
@@ -812,6 +827,7 @@ impl RegexVM {
                         ctx.pos = frame.pos;
                         ctx.captures = frame.saved_captures;
                         ctx.call_stack = frame.saved_call_stack;
+                        ctx.code_result = frame.saved_code_result;
                         continue;
                     }
                     trace_log!("vm", "  ✗ Char match failed, no backtrack available");
@@ -1150,10 +1166,12 @@ impl RegexVM {
                     trace_log!("vm", "  First match attempt at pos={}", ctx.pos);
                     let first_saved_captures = ctx.captures.clone();
                     let first_saved_call_stack = ctx.call_stack.clone();
+                    let first_saved_code_result = ctx.code_result.clone();
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                         ctx.pos = start_pos;
                         ctx.captures = first_saved_captures;
                         ctx.call_stack = first_saved_call_stack;
+                        ctx.code_result = first_saved_code_result;
                         trace_log!("vm", "  ✗ PlusGreedy: first match failed");
                         if self.try_backtrack(ctx, &mut ip) {
                             continue;
@@ -1174,10 +1192,12 @@ impl RegexVM {
                         let before_pos = ctx.pos;
                         let saved_captures = ctx.captures.clone();
                         let saved_call_stack = ctx.call_stack.clone();
+                        let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
                             ctx.captures = saved_captures;
                             ctx.call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             // Can't match anymore, that's fine
                             trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
                             break;
@@ -1186,6 +1206,7 @@ impl RegexVM {
                         if ctx.pos == before_pos {
                             ctx.captures = saved_captures;
                             ctx.call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             trace_log!("vm", "  PlusGreedy: no advance, stopping");
                             break;
                         }
@@ -1196,6 +1217,7 @@ impl RegexVM {
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                         match_count += 1;
                         trace_log!(
@@ -1233,10 +1255,12 @@ impl RegexVM {
                         let before_pos = ctx.pos;
                         let saved_captures = ctx.captures.clone();
                         let saved_call_stack = ctx.call_stack.clone();
+                        let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
                             ctx.captures = saved_captures;
                             ctx.call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             // Can't match anymore, that's fine for *
                             break;
                         }
@@ -1244,6 +1268,7 @@ impl RegexVM {
                         if ctx.pos == before_pos {
                             ctx.captures = saved_captures;
                             ctx.call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             break;
                         }
                         // Greedy path consumed one repetition; keep a fallback
@@ -1253,6 +1278,7 @@ impl RegexVM {
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                     }
 
@@ -1281,17 +1307,20 @@ impl RegexVM {
                     let before_pos = ctx.pos;
                     let saved_captures = ctx.captures.clone();
                     let saved_call_stack = ctx.call_stack.clone();
+                    let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
                         ctx.captures = saved_captures;
                         ctx.call_stack = saved_call_stack;
+                        ctx.code_result = saved_code_result;
                     } else {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                     }
 
@@ -1322,6 +1351,7 @@ impl RegexVM {
                             pos: ctx.pos,
                             saved_captures: ctx.captures.clone(),
                             saved_call_stack: ctx.call_stack.clone(),
+                            saved_code_result: ctx.code_result.clone(),
                         });
                     }
 
@@ -1349,7 +1379,8 @@ impl RegexVM {
                             ip: opcode_start,
                             pos: probe_ctx.pos,
                             saved_captures: probe_ctx.captures,
-                            saved_call_stack: ctx.call_stack.clone(),
+                            saved_call_stack: probe_ctx.call_stack,
+                            saved_code_result: probe_ctx.code_result,
                         });
                     }
 
@@ -1375,11 +1406,13 @@ impl RegexVM {
                     let before_pos = ctx.pos;
                     let saved_captures = ctx.captures.clone();
                     let saved_call_stack = ctx.call_stack.clone();
+                    let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
                         ctx.captures = saved_captures;
                         ctx.call_stack = saved_call_stack;
+                        ctx.code_result = saved_code_result;
                         if self.try_backtrack(ctx, &mut ip) {
                             continue;
                         }
@@ -1389,6 +1422,7 @@ impl RegexVM {
                     let after_first_pos = ctx.pos;
                     let after_first_captures = ctx.captures.clone();
                     let after_first_call_stack = ctx.call_stack.clone();
+                    let after_first_code_result = ctx.code_result.clone();
                     if self
                         .probe_subexpr(ctx, &code[expr_start..expr_end])
                         .is_some()
@@ -1398,6 +1432,7 @@ impl RegexVM {
                             pos: after_first_pos,
                             saved_captures: after_first_captures,
                             saved_call_stack: after_first_call_stack,
+                            saved_code_result: after_first_code_result,
                         });
                     }
 
@@ -1451,6 +1486,7 @@ impl RegexVM {
                         pos: ctx.pos,
                         saved_captures: ctx.captures.clone(),
                         saved_call_stack: ctx.call_stack.clone(),
+                        saved_code_result: ctx.code_result.clone(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
 
@@ -1507,6 +1543,7 @@ impl RegexVM {
                         ctx.pos = frame.pos;
                         ctx.captures = frame.saved_captures;
                         ctx.call_stack = frame.saved_call_stack;
+                        ctx.code_result = frame.saved_code_result;
                         continue;
                     }
                     return false;
@@ -1549,7 +1586,7 @@ impl RegexVM {
     /// Decode and execute an inline code-block operand.
     fn execute_inline_code_block(
         &self,
-        ctx: &ExecContext,
+        ctx: &mut ExecContext,
         code: &[u8],
         ip: &mut usize,
     ) -> Option<bool> {
@@ -1566,7 +1603,7 @@ impl RegexVM {
     }
 
     /// Execute a code-block predicate using the shared execution manager.
-    fn evaluate_code_block(&self, ctx: &ExecContext, language: &str, code: &str) -> bool {
+    fn evaluate_code_block(&self, ctx: &mut ExecContext, language: &str, code: &str) -> bool {
         let Some(execution_manager) = &self.execution_manager else {
             debug_log!(
                 "vm",
@@ -1582,21 +1619,23 @@ impl RegexVM {
                 debug_log!("vm", "CodeBlock {} execution error: {}", language, error);
                 false
             }
-            ExecResult::Replacement(_) => {
+            ExecResult::Replacement(value) => {
                 debug_log!(
                     "vm",
-                    "CodeBlock {} returned a replacement value, which is not yet supported in match mode",
-                    language
+                    "CodeBlock {} returned a replacement value; storing it on the current match path",
+                    language,
                 );
-                false
+                ctx.code_result = Some(CodeBlockValue::Replacement(value));
+                true
             }
-            ExecResult::Numeric(_) => {
+            ExecResult::Numeric(value) => {
                 debug_log!(
                     "vm",
-                    "CodeBlock {} returned a numeric value, which is not yet supported in match mode",
-                    language
+                    "CodeBlock {} returned a numeric value; storing it on the current match path",
+                    language,
                 );
-                false
+                ctx.code_result = Some(CodeBlockValue::Numeric(value));
+                true
             }
         }
     }
@@ -1687,6 +1726,8 @@ impl RegexVM {
         ctx.call_stack.clear();
         // Reset alternative tracking for fresh start
         ctx.current_alternative = None;
+        // Reset richer non-boolean code-block result tracking for fresh start
+        ctx.code_result = None;
     }
 
     /// Check if current position is at the absolute end of the input text.
@@ -1886,6 +1927,7 @@ impl RegexVM {
                         .map(|opt| opt.map(|(s, e)| (start + s, start + e)))
                         .collect(),
                     matched_alternative: m.matched_alternative,
+                    code_result: m.code_result,
                 };
 
                 start = adjusted_match.end.max(adjusted_match.start + 1);
@@ -1966,6 +2008,7 @@ impl RegexVM {
                     ctx.pos = frame.pos;
                     ctx.captures = frame.saved_captures;
                     call_stack = frame.saved_call_stack;
+                    ctx.code_result = frame.saved_code_result;
                     continue;
                 }
                 return false;
@@ -2234,6 +2277,7 @@ impl RegexVM {
                         pos: ctx.pos,
                         saved_captures: ctx.captures.clone(),
                         saved_call_stack: call_stack.clone(),
+                        saved_code_result: ctx.code_result.clone(),
                     });
                     continue;
                 }
@@ -2250,6 +2294,7 @@ impl RegexVM {
                         pos: ctx.pos,
                         saved_captures: ctx.captures.clone(),
                         saved_call_stack: call_stack.clone(),
+                        saved_code_result: ctx.code_result.clone(),
                     });
                     ip += offset;
                     continue;
@@ -2282,17 +2327,20 @@ impl RegexVM {
                     let before_pos = ctx.pos;
                     let saved_captures = ctx.captures.clone();
                     let saved_call_stack = call_stack.clone();
+                    let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
                         ctx.captures = saved_captures;
                         call_stack = saved_call_stack;
+                        ctx.code_result = saved_code_result;
                     } else {
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                     }
 
@@ -2323,6 +2371,7 @@ impl RegexVM {
                             pos: ctx.pos,
                             saved_captures: ctx.captures.clone(),
                             saved_call_stack: call_stack.clone(),
+                            saved_code_result: ctx.code_result.clone(),
                         });
                     }
 
@@ -2348,15 +2397,18 @@ impl RegexVM {
                         let before_pos = ctx.pos;
                         let saved_captures = ctx.captures.clone();
                         let saved_call_stack = call_stack.clone();
+                        let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
                             ctx.captures = saved_captures;
                             call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             break;
                         }
                         if ctx.pos == before_pos {
                             ctx.captures = saved_captures;
                             call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             break;
                         }
                         backtrack_stack.push(BacktrackFrame {
@@ -2364,6 +2416,7 @@ impl RegexVM {
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                     }
 
@@ -2391,7 +2444,8 @@ impl RegexVM {
                             ip: opcode_start,
                             pos: probe_ctx.pos,
                             saved_captures: probe_ctx.captures,
-                            saved_call_stack: call_stack.clone(),
+                            saved_call_stack: probe_ctx.call_stack,
+                            saved_code_result: probe_ctx.code_result,
                         });
                     }
 
@@ -2415,13 +2469,13 @@ impl RegexVM {
 
                     let first_pos = ctx.pos;
                     let first_captures = ctx.captures.clone();
-                    let first_call_stack = call_stack.clone();
+                    let first_code_result = ctx.code_result.clone();
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end])
                         || ctx.pos == first_pos
                     {
                         ctx.pos = first_pos;
                         ctx.captures = first_captures;
-                        let _ = first_call_stack;
+                        ctx.code_result = first_code_result;
                         local_backtrack_or_return_false!();
                     }
 
@@ -2429,15 +2483,18 @@ impl RegexVM {
                         let before_pos = ctx.pos;
                         let saved_captures = ctx.captures.clone();
                         let saved_call_stack = call_stack.clone();
+                        let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
                             ctx.captures = saved_captures;
                             call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             break;
                         }
                         if ctx.pos == before_pos {
                             ctx.captures = saved_captures;
                             call_stack = saved_call_stack;
+                            ctx.code_result = saved_code_result;
                             break;
                         }
                         backtrack_stack.push(BacktrackFrame {
@@ -2445,6 +2502,7 @@ impl RegexVM {
                             pos: before_pos,
                             saved_captures,
                             saved_call_stack,
+                            saved_code_result,
                         });
                     }
 
@@ -2469,18 +2527,19 @@ impl RegexVM {
 
                     let before_pos = ctx.pos;
                     let saved_captures = ctx.captures.clone();
-                    let saved_call_stack = call_stack.clone();
+                    let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
                         ctx.captures = saved_captures;
-                        let _ = saved_call_stack;
+                        ctx.code_result = saved_code_result;
                         local_backtrack_or_return_false!();
                     }
 
                     let after_first_pos = ctx.pos;
                     let after_first_captures = ctx.captures.clone();
                     let after_first_call_stack = call_stack.clone();
+                    let after_first_code_result = ctx.code_result.clone();
                     if self
                         .probe_subexpr(ctx, &code[expr_start..expr_end])
                         .is_some()
@@ -2490,6 +2549,7 @@ impl RegexVM {
                             pos: after_first_pos,
                             saved_captures: after_first_captures,
                             saved_call_stack: after_first_call_stack,
+                            saved_code_result: after_first_code_result,
                         });
                     }
 

@@ -57,6 +57,7 @@ if let Some(m) = re.find_first("abc123def") {
 - Positions are byte offsets.
 - `find_all` returns non-overlapping matches.
 - For top-level alternation patterns, `matched_branch_number` is 1-based.
+- When Lua/JavaScript/native code blocks return non-boolean values on the winning path, `find_first` / `find_all` expose them through `code_result`.
 ## Level 2 - Advanced usage
 ### AST-first workflows
 When parser syntax is not yet complete for a feature family, you can still compile from AST directly.
@@ -75,7 +76,7 @@ assert!(re.is_match("dog"));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 ### Predicate code blocks
-Embedded predicate execution is now available for Lua, JavaScript, Rust-native callbacks, and registered wasm modules.
+Embedded code-block execution is now available for Lua, JavaScript, Rust-native callbacks, and registered wasm modules.
 
 Requirements:
 - `ExecutionMode::Pure` rejects all code blocks.
@@ -192,7 +193,7 @@ Current limits for this slice:
 - Host-provided variables are read-only snapshots for each code-block evaluation, and richer non-boolean result handling is still not exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
-- Numeric and replacement return values are rejected in match mode.
+- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`; wasm still remains predicate-only.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:
@@ -218,7 +219,9 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 ### Predicate code-block semantics
 - Code blocks are zero-width predicate checkpoints in the VM path.
 - They can fail the current path and allow normal regex backtracking to continue.
-- Current implementation only treats boolean-style success/failure as shipped behavior.
+- Boolean-style success/failure still drives path control.
+- Lua/JavaScript/native `return 123` or `return "..."` also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
+- Wasm currently remains predicate-only because its shipped ABI is still `module:function` with an exported `() -> i32`.
 ### Branch reporting semantics
 - Branch reporting is intentionally scoped to top-level alternations.
 - `matched_branch_number` is 1-based and nested alternations do not override it.

@@ -81,7 +81,7 @@ pub mod log;
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
-pub use execution::{ExecContext, ExecResult};
+pub use execution::{CodeBlockValue, ExecContext, ExecResult};
 pub use pattern::{CompiledPattern, Pattern};
 
 /// High-performance regex matcher with optional code execution capabilities.
@@ -899,6 +899,33 @@ mod tests {
     }
 
     #[test]
+    fn full_mode_native_code_block_find_all_surfaces_replacement_results() {
+        let regex = Regex::with_mode(r#"(?<ch>.)(?{native:emit_char})"#, ExecutionMode::Full)
+            .expect("Failed to compile native richer-result pattern");
+        regex
+            .register_native("emit_char", |ctx| {
+                ExecResult::Replacement(ctx.named("ch").unwrap_or_default().to_string())
+            })
+            .expect("Failed to register native callback");
+
+        let matches = regex.find_all("ab");
+        let spans = matches.iter().map(|m| (m.start, m.end)).collect::<Vec<_>>();
+        let code_results = matches
+            .into_iter()
+            .map(|m| m.code_result)
+            .collect::<Vec<_>>();
+
+        assert_eq!(spans, vec![(0, 1), (1, 2)]);
+        assert_eq!(
+            code_results,
+            vec![
+                Some(CodeBlockValue::Replacement("a".to_string())),
+                Some(CodeBlockValue::Replacement("b".to_string())),
+            ]
+        );
+    }
+
+    #[test]
     fn full_mode_native_code_block_fails_when_callback_is_missing() {
         let regex = Regex::with_mode("(?{native:missing})", ExecutionMode::Full)
             .expect("Failed to compile native code block pattern");
@@ -968,6 +995,30 @@ mod tests {
             )
             .expect("Failed to register WASM module");
         assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_match_has_no_non_boolean_result_payload() {
+        let regex = Regex::with_mode("(?{wasm:truthy:evaluate})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM payload pattern");
+        regex
+            .register_wasm_module(
+                "truthy",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (func (export "evaluate") (result i32)
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM module");
+
+        let first = regex.find_first("").expect("Expected WASM predicate match");
+        assert_eq!(first.code_result, None);
     }
 
     #[cfg(feature = "wasm")]
@@ -1820,10 +1871,33 @@ mod tests {
 
     #[cfg(feature = "lua")]
     #[test]
-    fn safe_mode_lua_code_block_rejects_numeric_results_in_match_mode() {
+    fn safe_mode_lua_code_block_surfaces_numeric_results_in_match_mode() {
         let regex = Regex::with_mode(r"(?{lua:return 1})", ExecutionMode::Safe)
             .expect("Failed to compile Lua numeric-result pattern");
-        assert!(!regex.is_match(""));
+        assert!(regex.is_match(""));
+        let first = regex
+            .find_first("")
+            .expect("Expected Lua numeric-result match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 0);
+        assert_eq!(first.code_result, Some(CodeBlockValue::Numeric(1.0)));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_code_block_backtracking_restores_winning_result() {
+        let regex = Regex::with_mode(
+            r#"a*(?{lua:return string.len(arg[0])})a"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua backtracking-result pattern");
+
+        let first = regex
+            .find_first("a")
+            .expect("Expected Lua backtracking-result match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 1);
+        assert_eq!(first.code_result, Some(CodeBlockValue::Numeric(0.0)));
     }
 
     #[cfg(feature = "javascript")]
@@ -1850,6 +1924,26 @@ mod tests {
         .expect("Failed to compile JavaScript code block pattern");
         assert!(regex.is_match("cat"));
         assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_code_blocks_use_last_non_boolean_result() {
+        let regex = Regex::with_mode(
+            r#"(?{js:return 1;})(?{js:return "done";})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript richer-result pattern");
+
+        let first = regex
+            .find_first("")
+            .expect("Expected JavaScript richer-result match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 0);
+        assert_eq!(
+            first.code_result,
+            Some(CodeBlockValue::Replacement("done".to_string()))
+        );
     }
     #[test]
     fn parser_backreference_syntax_reports_explicit_unsupported_error() {

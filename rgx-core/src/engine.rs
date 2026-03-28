@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::execution::{ExecContext, ExecResult, ExecutionManager};
+use crate::execution::{CodeBlockValue, ExecContext, ExecResult, ExecutionManager};
 use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
 use crate::{trace_decision, trace_enter, trace_exit};
@@ -17,7 +17,7 @@ pub enum ExecutionMode {
 }
 
 /// Match result with position information
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MatchResult {
     /// Start position in bytes
     pub start: usize,
@@ -27,6 +27,11 @@ pub struct MatchResult {
     ///
     /// `None` when the pattern has no top-level alternation.
     pub matched_branch_number: Option<usize>,
+    /// Last non-boolean code-block value observed on the winning match path.
+    ///
+    /// This is `None` when the winning path produced only predicate-style
+    /// success/failure results.
+    pub code_result: Option<CodeBlockValue>,
 }
 
 /// High-performance regex execution engine
@@ -107,6 +112,7 @@ impl Engine {
                 start: m.start,
                 end: m.end,
                 matched_branch_number: m.matched_alternative.map(|id| id + 1),
+                code_result: m.code_result,
             })
             .collect::<Vec<_>>();
         trace_decision!(
@@ -166,6 +172,7 @@ impl Engine {
             start: m.start,
             end: m.end,
             matched_branch_number: m.matched_alternative.map(|id| id + 1),
+            code_result: m.code_result,
         });
         trace_decision!(
             "engine",

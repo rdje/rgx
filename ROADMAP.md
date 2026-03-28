@@ -68,10 +68,11 @@ Live forward-looking tracker for rgx.
 
 ### Embedded code-path expansion beyond phase 1
 - Status: `planned`
-- Goal: extend the newly shipped predicate code-block slice beyond the current Lua/JavaScript/native/wasm surface.
+- Goal: extend the newly shipped code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
   - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, named captures, and host-provided variables
-  - richer result semantics beyond predicate success/failure
+  - replacement-oriented APIs beyond the current `MatchResult.code_result` metadata slice
+  - richer non-boolean result handling on the wasm path
   - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
 ### Multi-language code-block runtime expansion
@@ -91,6 +92,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Added the first richer non-boolean code-block result slice for Lua/JavaScript/native by surfacing winning-path numeric/replacement values through `MatchResult.code_result` while keeping wasm predicate-only.
 - Added host-provided execution variables to the shipped code-block slice, including `Regex::set_variable(...)`, cross-backend variable bindings, and wasm variable imports.
 - Expanded the wasm ABI with `rgx` host imports for named captures, including deterministic named-capture ordering and regression coverage for name/value reads.
 - Expanded the wasm ABI with `rgx` host imports for current position, full input text, and numbered captures, including safe guest-memory failure handling and regression coverage.

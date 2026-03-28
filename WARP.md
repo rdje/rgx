@@ -12,14 +12,15 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
   - named groups, atomic groups, lookahead, and lookbehind
   - top-level branch reporting
 - Shipped on the execution-mode / feature-gated path:
-  - `(?{lua:...})` predicate code blocks in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled
-  - `(?{js:...})` / `(?{javascript:...})` predicate code blocks in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `javascript` feature is enabled
-  - `(?{native:...})` predicate code blocks on the Rust API path in `ExecutionMode::Full` after callback registration on the compiled `Regex`
+  - `(?{lua:...})` code blocks in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled
+  - `(?{js:...})` / `(?{javascript:...})` code blocks in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `javascript` feature is enabled
+  - `(?{native:...})` code blocks on the Rust API path in `ExecutionMode::Full` after callback registration on the compiled `Regex`
   - `(?{wasm:...})` predicate code blocks on the Rust API path in `ExecutionMode::Safe` or `ExecutionMode::Full` after module registration on the compiled `Regex`
+  - Lua/JavaScript/native can surface the last winning-path numeric or replacement value through `MatchResult.code_result`; wasm remains predicate-only
 - Explicit boundaries still in place:
   - `ExecutionMode::Pure` rejects all code blocks
   - the shipped native/wasm slices are currently Rust-API-only because the CLI does not expose registration
-  - the current wasm ABI keeps `module:function` -> exported `() -> i32` and adds `rgx` host imports for current position, full input text, numbered captures, named captures, and host-provided variables set through `Regex::set_variable(...)`; richer result semantics are still deferred
+  - the current wasm ABI keeps `module:function` -> exported `() -> i32` and adds `rgx` host imports for current position, full input text, numbered captures, named captures, and host-provided variables set through `Regex::set_variable(...)`; richer non-boolean result handling is still deferred there
   - backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated
 - `pgen-parser` is still a parser-contract validation path backed by fallback behavior, not a truly separate parser backend.
 ## Useful commands
@@ -41,7 +42,7 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 - `docs/USER_GUIDE.md` for current user-facing semantics
 - `DEVELOPMENT_NOTES.md`, `MEMORY.md`, and `CHANGES.md` for continuity and recent changes
 ## Current priorities
-1. Expand code-block support beyond the current shipped Lua/JavaScript/native/wasm predicate slice.
+1. Expand code-block support beyond the current first richer-result slice, especially replacement-oriented APIs and wasm richer-result handling.
 2. Keep capability/user/state docs truthful as features move from parsed-only to shipped.
 3. Replace the fallback-backed `pgen-parser` path with a real parser backend.
 4. Improve the performance-validation loop so benchmark claims are continuously grounded.

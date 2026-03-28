@@ -211,6 +211,14 @@ impl ExecContext {
 // ============================================================================
 // EXECUTION RESULT
 // ============================================================================
+/// Non-boolean value emitted by a code block on the winning match path.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeBlockValue {
+    /// Code returned a string payload.
+    Replacement(String),
+    /// Code returned a numeric payload.
+    Numeric(f64),
+}
 
 /// Result of code execution within a regex pattern.
 #[derive(Debug, Clone, PartialEq)]

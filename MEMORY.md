@@ -49,6 +49,7 @@ Live continuity memory for `rgx` sessions.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
 - Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered captures, named captures, and host-provided variables through the execution context.
+- Public `find_first` / `find_all` results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native code blocks while wasm remains predicate-only on the result side.
 - `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, and variables.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
@@ -72,11 +73,27 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
-- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice, most likely with richer non-boolean result semantics next.
+- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first `MatchResult.code_result` metadata slice, most likely with replacement-oriented APIs or richer wasm result handling next.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Shipped the first richer non-boolean code-block result slice:
+  - added public `CodeBlockValue` / `MatchResult.code_result` so `find_first` and `find_all` can expose the last winning-path numeric or replacement result without changing `is_match`
+  - extended VM execution/backtracking state so richer results survive only on the successful match path and speculative paths restore prior values cleanly
+  - kept wasm predicate-only for now while allowing Lua/JavaScript/native `Numeric` and `Replacement` returns to succeed in match mode
+  - added regressions for Lua numeric-result surfacing, Lua winning-path restoration under backtracking, JavaScript last-result-wins behavior, native `find_all` replacement results, and explicit wasm `code_result == None`
+  - refreshed user-facing and repository-state docs so the shipped semantics and remaining wasm boundary stay truthful
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 - Shipped host-provided execution variables across the shared code-block runtime:
   - added shared variable ownership in `ExecutionManager` plus public `Regex::set_variable(...)` threading through `Engine` and `RegexVM`
   - chose per-evaluation variable snapshots in `ExecContext` so backtracking sees deterministic callout inputs instead of shared mutable match-time state

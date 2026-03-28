@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Shipped first richer non-boolean code-block result slice
+- Scope: winning-path result retention in `rgx-core`, public match-result exposure, richer-result regressions, and repository/user documentation refreshes.
+- Changes:
+  - Root cause: `ExecResult` already included `Numeric(f64)` and `Replacement(String)`, and Lua/JavaScript/native backends could already emit those values, but the VM still dropped them in match mode and public match results had no place to surface them.
+  - Added public `CodeBlockValue` plus `MatchResult.code_result` so `find_first` / `find_all` can expose optional richer match metadata without changing the boolean contract of `is_match`.
+  - Extended the VM execution context, internal match type, and backtrack frames so the last winning-path non-boolean result is saved and restored alongside captures/call-stack state during speculative execution and backtracking.
+  - Treated Lua/JavaScript/native `ExecResult::Numeric(...)` and `ExecResult::Replacement(...)` as successful zero-width outcomes in match mode, with the deterministic rule that the last winning-path non-boolean result is the one surfaced publicly.
+  - Kept wasm predicate-only for this slice and added regressions that explicitly assert `code_result == None` on the wasm path while richer results are available on Lua/JavaScript/native.
+  - Added regression coverage in `rgx-core/src/lib.rs` for Lua numeric-result surfacing, Lua winning-path backtracking restoration, JavaScript last-result-wins behavior, native `find_all` replacement-result surfacing, and unchanged wasm predicate-only payload behavior.
+  - Refreshed `README.md`, `WARP.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped semantics and the remaining wasm boundary are described truthfully.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Host applications can now observe the first shipped richer-result layer through `MatchResult.code_result` while keeping `is_match` fast and boolean-only.
+  - The next logical expansion is no longer “any richer results at all”; it is the next layer beyond this metadata slice, especially replacement-oriented APIs and wasm richer-result handling.
 ### 2026-03-28 - Shipped host-provided execution variables across code-block runtimes
 - Scope: shared execution-variable ownership in `rgx-core`, Rust API/runtime exposure across Lua/JavaScript/native/wasm, regression coverage, and project-state documentation refreshes.
 - Changes:
