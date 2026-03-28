@@ -14,7 +14,7 @@ jobs:
   workspace:
     name: Workspace checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -23,7 +23,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpcre2-dev pkg-config
+          sudo apt-get install -y liblua5.4-dev libpcre2-dev pkg-config
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

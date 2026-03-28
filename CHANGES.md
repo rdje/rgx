@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Automated the rgx-core feature matrix in local/GitHub CI
+- Scope: local-first CI automation, GitHub workflow prerequisites, and validation/state documentation refreshes.
+- Changes:
+  - Extended `scripts/run-local-ci.sh` so the shared CI path now runs the `rgx-core` feature matrix after the default workspace checks: `pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages`.
+  - Kept the shared local/GitHub entry point intact by continuing to route `.github/workflows/ci.yml` through `./scripts/run-local-ci.sh`.
+  - Added the missing Ubuntu-side Lua 5.4 development package to the GitHub workflow so the `lua` feature can participate in the default hosted validation path too.
+  - Refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, `WARP.md`, and `MEMORY.md` so they no longer describe the feature matrix as a manual-only validation step.
+- Validation:
+  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/run-local-ci.sh`
+  - `/Users/richarddje/Documents/github/rgx/scripts/run-local-ci.sh`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - The default validation loop now continuously checks the shipped feature-gated code-block/backend surface instead of relying on a manual side matrix.
+  - Benchmark trend capture is still separate and remains the next validation-process gap.
 ### 2026-03-28 - Added a contract-scoped PGEN regex integration complaint
 - Scope: downstream PGEN integration review and RGX markdown cleanup.
 - Changes:

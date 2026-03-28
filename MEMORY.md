@@ -60,6 +60,7 @@ Live continuity memory for `rgx` sessions.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
 - Local-first CI is now available:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
+  - `./scripts/run-local-ci.sh` now covers the shared `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) in addition to default workspace checks
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source/CI execution files, and currently reports that there are no compile-time `include!`-style macros in workspace source
 - `Cargo.lock` is now intentionally tracked so local and GitHub CI use the same dependency resolution
 - `RUST_CODEBASE_ANALYSIS.md` now exists as the live roadmap-grounded assessment of the Rust workspace and is part of the Rust commit workflow review path.
@@ -68,7 +69,7 @@ Live continuity memory for `rgx` sessions.
 - Unbounded range quantifier (`{n,}`) parity is now differential-tested and aligned for scanning and suffix-sensitive behavior.
 - Negated shorthand character-class parity for `\D`, `\W`, and `\S` is now fixed end-to-end, including quantified VM execution, API regressions, differential parity tests, and direct CLI smoke coverage.
 - `cargo test -p rgx-core --features lua`, `cargo test -p rgx-core --features javascript`, `cargo test -p rgx-core --features wasm`, and `cargo check -p rgx-core --features all-languages` now validate the shipped code-block slice.
-- Local-first CI still validates only the default-feature workspace path; feature-gated `pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages` checks still rely on the manual validation matrix.
+- The shared local/GitHub CI path now validates the feature-gated `pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages` matrix automatically.
 - Capability and parser-boundary guardrails are actively enforced in:
   - `rgx-core/src/lib.rs`
   - `rgx-core/src/parsing.rs`
@@ -83,6 +84,13 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Automated the shared local/GitHub validation loop for the shipped feature matrix:
+  - `scripts/run-local-ci.sh` now runs the `rgx-core` feature-gated checks for `pgen-parser`, `lua`, `javascript`, `wasm`, and combined `all-languages`
+  - `.github/workflows/ci.yml` now installs Lua 5.4 development headers so the hosted path can run the same matrix
+  - the remaining validation-process gap is benchmark trend capture rather than feature-matrix automation
+- Validation confirmed:
+  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/run-local-ci.sh`
+  - `/Users/richarddje/Documents/github/rgx/scripts/run-local-ci.sh`
 - Added a git-tracked PGEN regex integration complaint and scrubbed the PGEN-specific markdown guidance surface:
   - the complaint is intentionally limited to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md`, `rust/docs/EMBEDDING_API_CONTRACT.md`, `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`, and `LIVE_ACHIEVEMENT_STATUS.md`
   - the recorded complaints are contract-quality complaints, not claims that the advertised parser surface is fake

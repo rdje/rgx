@@ -67,6 +67,7 @@ Pipeline in `rgx-core`:
 - `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
 - Local-first CI path now exists:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
+  - `./scripts/run-local-ci.sh` now covers the shared `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) in addition to default workspace checks
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
 - `Cargo.lock` is intentionally tracked so local validation and GitHub CI share the same dependency resolution
 - Core/CLI logging now supports UVM-style verbosity control and file routing:
@@ -137,7 +138,7 @@ Pipeline in `rgx-core`:
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs, but wasm richer-result handling remains open
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
-- Local-first CI currently validates only the default-feature workspace path; feature-gated `pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages` checks still rely on the manual validation matrix
+- Benchmark trend capture is still separate from the default validation loop
 
 ## Immediate priorities
 1. Expand and maintain the PCRE2 compatibility matrix with explicit exceptions/gaps and executable differential tests

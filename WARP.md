@@ -27,6 +27,7 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
 - `pgen-parser` is still a parser-contract validation path backed by fallback behavior, not a truly separate parser backend.
 ## Useful commands
 ```bash
+./scripts/run-local-ci.sh
 cargo test --workspace
 cargo test -p rgx-core
 cargo test -p rgx-core --features pgen-parser

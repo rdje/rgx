@@ -7,6 +7,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
+  - `./scripts/run-local-ci.sh` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser` => pass
@@ -49,7 +50,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `native` and `wasm` code blocks are shipped only on the Rust API path; the CLI still has no registration/configuration surface for them
   - the current wasm ABI still lacks richer non-boolean result handling even though Lua/JavaScript/native now expose a first richer-result slice plus dedicated numeric/replacement Rust APIs
   - `pgen-parser` is still a contract-validation path, not a true alternative parser backend
-  - automated validation still misses the feature matrix and benchmark trend capture
+  - automated validation still misses benchmark trend capture
   - benchmark/process maturity still lags correctness maturity
 ## What is shipped today
 ### Default public regex path
@@ -89,7 +90,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The declared opcode surface in `rgx-core/src/vm.rs` still exceeds the emitted/decoded/runtime-used surface; several opcode families remain aspirational or only partially wired.
 - The `pgen-parser` feature path is still a recursive-descent fallback. `PatternAnalysis` and `ParserConfig` remain unused scaffolding, and `parsing::parser_capabilities()` under the feature flag still advertises `error_recovery` / `syntax_highlighting` differently from the actual fallback-backed `PgenParser::capabilities()` implementation.
 - Current PGEN integration review is constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
-- The default local CI path in `scripts/run-local-ci.sh` validates `fmt`, default-feature workspace tests, and `clippy`, but it does not continuously cover `pgen-parser`, `lua`, `javascript`, `wasm`, or `all-languages`. Those checks are still a manual matrix.
+- The default local CI path in `scripts/run-local-ci.sh` now validates `fmt`, workspace tests, the `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`), combined-language build coverage (`all-languages`), and `clippy`, and GitHub Actions reuses that same path after installing Lua 5.4 development headers.
 - Benchmark infrastructure exists in `rgx-bench`, but benchmark trend capture is still ad hoc and separate from automated validation.
 ## Roadmap alignment
 ### Now
@@ -100,7 +101,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports, `MatchResult.code_result`, and numeric/replacement Rust helper APIs, most likely richer wasm result handling.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Replace the fallback-backed `pgen-parser` contract path with a real parser backend and make capability reporting fully truthful.
-- Operationalize automated feature-matrix coverage and benchmark trend capture instead of relying on manual runs.
+- Operationalize benchmark trend capture instead of relying on manual runs.
 ### Later
 - Finish larger regex-surface gaps: backreferences, recursion, conditionals, Unicode property classes, and the still-declared-but-unwired opcode families.
 ## Practical engineering notes
@@ -118,5 +119,5 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 1. Design and ship the next richer-result layer beyond `MatchResult.code_result` plus the current numeric/replacement helper APIs, especially wasm result handling.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 3. Replace the fallback `pgen-parser` feature path with a real parser implementation and align parser capability reporting with reality.
-4. Add automated feature-matrix coverage and benchmark-trend capture to the default validation loop.
+4. Add automated benchmark-trend capture to the default validation loop.
 5. Reduce warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`.

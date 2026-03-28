@@ -47,7 +47,7 @@ If you are new to the repo, use this order:
 
 ### CI / automation paths
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
-- [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point (same checks the workflow runs)
+- [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for the shared workspace + `rgx-core` feature-matrix validation path
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
 
 ## Documentation index (all `.md` files)
@@ -90,6 +90,10 @@ Run the same CI checks locally before pushing:
 ```bash
 ./scripts/run-local-ci.sh
 ```
+That shared path now covers:
+- workspace formatting/tests
+- `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, and `wasm`
+- combined-language build coverage through `--features all-languages`
 
 Tracing examples:
 ```bash
