@@ -62,6 +62,7 @@ Current behavior contract for the shipped slice:
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, the `vars` scripting binding, and `ExecContext::variable(...)`.
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native code blocks.
+- `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.
 - Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures, named captures, host-provided variables) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.

@@ -58,6 +58,33 @@ if let Some(m) = re.find_first("abc123def") {
 - `find_all` returns non-overlapping matches.
 - For top-level alternation patterns, `matched_branch_number` is 1-based.
 - When Lua/JavaScript/native code blocks return non-boolean values on the winning path, `find_first` / `find_all` expose them through `code_result`.
+### Code-driven numeric helpers
+When a winning match path emits `CodeBlockValue::Numeric`, the Rust API can collect those numeric payloads directly:
+
+```rust
+use rgx_core::{ExecResult, ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<digit>\d)(?{native:emit_digit})"#,
+    ExecutionMode::Full,
+)?;
+re.register_native("emit_digit", |ctx| {
+    let value = ctx
+        .named("digit")
+        .and_then(|digit| digit.parse::<f64>().ok())
+        .unwrap_or_default();
+    ExecResult::Numeric(value)
+})?;
+
+assert_eq!(re.find_first_numeric_with_code("7a8"), Some(7.0));
+assert_eq!(re.find_all_numeric_with_code("7a8"), vec![7.0, 8.0]);
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Current behavior:
+- `find_first_numeric_with_code` returns the first winning-path `Numeric(f64)` surfaced by any match.
+- `find_all_numeric_with_code` collects all winning-path numeric payloads in match order.
+- Matches without a winning-path `Numeric(f64)` payload are skipped.
 ### Code-driven replacement
 When a winning match path emits `CodeBlockValue::Replacement`, the Rust API can rebuild output text directly:
 
@@ -216,7 +243,7 @@ Current limits for this slice:
 - Host-provided variables are read-only snapshots for each code-block evaluation, and richer non-boolean result handling is still not exposed to wasm modules.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
-- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`; wasm still remains predicate-only.
+- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`; wasm still remains predicate-only.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:

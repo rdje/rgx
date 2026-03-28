@@ -18,7 +18,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
 - Current large-file concentration is still dominated by `rgx-core`:
   - `rgx-core/src/vm.rs`: 3960 lines
-  - `rgx-core/src/lib.rs`: 2311 lines
+  - `rgx-core/src/lib.rs`: 2437 lines
   - `rgx-core/src/execution.rs`: 1912 lines
   - `rgx-core/src/lexer.rs`: 1832 lines
   - `rgx-core/src/parser.rs`: 1190 lines
@@ -39,6 +39,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - engine attaches a shared `ExecutionManager` only when compiled programs actually contain code blocks
   - current match text, numbered captures, named captures, and host-provided variables are materialized into the execution context
   - winning-path non-boolean Lua/JavaScript/native results are surfaced through `MatchResult.code_result`
+  - `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches
   - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` payloads while copying non-replacement matches through unchanged
   - native callbacks can be registered on compiled regex objects through the public Rust API and dispatched through the shared runtime
   - host-provided variables can be registered on compiled regex objects through the public Rust API via `Regex::set_variable(...)` and are snapshotted into each code-block evaluation
@@ -46,7 +47,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The biggest remaining gaps are now narrower and clearer:
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` and `wasm` code blocks are shipped only on the Rust API path; the CLI still has no registration/configuration surface for them
-  - the current wasm ABI still lacks richer non-boolean result handling even though Lua/JavaScript/native now expose a first richer-result slice plus replacement-oriented Rust APIs
+  - the current wasm ABI still lacks richer non-boolean result handling even though Lua/JavaScript/native now expose a first richer-result slice plus dedicated numeric/replacement Rust APIs
   - `pgen-parser` is still a contract-validation path, not a true alternative parser backend
   - automated validation still misses the feature matrix and benchmark trend capture
   - benchmark/process maturity still lags correctness maturity
@@ -71,6 +72,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `ExecResult::Success` continues matching
   - `Failure` and `Error` fail the current path
   - Lua/JavaScript/native `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
+  - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` values in match order and skip matches whose winning path produced only predicate or replacement results
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path `Replacement(String)` values and preserve matched text unchanged when the winning path produces only predicate or numeric results
   - the current wasm ABI keeps `module:function` with an exported `() -> i32` predicate and adds `rgx` imports for `position`, `text_length` / `text_read`, `capture_count` / `capture_length` / `capture_read`, `named_capture_count` / `named_capture_name_length` / `named_capture_name_read` / `named_capture_value_length` / `named_capture_value_read`, and `variable_count` / `variable_name_length` / `variable_name_read` / `variable_value_length` / `variable_value_read`
   - wasm capture slot `0` is still the current overall match prefix, named captures and host-provided variables are exposed in lexicographic order by name, all read-style imports require exported linear memory named `memory`, and wasm remains predicate-only on the result side
@@ -94,7 +96,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because the wasm named-capture and variable imports extend shipped behavior without changing the public regex syntax or registration model.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 ### Next
-- Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports, `MatchResult.code_result`, and replacement-oriented Rust APIs, most likely richer wasm result handling plus dedicated numeric-result APIs.
+- Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports, `MatchResult.code_result`, and numeric/replacement Rust helper APIs, most likely richer wasm result handling.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Replace the fallback-backed `pgen-parser` contract path with a real parser backend and make capability reporting fully truthful.
 - Operationalize automated feature-matrix coverage and benchmark trend capture instead of relying on manual runs.
@@ -112,7 +114,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The named-capture and variable wasm imports materialize deterministic sorted views at host-call time, which keeps the guest-visible ABI stable without changing the underlying `HashMap` storage model.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, `rgx-bench/src/lib.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 ## High-confidence next actions
-1. Design and ship the next richer-result layer beyond `MatchResult.code_result` plus the current replacement APIs, especially wasm result handling and any dedicated numeric-result APIs.
+1. Design and ship the next richer-result layer beyond `MatchResult.code_result` plus the current numeric/replacement helper APIs, especially wasm result handling.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 3. Replace the fallback `pgen-parser` feature path with a real parser implementation and align parser capability reporting with reality.
 4. Add automated feature-matrix coverage and benchmark-trend capture to the default validation loop.

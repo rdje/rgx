@@ -36,6 +36,7 @@ Pipeline in `rgx-core`:
 - Code-block execution contexts now expose current overall match text, numbered captures, named captures, and host-provided variables to the execution layer
 - Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
 - Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native code blocks
+- Public numeric-result helper APIs now exist through `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)`, which collect winning-path `Numeric(f64)` payloads in match order and skip non-numeric matches
 - Public replacement-oriented APIs now exist through `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)`, which consume winning-path `Replacement(String)` payloads and leave non-replacement matches unchanged
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
 - Parser-path support for conditional syntax tokenization/parsing:
@@ -132,7 +133,7 @@ Pipeline in `rgx-core`:
 - Backreference, recursion, and conditional syntax are still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports, but richer result handling is still not exposed to wasm modules
-- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus replacement-oriented Rust APIs, but wasm richer-result handling and dedicated numeric-result APIs remain open
+- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs, but wasm richer-result handling remains open
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
 - Local-first CI currently validates only the default-feature workspace path; feature-gated `pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages` checks still rely on the manual validation matrix
@@ -144,7 +145,7 @@ Pipeline in `rgx-core`:
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
 5. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 6. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-7. Expand the staged code-block rollout beyond the current first richer-result plus replacement-API slice, especially additional wasm result work, dedicated numeric-result APIs, and any future non-Rust configuration surface
+7. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm result work and any future non-Rust configuration surface
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

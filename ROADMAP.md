@@ -71,8 +71,7 @@ Live forward-looking tracker for rgx.
 - Goal: extend the newly shipped code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
   - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, named captures, and host-provided variables
-  - richer non-boolean result handling on the wasm path beyond the current Rust-side replacement API layer
-  - dedicated numeric-result APIs beyond the current `MatchResult.code_result` metadata slice
+  - richer non-boolean result handling on the wasm path beyond the current Rust-side numeric/replacement helper layer
   - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
 ### Multi-language code-block runtime expansion
@@ -92,6 +91,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Added first dedicated numeric-result Rust APIs for code-block results by shipping `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` on top of winning-path `Numeric(f64)` payloads.
 - Added the first replacement-oriented Rust APIs for code-block results by shipping `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` on top of winning-path `Replacement(String)` payloads.
 - Added the first richer non-boolean code-block result slice for Lua/JavaScript/native by surfacing winning-path numeric/replacement values through `MatchResult.code_result` while keeping wasm predicate-only.
 - Added host-provided execution variables to the shipped code-block slice, including `Regex::set_variable(...)`, cross-backend variable bindings, and wasm variable imports.

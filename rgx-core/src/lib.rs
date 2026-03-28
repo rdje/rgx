@@ -319,6 +319,57 @@ impl Regex {
         replaced
     }
 
+    /// Find the first winning-path `CodeBlockValue::Numeric` surfaced by any match.
+    ///
+    /// Matches whose winning path produces only predicate-style or replacement-style
+    /// results are skipped, which keeps this API useful with mixed code-block patterns.
+    pub fn find_first_numeric_with_code(&self, text: &str) -> Option<f64> {
+        trace_enter!(
+            "api",
+            "Regex::find_first_numeric_with_code",
+            "text_len={}",
+            text.len()
+        );
+        let numeric = self
+            .find_all(text)
+            .into_iter()
+            .find_map(|m| Self::numeric_code_result(m.code_result.as_ref()));
+        trace_decision!(
+            "api",
+            "numeric.is_some()",
+            numeric.is_some(),
+            "find_first_numeric_with_code completed"
+        );
+        trace_exit!(
+            "api",
+            "Regex::find_first_numeric_with_code",
+            "ok=true,found={}",
+            numeric.is_some()
+        );
+        numeric
+    }
+
+    /// Collect all winning-path `CodeBlockValue::Numeric` values surfaced by matches.
+    ///
+    /// Matches whose winning path produces only predicate-style or replacement-style
+    /// results are skipped, preserving match-order numeric output for mixed patterns.
+    pub fn find_all_numeric_with_code(&self, text: &str) -> Vec<f64> {
+        trace_enter!(
+            "api",
+            "Regex::find_all_numeric_with_code",
+            "text_len={}",
+            text.len()
+        );
+        let numeric = self.collect_numeric_code_results(self.find_all(text));
+        trace_exit!(
+            "api",
+            "Regex::find_all_numeric_with_code",
+            "ok=true,count={}",
+            numeric.len()
+        );
+        numeric
+    }
+
     /// Test if the pattern matches the text (boolean result only).
     ///
     /// This is the fastest possible operation as it can terminate as soon
@@ -411,6 +462,31 @@ impl Regex {
 
         output.push_str(&text[cursor..]);
         output
+    }
+
+    fn collect_numeric_code_results<I>(&self, matches: I) -> Vec<f64>
+    where
+        I: IntoIterator<Item = MatchResult>,
+    {
+        trace_enter!("api", "Regex::collect_numeric_code_results");
+        let numeric = matches
+            .into_iter()
+            .filter_map(|m| Self::numeric_code_result(m.code_result.as_ref()))
+            .collect::<Vec<_>>();
+        trace_exit!(
+            "api",
+            "Regex::collect_numeric_code_results",
+            "ok=true,count={}",
+            numeric.len()
+        );
+        numeric
+    }
+
+    fn numeric_code_result(code_result: Option<&CodeBlockValue>) -> Option<f64> {
+        match code_result {
+            Some(CodeBlockValue::Numeric(value)) => Some(*value),
+            _ => None,
+        }
     }
 }
 
@@ -1039,6 +1115,56 @@ mod tests {
             .expect("Failed to register native callback");
 
         assert_eq!(regex.replace_first_with_code("a"), "EMPTY");
+    }
+
+    #[test]
+    fn full_mode_native_find_all_numeric_with_code_collects_numeric_payloads() {
+        let regex = Regex::with_mode(r#"(?<digit>\d)(?{native:emit_digit})"#, ExecutionMode::Full)
+            .expect("Failed to compile native numeric collection pattern");
+        regex
+            .register_native("emit_digit", |ctx| {
+                let value = ctx
+                    .named("digit")
+                    .and_then(|digit| digit.parse::<f64>().ok())
+                    .unwrap_or_default();
+                ExecResult::Numeric(value)
+            })
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.find_first_numeric_with_code("7a8"), Some(7.0));
+        assert_eq!(regex.find_all_numeric_with_code("7a8"), vec![7.0, 8.0]);
+    }
+
+    #[test]
+    fn full_mode_native_numeric_helpers_skip_non_numeric_payloads() {
+        let regex = Regex::with_mode(r#"(?<ch>.)(?{native:emit_mixed})"#, ExecutionMode::Full)
+            .expect("Failed to compile native mixed-payload pattern");
+        regex
+            .register_native("emit_mixed", |ctx| match ctx.named("ch") {
+                Some("1") => ExecResult::Numeric(1.0),
+                Some("2") => ExecResult::Numeric(2.0),
+                Some(other) => ExecResult::Replacement(other.to_uppercase()),
+                None => ExecResult::Success,
+            })
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.find_first_numeric_with_code("a1b2"), Some(1.0));
+        assert_eq!(regex.find_all_numeric_with_code("a1b2"), vec![1.0, 2.0]);
+        assert_eq!(regex.find_first_numeric_with_code("ab"), None);
+        assert!(regex.find_all_numeric_with_code("ab").is_empty());
+    }
+
+    #[test]
+    fn full_mode_native_find_first_numeric_with_code_uses_winning_path_numeric() {
+        let regex = Regex::with_mode(r#"a*(?{native:emit_len})a"#, ExecutionMode::Full)
+            .expect("Failed to compile native backtracking numeric pattern");
+        regex
+            .register_native("emit_len", |ctx| {
+                ExecResult::Numeric(ctx.current_match().unwrap_or_default().len() as f64)
+            })
+            .expect("Failed to register native callback");
+
+        assert_eq!(regex.find_first_numeric_with_code("a"), Some(0.0));
     }
 
     #[test]

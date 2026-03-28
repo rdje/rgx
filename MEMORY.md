@@ -51,6 +51,7 @@ Live continuity memory for `rgx` sessions.
 - Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
 - Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered captures, named captures, and host-provided variables through the execution context.
 - Public `find_first` / `find_all` results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native code blocks while wasm remains predicate-only on the result side.
+- `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` are now shipped on the Rust API path and collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
 - `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, and variables.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
@@ -75,11 +76,26 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
-- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling and/or dedicated numeric-result APIs next.
+- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling next.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-28
+- Shipped the first dedicated numeric-result Rust APIs on top of winning-path code-block numeric results:
+  - added `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` in `rgx-core/src/lib.rs`
+  - implemented numeric collection behavior that extracts only `CodeBlockValue::Numeric(f64)` payloads and skips matches whose winning path produced only predicate or replacement results
+  - added regressions for first/all numeric collection, non-numeric payload skipping, and winning-path numeric selection under backtracking using native callbacks
+  - refreshed user-facing and repository-state docs so the new numeric-result helper layer is documented truthfully and the remaining wasm richer-result boundary stays explicit
+- Validation confirmed:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
 - Shipped the first replacement-oriented Rust APIs on top of winning-path code-block replacement results:
   - added `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` in `rgx-core/src/lib.rs`
   - implemented rebuilt-output behavior that consumes only `CodeBlockValue::Replacement(String)` and preserves original matched text when the winning path produces only predicate or numeric results

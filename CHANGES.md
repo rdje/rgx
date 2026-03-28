@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-28 - Added dedicated numeric-result Rust APIs for code-block results
+- Scope: public numeric-result API surface in `rgx-core`, regression coverage, and repository/user documentation refreshes.
+- Changes:
+  - Root cause: the first richer-result slice already surfaced winning-path `Numeric(f64)` values through `MatchResult.code_result`, but there was still no dedicated public API for collecting numeric payloads directly from match order.
+  - Added `Regex::find_first_numeric_with_code(&self, text: &str) -> Option<f64>` and `Regex::find_all_numeric_with_code(&self, text: &str) -> Vec<f64>` in `rgx-core/src/lib.rs`.
+  - Added internal helpers that extract only `CodeBlockValue::Numeric(f64)` values; matches with no code result or only a replacement payload are skipped so mixed code-block patterns remain usable.
+  - Added regressions for first/all numeric collection, non-numeric payload skipping, and winning-path numeric selection under backtracking using native callbacks on the default Rust API path.
+  - Refreshed `README.md`, `WARP.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped numeric-result helper layer and remaining wasm richer-result boundary are described truthfully.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm`
+  - `cargo check --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features all-languages`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - Host applications can now collect numeric code-block payloads directly without manually scanning `MatchResult.code_result`.
+  - The remaining richer-result gap is now narrower: wasm still remains predicate-only on the result side.
 ### 2026-03-28 - Added replacement-oriented Rust APIs for code-block replacement payloads
 - Scope: public replacement-oriented API surface in `rgx-core`, regression coverage, and repository/user documentation refreshes.
 - Changes:
