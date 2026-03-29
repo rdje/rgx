@@ -1,0 +1,74 @@
+id: PGEN-RGX-0004
+summary: |
+  Regex parser binds a trailing quantifier to a multi-character literal atom instead of the final literal character
+status: closed
+opened_at: 2026-03-29T12:47:39Z
+first_seen_at: 2026-03-29T12:47:39Z
+last_updated_at: 2026-03-29T17:17:55Z
+parser_backend: pgen
+parser_backend_version: 1.1.0
+rgx_commit: d1b2cff1ae5c23525e7d364771a7fec65fe01785
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    /tmp/pgen_issue_bundle_bin pgen-issues/artifacts/PGEN-RGX-0004/repro_input.txt /tmp/pgen-rgx-0004-bundle
+    PGEN_TRACE_VERBOSITY=debug /tmp/pgen-target/debug/parseability_probe --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0004/repro_input.txt /tmp/pgen-rgx-0004-bundle/probe_ast_dump.json --profile regex_default --trace --trace-log-file /tmp/pgen-rgx-0004-bundle/pgen_trace.log
+  pattern: 'ab+'
+  input: 'ab+'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 14db662df21f5845e7851833d5e04c16629dab7a
+    Regex parser release version: 1.1.0
+    Regex integration contract version: 1.1.0
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+    Rust toolchain: rustc 1.89.0 (29483883e 2025-08-04)
+    Relevant Cargo feature: generated_parsers
+    Stable report bundle: pgen-issues/artifacts/PGEN-RGX-0004/
+expected_behavior: |
+  The regex pattern ab+ should parse as the concatenation of:
+  - literal "a"
+  - quantified literal "b+"
+
+  In other words, the trailing "+" should bind only to the final literal character, not to the whole "ab" prefix.
+actual_behavior: |
+  The generated regex backend accepts ab+ successfully, but the AST dump emits a single piece spanning bytes 0..3 where:
+  - the atom is a literal spanning bytes 0..2 and covering both "a" and "b",
+  - and the separate quantifier node at bytes 2..3 applies to that whole piece.
+
+  That accepted tree groups the pattern as though the trailing "+" were attached to the full "ab" atom, not just to "b".
+reproduction: |
+  Exact tracked reproducer bundle:
+  - pgen-issues/artifacts/PGEN-RGX-0004/repro_input.txt
+  - pgen-issues/artifacts/PGEN-RGX-0004/pgen_contract.json
+  - pgen-issues/artifacts/PGEN-RGX-0004/pgen_parse_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0004/pgen_ast_dump_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0004/pgen_ast_dump.json
+  - pgen-issues/artifacts/PGEN-RGX-0004/pgen_trace.log
+
+  Key facts from the bundle:
+  - pgen_contract.json reports supports_regex_generated_backend=true, regex_parser_release_version=1.1.0, and regex_integration_contract_version=1.1.0.
+  - pgen_parse_outcome.json reports status=success with no diagnostic.
+  - pgen_ast_dump.json emits one piece spanning start=0, end=3.
+  - Inside that piece, the literal node spans start=0, end=2 and covers both literal chars "a" and "b".
+  - The quantifier node spans start=2, end=3 and therefore binds to the whole preceding piece.
+
+  A downstream that consumes the published accepted-tree grouping cannot reconstruct a(b+) from this tree; the grouping has already committed to (ab)+-style binding.
+impact: |
+  RGX cannot safely reconstruct quantifier semantics for patterns where a trailing quantifier follows a multi-character literal run.
+
+  More generally, this changes regex meaning in the accepted tree, so downstream semantic consumers would parse ab+ as a different language than the source pattern intended.
+resolution:
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: null
+  verified_at: 2026-03-29T17:17:55Z
+  verification_notes: |
+    Re-verified against the local PGEN checkout at commit bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77.
+    parser_embedding_api_contract() now reports regex_parser_release_version=1.1.1 and regex_integration_contract_version=1.1.1.
+    The same RGX-side repro now transports ab+ as final-atom quantifier binding rather than (ab)+-style grouping.

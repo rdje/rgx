@@ -27,11 +27,14 @@ rquickjs = { workspace = true, optional = true }
 
 # Utilities
 tracing = { workspace = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+pgen = { path = "../../pgen/rust", default-features = false, features = ["generated_parsers"], optional = true }
 
 [features]
 default = ["std"]
 std = []
-pgen-parser = []
+pgen-parser = ["dep:pgen", "dep:serde", "dep:serde_json"]
 wasm = ["wasmtime"]
 lua = ["mlua"]
 javascript = ["rquickjs"]

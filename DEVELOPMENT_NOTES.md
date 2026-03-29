@@ -64,10 +64,19 @@ Pipeline in `rgx-core`:
 - Differential supported-syntax parity now includes negated shorthand character classes (`\D`, `\W`, `\S`) for first-match, find-all, and explicit no-match behavior
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
 - Parser-path regressions now explicitly cover lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`
+- The `pgen-parser` feature now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs` instead of a recursive-descent placeholder path
+- The PGEN adapter currently converts the stable PGEN regex AST dump into RGX AST nodes for:
+  - groups
+  - lookarounds
+  - conditionals
+  - quantifiers / concatenation / alternation structure
+  - leaf atoms via exact-slice fallback into the recursive-descent parser so RGX AST semantics stay aligned
+- The local backend choice under `pgen-parser` is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can force either the real PGEN backend or the recursive-descent reference backend without changing callers
 - `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
 - Local-first CI path now exists:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
-  - `./scripts/run-local-ci.sh` now covers the shared `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) in addition to default workspace checks
+  - `./scripts/run-local-ci.sh` now covers the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) plus `rgx-cli --features pgen-parser`
+  - hosted GitHub CI currently exports `RGX_SKIP_PGEN_CHECKS=1` so the workflow stays green until the verified PGEN `1.1.1` revision is published upstream
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
 - `Cargo.lock` is intentionally tracked so local validation and GitHub CI share the same dependency resolution
 - Core/CLI logging now supports UVM-style verbosity control and file routing:
@@ -126,7 +135,29 @@ Pipeline in `rgx-core`:
   - parser AST metadata invariants required by downstream compiler/runtime
   - parse-fail error mapping consistency (`RgxError::Compile`)
   - explicit parse-success/compile-fail guardrails for unintegrated runtime features
+- Current widened local reference fixtures now cover:
+  - empty patterns
+  - anchors (`$`, `\A`, `\Z`, `\z`)
+  - range quantifiers
+  - shorthand / Unicode property classes
+  - group families
+  - lookarounds
+  - conditionals with and without false branches
+  - code-block tags (`lua`, `js`, `javascript`, `native`, `wasm`)
+  - recursion and numeric backreferences
 - Suspected PGEN parser misbehavior should be reported with the structured bundle described by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
+- The current live PGEN regex caveats are narrower than the original complaint set:
+  - the contract is now integration-ready for basic RGX rollout,
+  - but AST consumers still need release pinning because the stable JSON schema does not freeze detailed `rule_name` taxonomy across upgrades,
+  - and the current embedded code-block contract is now structurally specified for opaque generic / `lua` / `js` / `javascript` payloads, but still intentionally narrower than arbitrary valid JS/Lua and still excludes published `native` / `wasm` support.
+- The current PGEN-backed integration still depends on the local sibling checkout at `../pgen`:
+  - the verified fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
+  - that commit is still ahead of PGEN `origin/main`
+  - so RGX now has real local PGEN coverage, but the distribution story for clean hosted builds still needs an explicit decision (publish upstream, vendor snapshot, or keep local-checkout integration for now)
+- The current forwardable recommendation for PGEN lives in `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`:
+  - keep parser guarantees structural,
+  - treat `lua` / `js` / `javascript` as source-body tags best validated by the downstream backend,
+  - and keep `native` / `wasm` reference-shaped rather than implying arbitrary inline source support.
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
@@ -154,6 +185,7 @@ Pipeline in `rgx-core`:
 - `CHANGES.md` is the living progress ledger
 - `README.md` is the single entry point for project onboarding/navigation and should be updated when objective/onboarding/path maps change (not required on every commit)
 - `COMMIT.md` is the authoritative commit-workflow contract and should be followed for every commit
+- Commit formatting is intentionally scoped to the RGX workspace packages so optional external parser dependencies do not leak into RGX validation.
 - Commit workflow now includes `cargo clippy --workspace --all-targets` with a hard gate: no clippy errors before commit (warnings currently tolerated).
 - `RUST_CODEBASE_ANALYSIS.md` is the live roadmap-grounded assessment of the Rust workspace and should be updated when implementation status, feature-flag readiness, or roadmap alignment materially changes.
 - `MEMORY.md` is the live cross-session continuity memory and must be updated after completed tasks before commit workflow

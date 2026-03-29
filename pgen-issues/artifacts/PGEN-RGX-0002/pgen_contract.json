@@ -1,0 +1,64 @@
+{
+  "api_version": "1.2.0",
+  "schema_version": 2,
+  "deterministic_by_default": true,
+  "input_ownership_model": "borrowed_str",
+  "parse_session_model": "stateless_per_call",
+  "zero_copy_input_boundary": true,
+  "stable_diagnostic_codes": [
+    "E_BACKEND_UNAVAILABLE",
+    "E_INPUT_TOO_LARGE",
+    "E_INVALID_ARGUMENT",
+    "E_INVALID_LIMITS",
+    "E_PARSE_FAILURE",
+    "E_UNSUPPORTED_PROFILE"
+  ],
+  "stable_diagnostic_location_fields": [
+    "byte_offset",
+    "line",
+    "column"
+  ],
+  "supported_grammars": [
+    "systemverilog",
+    "vhdl",
+    "regex"
+  ],
+  "supported_profiles": [
+    "sv_2017",
+    "sv_2023",
+    "vhdl_1076_2019",
+    "regex_default"
+  ],
+  "profile_matrix": [
+    {
+      "grammar": "systemverilog",
+      "profiles": [
+        "sv_2017",
+        "sv_2023"
+      ]
+    },
+    {
+      "grammar": "vhdl",
+      "profiles": [
+        "vhdl_1076_2019"
+      ]
+    },
+    {
+      "grammar": "regex",
+      "profiles": [
+        "regex_default"
+      ]
+    }
+  ],
+  "supports_systemverilog_generated_backend": false,
+  "supports_vhdl_generated_backend": false,
+  "supports_regex_generated_backend": true,
+  "regex_integration_contract_version": "1.1.0",
+  "regex_parser_release_version": "1.1.0",
+  "regex_ast_dump_schema_version": 1,
+  "regex_generated_backend_required_feature": "generated_parsers",
+  "regex_generated_backend_required_artifact": "generated/regex_parser.rs",
+  "regex_generated_backend_env_override": "PGEN_REGEX_PARSER_PATH",
+  "regex_frontend_json_artifact": "generated/regex.json",
+  "regex_frontend_json_role": "PGEN-generated frontend normalization and provenance artifact; not a stable downstream runtime input or AST contract"
+}

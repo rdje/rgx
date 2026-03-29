@@ -14,6 +14,70 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Activated the real local PGEN backend behind `pgen-parser`
+- Scope: parser-backend rollout, conformance hardening, CLI feature plumbing, and local workflow updates.
+- Changes:
+  - Replaced the `pgen-parser` placeholder path in `rgx-core/src/parsing.rs` with a real PGEN AST-dump adapter guarded by contract/release version checks that require regex contract/release `>= 1.1.1`.
+  - Added a one-constant local backend switch (`PGEN_FEATURE_BACKEND`) so the `pgen-parser` feature can force either the real PGEN backend or the recursive-descent reference backend without changing call sites.
+  - Expanded parser conformance fixtures to cover anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes against the recursive-descent reference AST.
+  - Added `rgx-cli` feature passthrough for `pgen-parser` and validated the CLI crate against the real PGEN-backed parser path.
+  - Tightened repo workflow docs/scripts so `cargo fmt` is scoped to the RGX workspace packages instead of leaking into the sibling `pgen` checkout.
+  - Tracked the local `pgen-issues/` report bundles so the untracked-file guard no longer blocks the local CI path.
+  - Taught hosted GitHub CI to export `RGX_SKIP_PGEN_CHECKS=1` temporarily while the verified PGEN fix revision remains unpublished upstream.
+- Validation:
+  - `./scripts/run-local-ci.sh`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm --check`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --offline`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser --offline`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features "pgen-parser lua javascript wasm" --offline`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features pgen-parser --offline`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets --offline`
+- Notes/impact:
+  - The `pgen-parser` feature is now a real local alternative parser backend rather than a recursive-descent conformance placeholder.
+  - The four previously reported RGX transport bugs are fixed in the local PGEN `1.1.1` checkout and no new show-stopper surfaced in the widened local regression sweep.
+  - The remaining blocker is distribution: the verified PGEN fix commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` is still only in the sibling local checkout and is not yet available on PGEN `origin/main`.
+  - Local RGX development now exercises the real PGEN backend end-to-end, while hosted CI temporarily skips only the `pgen-parser` slice until upstream publication catches up.
+### 2026-03-29 - Refreshed the PGEN embedded-code review docs for contract 1.1.0
+- Scope: downstream PGEN contract re-review, embedded-code follow-up, and continuity refreshes.
+- Changes:
+  - Re-reviewed the new `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` `1.1.0` revision against the RGX complaint/proposal documents.
+  - Updated `PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md` so it no longer claims that untagged blocks or `lua` / `js` tag classes are undefined; the live complaint surface now focuses on:
+    - AST semantic upgrade discipline,
+    - intentionally narrow JS/Lua structural guarantees,
+    - lack of published `native` / `wasm` tag support,
+    - and the still-out-of-scope runtime/wrapper semantics.
+  - Updated `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md` with an explicit upstream-adoption-status section showing which parts of the proposal were effectively adopted by contract `1.1.0` and which parts remain open.
+- Validation:
+  - Re-read the new upstream contract and both RGX-side review documents to confirm the local complaint/proposal set now matches the published `1.1.0` code-block contract.
+- Notes/impact:
+  - The RGX-side review docs are now aligned with the newer upstream contract instead of continuing to complain about points PGEN has already addressed.
+  - The remaining open parser-contract discussion is now mainly about scope widening (`native` / `wasm`, stronger JS/Lua shielding), not baseline code-block meaning.
+### 2026-03-28 - Added a forwardable PGEN embedded code-block contract proposal
+- Scope: downstream PGEN integration guidance, documentation indexing, and continuity refreshes.
+- Changes:
+  - Added `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md` as a git-tracked proposal document describing a recommended embedded code-block contract shape for PGEN.
+  - Proposed an explicit split between parser-layer structural guarantees and runtime-layer semantics, including recommended treatment for untagged blocks, source-body tags (`lua`, `js`, `javascript`), and reference-style tags (`native`, `wasm`).
+  - Updated `README.md` so the root markdown inventory now includes both the PGEN complaint document and the new embedded-code-block proposal document.
+- Validation:
+  - Re-read `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md` after creation to confirm the forwarded contract shape is internally consistent with the current RGX runtime/backend model.
+  - Re-read the updated `README.md` markdown inventory to confirm it now matches the tracked root markdown files relevant to the current PGEN review.
+- Notes/impact:
+  - RGX now has a separate forwardable “what PGEN could adopt” document instead of only a caveat list.
+  - The proposal keeps the parser contract honest by distinguishing structural code-block parsing from backend-owned language validation/execution.
+### 2026-03-28 - Refreshed the PGEN regex complaint down to the remaining live caveats
+- Scope: downstream PGEN integration review follow-up and continuity documentation.
+- Changes:
+  - Reworked `PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md` so it now distinguishes the complaints already addressed by the 2026-03-28 upstream contract refresh from the caveats that still remain live.
+  - Narrowed the live complaint surface to the remaining non-blocking integration limits:
+    - AST upgrade discipline is still only envelope-stable, not a fully frozen semantic rule taxonomy.
+    - Embedded code-block support is still structurally specified rather than per-language specified.
+    - Untagged `(?{...})` blocks still need an explicit downstream policy.
+    - Runtime code-block semantics and host-literal wrapper parsing remain intentionally out of scope.
+- Validation:
+  - Re-read `PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md` after the rewrite to confirm the forwarded caveat list is precise and no longer mixes resolved complaints with live ones.
+- Notes/impact:
+  - The RGX-side complaint document is now suitable to forward upstream without forcing PGEN to re-litigate already-fixed contract issues.
+  - The remaining upstream discussion is now focused on embedded-code-block contract clarity and AST upgrade expectations rather than basic contract plumbing.
 ### 2026-03-28 - Automated the rgx-core feature matrix in local/GitHub CI
 - Scope: local-first CI automation, GitHub workflow prerequisites, and validation/state documentation refreshes.
 - Changes:

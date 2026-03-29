@@ -37,6 +37,7 @@ Live continuity memory for `rgx` sessions.
 - Use `git_message_brief.txt` with `git commit -F git_message_brief.txt`.
 - Do not wait for an explicit user prompt to start the commit workflow after a completed task; begin it automatically once task work, validation, and doc updates are done.
 - New AI/LLM sessions should bootstrap through `SESSION_BOOTSTRAP.md`; `README.md` now ends with an explicit reminder to read that file and start there.
+- Run `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` before commit; keep external dependencies out of the RGX formatting gate.
 - Run `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` before commit and fix all clippy errors first (warnings tolerated for now).
 - Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
 - After commit:
@@ -46,6 +47,24 @@ Live continuity memory for `rgx` sessions.
 ## Current technical snapshot
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
+- PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.
+- After the upstream `1.1.0` contract refresh, the live complaint surface is narrower again: plain `(?{...})` and `lua` / `js` / `javascript` payload classes are now explicitly defined, while `native` / `wasm` tags, stronger JS/Lua shielding, runtime semantics, and AST semantic upgrade guarantees remain the main open points.
+- The `pgen-parser` feature now exercises a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`:
+  - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)
+  - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
+  - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
+- Local validation against the real PGEN backend is currently green for:
+  - `./scripts/run-local-ci.sh`
+  - `cargo test -p rgx-core --offline`
+  - `cargo test -p rgx-core --features pgen-parser --offline`
+  - `cargo test -p rgx-core --features "pgen-parser lua javascript wasm" --offline`
+  - `cargo test -p rgx-cli --features pgen-parser --offline`
+  - `cargo clippy --workspace --all-targets --offline`
+- The remaining blocker is distribution, not parser correctness:
+  - the verified PGEN fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
+  - the local `pgen` checkout is `177` commits ahead of `origin/main`
+  - so RGX currently depends on the sibling `../pgen` checkout for the real PGEN backend
+  - clean hosted/distributed integration still needs an explicit choice (upstream publish, vendored snapshot, or keep local-checkout dependency for now)
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
@@ -60,7 +79,8 @@ Live continuity memory for `rgx` sessions.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
 - Local-first CI is now available:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
-  - `./scripts/run-local-ci.sh` now covers the shared `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) in addition to default workspace checks
+  - `./scripts/run-local-ci.sh` now covers the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) plus `rgx-cli --features pgen-parser`
+  - hosted GitHub CI currently exports `RGX_SKIP_PGEN_CHECKS=1` until the verified PGEN `1.1.1` revision is published upstream
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source/CI execution files, and currently reports that there are no compile-time `include!`-style macros in workspace source
 - `Cargo.lock` is now intentionally tracked so local and GitHub CI use the same dependency resolution
 - `RUST_CODEBASE_ANALYSIS.md` now exists as the live roadmap-grounded assessment of the Rust workspace and is part of the Rust commit workflow review path.
@@ -79,11 +99,43 @@ Live continuity memory for `rgx` sessions.
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling next.
-- When the real PGEN backend lands, capture every suspected parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
+- Decide how to distribute the real PGEN backend cleanly now that the verified `1.1.1` fix revision exists only in the local sibling checkout.
+- Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
+### 2026-03-29
+- Verified that the four RGX-reported PGEN transport bugs are fixed in the local PGEN `1.1.1` checkout at `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
+- Replaced the `pgen-parser` placeholder path with a real PGEN AST-dump adapter in `rgx-core/src/parsing.rs`:
+  - contract gates now require regex parser/integration release `>= 1.1.1`
+  - PGEN AST transport is converted into canonical RGX AST nodes for structure-heavy constructs while leaf atoms are re-parsed from exact source slices to preserve RGX semantics
+  - local backend choice is controlled by one constant (`PGEN_FEATURE_BACKEND`)
+- Widened the parser conformance fixtures so the active parser and PGEN backend are both checked against the recursive-descent reference AST on anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
+- Added `rgx-cli` feature passthrough for `pgen-parser` and validated the CLI crate against the real PGEN backend too.
+- Found a distribution blocker after validation:
+  - the verified PGEN fix commit is only in the local sibling checkout and is not present on PGEN `origin/main`
+  - a clean Git dependency pin is therefore not available yet
+  - the current local integration still depends on `../pgen`
+- Updated repo workflow/docs accordingly:
+  - `cargo fmt` commit/local-CI gates are now scoped to RGX workspace packages so they do not format the sibling `pgen` checkout
+  - `README.md`, `DEVELOPMENT_NOTES.md`, and `RUST_CODEBASE_ANALYSIS.md` need to keep reflecting that the parser backend is real locally while the distribution decision is still open
+  - `./scripts/run-local-ci.sh` is now locally strict about `../pgen` by default but allows hosted CI to skip `pgen-parser` checks temporarily via `RGX_SKIP_PGEN_CHECKS=1`
+- Re-reviewed the new upstream `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` `1.1.0` revision:
+  - plain `(?{...})` is now explicitly preserved as opaque generic payload
+  - `lua` / `js` / `javascript` are now explicitly published as opaque source-body payload classes
+  - published parser-layer structural guarantees now explicitly include balanced braces, single-quoted strings, double-quoted strings, and escapes
+  - the contract now also explicitly says it does not promise arbitrary valid JS/Lua payload acceptance, JavaScript comment/template-literal shielding, Lua long-bracket shielding, or published `native` / `wasm` tags
+- Refreshed the local complaint/proposal docs so they now match that newer upstream contract instead of the earlier narrower version.
 ### 2026-03-28
+- Refined the PGEN regex integration follow-up from a pure complaint into a complaint-plus-proposal pair:
+  - refreshed `PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md` so it now records only the remaining live caveats after the 2026-03-28 upstream contract refresh
+  - added `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md` as a forwardable suggested contract shape for embedded code blocks
+  - the current recommendation is:
+    - keep parser guarantees structural,
+    - avoid implying that arbitrary inline code is valid for every tag,
+    - treat `lua` / `js` / `javascript` as source-body tags best validated by the downstream backend,
+    - and keep `native` / `wasm` reference-shaped rather than arbitrary-source-shaped
+  - `README.md` now indexes both PGEN review documents explicitly
 - Automated the shared local/GitHub validation loop for the shipped feature matrix:
   - `scripts/run-local-ci.sh` now runs the `rgx-core` feature-gated checks for `pgen-parser`, `lua`, `javascript`, `wasm`, and combined `all-languages`
   - `.github/workflows/ci.yml` now installs Lua 5.4 development headers so the hosted path can run the same matrix

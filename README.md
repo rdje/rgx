@@ -58,6 +58,8 @@ If you are new to the repo, use this order:
 - [`COMMIT.md`](COMMIT.md) — commit workflow contract and invariants
 - [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) — technical knowledge base
 - [`MEMORY.md`](MEMORY.md) — continuity memory across sessions
+- [`PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md`](PGEN_REGEX_PARSER_INTEGRATION_COMPLAINT.md) — current RGX-side caveat list for the published PGEN regex integration contract
+- [`PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`](PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md) — proposed embedded code-block contract shape to forward upstream
 - [`PROJECT_VISION.md`](PROJECT_VISION.md) — long-term project direction
 - [`ROADMAP.md`](ROADMAP.md) — execution roadmap (`Now`/`Next`/`Later`)
 - [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) — live roadmap-grounded Rust workspace analysis
@@ -90,10 +92,15 @@ Run the same CI checks locally before pushing:
 ```bash
 ./scripts/run-local-ci.sh
 ```
-That shared path now covers:
+The current `pgen-parser` path expects a sibling local checkout at `../pgen` carrying the PGEN regex `1.1.1` fixes.
+
+That local path now covers:
 - workspace formatting/tests
 - `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, and `wasm`
+- `rgx-cli` build/test coverage with `--features pgen-parser`
 - combined-language build coverage through `--features all-languages`
+
+Hosted GitHub CI currently sets `RGX_SKIP_PGEN_CHECKS=1` until that fixed PGEN revision is published upstream, so the full `pgen-parser` path remains a local-checkout-backed validation path for now.
 
 Tracing examples:
 ```bash
@@ -114,5 +121,7 @@ Lua, JavaScript, and native code blocks can now also return first-slice richer n
 The Rust API now also ships first dedicated numeric-result and replacement-oriented helpers on top of that slice: `find_first_numeric_with_code(...)` / `find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` payloads in match order, while `replace_first_with_code(...)` / `replace_all_with_code(...)` consume winning-path `Replacement(String)` payloads and preserve non-replacement matches unchanged.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing read-only host imports for current position, full input text, numbered captures, named captures, and host-provided variables through the `rgx` namespace; richer non-boolean results are still deferred there.
 Some advanced constructs still remain intentionally parsed-but-unintegrated, including backreferences, recursion, conditionals, and Unicode property classes. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).
+The `pgen-parser` feature now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`, with a one-constant local switch for forcing the recursive-descent reference backend when needed.
 Current PGEN regex integration review is intentionally constrained to the published `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` surface and its referenced contract documents.
+The current integration dependency is still local-checkout-based because the verified PGEN `1.1.1` fix revision is present in the sibling `pgen` checkout but not yet published on PGEN `origin/main`.
 Read SESSION_BOOTSTRAP.md and start from there.

@@ -1,10 +1,10 @@
 # PARSER CONTRACT
-Canonical interoperability contract between `rgx` parser backends (current recursive-descent and future PGEN integration).
+Canonical interoperability contract between `rgx` parser backends (recursive-descent reference backend and the feature-gated PGEN backend).
 
 ## Contract metadata
 - Status: active
 - Version: `v0.1.5`
-- Last updated: `2026-03-28`
+- Last updated: `2026-03-29`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -82,7 +82,11 @@ The conformance harness checks:
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for unintegrated runtime features.
 
-When `pgen-parser` is enabled, the harness also checks the PGEN backend type against the same reference fixtures.
+When `pgen-parser` is enabled, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
+
+Current rollout note:
+- The `pgen-parser` feature now exercises a real PGEN AST-dump adapter in `rgx-core/src/parsing.rs`.
+- The local backend choice under that feature is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the PGEN backend and the recursive-descent reference backend without rewriting call sites.
 ## PGEN issue reporting and upstream handoff
 When RGX exercises a real PGEN-backed parser path, suspected parser misbehavior should be reported using the structured bundle described in `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 

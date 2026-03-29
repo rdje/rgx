@@ -35,4 +35,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run local CI script
+        env:
+          RGX_SKIP_PGEN_CHECKS: "1"
         run: ./scripts/run-local-ci.sh

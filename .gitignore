@@ -30,6 +30,7 @@ Desktop.ini
 
 # Logs and debugging
 *.log
+!pgen-issues/artifacts/*/pgen_trace.log
 *.out
 *.err
 debug/
@@ -99,4 +100,3 @@ wheels/
 .env
 .env.local
 config.local.*
-

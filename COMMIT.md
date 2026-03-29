@@ -37,7 +37,7 @@ Live commit workflow contract for `rgx`.
 ## Exact commit workflow (ordered)
 1. Finish the task implementation and validation.
 2. Run mandatory quality gate commands:
-   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --all`
+   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
    - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
    - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
    - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
@@ -74,6 +74,7 @@ Live commit workflow contract for `rgx`.
 - Clippy warnings are tolerated for now unless policy changes.
 - Keep commits task-scoped and validation-backed.
 - Never finalize a Rust-focused commit without deciding whether `RUST_CODEBASE_ANALYSIS.md` changed.
+- Keep the formatting gate scoped to RGX workspace packages so local external dependencies (for example the sibling `pgen` checkout) do not leak into RGX commit validation.
 
 ## Handoff usage
 - New AI should read `MEMORY.md` first, then `COMMIT.md`.

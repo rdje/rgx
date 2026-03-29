@@ -1,0 +1,77 @@
+id: PGEN-RGX-0001
+summary: |
+  Regex parser accepts (?R) but classifies it as inline modifiers instead of whole-pattern recursion
+status: closed
+opened_at: 2026-03-29T12:47:39Z
+first_seen_at: 2026-03-29T12:47:39Z
+last_updated_at: 2026-03-29T17:17:55Z
+parser_backend: pgen
+parser_backend_version: 1.1.0
+rgx_commit: d1b2cff1ae5c23525e7d364771a7fec65fe01785
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    /tmp/pgen_issue_bundle_bin pgen-issues/artifacts/PGEN-RGX-0001/repro_input.txt /tmp/pgen-rgx-0001-bundle
+    PGEN_TRACE_VERBOSITY=debug /tmp/pgen-target/debug/parseability_probe --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0001/repro_input.txt /tmp/pgen-rgx-0001-bundle/probe_ast_dump.json --profile regex_default --trace --trace-log-file /tmp/pgen-rgx-0001-bundle/pgen_trace.log
+  pattern: '(?R)'
+  input: '(?R)'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 14db662df21f5845e7851833d5e04c16629dab7a
+    Regex parser release version: 1.1.0
+    Regex integration contract version: 1.1.0
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+    Rust toolchain: rustc 1.89.0 (29483883e 2025-08-04)
+    Relevant Cargo feature: generated_parsers
+    Stable report bundle: pgen-issues/artifacts/PGEN-RGX-0001/
+expected_behavior: |
+  If whole-pattern recursion (?R) is intentionally supported, the parser should classify it in the same recursion/subroutine family as (?1) and (?&name), not as inline modifiers.
+
+  If whole-pattern recursion is intentionally out of scope for the published regex contract, the generated backend should reject (?R) deterministically instead of accepting it as a different construct.
+actual_behavior: |
+  The generated regex backend accepts (?R) successfully, but the AST dump routes it through:
+  - inline_modifiers
+  - modifier_spec
+  - modifier_group
+  - modifier_char = "R"
+
+  No recursion or subroutine node appears in the accepted tree.
+reproduction: |
+  Exact tracked reproducer bundle:
+  - pgen-issues/artifacts/PGEN-RGX-0001/repro_input.txt
+  - pgen-issues/artifacts/PGEN-RGX-0001/pgen_contract.json
+  - pgen-issues/artifacts/PGEN-RGX-0001/pgen_parse_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0001/pgen_ast_dump_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0001/pgen_ast_dump.json
+  - pgen-issues/artifacts/PGEN-RGX-0001/pgen_trace.log
+
+  Key facts from the bundle:
+  - pgen_contract.json reports supports_regex_generated_backend=true, regex_parser_release_version=1.1.0, and regex_integration_contract_version=1.1.0.
+  - pgen_parse_outcome.json reports status=success with no diagnostic.
+  - pgen_ast_dump.json classifies the accepted construct as inline_modifiers spanning bytes 0..4.
+  - Within that tree, the "R" token is emitted as modifier_char inside modifier_group.
+
+  Useful control checks run against the same generated backend:
+  - (?1) parses as subroutine_call with subroutine_target=digits.
+  - (?&name) parses as subroutine_call with subroutine_target carrying the named target.
+
+  That control evidence suggests the misclassification is specific to (?R), not the full recursion/subroutine family.
+impact: |
+  RGX cannot safely map (?R) into its own recursion AST or compile-boundary error path if the published PGEN transport classifies it as inline modifiers.
+
+  More importantly for PGEN, the current behavior is ambiguous for downstreams: the backend accepts the syntax, but the accepted tree says it is a different construct.
+resolution:
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: null
+  verified_at: 2026-03-29T17:17:55Z
+  verification_notes: |
+    Re-verified against the local PGEN checkout at commit bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77.
+    parser_embedding_api_contract() now reports regex_parser_release_version=1.1.1 and regex_integration_contract_version=1.1.1.
+    The same RGX-side repro now transports (?R) through the recursion/subroutine family instead of inline_modifiers.
