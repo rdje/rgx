@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Logged embedded code-block language direction for future work
+- Scope: roadmap steering, durable design notes, PGEN-facing contract guidance, and continuity capture.
+- Changes:
+  - Updated `ROADMAP.md` so future code-block expansion now clearly prioritizes the inline/source-body lane (`lua`, `js` / `javascript`, future `rhai`) ahead of additional wasm-centric work.
+  - Refined `DEVELOPMENT_NOTES.md` to record the current product direction: wasm and native stay supported as advanced reference-style backends, while Julia/Python are intentionally deferred for later evaluation.
+  - Extended `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md` so future upstream marker requests can treat `rhai` as the next source-body tag candidate alongside `lua` / `js` / `javascript`.
+  - Captured the design decision in `MEMORY.md` so later sessions continue from the same embedded-language prioritization without having to reconstruct this discussion from chat history.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+- Notes/impact:
+  - This is a planning-only update; no runtime behavior changed.
+  - Future implementation and future PGEN coordination now have a clear default direction for embedded language growth.
+
 ### 2026-03-30 - Exposed current match metadata to code-block runtimes
 - Scope: execution-context expansion, wasm ABI growth, regression coverage, and status-doc refreshes.
 - Changes:

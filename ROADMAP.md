@@ -78,17 +78,21 @@ Live forward-looking tracker for rgx.
 
 ### Embedded code-path expansion beyond phase 1
 - Status: `planned`
-- Goal: extend the newly shipped code-block slice beyond the current Lua/JavaScript/native/wasm surface.
+- Goal: refine the post-phase-1 code-block surface so first-class inline languages and advanced reference-style backends are treated differently.
 - Scope:
-  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, current match metadata, full input text, numbered captures, named captures, host-provided variables, and initial `emit_numeric` / `emit_replacement` result helpers
-  - richer non-boolean result handling on the wasm path beyond the current host-emitted numeric/replacement layer
-  - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
+  - keep Lua and JavaScript as the primary shipped inline source-body languages
+  - treat wasm as an advanced registered-module/reference-style path rather than the main everyday inline code-block UX target
+  - decide later whether native/wasm configuration should expand beyond the current Rust-API-only surface once the inline-language story is mature
+  - only revisit richer wasm ABI/result work after the preferred inline-language expansion path is clearer
 
 ### Multi-language code-block runtime expansion
 - Status: `planned`
 - Goal: extend code-block runtime support beyond initial languages while preserving deterministic behavior and safety guarantees.
 - Scope:
-  - language runtime integration sequence after the current shipped Lua/JavaScript/native/wasm slice
+  - prioritize `rhai` as the next candidate first-class inline/source-body language after the current shipped Lua/JavaScript slice
+  - keep `lua`, `js`, `javascript`, and future `rhai` aligned around the same source-body execution contract shape where practical
+  - explicitly defer heavier embedded runtimes such as Python and Julia until after the `rhai` decision and current ergonomics/safety work
+  - treat wasm and native as advanced reference-style backends rather than the primary model for new inline language growth
   - shared execution contracts, resource limits, and sandbox controls
 
 ## Later (strategic)

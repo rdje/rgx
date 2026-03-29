@@ -15,6 +15,7 @@ The upstream `1.1.0` contract already adopted a meaningful subset of the recomme
 - runtime semantics remain explicitly outside parser scope.
 
 What remains unapplied from the stronger version of this proposal:
+- no published support for a `rhai` source-body tag yet,
 - no published support for `native` or `wasm` tags,
 - no guarantee of arbitrary valid Lua/JavaScript source acceptance,
 - no published shielding guarantee for JavaScript comments/template literals or Lua long-bracket forms,
@@ -84,6 +85,7 @@ Recommended for:
 - `lua`
 - `js`
 - `javascript`
+- future `rhai`
 
 Recommended meaning:
 - parser guarantees structurally correct payload capture,
@@ -158,6 +160,7 @@ This is the most practical contract for:
 - `lua`
 - `js`
 - `javascript`
+- `rhai`
 
 ### Level 3 - Full parser-owned subgrammar
 Meaning:
@@ -177,6 +180,10 @@ PGEN should publish something close to the following.
 ### `js` / `javascript`
 - recommended contract level: Level 2
 - payload meaning: opaque JavaScript source body preserved by the regex parser and expected to be validated by the JavaScript-capable downstream runtime
+
+### `rhai`
+- recommended contract level: Level 2
+- payload meaning: opaque Rhai source body preserved by the regex parser and expected to be validated by the Rhai-capable downstream runtime
 
 ### `native`
 - recommended contract level: reference-style Class B
@@ -219,7 +226,7 @@ PGEN could adopt wording close to this:
 - The regex parser structurally supports embedded code blocks through `(?{...})` and `(?{lang:...})`.
 - Structural support means the parser recognizes code-block syntax, preserves the payload text, and reports malformed code-block syntax with normal parser diagnostics.
 - Unless explicitly stated otherwise for a specific language tag, structural support does not by itself mean that the payload is validated as source code in that language.
-- `lua`, `js`, and `javascript` payloads are preserved as opaque source bodies for downstream validation/execution.
+- `lua`, `js`, `javascript`, and any adopted `rhai` payloads are preserved as opaque source bodies for downstream validation/execution.
 - `native` and `wasm` payloads are reference-style payloads, not arbitrary inline source code, and their exact allowed formats are defined by the downstream runtime contract.
 - Untagged `(?{...})` blocks are either rejected or preserved as opaque generic payloads; they must not remain accepted with undefined meaning.
 
@@ -229,9 +236,11 @@ This split lets RGX integrate PGEN without requiring PGEN to own all execution s
 It gives RGX a clear path:
 - trust PGEN for robust code-block recognition and preservation,
 - map tags to RGX runtime backends,
+- keep the everyday inline-language track centered on `lua` / `js` / `javascript` and future `rhai`,
 - keep `native` and `wasm` reference-shaped,
-- and let Lua/JavaScript validation happen in the actual execution backend.
+- defer heavier runtimes such as Julia/Python until later product/runtime decisions,
+- and let Lua/JavaScript/Rhai validation happen in the actual execution backend.
 
 That produces a contract that is honest, implementable, and much less likely to break on edge-case snippets than an implicit claim of "arbitrary code for every selected language."
 
-The current upstream `1.1.0` direction is closer to this proposal than the earlier contract was; the main remaining gap for RGX is whether PGEN eventually wants to publish `native` / `wasm` tag support and whether it wants to widen the structural shielding guarantees for Lua/JavaScript bodies.
+The current upstream `1.1.0` direction is closer to this proposal than the earlier contract was; the main remaining gap for RGX is whether PGEN eventually wants to publish `rhai` alongside `lua` / `js` / `javascript`, whether it wants to publish `native` / `wasm` tag support, and whether it wants to widen the structural shielding guarantees for source-body tags.

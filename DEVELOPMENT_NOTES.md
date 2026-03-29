@@ -11,7 +11,11 @@ Technical knowledge base for day-to-day engineering work in rgx.
   - feature coverage
   - runtime performance
   - matching accuracy
-- rgx also targets broader code-block language support over time (e.g., JavaScript, Lua, Julia, and additional runtimes), with explicit safety and sandbox guarantees.
+- rgx also targets broader code-block language support over time, but the current preferred inline-language direction is:
+  - first-class source-body languages: JavaScript, Lua, and a future Rhai track
+  - advanced reference-style backends: native and wasm
+  - explicitly deferred heavier runtimes for later evaluation: Julia and Python
+  - all with explicit safety and sandbox guarantees
 
 ## Current architecture (practical view)
 Pipeline in `rgx-core`:
@@ -169,7 +173,7 @@ Pipeline in `rgx-core`:
   - hosted CI for the private submodule may need an explicit token such as `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
 - The current forwardable recommendation for PGEN lives in `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`:
   - keep parser guarantees structural,
-  - treat `lua` / `js` / `javascript` as source-body tags best validated by the downstream backend,
+  - treat `lua` / `js` / `javascript` and future `rhai` as source-body tags best validated by the downstream backend,
   - and keep `native` / `wasm` reference-shaped rather than implying arbitrary inline source support.
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
@@ -178,7 +182,9 @@ Pipeline in `rgx-core`:
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
+- The current product direction is to avoid using wasm as the benchmark for everyday inline code-block ergonomics; it remains supported, but future inline-language prioritization should compare against Lua/JavaScript and the prospective Rhai track first
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
+- Julia/Python embedding remain intentionally deferred until after the Lua/JavaScript/Rhai direction is clearer
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
 - Benchmark trend capture is still separate from the default validation loop
 
@@ -190,7 +196,7 @@ Pipeline in `rgx-core`:
 5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
 6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-8. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm ABI/result work and any future non-Rust configuration surface
+8. Expand the staged code-block rollout with the preferred inline-language direction in mind: prioritize Lua/JavaScript ergonomics and Rhai evaluation first, while treating further wasm ABI/result work as secondary unless product needs force it higher
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
