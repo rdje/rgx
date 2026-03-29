@@ -1177,6 +1177,35 @@ mod tests {
     }
 
     #[test]
+    fn full_mode_native_code_block_can_access_match_metadata() {
+        let regex = Regex::with_mode(
+            r#"foo|cat(?{native:check_match_metadata})"#,
+            ExecutionMode::Full,
+        )
+        .expect("Failed to compile native match-metadata pattern");
+        regex
+            .register_native("check_match_metadata", |ctx| {
+                if ctx.current_match() == Some("cat")
+                    && ctx.match_start() == 2
+                    && ctx.match_end() == 5
+                    && ctx.match_length() == 3
+                    && ctx.matched_branch_number() == Some(2)
+                {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("Failed to register native callback");
+
+        let first = regex
+            .find_first("xxcat")
+            .expect("Expected native match-metadata match");
+        assert_eq!((first.start, first.end), (2, 5));
+        assert_eq!(first.matched_branch_number, Some(2));
+    }
+
+    #[test]
     fn full_mode_native_code_block_find_all_surfaces_replacement_results() {
         let regex = Regex::with_mode(r#"(?<ch>.)(?{native:emit_char})"#, ExecutionMode::Full)
             .expect("Failed to compile native richer-result pattern");
@@ -1819,6 +1848,86 @@ mod tests {
 
     #[cfg(feature = "wasm")]
     #[test]
+    fn safe_mode_wasm_code_block_can_read_match_metadata() {
+        let regex = Regex::with_mode(
+            "foo|cat(?{wasm:ctx:match_metadata_is_visible})",
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM match-metadata pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "position" (func $position (result i32)))
+                        (import "rgx" "match_start" (func $match_start (result i32)))
+                        (import "rgx" "match_end" (func $match_end (result i32)))
+                        (import "rgx" "match_length" (func $match_length (result i32)))
+                        (import "rgx" "branch_number" (func $branch_number (result i32)))
+                        (func (export "match_metadata_is_visible") (result i32)
+                            call $position
+                            i32.const 5
+                            i32.eq
+                            call $match_start
+                            i32.const 2
+                            i32.eq
+                            i32.and
+                            call $match_end
+                            i32.const 5
+                            i32.eq
+                            i32.and
+                            call $match_length
+                            i32.const 3
+                            i32.eq
+                            i32.and
+                            call $branch_number
+                            i32.const 2
+                            i32.eq
+                            i32.and
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM match-metadata module");
+        let first = regex
+            .find_first("xxcat")
+            .expect("Expected WASM match-metadata match");
+        assert_eq!((first.start, first.end), (2, 5));
+        assert_eq!(first.matched_branch_number, Some(2));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_reports_missing_branch_number() {
+        let regex = Regex::with_mode(
+            "cat(?{wasm:ctx:branch_number_is_unavailable})",
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile WASM missing-branch pattern");
+        regex
+            .register_wasm_module(
+                "ctx",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "branch_number" (func $branch_number (result i32)))
+                        (func (export "branch_number_is_unavailable") (result i32)
+                            call $branch_number
+                            i32.const -1
+                            i32.eq
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM missing-branch module");
+        assert!(regex.is_match("cat"));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
     fn safe_mode_wasm_code_block_can_read_input_text() {
         let regex = Regex::with_mode("cat(?{wasm:ctx:input_is_cat_dog})", ExecutionMode::Safe)
             .expect("Failed to compile WASM text-read pattern");
@@ -2396,6 +2505,21 @@ mod tests {
 
     #[cfg(feature = "lua")]
     #[test]
+    fn safe_mode_lua_code_block_can_access_match_metadata() {
+        let regex = Regex::with_mode(
+            r#"foo|cat(?{lua:return match_start == 2 and match_end == 5 and match_length == 3 and branch_number == 2})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua match-metadata pattern");
+        let first = regex
+            .find_first("xxcat")
+            .expect("Expected Lua match-metadata match");
+        assert_eq!((first.start, first.end), (2, 5));
+        assert_eq!(first.matched_branch_number, Some(2));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
     fn safe_mode_lua_code_block_participates_in_backtracking() {
         let regex = Regex::with_mode(r#"a*(?{lua:return arg[0] == ""})a"#, ExecutionMode::Safe)
             .expect("Failed to compile Lua backtracking pattern");
@@ -2457,6 +2581,22 @@ mod tests {
         .expect("Failed to compile JavaScript code block pattern");
         assert!(regex.is_match("cat"));
         assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_code_block_can_access_match_metadata() {
+        let regex = Regex::with_mode(
+            r#"foo|cat(?{js:return match_start === 2 && match_end === 5 && match_length === 3 && branch_number === 2;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript match-metadata pattern");
+
+        let first = regex
+            .find_first("xxcat")
+            .expect("Expected JavaScript match-metadata match");
+        assert_eq!((first.start, first.end), (2, 5));
+        assert_eq!(first.matched_branch_number, Some(2));
     }
 
     #[cfg(feature = "javascript")]

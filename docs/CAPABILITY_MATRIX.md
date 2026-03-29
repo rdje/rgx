@@ -39,6 +39,10 @@ Current behavior contract for the shipped slice:
   - current wasm ABI keeps `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
   - wasm modules may optionally import context and result helpers from the `rgx` namespace:
     - `position() -> i32`
+    - `match_start() -> i32`
+    - `match_end() -> i32`
+    - `match_length() -> i32`
+    - `branch_number() -> i32` (`-1` when the current path is not inside a top-level alternation arm)
     - `text_length() -> i32`
     - `text_read(ptr, offset, len) -> i32`
     - `capture_count() -> i32`
@@ -65,11 +69,11 @@ Current behavior contract for the shipped slice:
   - `native` requires registering a callback on the compiled `Regex`
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
-- Current overall match text (`arg[0]`), numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, the `vars` scripting binding, and `ExecContext::variable(...)`.
+- Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.
-- Wasm currently exposes a smaller import-based context/result slice (position, full input text, numbered captures, named captures, host-provided variables, numeric emission, replacement emission) rather than the fuller Lua/JavaScript/native binding surface.
+- Wasm currently exposes a smaller import-based context/result slice (position, current match metadata, full input text, numbered captures, named captures, host-provided variables, numeric emission, replacement emission) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
 Representative test anchors:
 - `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests

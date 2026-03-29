@@ -45,22 +45,30 @@ use std::sync::{Arc, RwLock};
 ///
 /// This provides safe, read-only access to:
 /// - The matched text
+/// - Current match start/end/length metadata
 /// - Capture groups
 /// - Named captures
 /// - Host-provided variables
 /// - Match position
+/// - Top-level branch selection when available
 #[derive(Debug, Clone)]
 pub struct ExecContext {
     /// The full text being matched
     pub text: String,
     /// Current match position
     pub position: usize,
+    /// Current match-attempt start position
+    pub match_start: usize,
+    /// Current match-attempt end position
+    pub match_end: usize,
     /// Captured groups (indexed from 0)
     pub captures: Vec<Option<String>>,
     /// Named capture groups
     pub named_captures: HashMap<String, String>,
     /// Host-provided variable snapshot for this code-block execution
     pub variables: Arc<RwLock<HashMap<String, String>>>,
+    /// 1-based top-level branch number when the current path is inside a top-level alternation arm
+    pub matched_branch_number: Option<usize>,
 }
 
 impl ExecContext {
@@ -76,9 +84,12 @@ impl ExecContext {
         let context = Self {
             text,
             position,
+            match_start: position,
+            match_end: position,
             captures: Vec::new(),
             named_captures: HashMap::new(),
             variables: Arc::new(RwLock::new(HashMap::new())),
+            matched_branch_number: None,
         };
         trace_exit!(
             "execution",
@@ -110,6 +121,26 @@ impl ExecContext {
             current.is_some()
         );
         current
+    }
+
+    /// Get the current match-attempt start offset in bytes.
+    pub fn match_start(&self) -> usize {
+        self.match_start
+    }
+
+    /// Get the current match-attempt end offset in bytes.
+    pub fn match_end(&self) -> usize {
+        self.match_end
+    }
+
+    /// Get the current match-attempt length in bytes.
+    pub fn match_length(&self) -> usize {
+        self.match_end.saturating_sub(self.match_start)
+    }
+
+    /// Get the current 1-based top-level branch number, if any.
+    pub fn matched_branch_number(&self) -> Option<usize> {
+        self.matched_branch_number
     }
 
     /// Get a capture group by index
@@ -322,6 +353,13 @@ pub mod lua {
 
             // Set match position
             globals.set("pos", context.position)?;
+            globals.set("match_start", context.match_start)?;
+            globals.set("match_end", context.match_end)?;
+            globals.set("match_length", context.match_length())?;
+            match context.matched_branch_number {
+                Some(branch_number) => globals.set("branch_number", branch_number)?,
+                None => globals.set("branch_number", Value::Nil)?,
+            }
 
             // Set full text (read-only)
             globals.set("text", context.text.clone())?;
@@ -465,6 +503,33 @@ pub mod javascript {
 
                 // Set position and text
                 globals.set("pos", context.position as i32).ok();
+                globals
+                    .set(
+                        "match_start",
+                        i32::try_from(context.match_start).unwrap_or(i32::MAX),
+                    )
+                    .ok();
+                globals
+                    .set(
+                        "match_end",
+                        i32::try_from(context.match_end).unwrap_or(i32::MAX),
+                    )
+                    .ok();
+                globals
+                    .set(
+                        "match_length",
+                        i32::try_from(context.match_length()).unwrap_or(i32::MAX),
+                    )
+                    .ok();
+                if let Some(branch_number) = context.matched_branch_number {
+                    if let Ok(branch_number) = i32::try_from(branch_number) {
+                        globals.set("branch_number", branch_number).ok();
+                    } else {
+                        globals.set("branch_number", Undefined).ok();
+                    }
+                } else {
+                    globals.set("branch_number", Undefined).ok();
+                }
                 globals.set("text", context.text.clone()).ok();
 
                 // Create named captures object
@@ -667,6 +732,8 @@ pub mod wasm {
     /// - `function` is an exported zero-argument function
     /// - function result must be `i32` where `0` means failure and non-zero means success
     /// - modules may optionally import execution-context helpers from the `rgx` namespace
+    ///   - `rgx.position()`, `rgx.match_start()`, `rgx.match_end()`, `rgx.match_length()`
+    ///   - `rgx.branch_number()` (`-1` when unavailable)
     /// - modules may optionally emit richer winning-path results through:
     ///   - `rgx.emit_numeric(f64)`
     ///   - `rgx.emit_replacement(ptr, len)`
@@ -705,6 +772,30 @@ pub mod wasm {
                 .func_wrap("rgx", "position", Self::current_position_import)
                 .map_err(|e| {
                     RgxError::Engine(format!("Failed to define WASM import rgx.position: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "match_start", Self::match_start_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.match_start: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "match_end", Self::match_end_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.match_end: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "match_length", Self::match_length_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.match_length: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "branch_number", Self::branch_number_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.branch_number: {e}"
+                    ))
                 })?;
             linker
                 .func_wrap("rgx", "text_length", Self::text_length_import)
@@ -906,6 +997,27 @@ pub mod wasm {
 
         fn current_position_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
             Self::usize_to_i32(caller.data().context.position, "current position")
+        }
+
+        fn match_start_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.match_start, "current match start")
+        }
+
+        fn match_end_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.match_end, "current match end")
+        }
+
+        fn match_length_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            Self::usize_to_i32(caller.data().context.match_length(), "current match length")
+        }
+
+        fn branch_number_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
+            match caller.data().context.matched_branch_number {
+                Some(branch_number) => {
+                    Self::usize_to_i32(branch_number, "current top-level branch number")
+                }
+                None => Ok(-1),
+            }
         }
 
         fn text_length_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {

@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Exposed current match metadata to code-block runtimes
+- Scope: execution-context expansion, wasm ABI growth, regression coverage, and status-doc refreshes.
+- Changes:
+  - Extended `rgx-core/src/execution.rs` `ExecContext` so code blocks can read current match start/end/length metadata plus the current 1-based top-level branch number when applicable.
+  - Exposed that metadata to Lua and JavaScript globals (`match_start`, `match_end`, `match_length`, `branch_number`) and to native callbacks through new `ExecContext` helper methods.
+  - Expanded the wasm host ABI with `rgx.match_start()`, `rgx.match_end()`, `rgx.match_length()`, and `rgx.branch_number()` while preserving the stable `(?{wasm:module:function})` / exported `() -> i32` predicate contract.
+  - Wired the VM execution context in `rgx-core/src/vm.rs` so code blocks receive the active match-attempt span and current top-level alternation branch number without changing parser/compiler behavior.
+  - Added focused native/Lua/JavaScript/wasm regressions in `rgx-core/src/lib.rs` covering match-span metadata and branch-number visibility, including the explicit wasm `-1` boundary when no top-level branch is active.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped execution-context surface is described truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core full_mode_native_code_block_can_access_match_metadata -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_code_block_can_access_match_metadata -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_code_block_can_access_match_metadata -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block_can_read_match_metadata -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - The code-block runtime surface is now more self-describing: callers no longer need to reconstruct current match span or top-level branch selection indirectly from `arg[0]`, `pos`, and surrounding match results.
+  - Wasm remains on the stable predicate ABI; this change only broadens the optional `rgx` host-import surface.
+
 ### 2026-03-30 - Shipped recursion / subroutine execution on the default regex path
 - Scope: compiler validation, VM runtime wiring, recursion parity coverage, and status-doc refreshes.
 - Changes:

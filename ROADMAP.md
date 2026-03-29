@@ -80,7 +80,7 @@ Live forward-looking tracker for rgx.
 - Status: `planned`
 - Goal: extend the newly shipped code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
-  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, named captures, host-provided variables, and initial `emit_numeric` / `emit_replacement` result helpers
+  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, current match metadata, full input text, numbered captures, named captures, host-provided variables, and initial `emit_numeric` / `emit_replacement` result helpers
   - richer non-boolean result handling on the wasm path beyond the current host-emitted numeric/replacement layer
   - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
@@ -101,6 +101,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Expanded code-block execution contexts with current match metadata (`match_start`, `match_end`, `match_length`, top-level `branch_number`) across native/Lua/JavaScript plus new wasm host imports.
 - Shipped possessive quantifiers on the default compiler/VM path by lowering `*+`, `++`, `?+`, and counted possessive forms through atomic-group semantics, including parser-path regressions and PCRE2 differential coverage.
 - Shipped Unicode property classes on the default compiler/VM path, including invalid-property compile errors, parser-path and AST-first regressions, and representative PCRE2 differential coverage.
 - Switched the default RGX build over to the real submodule-backed PGEN parser so normal workspace builds now exercise PGEN by default.

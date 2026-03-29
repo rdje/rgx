@@ -9,20 +9,19 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core possessive -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_active_parser_matches_reference_fixtures -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_pgen_backend_matches_reference_fixtures -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_possessive_quantifiers -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core full_mode_native_code_block_can_access_match_metadata -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_code_block_can_access_match_metadata -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_code_block_can_access_match_metadata -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block_can_read_match_metadata -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized)
 - Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 4421 lines
-  - `rgx-core/src/lib.rs`: 2799 lines
-  - `rgx-core/src/execution.rs`: 1987 lines
+  - `rgx-core/src/vm.rs`: 4603 lines
+  - `rgx-core/src/lib.rs`: 2976 lines
+  - `rgx-core/src/execution.rs`: 2099 lines
   - `rgx-core/src/lexer.rs`: 1877 lines
   - `rgx-core/src/parser.rs`: 1246 lines
 - Current scaffold concentration remains visible in several near-empty modules/crates:
@@ -57,7 +56,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - parser recognizes `(?{lang:code})`
   - compiler validates code blocks against `ExecutionMode` and cargo features
   - VM lowers code blocks into inline opcodes and executes them during matching
-  - engine/runtime materialize current match text, numbered captures, named captures, and host-provided variables into the execution context
+  - engine/runtime materialize current match text, current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables into the execution context
   - winning-path non-boolean Lua/JavaScript/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
@@ -88,10 +87,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `(?{wasm:...})` is shipped on the Rust API path in `ExecutionMode::Safe` or `ExecutionMode::Full` after registering a named wasm module on the compiled `Regex`.
 - Current execution-context contract for this slice:
   - capture slot `0` is the current overall match prefix for the current match attempt
+  - current match start/end/length metadata plus the 1-based top-level branch number are now available to code-block runtimes when applicable
   - numbered captures, named captures, and host-provided variables are available when their groups have completed or have been set through the Rust API
   - code blocks participate in backtracking and may execute multiple times during one overall match search
   - Lua/JavaScript/native/wasm `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
-  - wasm keeps `module:function` plus exported `() -> i32` predicates and `rgx` imports for position, full input text, numbered captures, named captures, variables, `emit_numeric(...)`, and `emit_replacement(...)`
+  - wasm keeps `module:function` plus exported `() -> i32` predicates and `rgx` imports for position, current match metadata, full input text, numbered captures, named captures, variables, `emit_numeric(...)`, and `emit_replacement(...)`
 
 ### Parser interoperability / PGEN path
 - `docs/PARSER_CONTRACT.md` is the parser-boundary source of truth.
@@ -136,7 +136,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 
 ### Next
-- Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports plus the initial `emit_numeric` / `emit_replacement` result helpers.
+- Design the next higher-value wasm/runtime slice beyond the current position/match-metadata/text/numbered-capture/named-capture/variable imports plus the initial `emit_numeric` / `emit_replacement` result helpers.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
 - Operationalize benchmark trend capture instead of relying on manual runs.
@@ -157,7 +157,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, `rgx-bench/src/lib.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 
 ## High-confidence next actions
-1. Design and ship the next wasm/runtime layer beyond the current import-based context slice plus initial `emit_numeric` / `emit_replacement` helpers.
+1. Design and ship the next wasm/runtime layer beyond the current import-based context slice plus current match metadata and the initial `emit_numeric` / `emit_replacement` helpers.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 3. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 4. Add automated benchmark-trend capture to the default validation loop.

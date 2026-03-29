@@ -1751,6 +1751,9 @@ impl RegexVM {
     fn build_code_exec_context(&self, ctx: &ExecContext) -> CodeExecContext {
         let mut exec_ctx =
             CodeExecContext::new(String::from_utf8_lossy(&ctx.text).into_owned(), ctx.pos);
+        exec_ctx.match_start = ctx.match_start;
+        exec_ctx.match_end = ctx.pos;
+        exec_ctx.matched_branch_number = ctx.current_alternative.map(|id| id + 1);
         let mut captures = Vec::with_capacity(self.program.num_groups as usize + 1);
         captures.push(self.capture_text(ctx, ctx.match_start, ctx.pos));
         for group_id in 1..=self.program.num_groups {

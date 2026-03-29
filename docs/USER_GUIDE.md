@@ -3,7 +3,7 @@ Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
 ## Living-document policy
-- Last updated: 2026-03-29
+- Last updated: 2026-03-30
 - This is a live document and should be updated as user-visible behavior changes.
 - Keep examples and feature-status notes aligned with current shipped behavior.
 - For recent changes and validation details, cross-check `CHANGES.md` and `RUST_CODEBASE_ANALYSIS.md`.
@@ -240,10 +240,18 @@ What the execution context exposes today:
 - `named.<group_name>` / `named[group_name]`: completed named captures
 - `vars.<name>` / `vars[name]`: host-provided execution variables set through `Regex::set_variable(...)`
 - `pos`: current byte position in the input
+- `match_start`: current match-attempt start byte offset
+- `match_end`: current match-attempt end byte offset
+- `match_length`: current match-attempt length in bytes
+- `branch_number`: 1-based top-level branch number when the current path is inside a top-level alternation arm
 - `text`: full input text
-- Lua/JavaScript bindings expose `arg`, `named`, `vars`, `pos`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `group()`, `named()`, and `variable()`.
+- Lua/JavaScript bindings expose `arg`, `named`, `vars`, `pos`, `match_start`, `match_end`, `match_length`, `branch_number`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `match_start()`, `match_end()`, `match_length()`, `matched_branch_number()`, `group()`, `named()`, and `variable()`.
 - Wasm currently exposes a smaller import-based context/result slice through the `rgx` namespace:
   - `position() -> i32`
+  - `match_start() -> i32`
+  - `match_end() -> i32`
+  - `match_length() -> i32`
+  - `branch_number() -> i32` (`-1` when the current path is not inside a top-level alternation arm)
   - `text_length() -> i32`
   - `text_read(ptr, offset, len) -> i32`
   - `capture_count() -> i32`
@@ -264,6 +272,7 @@ What the execution context exposes today:
 - Named captures and host-provided variables are exposed to wasm through deterministic lexicographic ordering by name.
 - `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, `variable_value_read`, and `emit_replacement` require the wasm module to export linear memory as `memory`.
 - Capture slot `0` in the wasm ABI is still the current overall match prefix for the current match attempt.
+- `branch_number` is intentionally aligned with `MatchResult.matched_branch_number`: it is 1-based when available and absent / `-1` when the current path is not inside a top-level alternation arm.
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.

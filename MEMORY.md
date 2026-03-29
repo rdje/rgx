@@ -66,11 +66,11 @@ Live continuity memory for `rgx` sessions.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
-- Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered captures, named captures, and host-provided variables through the execution context.
+- Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables through the execution context.
 - Public `find_first` / `find_all` results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` are now shipped on the Rust API path and collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
-- The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
+- The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, current match metadata, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
 - Numeric backreferences are now shipped on the default compiler/VM path:
   - compile-time validation now rejects only missing-group references such as `(a)\2`
   - runtime matching now executes numbered backreferences through real VM bytecode in both top-level and subexpression paths
