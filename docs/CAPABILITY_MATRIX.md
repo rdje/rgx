@@ -75,7 +75,6 @@ Representative test anchors:
 - `rgx-core/src/execution.rs` backend dispatch logic
 ## Advanced syntax still parsed but not runtime-integrated
 - Recursion (`(?R)`, `(?1)`, `(?&name)`): `parsed-only`
-- Conditionals (`(?(...)yes|no)` currently supported parser condition forms): `parsed-only`
 Behavior contract:
 - These forms are accepted by parser/conformance tests where applicable.
 - Compilation intentionally fails with explicit error messages until VM/runtime integration lands.
@@ -84,21 +83,23 @@ Representative test anchors:
 - `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests
 ## Advanced syntax shipped on the default runtime path
 - Numeric backreferences (`\1`, `\2`, ...): `shipped`
+- Conditionals (`(?(...)yes|no)` current supported parser condition forms): `shipped`
 Behavior contract:
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
-- Compilation fails explicitly when a numeric backreference refers to a capture group that does not exist in the pattern.
+- Conditionals evaluate their test on the current match path and execute only the selected branch.
+- Compilation fails explicitly when a numeric backreference or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern.
 Representative test anchors:
-- `rgx-core/src/lib.rs` numeric backreference runtime and compile-boundary tests
-- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences
-## Conditional parser condition forms (current parser coverage)
-- Group-exists: `(?(1)yes|no)` (`parsed-only` at runtime)
-- Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`parsed-only` at runtime)
+- `rgx-core/src/lib.rs` numeric backreference and conditional runtime/compile-boundary tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences and conditionals
+## Conditional runtime coverage (current shipped parser forms)
+- Group-exists: `(?(1)yes|no)` (`shipped`)
+- Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)
 - Lookaround conditions:
   - `(?(?=expr)yes|no)`
   - `(?(?!expr)yes|no)`
   - `(?(?<=expr)yes|no)`
   - `(?(?<!expr)yes|no)`
-  (`parsed-only` at runtime)
+  (`shipped`)
 ## Notes for roadmap usage
 - This matrix is implementation-facing and must reflect verified behavior only.
 - Aspirational goals (broader code-block language support, richer wasm ABI, richer result semantics, full PCRE2 parity) belong in `ROADMAP.md` and `PROJECT_VISION.md`.

@@ -27,6 +27,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
 - Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
   - differential coverage includes successful backreference matching, explicit no-match behavior, and alternation/lookahead cases that depend on capture restoration under backtracking
+- Conditionals (`(?(...)yes|no)` current supported parser forms): `parity-verified`
+  - differential coverage includes group-exists, named-group-exists, and lookaround conditions for both first-match and all-match span parity
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
   - positive/negative lookbehind: `parity-verified`
@@ -39,12 +41,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - PCRE2 executes these forms.
 - Recursion (`(?R)`, `(?1)`, `(?&name)`): `rgx-gap`
   - rgx currently parses and returns explicit compile-time unsupported errors.
-- Conditionals (`(?(...)yes|no)`): `rgx-gap`
-  - rgx currently parses and returns explicit compile-time unsupported errors.
-  - differential tests currently cover:
-    - group-exists `(?(1)...)`
-    - named-group-exists `(?(<name>)...)`, `(?(name)...)`
-    - lookaround conditions `(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`
 
 ## Out of scope for PCRE2 parity
 - rgx inline code blocks (`(?{lang:code})`): `out-of-scope`

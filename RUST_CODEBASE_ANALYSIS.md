@@ -99,7 +99,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
-- Recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
+- Recursion and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
 - PGEN accepted possessive quantifiers are still rejected by the RGX parser adapter because RGX does not yet represent possessive quantifiers in its parser AST.
 
 ## Codebase realities that matter for roadmap prioritization
@@ -116,6 +116,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ### Now
 - PCRE2 parity hardening remains active and well-supported by tests and docs.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
+- Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 
@@ -126,7 +127,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Operationalize benchmark trend capture instead of relying on manual runs.
 
 ### Later
-- Finish larger regex-surface gaps: recursion, conditionals, Unicode property classes, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: recursion, Unicode property classes, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

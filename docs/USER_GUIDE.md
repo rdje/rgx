@@ -276,10 +276,10 @@ Current limits for this slice:
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:
 - recursion
-- conditionals
 - Unicode property classes
 These continue to fail with explicit compile-time messages.
 Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
+Conditionals are also part of the shipped runtime path for group-exists, named-group-exists, and lookaround conditions. Missing conditional group/name references fail explicitly at compile time.
 ## Level 3 - Gory details
 ### Execution model
 Pipeline:

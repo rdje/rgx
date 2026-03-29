@@ -8,7 +8,7 @@
 //! - JIT compilation hints
 //! - Memoization for backtracking
 
-use crate::ast::{AnchorType, CharClass, CharRange, GroupKind, Quantifier, Regex};
+use crate::ast::{AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, Regex};
 use crate::execution::{
     CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager,
 };
@@ -190,6 +190,12 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Recursion { .. } => "Recursion",
     }
 }
+
+const CONDITIONAL_KIND_GROUP_EXISTS: u8 = 0;
+const CONDITIONAL_KIND_LOOKAHEAD_POSITIVE: u8 = 1;
+const CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE: u8 = 2;
+const CONDITIONAL_KIND_LOOKBEHIND_POSITIVE: u8 = 3;
+const CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE: u8 = 4;
 
 /// Bytecode instruction with operands
 #[derive(Debug, Clone)]
@@ -1488,6 +1494,26 @@ impl RegexVM {
                     return false;
                 }
 
+                OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
+                    let jump_if_match = matches!(op, OpCode::JumpIfMatch);
+                    let Some(condition_matches) =
+                        self.evaluate_conditional_operand(ctx, code, &mut ip)
+                    else {
+                        return false;
+                    };
+
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+
+                    if condition_matches == jump_if_match {
+                        ip += offset;
+                    }
+                    continue;
+                }
+
                 OpCode::Split => {
                     // Read jump offset (2 bytes, little-endian)
                     if ip + 1 >= code.len() {
@@ -2328,6 +2354,26 @@ impl RegexVM {
                     local_backtrack_or_return_false!();
                 }
 
+                OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
+                    let jump_if_match = matches!(op, OpCode::JumpIfMatch);
+                    let Some(condition_matches) =
+                        self.evaluate_conditional_operand(ctx, code, &mut ip)
+                    else {
+                        return false;
+                    };
+
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+
+                    if condition_matches == jump_if_match {
+                        ip += offset;
+                    }
+                    continue;
+                }
+
                 OpCode::Split => {
                     if ip + 1 >= code.len() {
                         return false;
@@ -2641,6 +2687,86 @@ impl RegexVM {
         let mut assertion_ctx = self.clone_exec_context(ctx);
 
         self.execute_subexpr(&mut assertion_ctx, code)
+    }
+
+    fn evaluate_conditional_operand(
+        &self,
+        ctx: &ExecContext,
+        code: &[u8],
+        ip: &mut usize,
+    ) -> Option<bool> {
+        if *ip >= code.len() {
+            return None;
+        }
+
+        let kind = code[*ip];
+        *ip += 1;
+
+        match kind {
+            CONDITIONAL_KIND_GROUP_EXISTS => {
+                if *ip >= code.len() {
+                    return None;
+                }
+                let group_id = code[*ip] as usize;
+                *ip += 1;
+                Some(self.capture_group_exists(ctx, group_id))
+            }
+            CONDITIONAL_KIND_LOOKAHEAD_POSITIVE | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE => {
+                if *ip >= code.len() {
+                    return None;
+                }
+                let expr_len = code[*ip] as usize;
+                *ip += 1;
+                let expr_start = *ip;
+                let expr_end = expr_start + expr_len;
+                if expr_end > code.len() {
+                    return None;
+                }
+                let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
+                *ip = expr_end;
+                if kind == CONDITIONAL_KIND_LOOKAHEAD_POSITIVE {
+                    Some(matched)
+                } else {
+                    Some(!matched)
+                }
+            }
+            CONDITIONAL_KIND_LOOKBEHIND_POSITIVE | CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE => {
+                if *ip >= code.len() {
+                    return None;
+                }
+                let expr_len = code[*ip] as usize;
+                *ip += 1;
+                let expr_start = *ip;
+                let expr_end = expr_start + expr_len;
+                if expr_end > code.len() {
+                    return None;
+                }
+                let matched = self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end]);
+                *ip = expr_end;
+                if kind == CONDITIONAL_KIND_LOOKBEHIND_POSITIVE {
+                    Some(matched)
+                } else {
+                    Some(!matched)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn capture_group_exists(&self, ctx: &ExecContext, group_id: usize) -> bool {
+        if group_id == 0 {
+            return false;
+        }
+
+        let start_idx = group_id * 2;
+        let end_idx = start_idx + 1;
+        matches!(
+            (
+                ctx.captures.get(start_idx).and_then(|&x| x),
+                ctx.captures.get(end_idx).and_then(|&x| x)
+            ),
+            (Some(_), Some(_))
+        )
     }
 
     /// Execute a lookbehind assertion by finding a sub-expression match
@@ -3074,6 +3200,8 @@ pub struct OptimizingCompiler {
     char_classes: Vec<CompiledCharClass>,
     /// String literals for optimization
     strings: Vec<String>,
+    /// Named capture group mapping for conditional references
+    named_groups: HashMap<String, u32>,
     /// Group counter for captures
     group_counter: u32,
     /// Optimization flags
@@ -3085,11 +3213,17 @@ pub struct OptimizingCompiler {
 impl OptimizingCompiler {
     /// Create new optimizing compiler
     pub fn new() -> Self {
+        Self::with_named_groups(HashMap::new())
+    }
+
+    /// Create new optimizing compiler with resolved named group references.
+    pub fn with_named_groups(named_groups: HashMap<String, u32>) -> Self {
         trace_enter!("vm", "OptimizingCompiler::new");
         let compiler = Self {
             code: Vec::new(),
             char_classes: Vec::new(),
             strings: Vec::new(),
+            named_groups,
             group_counter: 0,
             flags: ProgramFlags {
                 simd_enabled: true,
@@ -3190,6 +3324,24 @@ impl OptimizingCompiler {
                 self.analyze_pass(expr);
             }
             Regex::CodeBlock { .. } => self.flags.has_code_blocks = true,
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    ConditionalTest::Lookahead { expr, .. }
+                    | ConditionalTest::Lookbehind { expr, .. } => {
+                        self.flags.has_lookarounds = true;
+                        self.analyze_pass(expr);
+                    }
+                    ConditionalTest::GroupExists(_) | ConditionalTest::NamedGroupExists(_) => {}
+                }
+                self.analyze_pass(true_branch);
+                if let Some(false_branch) = false_branch {
+                    self.analyze_pass(false_branch);
+                }
+            }
             Regex::Sequence(items) => {
                 for item in items {
                     self.analyze_pass(item);
@@ -3374,9 +3526,7 @@ impl OptimizingCompiler {
                 }
 
                 // Compile lookahead sub-expression inline with a length prefix.
-                let mut sub_compiler = OptimizingCompiler::new();
-                sub_compiler.codegen_pass(expr, false);
-                let sub_code = sub_compiler.code;
+                let sub_code = self.compile_inline_subexpr(expr);
 
                 self.code.push(sub_code.len() as u8);
                 self.code.extend(sub_code);
@@ -3390,9 +3540,7 @@ impl OptimizingCompiler {
                 }
 
                 // Compile lookbehind sub-expression inline with a length prefix.
-                let mut sub_compiler = OptimizingCompiler::new();
-                sub_compiler.codegen_pass(expr, false);
-                let sub_code = sub_compiler.code;
+                let sub_code = self.compile_inline_subexpr(expr);
 
                 self.code.push(sub_code.len() as u8);
                 self.code.extend(sub_code);
@@ -3400,6 +3548,37 @@ impl OptimizingCompiler {
 
             Regex::CodeBlock { lang, code } => {
                 self.emit_code_block(lang, code);
+            }
+
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                self.emit_conditional_jump(OpCode::JumpIfNoMatch, condition);
+                let false_jump_pos = self.code.len();
+                self.code.push(0);
+                self.code.push(0);
+
+                self.codegen_pass(true_branch, false);
+
+                if let Some(false_branch) = false_branch {
+                    self.emit_op(OpCode::Jump);
+                    let end_jump_pos = self.code.len();
+                    self.code.push(0);
+                    self.code.push(0);
+
+                    let false_branch_start = self.code.len();
+                    self.patch_u16_offset(false_jump_pos, false_branch_start);
+
+                    self.codegen_pass(false_branch, false);
+
+                    let end_pos = self.code.len();
+                    self.patch_u16_offset(end_jump_pos, end_pos);
+                } else {
+                    let end_pos = self.code.len();
+                    self.patch_u16_offset(false_jump_pos, end_pos);
+                }
             }
 
             Regex::Backreference(group_id) => {
@@ -3486,9 +3665,7 @@ impl OptimizingCompiler {
                                 // Emit unbounded tail as A* after required prefix.
                                 self.emit_op(OpCode::StarGreedy);
 
-                                let mut sub_compiler = OptimizingCompiler::new();
-                                sub_compiler.codegen_pass(expr, false);
-                                let sub_code = sub_compiler.code;
+                                let sub_code = self.compile_inline_subexpr(expr);
 
                                 self.code.push(sub_code.len() as u8);
                                 self.code.extend(sub_code);
@@ -3559,12 +3736,53 @@ impl OptimizingCompiler {
     fn emit_subexpr_opcode(&mut self, op: OpCode, expr: &Regex) {
         self.emit_op(op);
 
-        let mut sub_compiler = OptimizingCompiler::new();
-        sub_compiler.codegen_pass(expr, false);
-        let sub_code = sub_compiler.code;
+        let sub_code = self.compile_inline_subexpr(expr);
 
         self.code.push(sub_code.len() as u8);
         self.code.extend(sub_code);
+    }
+
+    fn emit_conditional_jump(&mut self, op: OpCode, condition: &ConditionalTest) {
+        self.emit_op(op);
+        match condition {
+            ConditionalTest::GroupExists(group_id) => {
+                self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
+                self.code.push(*group_id as u8);
+            }
+            ConditionalTest::NamedGroupExists(name) => {
+                let group_id = self
+                    .named_groups
+                    .get(name)
+                    .copied()
+                    .expect("named conditional reference should be validated before codegen");
+                self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
+                self.code.push(group_id as u8);
+            }
+            ConditionalTest::Lookahead { expr, positive } => {
+                self.code.push(if *positive {
+                    CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
+                } else {
+                    CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
+                });
+
+                let sub_code = self.compile_inline_subexpr(expr);
+
+                self.code.push(sub_code.len() as u8);
+                self.code.extend(sub_code);
+            }
+            ConditionalTest::Lookbehind { expr, positive } => {
+                self.code.push(if *positive {
+                    CONDITIONAL_KIND_LOOKBEHIND_POSITIVE
+                } else {
+                    CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE
+                });
+
+                let sub_code = self.compile_inline_subexpr(expr);
+
+                self.code.push(sub_code.len() as u8);
+                self.code.extend(sub_code);
+            }
+        }
     }
 
     /// Emit an inline code-block operand payload.
@@ -3577,6 +3795,31 @@ impl OptimizingCompiler {
         self.code
             .extend_from_slice(&(code.len() as u16).to_le_bytes());
         self.code.extend_from_slice(code.as_bytes());
+    }
+
+    fn patch_u16_offset(&mut self, offset_pos: usize, target_pos: usize) {
+        let offset = target_pos - (offset_pos + 2);
+        let offset_bytes = (offset as u16).to_le_bytes();
+        self.code[offset_pos] = offset_bytes[0];
+        self.code[offset_pos + 1] = offset_bytes[1];
+    }
+
+    fn compile_inline_subexpr(&mut self, expr: &Regex) -> Vec<u8> {
+        let mut sub_compiler = OptimizingCompiler::with_named_groups(self.named_groups.clone());
+        sub_compiler.group_counter = self.group_counter;
+        sub_compiler.codegen_pass(expr, false);
+
+        self.group_counter = sub_compiler.group_counter;
+        self.flags.max_capture_group = self
+            .flags
+            .max_capture_group
+            .max(sub_compiler.flags.max_capture_group);
+        self.flags.has_backrefs |= sub_compiler.flags.has_backrefs;
+        self.flags.has_lookarounds |= sub_compiler.flags.has_lookarounds;
+        self.flags.has_code_blocks |= sub_compiler.flags.has_code_blocks;
+        self.flags.instruction_count += sub_compiler.flags.instruction_count;
+
+        sub_compiler.code
     }
 
     /// Emit opcode with character operand
@@ -3687,6 +3930,8 @@ impl TryFrom<u8> for OpCode {
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x42 => Ok(SplitLazy),
+            0x43 => Ok(JumpIfMatch),
+            0x44 => Ok(JumpIfNoMatch),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),

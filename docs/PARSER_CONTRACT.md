@@ -65,8 +65,8 @@ Current contract:
   - backreferences
   - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
 - Compiler/runtime status for those parser-recognized forms is:
-  - backreferences are integrated on the default regex path
-  - recursion and conditionals still fail explicitly (not silently) until runtime integration lands
+  - backreferences and conditionals are integrated on the default regex path
+  - recursion still fails explicitly (not silently) until runtime integration lands
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Shipped conditional runtime support on the default regex path
+- Scope: compiler/VM conditional execution, compile-boundary validation, parity coverage, and documentation refreshes.
+- Changes:
+  - Removed conditionals from the generic parsed-but-unintegrated compile boundary in `rgx-core/src/compiler.rs` and replaced that blanket rejection with dedicated validation for missing numbered and named conditional references.
+  - Wired `Regex::Conditional(...)` through `rgx-core/src/vm.rs` analysis, bytecode emission, opcode decoding, and both execution paths so group-exists, named-group-exists, and lookaround condition forms now execute on the default runtime path.
+  - Added AST-first and parser-path regressions in `rgx-core/src/lib.rs` covering group-exists, named-group-exists, optional false branches, lookaround conditions, and explicit compile errors for missing conditional references.
+  - Promoted conditionals from known-gap coverage to supported differential coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Refreshed `README.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `docs/USER_GUIDE.md`, and `docs/PARSER_CONTRACT.md` so shipped status and remaining gaps are described truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Conditionals are no longer a parser-only or parity-gap family; they are now part of the supported default compiler/VM path.
+  - No new PGEN parser show-stopper surfaced while rerunning the shared local CI path with the submodule-backed parser active.
+
 ### 2026-03-29 - Pinned the default PGEN parser backend as a real RGX submodule
 - Scope: submodule-backed parser dependency, default-build verification, Cargo workspace separation, CI workflow updates, and documentation refreshes.
 - Changes:

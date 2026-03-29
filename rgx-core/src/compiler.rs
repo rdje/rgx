@@ -119,6 +119,9 @@ impl Compiler {
             self.mode
         );
         debug_log!("compiler", "AST: {:?}", ast);
+        let total_groups = Self::count_capture_groups(&ast);
+        let named_groups = Self::collect_named_groups(&ast);
+
         if let Some(msg) = Self::backreference_validation_message(&ast) {
             trace_exit!(
                 "compiler",
@@ -128,7 +131,7 @@ impl Compiler {
             );
             return Err(RgxError::Compile(msg));
         }
-        if let Some(msg) = self.feature_validation_message(&ast) {
+        if let Some(msg) = self.feature_validation_message(&ast, total_groups, &named_groups) {
             trace_decision!(
                 "compiler",
                 "feature_validation_message(ast).is_some()",
@@ -153,9 +156,9 @@ impl Compiler {
 
         // Compile AST into optimized VM bytecode
         debug_log!("compiler", "Compiling AST to VM bytecode...");
-        let mut vm_compiler = VMCompiler::new();
+        let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
         let mut program = vm_compiler.compile(&ast);
-        program.named_groups = Self::collect_named_groups(&ast);
+        program.named_groups = named_groups;
 
         debug_log!("compiler", "Program compiled:");
         debug_log!(
@@ -199,7 +202,12 @@ impl Compiler {
             program,
         })
     }
-    fn feature_validation_message(&self, ast: &RegexAst) -> Option<String> {
+    fn feature_validation_message(
+        &self,
+        ast: &RegexAst,
+        total_groups: u32,
+        named_groups: &std::collections::HashMap<String, u32>,
+    ) -> Option<String> {
         match ast {
             RegexAst::CodeBlock { lang, code } => self.code_block_validation_message(lang, code),
             RegexAst::UnicodeClass { .. }
@@ -210,16 +218,54 @@ impl Compiler {
             RegexAst::Recursion { .. } => Some(
                 "recursion syntax is parsed but not yet integrated into VM execution".to_string(),
             ),
-            RegexAst::Conditional { .. } => Some(
-                "conditional syntax is parsed but not yet integrated into VM execution".to_string(),
-            ),
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
                 .iter()
-                .find_map(|item| self.feature_validation_message(item)),
+                .find_map(|item| self.feature_validation_message(item, total_groups, named_groups)),
             RegexAst::Quantified { expr, .. }
             | RegexAst::Group { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => self.feature_validation_message(expr),
+            | RegexAst::Lookbehind { expr, .. } => {
+                self.feature_validation_message(expr, total_groups, named_groups)
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let condition_message = match condition {
+                    crate::ast::ConditionalTest::GroupExists(group) => {
+                        if *group > total_groups {
+                            Some(format!(
+                                "conditional '(?({group})...)' refers to missing capture group"
+                            ))
+                        } else {
+                            None
+                        }
+                    }
+                    crate::ast::ConditionalTest::NamedGroupExists(name) => {
+                        if named_groups.contains_key(name) {
+                            None
+                        } else {
+                            Some(format!(
+                                "conditional '(?({name})...)' refers to missing named capture group"
+                            ))
+                        }
+                    }
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        self.feature_validation_message(expr, total_groups, named_groups)
+                    }
+                };
+                condition_message
+                    .or_else(|| {
+                        self.feature_validation_message(true_branch, total_groups, named_groups)
+                    })
+                    .or_else(|| {
+                        false_branch.as_ref().and_then(|branch| {
+                            self.feature_validation_message(branch, total_groups, named_groups)
+                        })
+                    })
+            }
             _ => None,
         }
     }

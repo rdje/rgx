@@ -99,14 +99,28 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Continue closing remaining parsed-but-unintegrated regex gaps (recursion, conditionals, Unicode property classes).
+- Continue closing remaining parsed-but-unintegrated regex gaps (recursion and Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
-- Decide how to distribute the real PGEN backend cleanly now that the verified `1.1.1` fix revision exists only in the local sibling checkout.
+- Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Shipped conditional runtime support on the default compiler/VM path:
+  - removed the blanket compile-boundary rejection for `Regex::Conditional(...)` in `rgx-core/src/compiler.rs` and replaced it with dedicated validation for missing numbered and named conditional references
+  - wired `Regex::Conditional(...)` through VM analysis, bytecode emission, opcode decoding, and both execution paths in `rgx-core/src/vm.rs`
+  - added AST-first and parser-path regressions in `rgx-core/src/lib.rs` for group-exists, named-group-exists, optional false branches, lookaround conditions, and explicit missing-group compile errors
+  - promoted conditionals from PCRE2 known-gap coverage to supported parity coverage in `rgx-bench/tests/pcre2_parity.rs`
+- Re-ran targeted and full validation for the conditional-runtime slice:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- No new PGEN parser show-stopper surfaced while rerunning the default local CI path with the submodule-backed parser active.
 - Shipped numeric backreferences on the default compiler/VM path:
   - removed the blanket parsed-but-unintegrated compile rejection and replaced it with dedicated missing-group validation in `rgx-core/src/compiler.rs`
   - wired `Regex::Backreference(...)` through VM analysis, bytecode emission, opcode decoding, and execution in `rgx-core/src/vm.rs`

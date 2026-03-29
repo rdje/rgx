@@ -675,60 +675,64 @@ fn pcre2_parity_supported_quantifier_suffix_backtracking_behavior() {
 }
 
 #[test]
-fn pcre2_parity_known_gap_conditional_compile_behavior() {
+fn pcre2_parity_supported_conditionals() {
     let cases = [
-        KnownGapCase {
+        ParityCase {
             name: "conditional_group_exists",
             pattern: "(a)?(?(1)b|c)",
-            input: "ab",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "ab c ac cab",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_named_group_exists_angle_bracket",
             pattern: "(?<g>a)?(?(<g>)b|c)",
-            input: "ab",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "ab c ac cab",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_named_group_exists_bare",
             pattern: "(?<g>a)?(?(g)b|c)",
-            input: "ab",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "ab c ac cab",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_lookahead",
             pattern: "(?(?=ab)a|z)b",
-            input: "ab",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "ab zb xb",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_negative_lookahead",
             pattern: "(?(?!ab)z|a)b",
-            input: "ab",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "ab zb xb",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_lookbehind",
             pattern: "(?(?<=x)a|b)",
-            input: "b",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "xa b a",
         },
-        KnownGapCase {
+        ParityCase {
             name: "conditional_negative_lookbehind",
             pattern: "(?(?<!x)b|a)",
-            input: "b",
-            expected_rgx_error:
-                "conditional syntax is parsed but not yet integrated into VM execution",
+            input: "xa b a",
         },
     ];
 
     for case in cases {
-        assert_known_gap_case(&case);
+        let rgx_first = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2_first = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx_first, pcre2_first,
+            "conditional first-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+
+        let rgx_all = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2_all = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx_all, pcre2_all,
+            "conditional find_all mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
     }
 }

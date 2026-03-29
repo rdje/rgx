@@ -657,6 +657,33 @@ mod tests {
     }
 
     #[test]
+    fn ast_conditional_group_exists_selects_runtime_branch() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Anchor(crate::ast::AnchorType::AbsStart),
+            RegexAst::Quantified {
+                expr: Box::new(RegexAst::Group {
+                    expr: Box::new(RegexAst::Char('a')),
+                    kind: GroupKind::Capturing,
+                    index: None,
+                    name: None,
+                }),
+                quantifier: crate::ast::Quantifier::ZeroOrOne { lazy: false },
+            },
+            RegexAst::Conditional {
+                condition: crate::ast::ConditionalTest::GroupExists(1),
+                true_branch: Box::new(RegexAst::Char('b')),
+                false_branch: Some(Box::new(RegexAst::Char('c'))),
+            },
+            RegexAst::Anchor(crate::ast::AnchorType::AbsEndNoNL),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile conditional AST directly");
+        assert!(regex.is_match("ab"));
+        assert!(regex.is_match("c"));
+        assert!(!regex.is_match("ac"));
+    }
+
+    #[test]
     fn parser_positive_lookahead_syntax() {
         let regex =
             Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
@@ -2422,13 +2449,12 @@ mod tests {
     }
 
     #[test]
-    fn parser_conditional_syntax_reports_explicit_unsupported_error() {
-        let result = Regex::compile("(?(1)a|b)");
-        assert!(result.is_err(), "Conditional should not silently compile");
-        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
-        );
+    fn parser_conditional_group_exists_selects_runtime_branch() {
+        let regex = Regex::compile(r"\A(a)?(?(1)b|c)\z")
+            .expect("Failed to compile group-exists conditional syntax");
+        assert!(regex.is_match("ab"));
+        assert!(regex.is_match("c"));
+        assert!(!regex.is_match("ac"));
     }
 
     #[test]
@@ -2468,29 +2494,86 @@ mod tests {
     }
 
     #[test]
-    fn parser_conditional_lookahead_syntax_reports_explicit_unsupported_error() {
-        let result = Regex::compile("(?(?=ab)x|y)");
-        assert!(
-            result.is_err(),
-            "Lookahead conditional should not silently compile"
-        );
-        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
-        );
+    fn parser_conditional_named_group_exists_selects_runtime_branch() {
+        let angle = Regex::compile(r"\A(?<g>a)?(?(<g>)b|c)\z")
+            .expect("Failed to compile named-group conditional syntax");
+        assert!(angle.is_match("ab"));
+        assert!(angle.is_match("c"));
+        assert!(!angle.is_match("ac"));
+
+        let bare = Regex::compile(r"\A(?<g>a)?(?(g)b|c)\z")
+            .expect("Failed to compile bare named-group conditional syntax");
+        assert!(bare.is_match("ab"));
+        assert!(bare.is_match("c"));
+        assert!(!bare.is_match("ac"));
     }
 
     #[test]
-    fn parser_conditional_negative_lookbehind_syntax_reports_explicit_unsupported_error() {
-        let result = Regex::compile("(?(?<!z)a|b)");
+    fn parser_conditional_without_false_branch_acts_like_empty_else() {
+        let regex = Regex::compile(r"\A(a)?(?(1)b)d\z")
+            .expect("Failed to compile single-branch conditional");
+        assert!(regex.is_match("abd"));
+        assert!(regex.is_match("d"));
+        assert!(!regex.is_match("ad"));
+    }
+
+    #[test]
+    fn parser_conditional_lookaround_forms_select_runtime_branch() {
+        let lookahead =
+            Regex::compile("(?(?=ab)a|z)b").expect("Failed to compile lookahead conditional");
+        assert!(lookahead.is_match("ab"));
+        assert!(lookahead.is_match("zb"));
+        assert!(!lookahead.is_match("xb"));
+
+        let negative_lookahead = Regex::compile("(?(?!ab)z|a)b")
+            .expect("Failed to compile negative-lookahead conditional");
+        assert!(negative_lookahead.is_match("ab"));
+        assert!(negative_lookahead.is_match("zb"));
+        assert!(!negative_lookahead.is_match("xb"));
+
+        let lookbehind =
+            Regex::compile("(?(?<=x)a|b)").expect("Failed to compile lookbehind conditional");
+        let lookbehind_match = lookbehind
+            .find_first("xa")
+            .expect("Expected lookbehind conditional match");
+        assert_eq!((lookbehind_match.start, lookbehind_match.end), (1, 2));
+        assert!(lookbehind.is_match("b"));
+
+        let negative_lookbehind = Regex::compile("(?(?<!x)b|a)")
+            .expect("Failed to compile negative-lookbehind conditional");
+        let negative_lookbehind_match = negative_lookbehind
+            .find_first("xa")
+            .expect("Expected negative-lookbehind conditional match");
+        assert_eq!(
+            (
+                negative_lookbehind_match.start,
+                negative_lookbehind_match.end
+            ),
+            (1, 2)
+        );
+        assert!(negative_lookbehind.is_match("b"));
+    }
+
+    #[test]
+    fn parser_conditional_missing_group_reports_compile_error() {
+        let result = Regex::compile("(a)?(?(2)b|c)");
         assert!(
             result.is_err(),
-            "Negative lookbehind conditional should not silently compile"
+            "Conditional missing-group reference should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("conditional '(?(2)...)' refers to missing capture group"));
+    }
+
+    #[test]
+    fn parser_conditional_missing_named_group_reports_compile_error() {
+        let result = Regex::compile("(?<g>a)?(?(missing)b|c)");
         assert!(
-            msg.contains("conditional syntax is parsed but not yet integrated into VM execution")
+            result.is_err(),
+            "Conditional missing named-group reference should not silently compile"
         );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("conditional '(?(missing)...)' refers to missing named capture group"));
     }
 
     #[test]
@@ -2520,6 +2603,20 @@ mod tests {
             ("(?<!x)a", "ba", true),
             ("(?=cat)c", "xxcat", true),
             ("(?<!x)a", "xa", false),
+            (r"\A(a)?(?(1)b|c)\z", "ab", true),
+            (r"\A(a)?(?(1)b|c)\z", "c", true),
+            (r"\A(a)?(?(1)b|c)\z", "ac", false),
+            (r"\A(?<g>a)?(?(g)b|c)\z", "ab", true),
+            (r"\A(?<g>a)?(?(g)b|c)\z", "c", true),
+            ("(?(?=ab)a|z)b", "ab", true),
+            ("(?(?=ab)a|z)b", "zb", true),
+            ("(?(?=ab)a|z)b", "xb", false),
+            ("(?(?!ab)z|a)b", "ab", true),
+            ("(?(?!ab)z|a)b", "zb", true),
+            ("(?(?<=x)a|b)", "xa", true),
+            ("(?(?<=x)a|b)", "b", true),
+            ("(?(?<!x)b|a)", "xa", true),
+            ("(?(?<!x)b|a)", "b", true),
             (r"\Acat", "cat dog", true),
             (r"\Acat", "xxcat", false),
             ("dog$", "cat dog", true),
@@ -2560,34 +2657,6 @@ mod tests {
             (
                 "(?{lua:return true})",
                 "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-            ),
-            (
-                "(?(1)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(<word>)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(word)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?=ab)x|y)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?!ab)x|y)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?<=z)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?<!z)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
             ),
             (
                 r"\p{L}+",

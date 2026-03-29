@@ -1279,34 +1279,6 @@ mod tests {
                 "(?&word)",
                 "recursion syntax is parsed but not yet integrated into VM execution",
             ),
-            (
-                "(?(1)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(<word>)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(word)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?=ab)x|y)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?!ab)x|y)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?<!z)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?(?<=z)a|b)",
-                "conditional syntax is parsed but not yet integrated into VM execution",
-            ),
         ];
 
         for (pattern, expected_msg) in cases {

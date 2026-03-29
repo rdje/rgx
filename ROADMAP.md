@@ -40,7 +40,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
-  - incrementally close remaining syntax gaps (numeric backreferences now shipped; conditional parsing subset wired)
+  - incrementally close remaining syntax gaps (numeric backreferences and conditionals now shipped; recursion and Unicode property classes still gated)
 
 ### Parser interoperability contract and conformance harness
 - Status: `in-progress`
@@ -93,6 +93,7 @@ Live forward-looking tracker for rgx.
 
 ## Done recently (snapshot)
 - Switched the default RGX build over to the real submodule-backed PGEN parser so normal workspace builds now exercise PGEN by default.
+- Shipped conditional runtime support on the default compiler/VM path, including group-exists, named-group-exists, and lookaround condition forms, missing-group compile errors, and PCRE2 differential coverage.
 - Shipped numeric backreferences on the default compiler/VM path, including backtracking-safe runtime matching, missing-group compile errors, and PCRE2 differential coverage.
 - Extended wasm code blocks with winning-path `Numeric` / `Replacement` result emission through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)`, including last-emitted-wins and invalid-payload failure coverage.
 - Extended the shared local/GitHub CI path so `./scripts/run-local-ci.sh` now covers the `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages`) instead of leaving those checks manual.
