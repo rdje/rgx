@@ -60,6 +60,15 @@ Live forward-looking tracker for rgx.
   - keep docs synchronized with verified behavior
 
 ## Next (near-term)
+### PCRE2 10.47+ downstream syntax alignment
+- Status: `planned`
+- Goal: prepare RGX for newer PCRE2 syntax that may arrive through the default PGEN parser path.
+- Scope:
+  - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
+  - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
+  - audit downstream RGX handling for branch-reset groups, `DEFINE` conditionals, and Perl extended character classes `(?[...])` once parser transport is available and verified
+  - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
+
 ### Performance validation loop
 - Status: `planned`
 - Goal: tighten benchmark-driven optimization workflow.

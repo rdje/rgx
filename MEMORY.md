@@ -99,6 +99,7 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
+- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and any branch-reset / `DEFINE` / `(?[...])` boundary decisions.
 - Continue closing remaining parsed-but-unintegrated regex gaps (recursion and Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
@@ -107,6 +108,9 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Planning-only follow-up after reviewing current upstream PCRE2 syntax:
+  - `ROADMAP.md` now tracks RGX-side future work for newer PCRE2 syntax that may arrive through PGEN, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditional forms, and downstream boundary decisions for branch reset, `DEFINE`, and Perl extended character classes `(?[...])`
+  - no implementation or validation work was done in this pass; this was only a roadmap/continuity update so the RGX side is ready once PGEN parser support lands
 - Shipped conditional runtime support on the default compiler/VM path:
   - removed the blanket compile-boundary rejection for `Regex::Conditional(...)` in `rgx-core/src/compiler.rs` and replaced it with dedicated validation for missing numbered and named conditional references
   - wired `Regex::Conditional(...)` through VM analysis, bytecode emission, opcode decoding, and both execution paths in `rgx-core/src/vm.rs`
