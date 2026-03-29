@@ -1,5 +1,5 @@
 # PARSER CONTRACT
-Canonical interoperability contract between `rgx` parser backends (recursive-descent reference backend and the feature-gated PGEN backend).
+Canonical interoperability contract between `rgx` parser backends (the default local PGEN backend and the recursive-descent reference/fallback backend).
 
 ## Contract metadata
 - Status: active
@@ -64,7 +64,10 @@ Current contract:
   - recursion
   - backreferences
   - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
-- Compiler must then fail explicitly (not silently) for unintegrated runtime features.
+- Compiler/runtime status for those parser-recognized forms is:
+  - backreferences are integrated on the default regex path
+  - recursion and conditionals still fail explicitly (not silently) until runtime integration lands
+  - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
 
@@ -82,11 +85,11 @@ The conformance harness checks:
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for unintegrated runtime features.
 
-When `pgen-parser` is enabled, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
+When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
 
 Current rollout note:
-- The `pgen-parser` feature now exercises a real PGEN AST-dump adapter in `rgx-core/src/parsing.rs`.
-- The local backend choice under that feature is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the PGEN backend and the recursive-descent reference backend without rewriting call sites.
+- The default `rgx-core` build now includes `pgen-parser`, so `parse_pattern(...)` uses the real PGEN AST-dump adapter unless default features are explicitly disabled.
+- The local backend choice under that default PGEN-backed build is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the PGEN backend and the recursive-descent reference backend without rewriting call sites.
 ## PGEN issue reporting and upstream handoff
 When RGX exercises a real PGEN-backed parser path, suspected parser misbehavior should be reported using the structured bundle described in `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 

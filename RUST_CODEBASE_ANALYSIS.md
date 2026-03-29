@@ -9,15 +9,12 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core backreference -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
-  - `./scripts/run-local-ci.sh` => pass (with the sibling local `../pgen` checkout present)
+  - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized)
 - Current large-file concentration is still dominated by `rgx-core`:
   - `rgx-core/src/vm.rs`: 4030 lines
   - `rgx-core/src/lib.rs`: 2655 lines
@@ -34,16 +31,16 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
-- The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and it now has a real local alternative parser backend under `pgen-parser`.
+- The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
 - Numeric backreferences are now part of that shipped default path:
   - the compiler validates that numbered backreferences only target capture groups that actually exist
   - the VM now emits/decodes/executes `Backref` bytecode in both top-level and subexpression execution paths
   - parity and capability tests now treat numeric backreferences as supported behavior rather than a compile-boundary gap
-- `pgen-parser` is no longer a recursive-descent placeholder:
+- The default PGEN-backed parser path is no longer a recursive-descent placeholder:
   - `rgx-core/src/parsing.rs` now calls into the PGEN embedding API
   - the stable regex AST dump is converted into canonical RGX AST structure for groups, lookarounds, conditionals, concatenation/alternation/pieces, and quantifiers
   - leaf atoms are re-parsed from exact source slices through the recursive-descent parser so RGX AST semantics stay aligned for literals, classes, escapes, code blocks, recursion leaves, and related terminals
-  - local backend choice under the feature is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the real PGEN backend and the recursive-descent reference backend without changing call sites
+  - local backend choice under the default PGEN-backed build is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the real PGEN backend and the recursive-descent reference backend without changing call sites
 - Embedded code-block execution is implemented in the public path for Lua, JavaScript, Rust-native callbacks, and registered wasm modules:
   - parser recognizes `(?{lang:code})`
   - compiler validates code blocks against `ExecutionMode` and cargo features
@@ -56,8 +53,8 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` and `wasm` code blocks are still Rust-API-only; the CLI has no registration/configuration surface for them
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
-  - the real PGEN backend is green locally, but the verified PGEN `1.1.1` fix commit is still only present in the sibling local checkout and has not landed on PGEN `origin/main`
-  - clean/distributed hosted validation for the real PGEN backend therefore still needs an explicit dependency/distribution decision
+  - the real PGEN backend is green locally through pinned submodule commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
+  - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
   - automated validation still misses benchmark trend capture
 
 ## What is shipped today
@@ -109,9 +106,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
 - The declared opcode surface in `rgx-core/src/vm.rs` still exceeds the emitted/decoded/runtime-used surface; several opcode families remain aspirational or only partially wired.
 - `PatternAnalysis` and `ParserConfig` remain unused scaffolding even after the real PGEN backend rollout.
-- The default local CI path now validates RGX-scoped `fmt`, workspace tests, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`), combined-language build coverage (`all-languages`), and `clippy`.
-- The real PGEN backend currently depends on the sibling checkout at `../pgen`; the verified fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`, which is still `177` commits ahead of PGEN `origin/main`.
-- Hosted GitHub CI now exports `RGX_SKIP_PGEN_CHECKS=1`, which keeps the shared workflow green while temporarily skipping only the `pgen-parser` feature checks when the sibling `../pgen` checkout is unavailable there.
+- The default local CI path now validates the default PGEN-backed RGX-scoped `fmt` and workspace tests, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`), combined-language build coverage (`all-languages`), and `clippy`.
+- The PGEN dependency is now pinned as `subs/pgen` at commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
+- The root Cargo workspace explicitly excludes `subs/pgen/rust`, which keeps RGX validation scoped to RGX even though the parser dependency now lives under the repository tree.
+- Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure exists in `rgx-bench`, but benchmark trend capture is still ad hoc and separate from automated validation.
 
 ## Roadmap alignment
@@ -124,7 +122,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ### Next
 - Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports plus the initial `emit_numeric` / `emit_replacement` result helpers.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
-- Decide how RGX should distribute the now-real PGEN backend cleanly while the verified `1.1.1` fix revision is still unpublished upstream (keep local-checkout integration, vendor a snapshot, or wait for upstream push).
+- Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
 - Operationalize benchmark trend capture instead of relying on manual runs.
 
 ### Later
@@ -143,6 +141,6 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## High-confidence next actions
 1. Design and ship the next wasm/runtime layer beyond the current import-based context slice plus initial `emit_numeric` / `emit_replacement` helpers.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
-3. Resolve the dependency/distribution story for the real PGEN backend now that the verified fix commit is only available in the sibling local checkout.
+3. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 4. Add automated benchmark-trend capture to the default validation loop.
 5. Reduce warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`.

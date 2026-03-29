@@ -90,17 +90,19 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 
 Run the same CI checks locally before pushing:
 ```bash
+git submodule update --init --recursive
 ./scripts/run-local-ci.sh
 ```
-The current `pgen-parser` path expects a sibling local checkout at `../pgen` carrying the PGEN regex `1.1.1` fixes.
+The default RGX build now expects the committed `subs/pgen` submodule carrying the pinned PGEN regex `1.1.1` fixes.
 
-That local path now covers:
-- workspace formatting/tests
+That submodule-backed path now covers:
+- the default PGEN-backed workspace formatting/tests
 - `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, and `wasm`
 - `rgx-cli` build/test coverage with `--features pgen-parser`
 - combined-language build coverage through `--features all-languages`
 
-Hosted GitHub CI currently sets `RGX_SKIP_PGEN_CHECKS=1` until that fixed PGEN revision is published upstream, so the full `pgen-parser` path remains a local-checkout-backed validation path for now.
+Fresh clones should use `git clone --recurse-submodules ...` or run `git submodule update --init --recursive` before building.
+Because `subs/pgen` is private, hosted GitHub CI may need a `RGX_SUBMODULES_TOKEN` secret if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
 
 Tracing examples:
 ```bash
@@ -121,7 +123,7 @@ Lua, JavaScript, native, and wasm code blocks can now also return first-slice ri
 The Rust API now also ships first dedicated numeric-result and replacement-oriented helpers on top of that slice: `find_first_numeric_with_code(...)` / `find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` payloads in match order, while `replace_first_with_code(...)` / `replace_all_with_code(...)` consume winning-path `Replacement(String)` payloads and preserve non-replacement matches unchanged.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing `rgx` imports for current position, full input text, numbered captures, named captures, host-provided variables, and initial richer-result emission through `emit_numeric(...)` / `emit_replacement(...)`.
 Some advanced constructs still remain intentionally parsed-but-unintegrated, including recursion, conditionals, and Unicode property classes. Numeric backreferences are now shipped on the default regex path, including compile-time rejection for references to missing capture groups. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).
-The `pgen-parser` feature now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`, with a one-constant local switch for forcing the recursive-descent reference backend when needed.
+The default parser path now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`, with a one-constant local switch for forcing the recursive-descent reference backend when needed.
 Current PGEN regex integration review is intentionally constrained to the published `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` surface and its referenced contract documents.
-The current integration dependency is still local-checkout-based because the verified PGEN `1.1.1` fix revision is present in the sibling `pgen` checkout but not yet published on PGEN `origin/main`.
+The current integration dependency is now pinned as the `subs/pgen` submodule at verified fix commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
 Read SESSION_BOOTSTRAP.md and start from there.

@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Pinned the default PGEN parser backend as a real RGX submodule
+- Scope: submodule-backed parser dependency, default-build verification, Cargo workspace separation, CI workflow updates, and documentation refreshes.
+- Changes:
+  - Added the private PGEN repository as the committed submodule `subs/pgen` and switched `rgx-core` to depend on `../subs/pgen/rust` instead of the old sibling checkout path.
+  - Kept the default parser rollout intact by leaving `rgx-core` default features on `pgen-parser`, then verified the active default backend explicitly through `parsing::tests::test_parser_name`.
+  - Updated `scripts/run-local-ci.sh`, `README.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `WARP.md`, and `docs/PARSER_CONTRACT.md` so they now describe the submodule-backed PGEN dependency rather than the old `../pgen` local-checkout workaround.
+  - Taught GitHub Actions checkout to initialize submodules recursively and documented the likely need for `RGX_SUBMODULES_TOKEN` when the default `GITHUB_TOKEN` cannot read the private `rdje/pgen` repository.
+  - Added `exclude = ["subs/pgen/rust"]` to the root Cargo workspace so the submodule remains a distinct project even though it lives under the RGX tree; this keeps RGX workspace validation scoped to RGX while still building against the pinned PGEN dependency.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - A normal default RGX build now really does use PGEN by default through the pinned `subs/pgen` submodule, rather than only through a local sibling checkout convention.
+  - No new PGEN parser show-stopper surfaced during the widened submodule-backed validation sweep.
 ### 2026-03-29 - Shipped numeric backreferences on the default regex path
 - Scope: compiler/VM backreference runtime integration, compile-boundary validation, parity coverage, and documentation refreshes.
 - Changes:

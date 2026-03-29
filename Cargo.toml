@@ -6,6 +6,7 @@ members = [
     "rgx-bench",
     "rgx-wasm",
 ]
+exclude = ["subs/pgen/rust"]
 
 [workspace.package]
 version = "0.1.0"

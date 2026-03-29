@@ -19,6 +19,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.RGX_SUBMODULES_TOKEN != '' && secrets.RGX_SUBMODULES_TOKEN || github.token }}
 
       - name: Install system dependencies
         run: |
@@ -35,6 +38,4 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run local CI script
-        env:
-          RGX_SKIP_PGEN_CHECKS: "1"
         run: ./scripts/run-local-ci.sh

@@ -49,22 +49,19 @@ Live continuity memory for `rgx` sessions.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.
 - After the upstream `1.1.0` contract refresh, the live complaint surface is narrower again: plain `(?{...})` and `lua` / `js` / `javascript` payload classes are now explicitly defined, while `native` / `wasm` tags, stronger JS/Lua shielding, runtime semantics, and AST semantic upgrade guarantees remain the main open points.
-- The `pgen-parser` feature now exercises a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`:
+- The default RGX build now exercises a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs` through the pinned `subs/pgen` submodule:
   - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
-- Local validation against the real PGEN backend is currently green for:
+- The pinned PGEN submodule commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
+- Cargo workspace state now explicitly excludes `subs/pgen/rust` so RGX and PGEN stay separate projects even though PGEN lives under the RGX tree as a submodule.
+- Local validation against the default real PGEN backend is currently green for:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
   - `./scripts/run-local-ci.sh`
-  - `cargo test -p rgx-core --offline`
-  - `cargo test -p rgx-core --features pgen-parser --offline`
-  - `cargo test -p rgx-core --features "pgen-parser lua javascript wasm" --offline`
-  - `cargo test -p rgx-cli --features pgen-parser --offline`
-  - `cargo clippy --workspace --all-targets --offline`
-- The remaining blocker is distribution, not parser correctness:
-  - the verified PGEN fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
-  - the local `pgen` checkout is `177` commits ahead of `origin/main`
-  - so RGX currently depends on the sibling `../pgen` checkout for the real PGEN backend
-  - clean hosted/distributed integration still needs an explicit choice (upstream publish, vendored snapshot, or keep local-checkout dependency for now)
+- Hosted CI now checks out submodules recursively; because `subs/pgen` is private, GitHub Actions may still need `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.

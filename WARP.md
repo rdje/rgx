@@ -9,7 +9,7 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
   - literals, alternation, anchors including `\A`, `\Z`, `\z`
   - shorthand/custom character classes
   - greedy and lazy quantifiers, including counted ranges
-  - named groups, atomic groups, lookahead, and lookbehind
+  - named groups, atomic groups, lookahead, lookbehind, and numeric backreferences
   - top-level branch reporting
 - Shipped on the execution-mode / feature-gated path:
   - `(?{lua:...})` code blocks in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled
@@ -23,8 +23,8 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
   - the shipped native/wasm slices are currently Rust-API-only because the CLI does not expose registration
   - the current wasm ABI keeps `module:function` -> exported `() -> i32` and adds `rgx` host imports for current position, full input text, numbered captures, named captures, and host-provided variables set through `Regex::set_variable(...)`; richer non-boolean result handling is still deferred there
   - numeric results are currently surfaced through match metadata plus dedicated numeric helper APIs; the replacement-oriented API layer still consumes only `Replacement(String)`
-  - backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated
-- `pgen-parser` is still a parser-contract validation path backed by fallback behavior, not a truly separate parser backend.
+  - recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated
+- The default local parser is now the real submodule-backed PGEN backend; the recursive-descent parser remains available only as a fallback/reference path.
 ## Useful commands
 ```bash
 ./scripts/run-local-ci.sh
@@ -47,5 +47,5 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 ## Current priorities
 1. Expand code-block support beyond the current first richer-result plus numeric/replacement helper slice, especially wasm richer-result handling.
 2. Keep capability/user/state docs truthful as features move from parsed-only to shipped.
-3. Replace the fallback-backed `pgen-parser` path with a real parser backend.
+3. Keep the default PGEN-backed parser path stable while the private-submodule CI/auth story is tightened.
 4. Improve the performance-validation loop so benchmark claims are continuously grounded.
