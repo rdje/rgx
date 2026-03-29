@@ -35,6 +35,7 @@ wat = "1.0"
 # Scripting languages
 mlua = { version = "0.9", features = ["lua54", "send"] }
 rquickjs = "0.4"
+rhai = "1"
 
 # SIMD and low-level optimizations
 wide = "0.7"

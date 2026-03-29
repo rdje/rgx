@@ -1150,6 +1150,7 @@ mod tests {
             "(?{lua:return true})",
             "(?{js:return true})",
             "(?{javascript:return true})",
+            "(?{rhai:true})",
             "(?{native:cb})",
             "(?{wasm:mod:fn})",
             "(?R)",

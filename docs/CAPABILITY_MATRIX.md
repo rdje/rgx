@@ -27,6 +27,7 @@ Representative test anchors:
 ## Embedded code execution
 - `(?{lua:...})`: `mode-gated shipped`
 - `(?{js:...})` / `(?{javascript:...})`: `mode-gated shipped`
+- `(?{rhai:...})`: `mode-gated shipped`
 - `(?{native:...})`: `mode-gated shipped` on the Rust API path in `ExecutionMode::Full` after registration via `Regex::register_native(...)`; the CLI path still has no native-registration surface
 - `(?{wasm:...})`: `mode-gated shipped` on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration via `Regex::register_wasm_module(...)`; the CLI path still has no wasm-registration surface
 Current behavior contract for the shipped slice:
@@ -34,6 +35,7 @@ Current behavior contract for the shipped slice:
 - `ExecutionMode::Safe` accepts only the currently integrated sandboxed backends, with matching cargo features enabled:
   - `lua` requires the `lua` feature
   - `js` / `javascript` requires the `javascript` feature
+  - `rhai` requires the `rhai` feature
   - `wasm` requires the `wasm` feature plus a registered module on the compiled `Regex`
   - host-provided execution variables can be set on the compiled `Regex` via `Regex::set_variable(...)`
   - current wasm ABI keeps `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
@@ -69,14 +71,14 @@ Current behavior contract for the shipped slice:
   - `native` requires registering a callback on the compiled `Regex`
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
-- Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
-- `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native/wasm code blocks.
+- Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
+- `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/Rhai/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.
-- Wasm currently exposes a smaller import-based context/result slice (position, current match metadata, full input text, numbered captures, named captures, host-provided variables, numeric emission, replacement emission) rather than the fuller Lua/JavaScript/native binding surface.
+- Wasm currently exposes a smaller import-based context/result slice (position, current match metadata, full input text, numbered captures, named captures, host-provided variables, numeric emission, replacement emission) rather than the fuller Lua/JavaScript/Rhai/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
 Representative test anchors:
-- `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests
+- `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/Rhai/native/wasm code-block tests
 - `rgx-core/src/execution.rs` backend dispatch logic
 ## Advanced syntax shipped on the default runtime path
 - Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `shipped`

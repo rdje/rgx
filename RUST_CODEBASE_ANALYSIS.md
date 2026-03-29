@@ -12,6 +12,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core full_mode_native_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_code_block_can_access_match_metadata -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_code_block_can_match -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block_can_read_match_metadata -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
@@ -52,12 +53,12 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the stable regex AST dump is converted into canonical RGX AST structure for groups, lookarounds, conditionals, concatenation/alternation/pieces, and quantifiers
   - leaf atoms are re-parsed from exact source slices through the recursive-descent parser so RGX AST semantics stay aligned for literals, classes, escapes, code blocks, recursion leaves, and related terminals
   - local backend choice under the default PGEN-backed build is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can flip between the real PGEN backend and the recursive-descent reference backend without changing call sites
-- Embedded code-block execution is implemented in the public path for Lua, JavaScript, Rust-native callbacks, and registered wasm modules:
+- Embedded code-block execution is implemented in the public path for Lua, JavaScript, Rhai, Rust-native callbacks, and registered wasm modules:
   - parser recognizes `(?{lang:code})`
   - compiler validates code blocks against `ExecutionMode` and cargo features
   - VM lowers code blocks into inline opcodes and executes them during matching
   - engine/runtime materialize current match text, current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables into the execution context
-  - winning-path non-boolean Lua/JavaScript/native/wasm results are surfaced through `MatchResult.code_result`
+  - winning-path non-boolean Lua/JavaScript/Rhai/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
 - The biggest remaining gaps are now narrower and clearer:
@@ -83,6 +84,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ### Execution-mode / feature-gated path
 - `(?{lua:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled.
 - `(?{js:...})` and `(?{javascript:...})` are shipped as predicate checkpoints in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `javascript` feature is enabled.
+- `(?{rhai:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `rhai` feature is enabled.
 - `(?{native:...})` is shipped on the Rust API path in `ExecutionMode::Full` after registering a callback on the compiled `Regex`.
 - `(?{wasm:...})` is shipped on the Rust API path in `ExecutionMode::Safe` or `ExecutionMode::Full` after registering a named wasm module on the compiled `Regex`.
 - Current execution-context contract for this slice:
@@ -90,7 +92,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - current match start/end/length metadata plus the 1-based top-level branch number are now available to code-block runtimes when applicable
   - numbered captures, named captures, and host-provided variables are available when their groups have completed or have been set through the Rust API
   - code blocks participate in backtracking and may execute multiple times during one overall match search
-  - Lua/JavaScript/native/wasm `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
+  - Lua/JavaScript/Rhai/native/wasm `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
   - wasm keeps `module:function` plus exported `() -> i32` predicates and `rgx` imports for position, current match metadata, full input text, numbered captures, named captures, variables, `emit_numeric(...)`, and `emit_replacement(...)`
 
 ### Parser interoperability / PGEN path
@@ -104,7 +106,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - group families
   - lookarounds
   - conditionals with and without false branches
-  - code-block tags (`lua`, `js`, `javascript`, `native`, `wasm`)
+  - code-block tags (`lua`, `js`, `javascript`, `rhai`, `native`, `wasm`)
   - recursion and numeric backreferences
 - Direct local validation confirms the four previously reported PGEN transport bugs are fixed in the local `1.1.1` checkout.
 
@@ -133,10 +135,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
-- Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
+- Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
 
 ### Next
-- Design the next higher-value wasm/runtime slice beyond the current position/match-metadata/text/numbered-capture/named-capture/variable imports plus the initial `emit_numeric` / `emit_replacement` result helpers.
+- Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
 - Operationalize benchmark trend capture instead of relying on manual runs.
@@ -157,7 +159,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, `rgx-bench/src/lib.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 
 ## High-confidence next actions
-1. Design and ship the next wasm/runtime layer beyond the current import-based context slice plus current match metadata and the initial `emit_numeric` / `emit_replacement` helpers.
+1. Tighten the shipped Lua/JavaScript/Rhai inline-language surface and docs while keeping the default PGEN-backed parser contract honest.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 3. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 4. Add automated benchmark-trend capture to the default validation loop.

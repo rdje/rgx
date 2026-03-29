@@ -97,7 +97,7 @@ The default RGX build now expects the committed `subs/pgen` submodule carrying t
 
 That submodule-backed path now covers:
 - the default PGEN-backed workspace formatting/tests
-- `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, and `wasm`
+- `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, `rhai`, and `wasm`
 - `rgx-cli` build/test coverage with `--features pgen-parser`
 - combined-language build coverage through `--features all-languages`
 
@@ -117,9 +117,9 @@ Legacy CLI aliases:
 
 ## Current status snapshot
 Most mature path today is the VM/compiler pipeline in `rgx-core`, with public API and CLI integrated.
-Embedded code-block execution is now available on the public path for Lua and JavaScript code blocks in `ExecutionMode::Safe` / `ExecutionMode::Full` when the corresponding cargo feature is enabled, for registered wasm modules in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `wasm` feature enabled, and for `native` callbacks in `ExecutionMode::Full` through the Rust API after registration on a compiled `Regex`.
-Host-provided execution variables can now be set on compiled regexes via `Regex::set_variable(...)` and are snapshotted into Lua, JavaScript, native, and wasm code-block evaluation.
-Lua, JavaScript, native, and wasm code blocks can now also return first-slice richer non-boolean match metadata: `find_first` and `find_all` expose the last winning-path value through `MatchResult.code_result` / `CodeBlockValue`.
+Embedded code-block execution is now available on the public path for Lua, JavaScript, and Rhai code blocks in `ExecutionMode::Safe` / `ExecutionMode::Full` when the corresponding cargo feature is enabled, for registered wasm modules in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `wasm` feature enabled, and for `native` callbacks in `ExecutionMode::Full` through the Rust API after registration on a compiled `Regex`.
+Host-provided execution variables can now be set on compiled regexes via `Regex::set_variable(...)` and are snapshotted into Lua, JavaScript, Rhai, native, and wasm code-block evaluation.
+Lua, JavaScript, Rhai, native, and wasm code blocks can now also return first-slice richer non-boolean match metadata: `find_first` and `find_all` expose the last winning-path value through `MatchResult.code_result` / `CodeBlockValue`.
 The Rust API now also ships first dedicated numeric-result and replacement-oriented helpers on top of that slice: `find_first_numeric_with_code(...)` / `find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` payloads in match order, while `replace_first_with_code(...)` / `replace_all_with_code(...)` consume winning-path `Replacement(String)` payloads and preserve non-replacement matches unchanged.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing `rgx` imports for current position, current match start/end/length metadata, top-level branch number when available, full input text, numbered captures, named captures, host-provided variables, and initial richer-result emission through `emit_numeric(...)` / `emit_replacement(...)`.
 Unicode property classes, recursion/subroutine calls, numeric backreferences, and conditionals are now all shipped on the default regex path, including compile-time rejection for invalid Unicode property names and missing recursive/backreference/conditional capture targets. The CLI still has no native- or wasm-registration surface (tracked explicitly in the docs/matrices above).

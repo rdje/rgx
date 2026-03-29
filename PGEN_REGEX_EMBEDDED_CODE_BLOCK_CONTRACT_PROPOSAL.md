@@ -85,7 +85,7 @@ Recommended for:
 - `lua`
 - `js`
 - `javascript`
-- future `rhai`
+- `rhai`
 
 Recommended meaning:
 - parser guarantees structurally correct payload capture,
@@ -236,7 +236,7 @@ This split lets RGX integrate PGEN without requiring PGEN to own all execution s
 It gives RGX a clear path:
 - trust PGEN for robust code-block recognition and preservation,
 - map tags to RGX runtime backends,
-- keep the everyday inline-language track centered on `lua` / `js` / `javascript` and future `rhai`,
+- keep the everyday inline-language track centered on `lua` / `js` / `javascript` and `rhai`,
 - keep `native` and `wasm` reference-shaped,
 - defer heavier runtimes such as Julia/Python until later product/runtime decisions,
 - and let Lua/JavaScript/Rhai validation happen in the actual execution backend.

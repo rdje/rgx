@@ -24,6 +24,7 @@ wasmtime = { workspace = true, optional = true }
 # Scripting languages
 mlua = { workspace = true, optional = true }
 rquickjs = { workspace = true, optional = true }
+rhai = { workspace = true, optional = true }
 
 # Utilities
 tracing = { workspace = true }
@@ -39,7 +40,8 @@ pgen-parser = ["dep:pgen", "dep:serde", "dep:serde_json"]
 wasm = ["wasmtime"]
 lua = ["mlua"]
 javascript = ["rquickjs"]
-all-languages = ["wasm", "lua", "javascript"]
+rhai = ["dep:rhai"]
+all-languages = ["wasm", "lua", "javascript", "rhai"]
 
 [dev-dependencies]
 criterion = { workspace = true }

@@ -13,8 +13,9 @@ default = []
 pgen-parser = ["rgx-core/pgen-parser"]
 lua = ["rgx-core/lua"]
 javascript = ["rgx-core/javascript"]
+rhai = ["rgx-core/rhai"]
 wasm = ["rgx-core/wasm"]
-all-languages = ["lua", "javascript", "wasm"]
+all-languages = ["lua", "javascript", "rhai", "wasm"]
 
 [dependencies]
 rgx-core = { path = "../rgx-core" }

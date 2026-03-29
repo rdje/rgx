@@ -57,7 +57,7 @@ if let Some(m) = re.find_first("abc123def") {
 - Positions are byte offsets.
 - `find_all` returns non-overlapping matches.
 - For top-level alternation patterns, `matched_branch_number` is 1-based.
-- When Lua/JavaScript/native code blocks return non-boolean values on the winning path, `find_first` / `find_all` expose them through `code_result`.
+- When Lua/JavaScript/Rhai/native code blocks return non-boolean values on the winning path, `find_first` / `find_all` expose them through `code_result`.
 ### Code-driven numeric helpers
 When a winning match path emits `CodeBlockValue::Numeric`, the Rust API can collect those numeric payloads directly:
 
@@ -126,19 +126,20 @@ assert!(re.is_match("dog"));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 ### Predicate code blocks
-Embedded code-block execution is now available for Lua, JavaScript, Rust-native callbacks, and registered wasm modules.
+Embedded code-block execution is now available for Lua, JavaScript, Rhai, Rust-native callbacks, and registered wasm modules.
 
 Requirements:
 - `ExecutionMode::Pure` rejects all code blocks.
-- Use `Regex::with_mode(..., ExecutionMode::Safe)` or `ExecutionMode::Full` for `lua` / `js` / `javascript` / `wasm`.
+- Use `Regex::with_mode(..., ExecutionMode::Safe)` or `ExecutionMode::Full` for `lua` / `js` / `javascript` / `rhai` / `wasm`.
 - Use `ExecutionMode::Full` for `native`.
 - Enable the matching cargo feature:
   - `lua` for `(?{lua:...})`
   - `javascript` for `(?{js:...})` / `(?{javascript:...})`
+  - `rhai` for `(?{rhai:...})`
   - `wasm` for `(?{wasm:...})`
 - Register native callbacks or wasm modules on the compiled `Regex` before matching.
 - Optional host-provided variables can be set on the compiled `Regex` via `set_variable(...)`.
-- Write code as a predicate body and use `return ...` style in both Lua and JavaScript.
+- Write code as a predicate body; Lua and JavaScript commonly use `return ...`, while Rhai can use a final expression directly.
 
 Lua example:
 
@@ -214,6 +215,19 @@ assert!(re.is_match("cat"));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 
+Rhai example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?<word>cat)(?{rhai: named["word"] == "cat"})"#,
+    ExecutionMode::Safe,
+)?;
+assert!(re.is_match("cat"));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
 Native callback example:
 
 ```rust
@@ -245,7 +259,7 @@ What the execution context exposes today:
 - `match_length`: current match-attempt length in bytes
 - `branch_number`: 1-based top-level branch number when the current path is inside a top-level alternation arm
 - `text`: full input text
-- Lua/JavaScript bindings expose `arg`, `named`, `vars`, `pos`, `match_start`, `match_end`, `match_length`, `branch_number`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `match_start()`, `match_end()`, `match_length()`, `matched_branch_number()`, `group()`, `named()`, and `variable()`.
+- Lua/JavaScript/Rhai bindings expose `arg`, `named`, `vars`, `pos`, `match_start`, `match_end`, `match_length`, `branch_number`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `match_start()`, `match_end()`, `match_length()`, `matched_branch_number()`, `group()`, `named()`, and `variable()`.
 - Wasm currently exposes a smaller import-based context/result slice through the `rgx` namespace:
   - `position() -> i32`
   - `match_start() -> i32`
@@ -280,7 +294,7 @@ Current limits for this slice:
 - Host-provided variables are read-only snapshots for each code-block evaluation.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, invalid guest-memory reads/writes, and invalid UTF-8 replacement payloads also fail the current match path at runtime.
-- Lua/JavaScript/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
+- Lua/JavaScript/Rhai/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current advanced syntax status
 Unicode property classes are now part of the shipped runtime path. Patterns such as `\p{L}+`, `\P{L}+`, and `\p{Greek}+` compile and execute on the default path, and invalid property names fail explicitly at compile time.
@@ -307,7 +321,7 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - Code blocks are zero-width predicate checkpoints in the VM path.
 - They can fail the current path and allow normal regex backtracking to continue.
 - Boolean-style success/failure still drives path control.
-- Lua/JavaScript/native `return 123` or `return "..."` also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
+- Lua/JavaScript/Rhai/native numeric or string results also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
 - Wasm keeps the exported `() -> i32` predicate contract, and may additionally call `rgx.emit_numeric(...)` or `rgx.emit_replacement(...)` before returning non-zero to surface a winning-path payload.
 - `replace_first_with_code` / `replace_all_with_code` consume only winning-path `Replacement(String)` values; numeric-only matches continue to round-trip unchanged in replacement mode.
 - If a wasm module emits more than one non-boolean payload during one code-block execution, the last emitted payload wins.

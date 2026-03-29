@@ -380,6 +380,13 @@ impl Compiler {
                         )
                     }
                 }
+                "rhai" => {
+                    if cfg!(feature = "rhai") {
+                        None
+                    } else {
+                        Some("rhai code blocks require the `rhai` cargo feature".to_string())
+                    }
+                }
                 "wasm" => {
                     if cfg!(feature = "wasm") {
                         None
@@ -406,6 +413,13 @@ impl Compiler {
                             "javascript code blocks require the `javascript` cargo feature"
                                 .to_string(),
                         )
+                    }
+                }
+                "rhai" => {
+                    if cfg!(feature = "rhai") {
+                        None
+                    } else {
+                        Some("rhai code blocks require the `rhai` cargo feature".to_string())
                     }
                 }
                 "wasm" => {

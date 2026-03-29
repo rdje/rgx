@@ -49,10 +49,14 @@ Live continuity memory for `rgx` sessions.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.
 - Embedded code-block language direction was explicitly narrowed in design discussion:
-  - keep the first-class inline/source-body language track centered on `lua`, `js` / `javascript`, and future `rhai`
+  - keep the first-class inline/source-body language track centered on `lua`, `js` / `javascript`, and `rhai`
   - keep `native` / `wasm` as advanced reference-style backends rather than the primary inline UX target
   - defer Julia/Python support until later
   - and, when asking PGEN for future parser marker expansion, prefer `rhai` alongside `lua` / `js`
+- Rhai code blocks are now shipped locally in RGX as a feature-gated inline backend:
+  - `(?{rhai:...})` now executes in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `rhai` cargo feature enabled
+  - default PGEN-backed parsing already transports the `rhai` tag through the generic code-block path, and RGX now locks that in with parser-conformance fixtures
+  - upstream PGEN still has not explicitly published `rhai` as a marker in its contract, so RGX docs should keep that distinction visible
 - After the upstream `1.1.0` contract refresh, the live complaint surface is narrower again: plain `(?{...})` and `lua` / `js` / `javascript` payload classes are now explicitly defined, while `native` / `wasm` tags, stronger JS/Lua shielding, runtime semantics, and AST semantic upgrade guarantees remain the main open points.
 - The default RGX build now exercises a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs` through the pinned `subs/pgen` submodule:
   - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)

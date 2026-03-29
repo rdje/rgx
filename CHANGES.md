@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Shipped Rhai code-block execution
+- Scope: embedded-language expansion, feature wiring, parser-contract coverage, and doc/CI refreshes.
+- Changes:
+  - Added a new feature-gated Rhai backend in `rgx-core/src/execution.rs` and exposed it publicly through `rgx-core/src/rhai.rs`.
+  - Extended compiler/runtime language validation so `(?{rhai:...})` is accepted in `ExecutionMode::Safe` / `ExecutionMode::Full` when the `rhai` cargo feature is enabled and rejected explicitly otherwise.
+  - Added feature-gated Rhai runtime tests in `rgx-core/src/lib.rs` covering variables, named captures, match metadata, backtracking participation, and richer-result behavior.
+  - Extended parser-contract fixtures in `rgx-core/src/parsing.rs` so the default PGEN-backed parser and the recursive-descent reference parser are both checked on `(?{rhai:...})`.
+  - Updated `Cargo.toml`, `rgx-core/Cargo.toml`, `rgx-cli/Cargo.toml`, and `scripts/run-local-ci.sh` so Rhai is part of the feature matrix and `all-languages` coverage.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped inline-language surface now truthfully includes Rhai.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_code_block_can_match -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_code_blocks_use_last_non_boolean_result -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_pgen_backend_matches_reference_fixtures -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Rhai is now the third first-class inline/source-body language on the RGX path, alongside Lua and JavaScript.
+  - The default PGEN-backed parser path now has a regression guard for `rhai`, but upstream PGEN contract docs still need their own explicit marker publication later.
+
 ### 2026-03-30 - Logged embedded code-block language direction for future work
 - Scope: roadmap steering, durable design notes, PGEN-facing contract guidance, and continuity capture.
 - Changes:

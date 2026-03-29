@@ -20,7 +20,7 @@
 //! ├─────────────────────────────────────┤
 //! │       Code Execution Layer          │  ← Multi-language support
 //! ├─────────┬─────────┬─────────────────┤
-//! │  WASM   │   Lua   │  Native Calls   │  ← Pluggable executors
+//! │  Rhai   │ Lua/JS  │ Native/WASM     │  ← Pluggable executors
 //! └─────────┴─────────┴─────────────────┘
 //! ```
 //!
@@ -69,6 +69,8 @@ pub mod simd;
 pub mod javascript;
 #[cfg(feature = "lua")]
 pub mod lua;
+#[cfg(feature = "rhai")]
+pub mod rhai;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
@@ -2480,6 +2482,18 @@ mod tests {
         assert!(msg.contains("javascript code blocks require the `javascript` cargo feature"));
     }
 
+    #[cfg(not(feature = "rhai"))]
+    #[test]
+    fn safe_mode_rhai_code_blocks_require_rhai_feature() {
+        let result = Regex::with_mode("(?{rhai:true})", ExecutionMode::Safe);
+        assert!(
+            result.is_err(),
+            "Rhai code block should require the rhai feature"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("rhai code blocks require the `rhai` cargo feature"));
+    }
+
     #[cfg(feature = "lua")]
     #[test]
     fn safe_mode_lua_code_block_can_access_variables() {
@@ -2611,6 +2625,70 @@ mod tests {
         let first = regex
             .find_first("")
             .expect("Expected JavaScript richer-result match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 0);
+        assert_eq!(
+            first.code_result,
+            Some(CodeBlockValue::Replacement("done".to_string()))
+        );
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_block_can_access_variables() {
+        let regex = Regex::with_mode(r#"(?{rhai: vars["env"] == "prod"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Rhai variable pattern");
+        regex
+            .set_variable("env", "prod")
+            .expect("Failed to register execution variable");
+        assert!(regex.is_match(""));
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_block_can_match() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{rhai: named["word"] == "cat"})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai code block pattern");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_block_can_access_match_metadata() {
+        let regex = Regex::with_mode(
+            r#"foo|cat(?{rhai: match_start == 2 && match_end == 5 && match_length == 3 && branch_number == 2})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai match-metadata pattern");
+
+        let first = regex
+            .find_first("xxcat")
+            .expect("Expected Rhai match-metadata match");
+        assert_eq!((first.start, first.end), (2, 5));
+        assert_eq!(first.matched_branch_number, Some(2));
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_block_participates_in_backtracking() {
+        let regex = Regex::with_mode(r#"a*(?{rhai: arg[0] == ""})a"#, ExecutionMode::Safe)
+            .expect("Failed to compile Rhai backtracking pattern");
+        assert!(regex.is_match("a"));
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_blocks_use_last_non_boolean_result() {
+        let regex = Regex::with_mode(r#"(?{rhai: 1})(?{rhai: "done"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Rhai richer-result pattern");
+
+        let first = regex
+            .find_first("")
+            .expect("Expected Rhai richer-result match");
         assert_eq!(first.start, 0);
         assert_eq!(first.end, 0);
         assert_eq!(

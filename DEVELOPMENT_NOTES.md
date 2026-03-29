@@ -12,7 +12,7 @@ Technical knowledge base for day-to-day engineering work in rgx.
   - runtime performance
   - matching accuracy
 - rgx also targets broader code-block language support over time, but the current preferred inline-language direction is:
-  - first-class source-body languages: JavaScript, Lua, and a future Rhai track
+  - first-class source-body languages: JavaScript, Lua, and Rhai
   - advanced reference-style backends: native and wasm
   - explicitly deferred heavier runtimes for later evaluation: Julia and Python
   - all with explicit safety and sandbox guarantees
@@ -33,16 +33,16 @@ Pipeline in `rgx-core`:
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
-- Public-path predicate execution for `(?{lua:...})` and `(?{js:...})` / `(?{javascript:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` when the matching cargo feature is enabled
+- Public-path predicate execution for `(?{lua:...})`, `(?{js:...})` / `(?{javascript:...})`, and `(?{rhai:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` when the matching cargo feature is enabled
 - Public-path native callback execution for `(?{native:...})` in `ExecutionMode::Full` through `Regex::register_native(...)` on the Rust API path
 - Public-path wasm module execution for `(?{wasm:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` through `Regex::register_wasm_module(...)` on the Rust API path
 - Host-provided execution variables can now be registered through `Regex::set_variable(...)` and are snapshotted into each code-block evaluation
 - Wasm predicates can now read current position, full input text, numbered captures, named captures, and host-provided variables through `rgx` host imports while keeping the exported `() -> i32` predicate entrypoint stable
-- Code-block execution contexts now also expose current match start/end/length metadata plus top-level branch number when available across native/Lua/JavaScript, with matching wasm host imports for the same metadata
+- Code-block execution contexts now also expose current match start/end/length metadata plus top-level branch number when available across native/Lua/JavaScript/Rhai, with matching wasm host imports for the same metadata
 - Wasm modules can now also emit winning-path numeric and replacement payloads through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)` while still using the exported `() -> i32` predicate to decide success/failure
 - Code-block execution contexts now expose current overall match text, numbered captures, named captures, and host-provided variables to the execution layer
 - Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
-- Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native/wasm code blocks
+- Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/Rhai/native/wasm code blocks
 - Public numeric-result helper APIs now exist through `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)`, which collect winning-path `Numeric(f64)` payloads in match order and skip non-numeric matches
 - Public replacement-oriented APIs now exist through `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)`, which consume winning-path `Replacement(String)` payloads and leave non-replacement matches unchanged
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
@@ -91,7 +91,7 @@ Pipeline in `rgx-core`:
 - `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
 - Local-first CI path now exists:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
-  - `./scripts/run-local-ci.sh` now covers the default PGEN-backed workspace plus the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) and `rgx-cli --features pgen-parser`
+  - `./scripts/run-local-ci.sh` now covers the default PGEN-backed workspace plus the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`, `all-languages`) and `rgx-cli --features pgen-parser`
   - shared CI is now expected to initialize the committed `subs/pgen` submodule before running that same validation path
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
 - `Cargo.lock` is intentionally tracked so local validation and GitHub CI share the same dependency resolution
@@ -160,20 +160,20 @@ Pipeline in `rgx-core`:
   - group families
   - lookarounds
   - conditionals with and without false branches
-  - code-block tags (`lua`, `js`, `javascript`, `native`, `wasm`)
+  - code-block tags (`lua`, `js`, `javascript`, `rhai`, `native`, `wasm`)
   - recursion and numeric backreferences
 - Suspected PGEN parser misbehavior should be reported with the structured bundle described by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - The current live PGEN regex caveats are narrower than the original complaint set:
   - the contract is now integration-ready for basic RGX rollout,
   - but AST consumers still need release pinning because the stable JSON schema does not freeze detailed `rule_name` taxonomy across upgrades,
-  - and the current embedded code-block contract is now structurally specified for opaque generic / `lua` / `js` / `javascript` payloads, but still intentionally narrower than arbitrary valid JS/Lua and still excludes published `native` / `wasm` support.
+  - and the current embedded code-block contract is now structurally specified for opaque generic / `lua` / `js` / `javascript` payloads, while RGX now also ships a local `rhai` backend on top of generic tag transport pending explicit upstream marker publication; the published contract still excludes `native` / `wasm` support.
 - The current PGEN-backed integration now depends on the committed `subs/pgen` submodule:
   - the pinned fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
   - fresh clones must initialize submodules before building (`git submodule update --init --recursive`)
   - hosted CI for the private submodule may need an explicit token such as `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
 - The current forwardable recommendation for PGEN lives in `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`:
   - keep parser guarantees structural,
-  - treat `lua` / `js` / `javascript` and future `rhai` as source-body tags best validated by the downstream backend,
+  - treat `lua` / `js` / `javascript` and `rhai` as source-body tags best validated by the downstream backend,
   - and keep `native` / `wasm` reference-shaped rather than implying arbitrary inline source support.
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
@@ -181,8 +181,8 @@ Pipeline in `rgx-core`:
 - Parser/VM support for advanced regex syntax still has meaningful remaining gaps in newer PCRE families beyond the currently covered recursion, conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
-- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
-- The current product direction is to avoid using wasm as the benchmark for everyday inline code-block ergonomics; it remains supported, but future inline-language prioritization should compare against Lua/JavaScript and the prospective Rhai track first
+- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
+- The current product direction is to avoid using wasm as the benchmark for everyday inline code-block ergonomics; it remains supported, but future inline-language prioritization should compare against the shipped Lua/JavaScript/Rhai lane first
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Julia/Python embedding remain intentionally deferred until after the Lua/JavaScript/Rhai direction is clearer
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
@@ -196,7 +196,7 @@ Pipeline in `rgx-core`:
 5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
 6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-8. Expand the staged code-block rollout with the preferred inline-language direction in mind: prioritize Lua/JavaScript ergonomics and Rhai evaluation first, while treating further wasm ABI/result work as secondary unless product needs force it higher
+8. Expand the staged code-block rollout with the preferred inline-language direction in mind: prioritize Lua/JavaScript/Rhai ergonomics first, while treating further wasm ABI/result work as secondary unless product needs force it higher
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

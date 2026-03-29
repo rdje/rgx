@@ -1,6 +1,6 @@
 //! State-of-the-art code execution module for multi-language regex patterns.
 //!
-//! This module implements sandboxed code execution for Lua, JavaScript, and WebAssembly
+//! This module implements sandboxed code execution for Lua, JavaScript, Rhai, and WebAssembly
 //! within regex patterns. This is a unique feature that sets rgx apart from traditional
 //! regex engines, enabling powerful pattern matching with embedded logic.
 //!
@@ -8,7 +8,7 @@
 //!
 //! 1. **Security First**: All code runs in sandboxed environments with no filesystem,
 //!    network, or system access.
-//! 2. **Performance Layers**: Pure regex → +Lua (fast) → +JavaScript (flexible) → +WASM (portable)
+//! 2. **Performance Layers**: Pure regex → +Lua/Rhai (fast) → +JavaScript (flexible) → +WASM (portable)
 //! 3. **Zero-Cost Abstraction**: If you don't use code execution, it has zero overhead.
 //! 4. **Fail-Safe**: Code execution failures don't crash the regex engine.
 //!
@@ -16,6 +16,7 @@
 //!
 //! - `(?{lua:code})` - Execute Lua code
 //! - `(?{js:code})` - Execute JavaScript code  
+//! - `(?{rhai:code})` - Execute Rhai code
 //! - `(?{wasm:module:function})` - Call WASM function
 //! - `(?{native:function})` - Call registered native callback
 //!
@@ -296,6 +297,149 @@ pub trait ExecutionEngine: Send + Sync {
 
     /// Reset the engine state (clear any cached state)
     fn reset(&mut self);
+}
+
+// ============================================================================
+// RHAI EXECUTION ENGINE
+// ============================================================================
+
+#[cfg(feature = "rhai")]
+pub mod rhai {
+    use super::*;
+    use ::rhai::{Array, Dynamic, Engine as RhaiRuntime, ImmutableString, Map, Scope};
+
+    /// Rhai execution engine using a fresh embedded runtime per evaluation.
+    ///
+    /// **Security Features:**
+    /// - No filesystem or network access is wired into rgx
+    /// - No external module resolver is configured
+    /// - Each execution gets a fresh runtime and scope
+    ///
+    /// **Performance:**
+    /// - Pure-Rust embedded scripting engine
+    /// - No external runtime dependency
+    /// - Fresh runtime per execution keeps speculative backtracking safe
+    pub struct RhaiEngine;
+
+    impl RhaiEngine {
+        /// Create a new sandboxed Rhai engine.
+        pub fn new() -> Result<Self> {
+            Ok(Self)
+        }
+
+        fn new_engine(&self) -> RhaiRuntime {
+            let mut engine = RhaiRuntime::new();
+            engine.on_print(|_| {});
+            engine.on_debug(|_, _, _| {});
+            engine
+        }
+
+        fn build_scope(&self, context: &ExecContext) -> Scope<'static> {
+            let mut scope = Scope::new();
+
+            let arg = context
+                .captures
+                .iter()
+                .map(|capture| match capture {
+                    Some(text) => Dynamic::from(text.clone()),
+                    None => Dynamic::UNIT,
+                })
+                .collect::<Array>();
+            scope.push("arg", arg);
+
+            scope.push("pos", i64::try_from(context.position).unwrap_or(i64::MAX));
+            scope.push(
+                "match_start",
+                i64::try_from(context.match_start).unwrap_or(i64::MAX),
+            );
+            scope.push(
+                "match_end",
+                i64::try_from(context.match_end).unwrap_or(i64::MAX),
+            );
+            scope.push(
+                "match_length",
+                i64::try_from(context.match_length()).unwrap_or(i64::MAX),
+            );
+            match context.matched_branch_number {
+                Some(branch_number) => {
+                    scope.push(
+                        "branch_number",
+                        i64::try_from(branch_number).unwrap_or(i64::MAX),
+                    );
+                }
+                None => {
+                    scope.push_dynamic("branch_number", Dynamic::UNIT);
+                }
+            }
+            scope.push("text", context.text.clone());
+
+            let mut named = Map::new();
+            for (name, value) in &context.named_captures {
+                named.insert(name.clone().into(), value.clone().into());
+            }
+            scope.push("named", named);
+
+            let mut vars = Map::new();
+            for (name, value) in context.variables_snapshot() {
+                vars.insert(name.into(), value.into());
+            }
+            scope.push("vars", vars);
+
+            scope
+        }
+
+        fn into_exec_result(value: Dynamic) -> ExecResult {
+            if value.is::<bool>() {
+                return if value.cast::<bool>() {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                };
+            }
+            if value.is::<i64>() {
+                return ExecResult::Numeric(value.cast::<i64>() as f64);
+            }
+            if value.is::<f64>() {
+                return ExecResult::Numeric(value.cast::<f64>());
+            }
+            if value.is::<ImmutableString>() {
+                return ExecResult::Replacement(value.cast::<ImmutableString>().to_string());
+            }
+            if value.is::<String>() {
+                return ExecResult::Replacement(value.cast::<String>());
+            }
+            ExecResult::Success
+        }
+    }
+
+    impl ExecutionEngine for RhaiEngine {
+        fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
+            let engine = self.new_engine();
+            let mut scope = self.build_scope(context);
+            match engine.eval_with_scope::<Dynamic>(&mut scope, code) {
+                Ok(value) => Self::into_exec_result(value),
+                Err(err) => ExecResult::Error(format!("Rhai error: {}", err)),
+            }
+        }
+
+        fn language(&self) -> &str {
+            "rhai"
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn reset(&mut self) {
+            // Stateless engine: each execution creates a fresh runtime and scope.
+        }
+    }
+
+    impl Default for RhaiEngine {
+        fn default() -> Self {
+            Self::new().expect("Failed to create Rhai engine")
+        }
+    }
 }
 
 // ============================================================================
@@ -1742,6 +1886,8 @@ pub struct ExecutionManager {
     lua_engine: Option<lua::LuaEngine>,
     #[cfg(feature = "javascript")]
     js_engine: Option<javascript::JavaScriptEngine>,
+    #[cfg(feature = "rhai")]
+    rhai_engine: Option<rhai::RhaiEngine>,
     native_callbacks: NativeCallbackRegistry,
     variables: ExecutionVariableRegistry,
 }
@@ -1757,6 +1903,8 @@ impl ExecutionManager {
             lua_engine: lua::LuaEngine::new().ok(),
             #[cfg(feature = "javascript")]
             js_engine: javascript::JavaScriptEngine::new().ok(),
+            #[cfg(feature = "rhai")]
+            rhai_engine: rhai::RhaiEngine::new().ok(),
             native_callbacks: NativeCallbackRegistry::new(),
             variables: ExecutionVariableRegistry::new(),
         };
@@ -1790,13 +1938,24 @@ impl ExecutionManager {
                 false
             }
         };
+        let rhai_available = {
+            #[cfg(feature = "rhai")]
+            {
+                manager.rhai_engine.is_some()
+            }
+            #[cfg(not(feature = "rhai"))]
+            {
+                false
+            }
+        };
         trace_exit!(
             "execution",
             "ExecutionManager::new",
-            "ok=true,wasm_available={},lua_available={},javascript_available={},native_available=true,registered_variables=0",
+            "ok=true,wasm_available={},lua_available={},javascript_available={},rhai_available={},native_available=true,registered_variables=0",
             wasm_available,
             lua_available,
-            js_available
+            js_available,
+            rhai_available
         );
         manager
     }
@@ -1910,6 +2069,41 @@ impl ExecutionManager {
                         "execution",
                         "ExecutionManager::execute",
                         "ok=true,language=javascript,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
+                }
+            }
+
+            #[cfg(feature = "rhai")]
+            "rhai" => {
+                if let Some(engine) = &self.rhai_engine {
+                    trace_decision!(
+                        "execution",
+                        "self.rhai_engine.is_some()",
+                        true,
+                        "dispatching code to Rhai execution backend"
+                    );
+                    let result = engine.execute(code, context);
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=rhai,result_kind={}",
+                        exec_result_kind(&result)
+                    );
+                    result
+                } else {
+                    trace_decision!(
+                        "execution",
+                        "self.rhai_engine.is_some()",
+                        false,
+                        "rhai feature enabled but engine initialization unavailable"
+                    );
+                    let result = ExecResult::Error("Rhai engine not available".to_string());
+                    trace_exit!(
+                        "execution",
+                        "ExecutionManager::execute",
+                        "ok=true,language=rhai,result_kind={}",
                         exec_result_kind(&result)
                     );
                     result
@@ -2079,6 +2273,8 @@ impl ExecutionManager {
             "lua" => self.lua_engine.is_some(),
             #[cfg(feature = "javascript")]
             "js" | "javascript" => self.js_engine.is_some(),
+            #[cfg(feature = "rhai")]
+            "rhai" => self.rhai_engine.is_some(),
             "native" => true,
             _ => false,
         };
