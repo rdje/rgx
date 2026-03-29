@@ -78,7 +78,10 @@ Live continuity memory for `rgx` sessions.
 - `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, and the CLI still has no native/wasm registration surface.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
-- Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
+- Unicode property classes (`\p{...}`, `\P{...}`) are now shipped on the default compiler/VM path:
+  - parser-path and AST-first compilation resolve Unicode property/script classes through shared Unicode tables
+  - invalid property names fail explicitly at compile time
+  - PCRE2 differential coverage now treats representative Unicode property behavior as supported rather than as a known gap
 - Local-first CI is now available:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
   - `./scripts/run-local-ci.sh` now covers the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) plus `rgx-cli --features pgen-parser`
@@ -100,7 +103,7 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and any branch-reset / `DEFINE` / `(?[...])` boundary decisions.
-- Continue closing remaining parsed-but-unintegrated regex gaps (recursion and Unicode property classes).
+- Continue closing remaining parsed-but-unintegrated regex gaps (recursion remains the main one on the default regex path).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
@@ -108,6 +111,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Shipped Unicode property classes on the default compiler/VM path:
+  - added `rgx-core/src/unicode_support.rs` as a small bridge to `regex-syntax` so `\p{...}` / `\P{...}` resolve through maintained Unicode property tables instead of staying parser-only
+  - removed the old blanket compile-boundary rejection in `rgx-core/src/compiler.rs` and replaced it with explicit invalid-property diagnostics
+  - wired Unicode property classes through VM analysis/codegen in `rgx-core/src/vm.rs`, including a fix so inline subexpressions correctly merge and rebase nested char-class tables back into the parent program
+  - added parser-path and AST-first regressions in `rgx-core/src/lib.rs` plus representative PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`
 - Planning-only follow-up after reviewing current upstream PCRE2 syntax:
   - `ROADMAP.md` now tracks RGX-side future work for newer PCRE2 syntax that may arrive through PGEN, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditional forms, and downstream boundary decisions for branch reset, `DEFINE`, and Perl extended character classes `(?[...])`
   - no implementation or validation work was done in this pass; this was only a roadmap/continuity update so the RGX side is ready once PGEN parser support lands

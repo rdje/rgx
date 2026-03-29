@@ -13,7 +13,7 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Literals, concatenation, alternation: `shipped`
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) and word boundaries: `shipped`
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
-- Unicode property classes (`\p{...}`, `\P{...}`): `parsed-only`
+- Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
 - Quantifiers (greedy/lazy `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`
@@ -83,14 +83,16 @@ Representative test anchors:
 - `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests
 ## Advanced syntax shipped on the default runtime path
 - Numeric backreferences (`\1`, `\2`, ...): `shipped`
+- Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
 - Conditionals (`(?(...)yes|no)` current supported parser condition forms): `shipped`
 Behavior contract:
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
+- Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
-- Compilation fails explicitly when a numeric backreference or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern.
+- Compilation fails explicitly when a numeric backreference or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
 Representative test anchors:
-- `rgx-core/src/lib.rs` numeric backreference and conditional runtime/compile-boundary tests
-- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences and conditionals
+- `rgx-core/src/lib.rs` numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences, Unicode property classes, and conditionals
 ## Conditional runtime coverage (current shipped parser forms)
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)

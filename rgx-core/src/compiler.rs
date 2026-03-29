@@ -3,6 +3,7 @@ use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
 use crate::parsing;
 use crate::pattern::CompiledPattern;
+use crate::unicode_support::resolve_unicode_property_class;
 use crate::vm::OptimizingCompiler as VMCompiler;
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 
@@ -210,11 +211,12 @@ impl Compiler {
     ) -> Option<String> {
         match ast {
             RegexAst::CodeBlock { lang, code } => self.code_block_validation_message(lang, code),
-            RegexAst::UnicodeClass { .. }
-            | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { .. }) => Some(
-                "unicode property classes are parsed but not yet integrated into VM execution"
-                    .to_string(),
-            ),
+            RegexAst::UnicodeClass { name, negated } => {
+                resolve_unicode_property_class(name, *negated).err()
+            }
+            RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
+                resolve_unicode_property_class(name, *negated).err()
+            }
             RegexAst::Recursion { .. } => Some(
                 "recursion syntax is parsed but not yet integrated into VM execution".to_string(),
             ),

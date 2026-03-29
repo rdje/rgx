@@ -12,6 +12,7 @@ use crate::ast::{AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Q
 use crate::execution::{
     CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager,
 };
+use crate::unicode_support::resolve_unicode_property_class;
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -3315,7 +3316,7 @@ impl OptimizingCompiler {
     fn analyze_pass(&mut self, ast: &Regex) {
         match ast {
             Regex::Char(_) => self.stats.literal_chars += 1,
-            Regex::CharClass(_) => self.stats.char_classes += 1,
+            Regex::CharClass(_) | Regex::UnicodeClass { .. } => self.stats.char_classes += 1,
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
             Regex::Backreference(_) => self.flags.has_backrefs = true,
@@ -3405,16 +3406,22 @@ impl OptimizingCompiler {
                         }
                         self.code.push(class_id as u8);
                     }
-                    CharClass::UnicodeClass { name, negated: _ } => {
-                        // For now, treat Unicode classes as Any
-                        // TODO: Implement full Unicode property support
-                        eprintln!(
-                            "Warning: Unicode class \\p{{{}}} not yet fully supported",
-                            name
-                        );
-                        self.emit_op(OpCode::Any);
+                    CharClass::UnicodeClass { name, negated } => {
+                        let ranges = resolve_unicode_property_class(name, *negated)
+                            .expect("unicode property class should be validated before codegen");
+                        let class_id = self.compile_char_class(&ranges, false);
+                        self.emit_op(OpCode::CharClass);
+                        self.code.push(class_id as u8);
                     }
                 }
+            }
+
+            Regex::UnicodeClass { name, negated } => {
+                let ranges = resolve_unicode_property_class(name, *negated)
+                    .expect("unicode property class should be validated before codegen");
+                let class_id = self.compile_char_class(&ranges, false);
+                self.emit_op(OpCode::CharClass);
+                self.code.push(class_id as u8);
             }
 
             Regex::Anchor(anchor) => match anchor {
@@ -3809,6 +3816,13 @@ impl OptimizingCompiler {
         sub_compiler.group_counter = self.group_counter;
         sub_compiler.codegen_pass(expr, false);
 
+        let char_class_base = self.char_classes.len();
+        let mut sub_code = sub_compiler.code;
+        if !sub_compiler.char_classes.is_empty() {
+            self.rebase_inline_char_class_ids(&mut sub_code, char_class_base);
+            self.char_classes.extend(sub_compiler.char_classes);
+        }
+        self.strings.extend(sub_compiler.strings);
         self.group_counter = sub_compiler.group_counter;
         self.flags.max_capture_group = self
             .flags
@@ -3819,7 +3833,136 @@ impl OptimizingCompiler {
         self.flags.has_code_blocks |= sub_compiler.flags.has_code_blocks;
         self.flags.instruction_count += sub_compiler.flags.instruction_count;
 
-        sub_compiler.code
+        sub_code
+    }
+
+    fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
+        if char_class_base == 0 || code.is_empty() {
+            return;
+        }
+
+        let mut ip = 0;
+        while ip < code.len() {
+            let Ok(op) = OpCode::try_from(code[ip]) else {
+                return;
+            };
+            ip += 1;
+
+            match op {
+                OpCode::Char => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    let len = code[ip] as usize;
+                    ip += 1 + len;
+                }
+                OpCode::CharClass | OpCode::CharClassNeg => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    code[ip] = code[ip]
+                        .checked_add(char_class_base as u8)
+                        .expect("char class table exceeded single-byte operand range");
+                    ip += 1;
+                }
+                OpCode::String | OpCode::StringNoCase => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    let len = code[ip] as usize;
+                    ip += 1 + len;
+                }
+                OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
+                    ip += 2;
+                }
+                OpCode::SaveStart | OpCode::SaveEnd | OpCode::Backref | OpCode::SetAlternative => {
+                    ip += 1;
+                }
+                OpCode::Lookahead
+                | OpCode::LookaheadNeg
+                | OpCode::Lookbehind
+                | OpCode::LookbehindNeg
+                | OpCode::QuestionGreedy
+                | OpCode::QuestionLazy
+                | OpCode::StarGreedy
+                | OpCode::StarLazy
+                | OpCode::PlusGreedy
+                | OpCode::PlusLazy => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    let len = code[ip] as usize;
+                    ip += 1;
+                    let end = ip + len;
+                    if end > code.len() {
+                        return;
+                    }
+                    self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
+                    ip = end;
+                }
+                OpCode::CodeBlock => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    let lang_len = code[ip] as usize;
+                    ip += 1 + lang_len;
+                    if ip + 1 >= code.len() {
+                        return;
+                    }
+                    let body_len = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2 + body_len;
+                }
+                OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
+                    if ip >= code.len() {
+                        return;
+                    }
+                    let kind = code[ip];
+                    ip += 1;
+                    match kind {
+                        CONDITIONAL_KIND_GROUP_EXISTS => ip += 1,
+                        CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
+                        | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
+                        | CONDITIONAL_KIND_LOOKBEHIND_POSITIVE
+                        | CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE => {
+                            if ip >= code.len() {
+                                return;
+                            }
+                            let len = code[ip] as usize;
+                            ip += 1;
+                            let end = ip + len;
+                            if end > code.len() {
+                                return;
+                            }
+                            self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
+                            ip = end;
+                        }
+                        _ => return,
+                    }
+                    ip += 2;
+                }
+                OpCode::DigitAscii
+                | OpCode::DigitAsciiNeg
+                | OpCode::WordAscii
+                | OpCode::WordAsciiNeg
+                | OpCode::SpaceAscii
+                | OpCode::SpaceAsciiNeg
+                | OpCode::Any
+                | OpCode::StartLine
+                | OpCode::EndLine
+                | OpCode::StartText
+                | OpCode::EndText
+                | OpCode::EndTextOrNL
+                | OpCode::WordBoundary
+                | OpCode::NonWordBoundary
+                | OpCode::AtomicStart
+                | OpCode::AtomicEnd
+                | OpCode::Match
+                | OpCode::Fail
+                | OpCode::Accept
+                | OpCode::Halt => {}
+                _ => return,
+            }
+        }
     }
 
     /// Emit opcode with character operand
@@ -3844,17 +3987,20 @@ impl OptimizingCompiler {
         let mut unicode_ranges = Vec::new();
 
         for range in ranges {
-            // Handle ASCII characters specially for performance
-            if range.start as u32 <= 127 && range.end as u32 <= 127 {
-                // Set bits in ASCII bitmap
-                for ch in range.start as u8..=range.end as u8 {
+            let start = range.start as u32;
+            let end = range.end as u32;
+
+            if start <= 127 {
+                let ascii_end = end.min(127);
+                for ch in start as u8..=ascii_end as u8 {
                     let byte_idx = (ch / 16) as usize;
                     let bit_idx = (ch % 16) as usize;
                     ascii_bitmap[byte_idx] |= 1 << bit_idx;
                 }
-            } else {
-                // Add to Unicode ranges
-                unicode_ranges.push((range.start as u32, range.end as u32));
+            }
+
+            if end > 127 {
+                unicode_ranges.push((start.max(128), end));
             }
         }
 

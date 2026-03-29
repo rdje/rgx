@@ -25,6 +25,7 @@ Pipeline in `rgx-core`:
 - Core compile-and-run flow for basic regex patterns
 - Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
 - VM execution paths for literals, alternation, anchors (including `\\A`, `\\Z`, `\\z`), word boundaries, shorthand/custom character classes (including `\\D`, `\\W`, `\\S`), and greedy/lazy quantifiers
+- Unicode property classes (`\\p{...}`, `\\P{...}`) are now integrated through the compiler/VM path, including invalid-property compile errors and representative PCRE2 differential coverage
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
@@ -46,7 +47,7 @@ Pipeline in `rgx-core`:
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
 - Conditional runtime semantics are now integrated through the compiler/VM path, including missing-group and missing-name compile-time validation plus API/parity coverage
-- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, Unicode property classes, and disallowed code-block modes/languages
+- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, invalid Unicode property classes, and disallowed code-block modes/languages
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -57,7 +58,8 @@ Pipeline in `rgx-core`:
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding is in place
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
-- Differential known-gap parity checks currently cover recursion and Unicode property classes
+- Differential known-gap parity checks currently cover recursion
+- Differential supported-syntax parity now includes representative Unicode property classes
 - Differential supported-syntax parity now includes numeric backreferences, including backtracking-sensitive and no-match cases
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
 - Differential supported-syntax parity now includes absolute text anchors (`\A`, `\Z`, `\z`) including final-newline behavior for `\Z`
@@ -165,8 +167,7 @@ Pipeline in `rgx-core`:
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
-- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in recursion, Unicode property classes, possessive quantifiers, and other PCRE families beyond the currently covered conditional condition forms and lookaround syntax
-- Unicode property classes (`\\p{...}`, `\\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
+- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in recursion, possessive quantifiers, and other PCRE families beyond the currently covered conditional condition forms, Unicode property classes, and lookaround syntax
 - Recursion is still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)

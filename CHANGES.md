@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Shipped Unicode property classes on the default regex path
+- Scope: compiler/VM Unicode-property execution, compile-time validation, parity coverage, and documentation refreshes.
+- Changes:
+  - Root cause: Unicode property classes had previously been hardened into a compile boundary to avoid a silent VM miscompile, but that left `\p{...}` / `\P{...}` as a visible default-path gap even though both parsers already transported the syntax successfully.
+  - Added `rgx-core/src/unicode_support.rs` and a small `regex-syntax` dependency so RGX can resolve Unicode property/script classes through maintained Unicode tables instead of hard-coding them locally.
+  - Removed the blanket Unicode-property unsupported path from `rgx-core/src/compiler.rs` and replaced it with explicit invalid-property diagnostics that still fail fast for unknown property names.
+  - Wired Unicode property classes through `rgx-core/src/vm.rs` analysis and code generation, and fixed inline subexpression char-class rebasing so quantified/lookaround subprograms keep their nested char-class tables instead of dropping them.
+  - Added parser-path and AST-first regressions in `rgx-core/src/lib.rs` for positive classes, negated classes, script-value classes, and invalid-property compile failures.
+  - Promoted representative Unicode property cases to supported PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Refreshed `README.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `docs/PARSER_CONTRACT.md`, and `docs/USER_GUIDE.md` so shipped status and remaining gaps are described truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core unicode_property -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench unicode_property -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Unicode property classes are no longer a parser-only or parity-gap family; they are now part of the supported default compiler/VM path.
+  - The inline char-class rebasing fix also closes a broader latent correctness issue for nested subprograms that compile their own char-class tables.
+
 ### 2026-03-29 - Shipped conditional runtime support on the default regex path
 - Scope: compiler/VM conditional execution, compile-boundary validation, parity coverage, and documentation refreshes.
 - Changes:

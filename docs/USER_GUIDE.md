@@ -3,7 +3,7 @@ Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
 ## Living-document policy
-- Last updated: 2026-03-28
+- Last updated: 2026-03-29
 - This is a live document and should be updated as user-visible behavior changes.
 - Keep examples and feature-status notes aligned with current shipped behavior.
 - For recent changes and validation details, cross-check `CHANGES.md` and `RUST_CODEBASE_ANALYSIS.md`.
@@ -274,10 +274,11 @@ Current limits for this slice:
 - Lua/JavaScript/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
-The parser still recognizes several advanced constructs that are not runtime-integrated yet:
+Unicode property classes are now part of the shipped runtime path. Patterns such as `\p{L}+`, `\P{L}+`, and `\p{Greek}+` compile and execute on the default path, and invalid property names fail explicitly at compile time.
+
+The parser still recognizes one major advanced construct that is not runtime-integrated yet:
 - recursion
-- Unicode property classes
-These continue to fail with explicit compile-time messages.
+This continues to fail with an explicit compile-time message.
 Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
 Conditionals are also part of the shipped runtime path for group-exists, named-group-exists, and lookaround conditions. Missing conditional group/name references fail explicitly at compile time.
 ## Level 3 - Gory details

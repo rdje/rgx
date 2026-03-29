@@ -465,26 +465,45 @@ fn pcre2_parity_supported_syntax_first_match_span() {
 }
 
 #[test]
-fn pcre2_parity_known_gap_unicode_property_compile_behavior() {
+fn pcre2_parity_supported_unicode_property_classes() {
     let cases = [
-        KnownGapCase {
+        ParityCase {
             name: "unicode_property_letters",
             pattern: r"\p{L}+",
-            input: "abc",
-            expected_rgx_error:
-                "unicode property classes are parsed but not yet integrated into VM execution",
+            input: "123 abc XYZ !",
         },
-        KnownGapCase {
+        ParityCase {
             name: "unicode_property_negated_letters",
             pattern: r"\P{L}+",
-            input: "123",
-            expected_rgx_error:
-                "unicode property classes are parsed but not yet integrated into VM execution",
+            input: "abc 123 XYZ !",
+        },
+        ParityCase {
+            name: "unicode_property_hex_digit",
+            pattern: r"\p{ASCII_Hex_Digit}+",
+            input: "zz 12AF xx G",
         },
     ];
 
     for case in cases {
-        assert_known_gap_case(&case);
+        let rgx_first = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2_first = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx_first, pcre2_first,
+            "unicode-property first-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+
+        let rgx_all = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2_all = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx_all, pcre2_all,
+            "unicode-property find_all mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
     }
 }
 

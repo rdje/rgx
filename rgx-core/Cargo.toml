@@ -29,6 +29,7 @@ rquickjs = { workspace = true, optional = true }
 tracing = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
+regex-syntax = "0.8.6"
 pgen = { path = "../subs/pgen/rust", default-features = false, features = ["generated_parsers"], optional = true }
 
 [features]

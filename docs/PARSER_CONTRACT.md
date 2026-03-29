@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.5`
+- Version: `v0.1.6`
 - Last updated: `2026-03-29`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -41,6 +41,7 @@ Required invariants:
   - code blocks `(?{lang:code})` -> `Regex::CodeBlock { lang, code }`
   - recursion `(?R)`, `(?1)`, `(?&name)` -> `Regex::Recursion { target }`
   - backreferences like `\1` -> `Regex::Backreference(..)`
+  - Unicode property classes like `\p{L}` / `\P{Greek}` -> `Regex::UnicodeClass { name, negated }`
   - conditional (currently supported parser tests):
     - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
     - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
@@ -65,7 +66,7 @@ Current contract:
   - backreferences
   - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
 - Compiler/runtime status for those parser-recognized forms is:
-  - backreferences and conditionals are integrated on the default regex path
+  - backreferences, Unicode property classes, and conditionals are integrated on the default regex path
   - recursion still fails explicitly (not silently) until runtime integration lands
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 

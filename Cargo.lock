@@ -1255,6 +1255,7 @@ dependencies = [
  "memchr",
  "mlua",
  "pgen",
+ "regex-syntax",
  "rquickjs",
  "serde",
  "serde_json",

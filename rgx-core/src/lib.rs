@@ -57,6 +57,7 @@ pub mod parser;
 pub mod parsing;
 pub mod pattern;
 pub mod token;
+mod unicode_support;
 pub mod vm;
 
 // Performance optimizations
@@ -2458,39 +2459,63 @@ mod tests {
     }
 
     #[test]
-    fn parser_unicode_property_syntax_reports_explicit_unsupported_error() {
-        for pattern in [r"\p{L}+", r"\P{L}+"] {
-            let result = Regex::compile(pattern);
-            assert!(
-                result.is_err(),
-                "Unicode property class should not silently compile: {pattern}"
-            );
-            let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-            assert!(
-                msg.contains(
-                    "unicode property classes are parsed but not yet integrated into VM execution"
-                ),
-                "unexpected compile message for pattern {pattern}: {msg}"
-            );
-        }
+    fn parser_unicode_property_letters_match_runtime_path() {
+        let regex = Regex::compile(r"\p{L}+")
+            .expect("Failed to compile Unicode property class for letters");
+        assert!(regex.is_match("abc"));
+        assert!(regex.is_match("é"));
+        assert!(regex.is_match("β"));
+        assert!(!regex.is_match("123"));
+
+        let first = regex
+            .find_first("123β45")
+            .expect("Expected Unicode letter match");
+        assert_eq!((first.start, first.end), (3, 5));
     }
 
     #[test]
-    fn ast_unicode_property_class_reports_explicit_unsupported_error() {
-        let ast = RegexAst::CharClass(crate::ast::CharClass::UnicodeClass {
-            name: "L".to_string(),
-            negated: false,
-        });
+    fn parser_unicode_property_negation_matches_runtime_path() {
+        let regex = Regex::compile(r"\P{L}+")
+            .expect("Failed to compile negated Unicode property class for letters");
+        assert!(regex.is_match("123"));
+        assert!(regex.is_match("!"));
+        assert!(!regex.is_match("abc"));
+        assert!(!regex.is_match("β"));
+    }
 
-        let result = Regex::from_ast(ast);
+    #[test]
+    fn parser_unicode_property_script_value_matches_runtime_path() {
+        let regex =
+            Regex::compile(r"\p{Greek}+").expect("Failed to compile Unicode script property class");
+        assert!(regex.is_match("β"));
+        assert!(regex.is_match("Ω"));
+        assert!(!regex.is_match("abc"));
+    }
+
+    #[test]
+    fn parser_invalid_unicode_property_reports_compile_error() {
+        let result = Regex::compile(r"\p{Definitely_Not_A_Real_Property}");
         assert!(
             result.is_err(),
-            "AST Unicode property class should not silently compile"
+            "Invalid Unicode property should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains(
-            "unicode property classes are parsed but not yet integrated into VM execution"
-        ));
+        assert!(
+            msg.contains("invalid Unicode property class"),
+            "unexpected invalid-property compile message: {msg}"
+        );
+    }
+
+    #[test]
+    fn ast_unicode_property_class_executes() {
+        let ast = RegexAst::UnicodeClass {
+            name: "L".to_string(),
+            negated: false,
+        };
+
+        let regex = Regex::from_ast(ast).expect("AST Unicode property class should compile");
+        assert!(regex.is_match("é"));
+        assert!(!regex.is_match("1"));
     }
 
     #[test]
@@ -2603,6 +2628,10 @@ mod tests {
             ("(?<!x)a", "ba", true),
             ("(?=cat)c", "xxcat", true),
             ("(?<!x)a", "xa", false),
+            (r"\p{L}+", "123β", true),
+            (r"\p{L}+", "123", false),
+            (r"\P{L}+", "123!", true),
+            (r"\P{L}+", "β", false),
             (r"\A(a)?(?(1)b|c)\z", "ab", true),
             (r"\A(a)?(?(1)b|c)\z", "c", true),
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
@@ -2657,14 +2686,6 @@ mod tests {
             (
                 "(?{lua:return true})",
                 "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-            ),
-            (
-                r"\p{L}+",
-                "unicode property classes are parsed but not yet integrated into VM execution",
-            ),
-            (
-                r"\P{L}+",
-                "unicode property classes are parsed but not yet integrated into VM execution",
             ),
         ];
 

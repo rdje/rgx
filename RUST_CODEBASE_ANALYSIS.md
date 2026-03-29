@@ -9,7 +9,8 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core unicode_property -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench unicode_property -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
@@ -32,6 +33,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
+- Unicode property classes are now part of that shipped default path:
+  - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
+  - invalid property names now fail explicitly at compile time
+  - PCRE2 differential coverage now treats representative Unicode property behavior as supported rather than as a known gap
 - Numeric backreferences are now part of that shipped default path:
   - the compiler validates that numbered backreferences only target capture groups that actually exist
   - the VM now emits/decodes/executes `Backref` bytecode in both top-level and subexpression execution paths
@@ -62,6 +67,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Literals, concatenation, alternation
 - Anchors including `^`, `$`, `\A`, `\Z`, and `\z`
 - Shorthand and custom character classes, including negated shorthand classes
+- Unicode property classes (`\p{...}`, `\P{...}`)
 - Greedy and lazy `?`, `*`, `+`, `{n,m}`, and `{n,}` quantifiers
 - Capturing, non-capturing, named, and atomic groups
 - Numeric backreferences (`\1`, `\2`, ...)
@@ -99,7 +105,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
-- Recursion and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
+- Recursion remains parsed-but-unintegrated and continues to fail explicitly at compile time.
 - PGEN accepted possessive quantifiers are still rejected by the RGX parser adapter because RGX does not yet represent possessive quantifiers in its parser AST.
 
 ## Codebase realities that matter for roadmap prioritization
@@ -127,7 +133,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Operationalize benchmark trend capture instead of relying on manual runs.
 
 ### Later
-- Finish larger regex-surface gaps: recursion, Unicode property classes, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: recursion and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.
@@ -137,6 +143,8 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Native callback storage uses shared interior mutability, so the `Arc<ExecutionManager>` attached to the VM can receive post-compilation registrations without swapping runtime instances.
 - Host-provided execution variables now live on the shared `ExecutionManager` and are snapshotted into each per-call `ExecContext`, which keeps callout inputs deterministic under backtracking while still allowing Rust API updates between matches.
 - Wasm module storage follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime; per-call store data now also retains the last emitted wasm result payload until predicate completion.
+- Unicode property classes are resolved through a small `unicode_support.rs` bridge backed by `regex-syntax`, which keeps RGX aligned with current Unicode property tables without hard-coding those tables locally.
+- Inline subexpression compilation now has to merge and rebase child char-class tables back into the parent compiler state; that fix matters for Unicode property classes inside quantified/lookaround subprograms and closes a broader latent char-class bug.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, `rgx-bench/src/lib.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 
 ## High-confidence next actions
