@@ -12,10 +12,10 @@ Live compatibility tracker for `rgx` against PCRE2.
 - `out-of-scope`: behavior is not a parity target for PCRE2 comparison.
 
 ## Rough progress estimate
-- Tracked parity estimate: about `90%`
-  - Rationale: among the major regex feature families that this matrix currently tracks explicitly, only recursion remains in the `rgx-gap` bucket.
-- Broader PCRE2 regex estimate: about `70%`
-  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or still intentionally unsupported.
+- Tracked parity estimate: about `92%`
+  - Rationale: among the major regex feature families that this matrix currently tracks explicitly, recursion is now the only remaining item in the `rgx-gap` bucket and possessive quantifiers have moved into `parity-verified`.
+- Broader PCRE2 regex estimate: about `72%`
+  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including possessive quantifiers, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or still intentionally unsupported.
 - These percentages are intentionally rough and hand-maintained.
   - They are not derived from a formal PCRE2 feature census.
   - Update them only when whole feature families move, not for tiny edge-case wins.
@@ -30,6 +30,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Alternation: `parity-verified`
 - Basic quantifiers (`*`, `+`, `?`, `*?`, `+?`, `??`): `parity-verified`
   - differential coverage includes suffix-sensitive backtracking scenarios (e.g., `a*a`, `a+a`, `ab?b`) and lazy shortest-match cases
+- Possessive quantifiers (`*+`, `++`, `?+`, `{n,m}+`): `parity-verified`
+  - differential coverage includes both straightforward success cases and suffix-sensitive no-backtracking behavior (e.g., `\Aa*+a\z`, `\Aa++a\z`, `\A\d{2,3}+3\z`)
 - Range quantifier (`{n,m}`) scanning/earliest-match behavior: `parity-verified`
   - differential coverage includes bounded-range suffix backtracking scenarios (e.g., `{2,3}3`, `{2,3}?3`), exact-range `{n}` find-all behavior, and unbounded-range `{n,}` / `{n,}?` scan and suffix-sensitive cases
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
@@ -57,7 +59,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Anchors and word boundaries
 - Shorthand character classes and custom classes
 - Unicode property classes in the currently covered forms
-- Greedy/lazy quantifiers and counted ranges
+- Greedy/lazy/possessive quantifiers and counted ranges
 - Numeric backreferences
 - Current shipped conditional forms
   - group-exists
@@ -67,8 +69,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 
 ### Explicitly unsupported or still open
 - Recursion / subroutine recursion forms currently used by rgx (`(?R)`, `(?1)`, `(?&name)`)
-- Possessive quantifiers in the current rgx parser adapter
-  - PGEN may transport them, but rgx does not yet represent them in its parser AST / runtime path
 
 ### Planned next or broader PCRE2 follow-up
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`

@@ -14,7 +14,7 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) and word boundaries: `shipped`
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
-- Quantifiers (greedy/lazy `?`, `*`, `+`, counted ranges): `shipped`
+- Quantifiers (greedy/lazy/possessive `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`
   - atomic groups `(?>...)`: `shipped`
@@ -23,6 +23,7 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 Representative test anchors:
 - `rgx-core/src/lib.rs` parser-path lookaround/atomic/code-boundary tests
 - `rgx-core/src/vm.rs` VM execution tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for quantifier, possessive-quantifier, and atomic-group behavior
 ## Embedded code execution
 - `(?{lua:...})`: `mode-gated shipped`
 - `(?{js:...})` / `(?{javascript:...})`: `mode-gated shipped`

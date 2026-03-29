@@ -9,19 +9,22 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core unicode_property -- --nocapture` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench unicode_property -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core possessive -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_active_parser_matches_reference_fixtures -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_pgen_backend_matches_reference_fixtures -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_possessive_quantifiers -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized)
 - Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 4030 lines
-  - `rgx-core/src/lib.rs`: 2655 lines
+  - `rgx-core/src/vm.rs`: 4421 lines
+  - `rgx-core/src/lib.rs`: 2799 lines
   - `rgx-core/src/execution.rs`: 1987 lines
-  - `rgx-core/src/lexer.rs`: 1832 lines
-  - `rgx-core/src/parser.rs`: 1190 lines
+  - `rgx-core/src/lexer.rs`: 1877 lines
+  - `rgx-core/src/parser.rs`: 1246 lines
 - Current scaffold concentration remains visible in several near-empty modules/crates:
   - `rgx-core/src/javascript.rs`
   - `rgx-core/src/wasm.rs`
@@ -41,6 +44,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the compiler validates that numbered backreferences only target capture groups that actually exist
   - the VM now emits/decodes/executes `Backref` bytecode in both top-level and subexpression execution paths
   - parity and capability tests now treat numeric backreferences as supported behavior rather than a compile-boundary gap
+- Possessive quantifiers are now part of that shipped default path:
+  - both parser backends lower `*+`, `++`, `?+`, and counted possessive forms into atomic-wrapped greedy quantified AST nodes
+  - runtime behavior now blocks backtracking into the possessive piece while still allowing ordinary success cases that need no suffix backtracking
+  - parity and capability tests now treat possessive quantifiers as supported behavior rather than as a parser-adapter gap
 - The default PGEN-backed parser path is no longer a recursive-descent placeholder:
   - `rgx-core/src/parsing.rs` now calls into the PGEN embedding API
   - the stable regex AST dump is converted into canonical RGX AST structure for groups, lookarounds, conditionals, concatenation/alternation/pieces, and quantifiers
@@ -68,7 +75,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Anchors including `^`, `$`, `\A`, `\Z`, and `\z`
 - Shorthand and custom character classes, including negated shorthand classes
 - Unicode property classes (`\p{...}`, `\P{...}`)
-- Greedy and lazy `?`, `*`, `+`, `{n,m}`, and `{n,}` quantifiers
+- Greedy, lazy, and possessive `?`, `*`, `+`, `{n,m}`, and `{n,}` quantifiers
 - Capturing, non-capturing, named, and atomic groups
 - Numeric backreferences (`\1`, `\2`, ...)
 - Positive and negative lookahead/lookbehind
@@ -92,6 +99,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - empty patterns
   - anchors
   - range quantifiers
+  - possessive quantifiers
   - shorthand and Unicode property classes
   - group families
   - lookarounds
@@ -106,7 +114,6 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Recursion remains parsed-but-unintegrated and continues to fail explicitly at compile time.
-- PGEN accepted possessive quantifiers are still rejected by the RGX parser adapter because RGX does not yet represent possessive quantifiers in its parser AST.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
@@ -124,6 +131,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
+- Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 
 ### Next

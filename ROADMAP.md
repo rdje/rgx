@@ -40,7 +40,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
-  - incrementally close remaining syntax gaps (numeric backreferences, conditionals, and Unicode property classes now shipped; recursion still gated)
+  - incrementally close remaining syntax gaps (numeric backreferences, conditionals, Unicode property classes, and possessive quantifiers now shipped; recursion still gated)
 
 ### Parser interoperability contract and conformance harness
 - Status: `in-progress`
@@ -101,6 +101,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Shipped possessive quantifiers on the default compiler/VM path by lowering `*+`, `++`, `?+`, and counted possessive forms through atomic-group semantics, including parser-path regressions and PCRE2 differential coverage.
 - Shipped Unicode property classes on the default compiler/VM path, including invalid-property compile errors, parser-path and AST-first regressions, and representative PCRE2 differential coverage.
 - Switched the default RGX build over to the real submodule-backed PGEN parser so normal workspace builds now exercise PGEN by default.
 - Shipped conditional runtime support on the default compiler/VM path, including group-exists, named-group-exists, and lookaround condition forms, missing-group compile errors, and PCRE2 differential coverage.

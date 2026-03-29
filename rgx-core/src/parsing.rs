@@ -682,10 +682,8 @@ impl<'a> PgenAstAdapter<'a> {
         let quantifier = self
             .first_descendant(quantifier_slot, "quantifier")
             .ok_or_else(|| self.contract_error("pgen piece quantifier slot is malformed"))?;
-        Ok(Regex::Quantified {
-            expr: Box::new(expr),
-            quantifier: self.convert_quantifier(quantifier)?,
-        })
+        let (quantifier, possessive) = self.convert_quantifier(quantifier)?;
+        Ok(self.wrap_quantified(expr, quantifier, possessive))
     }
 
     fn convert_atom(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -880,7 +878,25 @@ impl<'a> PgenAstAdapter<'a> {
         Err(self.contract_error("unsupported empty pgen conditional condition"))
     }
 
-    fn convert_quantifier(&self, node: &PgenAstNode) -> Result<Quantifier> {
+    fn wrap_quantified(&self, expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
+        let quantified = Regex::Quantified {
+            expr: Box::new(expr),
+            quantifier,
+        };
+
+        if possessive {
+            Regex::Group {
+                expr: Box::new(quantified),
+                kind: GroupKind::Atomic,
+                index: None,
+                name: None,
+            }
+        } else {
+            quantified
+        }
+    }
+
+    fn convert_quantifier(&self, node: &PgenAstNode) -> Result<(Quantifier, bool)> {
         let base = self
             .first_descendant(node, "quant_base")
             .ok_or_else(|| self.contract_error("pgen quantifier is missing quant_base"))?;
@@ -890,27 +906,28 @@ impl<'a> PgenAstAdapter<'a> {
             .transpose()?
             .unwrap_or("");
 
-        if suffix == "+" {
-            return Err(RgxError::Compile(
-                "pgen accepted a possessive quantifier, but rgx does not yet represent possessive quantifiers in its parser AST"
-                    .to_string(),
-            ));
-        }
-
+        let possessive = suffix == "+";
         let lazy = suffix == "?";
         let base_text = self.slice(base)?;
         match base_text {
-            "*" => Ok(Quantifier::ZeroOrMore { lazy }),
-            "+" => Ok(Quantifier::OneOrMore { lazy }),
-            "?" => Ok(Quantifier::ZeroOrOne { lazy }),
-            _ if base_text.starts_with('{') => self.parse_counted_quantifier(base_text, lazy),
+            "*" => Ok((Quantifier::ZeroOrMore { lazy }, possessive)),
+            "+" => Ok((Quantifier::OneOrMore { lazy }, possessive)),
+            "?" => Ok((Quantifier::ZeroOrOne { lazy }, possessive)),
+            _ if base_text.starts_with('{') => {
+                self.parse_counted_quantifier(base_text, lazy, possessive)
+            }
             other => {
                 Err(self.contract_error(&format!("unsupported pgen quantifier base '{other}'")))
             }
         }
     }
 
-    fn parse_counted_quantifier(&self, text: &str, lazy: bool) -> Result<Quantifier> {
+    fn parse_counted_quantifier(
+        &self,
+        text: &str,
+        lazy: bool,
+        possessive: bool,
+    ) -> Result<(Quantifier, bool)> {
         let inner = text
             .strip_prefix('{')
             .and_then(|value| value.strip_suffix('}'))
@@ -940,7 +957,7 @@ impl<'a> PgenAstAdapter<'a> {
             (count, Some(count))
         };
 
-        Ok(Quantifier::Range { min, max, lazy })
+        Ok((Quantifier::Range { min, max, lazy }, possessive))
     }
 
     fn parse_leaf_fragment(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -1105,6 +1122,10 @@ mod tests {
             "abc",
             "a|b",
             "ab+",
+            "a*+",
+            "a++",
+            "a?+",
+            "a{2,3}+",
             r"\d{2,3}",
             r"\d{2,}",
             r"\D+",

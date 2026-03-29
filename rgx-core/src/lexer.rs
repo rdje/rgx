@@ -66,6 +66,9 @@ impl<'a> Lexer<'a> {
             Token::Star => "Star",
             Token::Plus => "Plus",
             Token::Question => "Question",
+            Token::StarPossessive => "StarPossessive",
+            Token::PlusPossessive => "PlusPossessive",
+            Token::QuestionPossessive => "QuestionPossessive",
             Token::StarLazy => "StarLazy",
             Token::PlusLazy => "PlusLazy",
             Token::QuestionLazy => "QuestionLazy",
@@ -664,7 +667,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    /// Parse * and *? quantifiers
+    /// Parse *, *?, and *+ quantifiers
     fn parse_star(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -677,6 +680,9 @@ impl<'a> Lexer<'a> {
         let token = if self.current == Some('?') {
             self.advance(); // Skip '?'
             Token::StarLazy
+        } else if self.current == Some('+') {
+            self.advance(); // Skip '+'
+            Token::StarPossessive
         } else {
             Token::Star
         };
@@ -689,7 +695,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    /// Parse + and +? quantifiers
+    /// Parse +, +?, and ++ quantifiers
     fn parse_plus(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -702,6 +708,9 @@ impl<'a> Lexer<'a> {
         let token = if self.current == Some('?') {
             self.advance(); // Skip '?'
             Token::PlusLazy
+        } else if self.current == Some('+') {
+            self.advance(); // Skip '+'
+            Token::PlusPossessive
         } else {
             Token::Plus
         };
@@ -714,7 +723,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    /// Parse ? and ?? quantifiers
+    /// Parse ?, ??, and ?+ quantifiers
     fn parse_question(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -727,6 +736,9 @@ impl<'a> Lexer<'a> {
         let token = if self.current == Some('?') {
             self.advance(); // Skip second '?'
             Token::QuestionLazy
+        } else if self.current == Some('+') {
+            self.advance(); // Skip '+'
+            Token::QuestionPossessive
         } else {
             Token::Question
         };
@@ -1361,7 +1373,7 @@ impl<'a> Lexer<'a> {
         Ok(Token::CharClass { ranges, negated })
     }
 
-    /// Parse repeat quantifier {n}, {n,}, {n,m}, {n,m}?
+    /// Parse repeat quantifier {n}, {n,}, {n,m}, {n,m}?, {n,m}+
     fn parse_repeat_quantifier(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -1441,22 +1453,31 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        // Check for lazy quantifier
-        let lazy = if self.current == Some('?') {
+        // Check for lazy or possessive suffix
+        let (lazy, possessive) = if self.current == Some('?') {
             self.advance(); // Skip '?'
-            true
+            (true, false)
+        } else if self.current == Some('+') {
+            self.advance(); // Skip '+'
+            (false, true)
         } else {
-            false
+            (false, false)
         };
         trace_exit!(
             "lexer",
             "Lexer::parse_repeat_quantifier",
-            "ok=true,min={},max={:?},lazy={}",
+            "ok=true,min={},max={:?},lazy={},possessive={}",
             min,
             max,
-            lazy
+            lazy,
+            possessive
         );
-        Ok(Token::Repeat { min, max, lazy })
+        Ok(Token::Repeat {
+            min,
+            max,
+            lazy,
+            possessive,
+        })
     }
 }
 
@@ -1516,6 +1537,29 @@ mod tests {
                 Token::PlusLazy,
                 Token::Char('c'),
                 Token::QuestionLazy
+            ]
+        );
+    }
+
+    #[test]
+    fn test_possessive_quantifiers() {
+        let tokens = tokenize_all("a*+b++c?+d{2,5}+").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Char('a'),
+                Token::StarPossessive,
+                Token::Char('b'),
+                Token::PlusPossessive,
+                Token::Char('c'),
+                Token::QuestionPossessive,
+                Token::Char('d'),
+                Token::Repeat {
+                    min: 2,
+                    max: Some(5),
+                    lazy: false,
+                    possessive: true,
+                }
             ]
         );
     }
@@ -1780,7 +1824,8 @@ mod tests {
                 Token::Repeat {
                     min: 2,
                     max: Some(5),
-                    lazy: false
+                    lazy: false,
+                    possessive: false,
                 }
             ]
         );

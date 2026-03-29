@@ -57,6 +57,12 @@ pub enum Token {
     Plus,
     /// ? (zero or one, greedy)
     Question,
+    /// *+ (zero or more, possessive)
+    StarPossessive,
+    /// ++ (one or more, possessive)
+    PlusPossessive,
+    /// ?+ (zero or one, possessive)
+    QuestionPossessive,
     /// *? (zero or more, lazy)
     StarLazy,
     /// +? (one or more, lazy)
@@ -68,6 +74,7 @@ pub enum Token {
         min: u32,
         max: Option<u32>,
         lazy: bool,
+        possessive: bool,
     },
 
     // Groups

@@ -694,6 +694,165 @@ fn pcre2_parity_supported_quantifier_suffix_backtracking_behavior() {
 }
 
 #[test]
+fn pcre2_parity_supported_possessive_quantifiers() {
+    let first_cases = [
+        ParityCase {
+            name: "possessive_star_success_first",
+            pattern: "a*+b",
+            input: "aaab aab b",
+        },
+        ParityCase {
+            name: "possessive_plus_success_first",
+            pattern: "a++b",
+            input: "aaab aab b",
+        },
+        ParityCase {
+            name: "possessive_range_success_first",
+            pattern: "a{2,3}+b",
+            input: "aaab aab ab",
+        },
+        ParityCase {
+            name: "possessive_star_suffix_no_backtrack_first",
+            pattern: r"\Aa*+a\z",
+            input: "aaaa",
+        },
+        ParityCase {
+            name: "possessive_plus_suffix_no_backtrack_first",
+            pattern: r"\Aa++a\z",
+            input: "aaaa",
+        },
+        ParityCase {
+            name: "possessive_question_suffix_no_backtrack_first",
+            pattern: r"\Aa?+a\z",
+            input: "a",
+        },
+        ParityCase {
+            name: "possessive_range_suffix_no_backtrack_first",
+            pattern: r"\A\d{2,3}+3\z",
+            input: "123",
+        },
+    ];
+
+    for case in first_cases {
+        let rgx = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2 = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "possessive-quantifier first-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+
+    assert_eq!(
+        pcre2_first_span("a*+b", "aaab aab b")
+            .unwrap_or_else(|e| panic!("[possessive_star_success_first] pcre2 error: {e}")),
+        Some((0, 4))
+    );
+    assert_eq!(
+        pcre2_first_span("a++b", "aaab aab b")
+            .unwrap_or_else(|e| panic!("[possessive_plus_success_first] pcre2 error: {e}")),
+        Some((0, 4))
+    );
+    assert_eq!(
+        pcre2_first_span("a{2,3}+b", "aaab aab ab")
+            .unwrap_or_else(|e| panic!("[possessive_range_success_first] pcre2 error: {e}")),
+        Some((0, 4))
+    );
+    assert_eq!(
+        pcre2_first_span(r"\Aa*+a\z", "aaaa").unwrap_or_else(|e| {
+            panic!("[possessive_star_suffix_no_backtrack_first] pcre2 error: {e}")
+        }),
+        None
+    );
+    assert_eq!(
+        pcre2_first_span(r"\A\d{2,3}+3\z", "123").unwrap_or_else(|e| {
+            panic!("[possessive_range_suffix_no_backtrack_first] pcre2 error: {e}")
+        }),
+        None
+    );
+
+    let all_cases = [
+        ParityCase {
+            name: "possessive_star_success_all",
+            pattern: "a*+b",
+            input: "aaab aab b",
+        },
+        ParityCase {
+            name: "possessive_plus_success_all",
+            pattern: "a++b",
+            input: "aaab aab b",
+        },
+        ParityCase {
+            name: "possessive_range_success_all",
+            pattern: "a{2,3}+b",
+            input: "aaab aab ab",
+        },
+        ParityCase {
+            name: "possessive_star_suffix_no_backtrack_all",
+            pattern: r"\Aa*+a\z",
+            input: "aaaa",
+        },
+        ParityCase {
+            name: "possessive_plus_suffix_no_backtrack_all",
+            pattern: r"\Aa++a\z",
+            input: "aaaa",
+        },
+        ParityCase {
+            name: "possessive_question_suffix_no_backtrack_all",
+            pattern: r"\Aa?+a\z",
+            input: "a",
+        },
+        ParityCase {
+            name: "possessive_range_suffix_no_backtrack_all",
+            pattern: r"\A\d{2,3}+3\z",
+            input: "123",
+        },
+    ];
+
+    for case in all_cases {
+        let rgx = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2 = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "possessive-quantifier find_all mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+
+    assert_eq!(
+        pcre2_all_spans("a*+b", "aaab aab b")
+            .unwrap_or_else(|e| panic!("[possessive_star_success_all] pcre2 error: {e}")),
+        vec![(0, 4), (5, 8), (9, 10)]
+    );
+    assert_eq!(
+        pcre2_all_spans("a++b", "aaab aab b")
+            .unwrap_or_else(|e| panic!("[possessive_plus_success_all] pcre2 error: {e}")),
+        vec![(0, 4), (5, 8)]
+    );
+    assert_eq!(
+        pcre2_all_spans("a{2,3}+b", "aaab aab ab")
+            .unwrap_or_else(|e| panic!("[possessive_range_success_all] pcre2 error: {e}")),
+        vec![(0, 4), (5, 8)]
+    );
+    assert_eq!(
+        pcre2_all_spans(r"\Aa++a\z", "aaaa").unwrap_or_else(|e| {
+            panic!("[possessive_plus_suffix_no_backtrack_all] pcre2 error: {e}")
+        }),
+        vec![]
+    );
+    assert_eq!(
+        pcre2_all_spans(r"\Aa?+a\z", "a").unwrap_or_else(|e| {
+            panic!("[possessive_question_suffix_no_backtrack_all] pcre2 error: {e}")
+        }),
+        vec![]
+    );
+}
+
+#[test]
 fn pcre2_parity_supported_conditionals() {
     let cases = [
         ParityCase {

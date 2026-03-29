@@ -281,6 +281,7 @@ The parser still recognizes one major advanced construct that is not runtime-int
 This continues to fail with an explicit compile-time message.
 Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
 Conditionals are also part of the shipped runtime path for group-exists, named-group-exists, and lookaround conditions. Missing conditional group/name references fail explicitly at compile time.
+Possessive quantifiers are also part of the shipped runtime path. Forms such as `a*+`, `a++`, `a?+`, and `a{2,3}+` behave like their greedy equivalents wrapped in an atomic group, so they do not backtrack once that quantified piece has matched.
 ## Level 3 - Gory details
 ### Execution model
 Pipeline:
@@ -295,6 +296,7 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 ### Atomic-group semantics
 - Atomic groups `(?>...)` are supported.
 - Once an atomic group succeeds, rgx does not backtrack into alternatives/paths created inside that group.
+- Possessive quantifiers use the same no-backtracking rule internally, so `a*+`, `a++`, `a?+`, and counted possessive forms behave like atomic-wrapped greedy repeats.
 ### Predicate code-block semantics
 - Code blocks are zero-width predicate checkpoints in the VM path.
 - They can fail the current path and allow normal regex backtracking to continue.

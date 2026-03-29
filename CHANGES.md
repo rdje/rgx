@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Shipped possessive quantifiers on the default regex path
+- Scope: parser transport, runtime semantics hardening, parity coverage, and documentation refreshes.
+- Changes:
+  - Added lexer/parser support for possessive quantifier forms `*+`, `++`, `?+`, and counted possessive repeats by extending `rgx-core/src/token.rs` and `rgx-core/src/lexer.rs`.
+  - Defined the canonical RGX lowering in both parser paths so possessive quantifiers become atomic-wrapped greedy quantified AST nodes in `rgx-core/src/parser.rs` and `rgx-core/src/parsing.rs`, keeping the recursive-descent reference backend and the default PGEN-backed adapter aligned without adding a new AST variant.
+  - Added parser-path runtime regressions in `rgx-core/src/lib.rs` proving possessive quantifiers block suffix backtracking while still matching straightforward success cases, and extended capability-matrix guardrails with possessive cases.
+  - Promoted possessive quantifiers to supported PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Refreshed `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `docs/PARSER_CONTRACT.md`, and `docs/USER_GUIDE.md` so shipped status and remaining gaps are described truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core possessive -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_active_parser_matches_reference_fixtures -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_pgen_backend_matches_reference_fixtures -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_possessive_quantifiers -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Possessive quantifiers are no longer a parser-adapter gap; they are now part of the supported default compiler/VM path.
+  - The shipped lowering deliberately reuses atomic-group semantics, which keeps parser/backend interoperability simple while matching PCRE2 no-backtracking behavior for this feature family.
+
 ### 2026-03-29 - Added a rough maintained PCRE2 support estimate and checklist
 - Scope: parity-tracking documentation only.
 - Changes:

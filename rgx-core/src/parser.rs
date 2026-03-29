@@ -15,6 +15,24 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    fn wrap_quantified(expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
+        let quantified = Regex::Quantified {
+            expr: Box::new(expr),
+            quantifier,
+        };
+
+        if possessive {
+            Regex::Group {
+                expr: Box::new(quantified),
+                kind: GroupKind::Atomic,
+                index: None,
+                name: None,
+            }
+        } else {
+            quantified
+        }
+    }
+
     /// Create a new parser for the given input
     pub fn new(input: &'a str) -> Result<Self, LexError> {
         trace_enter!("parser", "Parser::new", "input_len={}", input.len());
@@ -357,34 +375,52 @@ impl<'a> Parser<'a> {
         let quantifier = match self.peek() {
             Some(Token::Question) => {
                 self.advance()?;
-                Some(Quantifier::ZeroOrOne { lazy: false })
+                Some((Quantifier::ZeroOrOne { lazy: false }, false))
             }
             Some(Token::QuestionLazy) => {
                 self.advance()?;
-                Some(Quantifier::ZeroOrOne { lazy: true })
+                Some((Quantifier::ZeroOrOne { lazy: true }, false))
+            }
+            Some(Token::QuestionPossessive) => {
+                self.advance()?;
+                Some((Quantifier::ZeroOrOne { lazy: false }, true))
             }
             Some(Token::Star) => {
                 self.advance()?;
-                Some(Quantifier::ZeroOrMore { lazy: false })
+                Some((Quantifier::ZeroOrMore { lazy: false }, false))
             }
             Some(Token::StarLazy) => {
                 self.advance()?;
-                Some(Quantifier::ZeroOrMore { lazy: true })
+                Some((Quantifier::ZeroOrMore { lazy: true }, false))
+            }
+            Some(Token::StarPossessive) => {
+                self.advance()?;
+                Some((Quantifier::ZeroOrMore { lazy: false }, true))
             }
             Some(Token::Plus) => {
                 self.advance()?;
-                Some(Quantifier::OneOrMore { lazy: false })
+                Some((Quantifier::OneOrMore { lazy: false }, false))
             }
             Some(Token::PlusLazy) => {
                 self.advance()?;
-                Some(Quantifier::OneOrMore { lazy: true })
+                Some((Quantifier::OneOrMore { lazy: true }, false))
             }
-            Some(Token::Repeat { min, max, lazy }) => {
+            Some(Token::PlusPossessive) => {
+                self.advance()?;
+                Some((Quantifier::OneOrMore { lazy: false }, true))
+            }
+            Some(Token::Repeat {
+                min,
+                max,
+                lazy,
+                possessive,
+            }) => {
                 let min = *min;
                 let max = *max;
                 let lazy = *lazy;
+                let possessive = *possessive;
                 self.advance()?;
-                Some(Quantifier::Range { min, max, lazy })
+                Some((Quantifier::Range { min, max, lazy }, possessive))
             }
             _ => None,
         };
@@ -396,11 +432,8 @@ impl<'a> Parser<'a> {
             quantified,
             "wrap atom into quantified AST node only when suffix quantifier is present"
         );
-        let result = if let Some(q) = quantifier {
-            Regex::Quantified {
-                expr: Box::new(expr),
-                quantifier: q,
-            }
+        let result = if let Some((q, possessive)) = quantifier {
+            Self::wrap_quantified(expr, q, possessive)
         } else {
             expr
         };
@@ -824,6 +857,29 @@ mod tests {
                 assert!(matches!(quantifier, Quantifier::ZeroOrMore { lazy: false }));
             }
             _ => panic!("Expected quantified"),
+        }
+    }
+
+    #[test]
+    fn test_parse_possessive_quantified() {
+        let mut parser = Parser::new("a*+").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Group {
+                expr, kind, name, ..
+            } => {
+                assert!(matches!(kind, GroupKind::Atomic));
+                assert_eq!(name, None);
+                match *expr {
+                    Regex::Quantified { expr, quantifier } => {
+                        assert!(matches!(*expr, Regex::Char('a')));
+                        assert!(matches!(quantifier, Quantifier::ZeroOrMore { lazy: false }));
+                    }
+                    _ => panic!("Expected quantified expression inside possessive atomic group"),
+                }
+            }
+            _ => panic!("Expected possessive quantifier to lower into an atomic group"),
         }
     }
 

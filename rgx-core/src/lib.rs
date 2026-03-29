@@ -1049,6 +1049,54 @@ mod tests {
     }
 
     #[test]
+    fn parser_possessive_quantifiers_block_backtracking_for_suffix() {
+        let star =
+            Regex::compile(r"\Aa*+a\z").expect("Failed to compile possessive star suffix pattern");
+        let plus =
+            Regex::compile(r"\Aa++a\z").expect("Failed to compile possessive plus suffix pattern");
+        let question = Regex::compile(r"\Aa?+a\z")
+            .expect("Failed to compile possessive question suffix pattern");
+        let range = Regex::compile(r"\A\d{2,3}+3\z")
+            .expect("Failed to compile possessive bounded-range suffix pattern");
+
+        assert!(!star.is_match("aaaa"));
+        assert!(!plus.is_match("aaaa"));
+        assert!(!question.is_match("a"));
+        assert!(!range.is_match("123"));
+
+        let greedy_star = Regex::compile(r"\Aa*a\z")
+            .expect("Failed to compile greedy star suffix control pattern");
+        let greedy_plus = Regex::compile(r"\Aa+a\z")
+            .expect("Failed to compile greedy plus suffix control pattern");
+        let greedy_question = Regex::compile(r"\Aa?a\z")
+            .expect("Failed to compile greedy question suffix control pattern");
+        let greedy_range = Regex::compile(r"\A\d{2,3}3\z")
+            .expect("Failed to compile greedy bounded-range suffix control pattern");
+
+        assert!(greedy_star.is_match("aaaa"));
+        assert!(greedy_plus.is_match("aaaa"));
+        assert!(greedy_question.is_match("a"));
+        assert!(greedy_range.is_match("123"));
+    }
+
+    #[test]
+    fn parser_possessive_quantifiers_match_when_no_backtracking_is_needed() {
+        let star =
+            Regex::compile(r"\Aa*+b\z").expect("Failed to compile possessive star success pattern");
+        let plus =
+            Regex::compile(r"\Aa++b\z").expect("Failed to compile possessive plus success pattern");
+        let question = Regex::compile(r"\Aa?+b\z")
+            .expect("Failed to compile possessive question success pattern");
+        let range = Regex::compile(r"\Aa{2,3}+b\z")
+            .expect("Failed to compile possessive bounded-range success pattern");
+
+        assert!(star.is_match("aaab"));
+        assert!(plus.is_match("aaab"));
+        assert!(question.is_match("ab"));
+        assert!(range.is_match("aaab"));
+    }
+
+    #[test]
     fn parser_atomic_group_blocks_backtracking() {
         let atomic = Regex::compile("(?>a|ab)c").expect("Failed to compile atomic-group pattern");
         let non_atomic = Regex::compile("(a|ab)c").expect("Failed to compile non-atomic pattern");
@@ -2615,6 +2663,12 @@ mod tests {
             ("a*a", "a", true),
             ("a+a", "aa", true),
             ("ab?b", "ab", true),
+            (r"\Aa*+a\z", "aaaa", false),
+            (r"\Aa*+b\z", "aaab", true),
+            (r"\Aa++a\z", "aaaa", false),
+            (r"\Aa?+a\z", "a", false),
+            (r"\A\d{2,3}+3\z", "123", false),
+            (r"\Aa{2,3}+b\z", "aaab", true),
             ("(?<word>cat)", "xxcatyy", true),
             (r"(a)\1", "baa", true),
             (r"(a)\1", "bab", false),

@@ -24,7 +24,7 @@ Pipeline in `rgx-core`:
 ## What is currently reliable
 - Core compile-and-run flow for basic regex patterns
 - Parser-independent compile-and-run flow from AST via `Compiler::compile_ast` and `Regex::from_ast`
-- VM execution paths for literals, alternation, anchors (including `\\A`, `\\Z`, `\\z`), word boundaries, shorthand/custom character classes (including `\\D`, `\\W`, `\\S`), and greedy/lazy quantifiers
+- VM execution paths for literals, alternation, anchors (including `\\A`, `\\Z`, `\\z`), word boundaries, shorthand/custom character classes (including `\\D`, `\\W`, `\\S`), and greedy/lazy/possessive quantifiers
 - Unicode property classes (`\\p{...}`, `\\P{...}`) are now integrated through the compiler/VM path, including invalid-property compile errors and representative PCRE2 differential coverage
 - AST-first VM/compiler support for positive and negative lookahead/lookbehind assertions
 - Parser-path support for positive/negative lookahead and lookbehind syntax
@@ -52,6 +52,7 @@ Pipeline in `rgx-core`:
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
 - Atomic-group runtime semantics implemented to block backtracking into successful atomic groups
+- Parser-path support for possessive quantifiers (`*+`, `++`, `?+`, `{n,m}+`) now lowers through the same atomic-group semantics used by explicit `(?>...)`
 - A formal parser interoperability contract is maintained in the repo
 - PGEN parser issue handoff is now constrained to the published upstream reporting protocol
 - Live shipped-vs-scaffolded matrix at `docs/CAPABILITY_MATRIX.md`
@@ -67,15 +68,18 @@ Pipeline in `rgx-core`:
 - Differential supported-syntax parity now also includes unbounded range coverage (`{n,}`) including suffix-sensitive `{n,}3` behavior
 - Differential supported-syntax parity now includes dedicated suffix-backtracking guardrails for greedy `*`, `+`, and `?` quantifiers
 - Differential supported-syntax parity now includes lazy quantifiers and lazy counted-range suffix behavior
+- Differential supported-syntax parity now includes possessive quantifiers, including both success cases and suffix-sensitive no-backtracking behavior
 - Differential supported-syntax parity now includes negated shorthand character classes (`\D`, `\W`, `\S`) for first-match, find-all, and explicit no-match behavior
 - Parser-path regressions now explicitly cover suffix backtracking for greedy `*`, `+`, and `?` quantifiers
 - Parser-path regressions now explicitly cover lazy `??`, `*?`, `+?`, `{n,m}?`, and `{n,}?`
+- Parser-path regressions now explicitly cover possessive `*+`, `++`, `?+`, and `{n,m}+`
 - The default `rgx-core` build now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs` instead of a recursive-descent placeholder path
 - The PGEN adapter currently converts the stable PGEN regex AST dump into RGX AST nodes for:
   - groups
   - lookarounds
   - conditionals
   - quantifiers / concatenation / alternation structure
+  - possessive quantifiers via atomic-wrapped quantified RGX AST lowering
   - leaf atoms via exact-slice fallback into the recursive-descent parser so RGX AST semantics stay aligned
 - The local backend choice under the default PGEN-backed build is intentionally controlled by one constant (`PGEN_FEATURE_BACKEND`) so RGX can force either the real PGEN backend or the recursive-descent reference backend without changing callers
 - `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
@@ -145,6 +149,7 @@ Pipeline in `rgx-core`:
   - empty patterns
   - anchors (`$`, `\A`, `\Z`, `\z`)
   - range quantifiers
+  - possessive quantifiers
   - shorthand / Unicode property classes
   - group families
   - lookarounds
@@ -167,7 +172,7 @@ Pipeline in `rgx-core`:
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
-- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in recursion, possessive quantifiers, and other PCRE families beyond the currently covered conditional condition forms, Unicode property classes, and lookaround syntax
+- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in recursion and other PCRE families beyond the currently covered conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
 - Recursion is still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)

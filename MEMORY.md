@@ -75,6 +75,10 @@ Live continuity memory for `rgx` sessions.
   - compile-time validation now rejects only missing-group references such as `(a)\2`
   - runtime matching now executes numbered backreferences through real VM bytecode in both top-level and subexpression paths
   - PCRE2 differential coverage now treats numeric backreferences as supported rather than as a known gap
+- Possessive quantifiers are now shipped on the default compiler/VM path:
+  - both parser backends lower `*+`, `++`, `?+`, and counted possessive forms into atomic-wrapped greedy quantified AST nodes
+  - runtime behavior now blocks backtracking into the possessive piece while still allowing straightforward success cases
+  - PCRE2 differential coverage now treats possessive quantifiers as supported rather than as a parser-adapter gap
 - `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, and the CLI still has no native/wasm registration surface.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
@@ -111,9 +115,25 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Shipped possessive quantifiers on the default compiler/VM path:
+  - extended lexer/parser tokenization and the default PGEN-backed parser adapter so `*+`, `++`, `?+`, and counted possessive repeats all lower into atomic-wrapped greedy quantified AST nodes
+  - added parser-path runtime regressions for suffix-sensitive no-backtracking behavior and straightforward success cases
+  - promoted possessive quantifiers to supported PCRE2 differential coverage and refreshed the capability/parity/parser-contract/user docs accordingly
+- Re-ran targeted and full validation for the possessive-quantifier slice:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core possessive -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_active_parser_matches_reference_fixtures -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_pgen_backend_matches_reference_fixtures -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_possessive_quantifiers -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- No new PGEN parser show-stopper surfaced while rerunning the shared local CI path with possessive-quantifier coverage added.
 - Added a durable rough PCRE2 support estimate and checklist to `docs/PCRE2_COMPATIBILITY_MATRIX.md`:
-  - tracked parity estimate is now documented as roughly `90%`
-  - broader practical PCRE2 regex estimate is now documented as roughly `70%`
+  - tracked parity estimate is now documented as roughly `92%`
+  - broader practical PCRE2 regex estimate is now documented as roughly `72%`
   - the estimate is explicitly caveated as hand-maintained and family-based rather than a formal full-PCRE2 census
 - Shipped Unicode property classes on the default compiler/VM path:
   - added `rgx-core/src/unicode_support.rs` as a small bridge to `regex-syntax` so `\p{...}` / `\P{...}` resolve through maintained Unicode property tables instead of staying parser-only

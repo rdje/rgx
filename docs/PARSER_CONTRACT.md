@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.6`
+- Version: `v0.1.7`
 - Last updated: `2026-03-29`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -37,6 +37,11 @@ Required invariants:
 - Lookaround forms map as:
   - `(?=...)` / `(?!...)` -> `Regex::Lookahead { positive: true/false, ... }`
   - `(?<=...)` / `(?<!...)` -> `Regex::Lookbehind { positive: true/false, ... }`
+- Possessive quantifiers lower to canonical AST using existing shipped nodes rather than a dedicated possessive AST variant:
+  - `a*+` -> `Regex::Group { kind: Atomic, expr: Regex::Quantified { expr: 'a', quantifier: ZeroOrMore { lazy: false }}}`
+  - `a++` -> `Regex::Group { kind: Atomic, expr: Regex::Quantified { expr: 'a', quantifier: OneOrMore { lazy: false }}}`
+  - `a?+` -> `Regex::Group { kind: Atomic, expr: Regex::Quantified { expr: 'a', quantifier: ZeroOrOne { lazy: false }}}`
+  - `a{m,n}+` -> `Regex::Group { kind: Atomic, expr: Regex::Quantified { expr: 'a', quantifier: Range { min: m, max: Some(n), lazy: false }}}`
 - Parsed advanced constructs with dedicated AST nodes must preserve payload content:
   - code blocks `(?{lang:code})` -> `Regex::CodeBlock { lang, code }`
   - recursion `(?R)`, `(?1)`, `(?&name)` -> `Regex::Recursion { target }`
@@ -86,7 +91,7 @@ The conformance harness checks:
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for unintegrated runtime features.
 
-When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
+When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
 
 Current rollout note:
 - The default `rgx-core` build now includes `pgen-parser`, so `parse_pattern(...)` uses the real PGEN AST-dump adapter unless default features are explicitly disabled.
