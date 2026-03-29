@@ -568,11 +568,23 @@ pub mod wasm {
     #[derive(Clone)]
     struct WasmStoreData {
         context: ExecContext,
+        emitted_result: Option<CodeBlockValue>,
     }
 
     impl WasmStoreData {
         fn new(context: ExecContext) -> Self {
-            Self { context }
+            Self {
+                context,
+                emitted_result: None,
+            }
+        }
+
+        fn set_emitted_result(&mut self, result: CodeBlockValue) {
+            self.emitted_result = Some(result);
+        }
+
+        fn take_emitted_result(&mut self) -> Option<CodeBlockValue> {
+            self.emitted_result.take()
         }
     }
 
@@ -654,7 +666,11 @@ pub mod wasm {
     /// - `module` is a Rust-registered module name
     /// - `function` is an exported zero-argument function
     /// - function result must be `i32` where `0` means failure and non-zero means success
-    /// - modules may optionally import read-only execution-context helpers from the `rgx` namespace
+    /// - modules may optionally import execution-context helpers from the `rgx` namespace
+    /// - modules may optionally emit richer winning-path results through:
+    ///   - `rgx.emit_numeric(f64)`
+    ///   - `rgx.emit_replacement(ptr, len)`
+    /// - emitted results are used only when the exported predicate returns non-zero
     pub struct WasmEngine {
         engine: Engine,
         linker: Linker<WasmStoreData>,
@@ -823,6 +839,20 @@ pub mod wasm {
                         "Failed to define WASM import rgx.variable_value_read: {e}"
                     ))
                 })?;
+            linker
+                .func_wrap("rgx", "emit_numeric", Self::emit_numeric_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.emit_numeric: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "emit_replacement", Self::emit_replacement_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.emit_replacement: {e}"
+                    ))
+                })?;
             trace_exit!("execution", "WasmEngine::build_linker", "ok=true");
             Ok(linker)
         }
@@ -857,6 +887,21 @@ pub mod wasm {
             memory
                 .write(caller, guest_ptr, bytes)
                 .map_err(|e| anyhow!("Failed to write into guest memory: {e}"))
+        }
+
+        fn read_guest_bytes(
+            caller: &mut Caller<'_, WasmStoreData>,
+            guest_ptr: i32,
+            len: i32,
+        ) -> wasmtime::Result<Vec<u8>> {
+            let memory = Self::guest_memory(caller)?;
+            let guest_ptr = Self::nonnegative_i32_to_usize(guest_ptr, "guest pointer")?;
+            let len = Self::nonnegative_i32_to_usize(len, "guest byte length")?;
+            let mut bytes = vec![0_u8; len];
+            memory
+                .read(caller, guest_ptr, &mut bytes)
+                .map_err(|e| anyhow!("Failed to read from guest memory: {e}"))?;
+            Ok(bytes)
         }
 
         fn current_position_import(caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<i32> {
@@ -1131,6 +1176,30 @@ pub mod wasm {
             Self::usize_to_i32(bytes.len(), "copied variable value length")
         }
 
+        fn emit_numeric_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            value: f64,
+        ) -> wasmtime::Result<()> {
+            caller
+                .data_mut()
+                .set_emitted_result(CodeBlockValue::Numeric(value));
+            Ok(())
+        }
+
+        fn emit_replacement_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            guest_ptr: i32,
+            len: i32,
+        ) -> wasmtime::Result<()> {
+            let bytes = Self::read_guest_bytes(&mut caller, guest_ptr, len)?;
+            let replacement = String::from_utf8(bytes)
+                .map_err(|_| anyhow!("WASM replacement result must be valid UTF-8"))?;
+            caller
+                .data_mut()
+                .set_emitted_result(CodeBlockValue::Replacement(replacement));
+            Ok(())
+        }
+
         /// Register a named wasm module from binary bytes.
         pub fn register_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
             trace_enter!(
@@ -1259,7 +1328,13 @@ pub mod wasm {
             let result = match function.call(&mut store, ()) {
                 Ok(value) => {
                     if value != 0 {
-                        ExecResult::Success
+                        match store.data_mut().take_emitted_result() {
+                            Some(CodeBlockValue::Numeric(value)) => ExecResult::Numeric(value),
+                            Some(CodeBlockValue::Replacement(value)) => {
+                                ExecResult::Replacement(value)
+                            }
+                            None => ExecResult::Success,
+                        }
                     } else {
                         ExecResult::Failure
                     }

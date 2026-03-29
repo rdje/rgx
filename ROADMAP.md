@@ -71,8 +71,8 @@ Live forward-looking tracker for rgx.
 - Status: `planned`
 - Goal: extend the newly shipped code-block slice beyond the current Lua/JavaScript/native/wasm surface.
 - Scope:
-  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, named captures, and host-provided variables
-  - richer non-boolean result handling on the wasm path beyond the current Rust-side numeric/replacement helper layer
+  - richer wasm ABI beyond the current `module:function` / `() -> i32` predicate contract plus `rgx` imports for position, full input text, numbered captures, named captures, host-provided variables, and initial `emit_numeric` / `emit_replacement` result helpers
+  - richer non-boolean result handling on the wasm path beyond the current host-emitted numeric/replacement layer
   - decide whether native/wasm configuration should expand beyond the current Rust-API-only surface
 
 ### Multi-language code-block runtime expansion
@@ -92,10 +92,11 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Extended wasm code blocks with winning-path `Numeric` / `Replacement` result emission through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)`, including last-emitted-wins and invalid-payload failure coverage.
 - Extended the shared local/GitHub CI path so `./scripts/run-local-ci.sh` now covers the `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages`) instead of leaving those checks manual.
 - Added first dedicated numeric-result Rust APIs for code-block results by shipping `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` on top of winning-path `Numeric(f64)` payloads.
 - Added the first replacement-oriented Rust APIs for code-block results by shipping `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` on top of winning-path `Replacement(String)` payloads.
-- Added the first richer non-boolean code-block result slice for Lua/JavaScript/native by surfacing winning-path numeric/replacement values through `MatchResult.code_result` while keeping wasm predicate-only.
+- Added the first richer non-boolean code-block result slice by surfacing winning-path numeric/replacement values through `MatchResult.code_result`, now across Lua/JavaScript/native/wasm.
 - Added host-provided execution variables to the shipped code-block slice, including `Regex::set_variable(...)`, cross-backend variable bindings, and wasm variable imports.
 - Expanded the wasm ABI with `rgx` host imports for named captures, including deterministic named-capture ordering and regression coverage for name/value reads.
 - Expanded the wasm ABI with `rgx` host imports for current position, full input text, and numbered captures, including safe guest-memory failure handling and regression coverage.

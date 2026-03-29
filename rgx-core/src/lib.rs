@@ -1241,7 +1241,7 @@ mod tests {
 
     #[cfg(feature = "wasm")]
     #[test]
-    fn safe_mode_wasm_code_block_match_has_no_non_boolean_result_payload() {
+    fn safe_mode_wasm_code_block_defaults_to_no_non_boolean_result_payload() {
         let regex = Regex::with_mode("(?{wasm:truthy:evaluate})", ExecutionMode::Safe)
             .expect("Failed to compile WASM payload pattern");
         regex
@@ -1261,6 +1261,167 @@ mod tests {
 
         let first = regex.find_first("").expect("Expected WASM predicate match");
         assert_eq!(first.code_result, None);
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_emit_numeric_results() {
+        let regex = Regex::with_mode(r"a(?{wasm:calc:emit_one_point_five})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM numeric-result pattern");
+        regex
+            .register_wasm_module(
+                "calc",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "emit_numeric" (func $emit_numeric (param f64)))
+                        (func (export "emit_one_point_five") (result i32)
+                            f64.const 1.5
+                            call $emit_numeric
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM numeric-result module");
+
+        let first = regex
+            .find_first("aa")
+            .expect("Expected WASM numeric-result match");
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 1);
+        assert_eq!(first.code_result, Some(CodeBlockValue::Numeric(1.5)));
+        assert_eq!(regex.find_first_numeric_with_code("aa"), Some(1.5));
+        assert_eq!(regex.find_all_numeric_with_code("aa"), vec![1.5, 1.5]);
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_last_emitted_result_wins() {
+        let regex = Regex::with_mode("(?{wasm:calc:emit_multiple})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM multi-result pattern");
+        regex
+            .register_wasm_module(
+                "calc",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "emit_numeric" (func $emit_numeric (param f64)))
+                        (func (export "emit_multiple") (result i32)
+                            f64.const 1.0
+                            call $emit_numeric
+                            f64.const 2.5
+                            call $emit_numeric
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM multi-result module");
+
+        let first = regex
+            .find_first("")
+            .expect("Expected WASM multi-result match");
+        assert_eq!(first.code_result, Some(CodeBlockValue::Numeric(2.5)));
+        assert_eq!(regex.find_first_numeric_with_code(""), Some(2.5));
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_can_emit_replacement_results() {
+        let regex = Regex::with_mode("cat(?{wasm:emit:cat_upper})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM replacement pattern");
+        regex
+            .register_wasm_module(
+                "emit",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "emit_replacement" (func $emit_replacement (param i32 i32)))
+                        (memory (export "memory") 1)
+                        (data (i32.const 0) "CAT")
+                        (func (export "cat_upper") (result i32)
+                            i32.const 0
+                            i32.const 3
+                            call $emit_replacement
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM replacement module");
+
+        let first = regex
+            .find_first("cat dog cat")
+            .expect("Expected WASM replacement-result match");
+        assert_eq!(
+            first.code_result,
+            Some(CodeBlockValue::Replacement("CAT".to_string()))
+        );
+        assert_eq!(regex.replace_first_with_code("cat dog cat"), "CAT dog cat");
+        assert_eq!(regex.replace_all_with_code("cat dog cat"), "CAT dog CAT");
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_fails_for_invalid_utf8_replacement_payload() {
+        let regex = Regex::with_mode("(?{wasm:emit:invalid_utf8})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM invalid UTF-8 pattern");
+        regex
+            .register_wasm_module(
+                "emit",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "emit_replacement" (func $emit_replacement (param i32 i32)))
+                        (memory (export "memory") 1)
+                        (data (i32.const 0) "\ff")
+                        (func (export "invalid_utf8") (result i32)
+                            i32.const 0
+                            i32.const 1
+                            call $emit_replacement
+                            i32.const 1
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM invalid UTF-8 module");
+
+        assert!(!regex.is_match(""));
+        assert_eq!(regex.find_first(""), None);
+        assert_eq!(regex.replace_first_with_code(""), "");
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn safe_mode_wasm_code_block_discards_emitted_result_on_failure() {
+        let regex = Regex::with_mode("(?{wasm:calc:emit_then_fail})", ExecutionMode::Safe)
+            .expect("Failed to compile WASM failed-result pattern");
+        regex
+            .register_wasm_module(
+                "calc",
+                test_wasm_module_bytes(
+                    r#"
+                    (module
+                        (import "rgx" "emit_numeric" (func $emit_numeric (param f64)))
+                        (func (export "emit_then_fail") (result i32)
+                            f64.const 9.0
+                            call $emit_numeric
+                            i32.const 0
+                        )
+                    )
+                    "#,
+                ),
+            )
+            .expect("Failed to register WASM failed-result module");
+
+        assert!(!regex.is_match(""));
+        assert_eq!(regex.find_first(""), None);
+        assert_eq!(regex.find_first_numeric_with_code(""), None);
     }
 
     #[cfg(feature = "wasm")]

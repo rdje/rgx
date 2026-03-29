@@ -36,7 +36,7 @@ Current behavior contract for the shipped slice:
   - `wasm` requires the `wasm` feature plus a registered module on the compiled `Regex`
   - host-provided execution variables can be set on the compiled `Regex` via `Regex::set_variable(...)`
   - current wasm ABI keeps `module:function`, where `function` must be an exported `() -> i32` predicate (`0` = fail, non-zero = succeed)
-  - wasm modules may optionally import read-only context helpers from the `rgx` namespace:
+  - wasm modules may optionally import context and result helpers from the `rgx` namespace:
     - `position() -> i32`
     - `text_length() -> i32`
     - `text_read(ptr, offset, len) -> i32`
@@ -53,20 +53,23 @@ Current behavior contract for the shipped slice:
     - `variable_name_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
     - `variable_value_length(index) -> i32` (`-1` when the variable slot is unavailable)
     - `variable_value_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+    - `emit_numeric(value: f64)`
+    - `emit_replacement(ptr, len)`
   - named captures and host-provided variables are exposed to wasm through deterministic lexicographic ordering by name
-  - `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, and `variable_value_read` require the module to export linear memory as `memory`
-  - malformed wasm call specs, malformed context reads, unknown module names, and missing/invalid exports or guest-memory interactions fail the current match path at runtime
+  - `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, `variable_value_read`, and `emit_replacement` require the module to export linear memory as `memory`
+  - `emit_numeric` / `emit_replacement` set the winning-path non-boolean payload for the current code block; the last emitted wasm payload wins if a module emits more than once before returning
+  - emitted wasm payloads are used only when the exported predicate returns non-zero; a `0` predicate result still fails the current match path
+  - malformed wasm call specs, malformed context reads, unknown module names, invalid UTF-8 replacement payloads, and missing/invalid exports or guest-memory interactions fail the current match path at runtime
 - `ExecutionMode::Full` accepts the same sandboxed backends plus `native` code blocks on the Rust API path:
   - `native` requires registering a callback on the compiled `Regex`
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/native execution layer via `ExecContext`, the `vars` scripting binding, and `ExecContext::variable(...)`.
-- `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native code blocks.
+- `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.
-- Wasm currently exposes a smaller import-based context slice (position, full input text, numbered captures, named captures, host-provided variables) rather than the fuller Lua/JavaScript/native binding surface.
+- Wasm currently exposes a smaller import-based context/result slice (position, full input text, numbered captures, named captures, host-provided variables, numeric emission, replacement emission) rather than the fuller Lua/JavaScript/native binding surface.
 - Code blocks participate in backtracking and may execute multiple times during one overall match search.
-- Wasm remains predicate-only on the result side through the current exported `() -> i32` ABI.
 Representative test anchors:
 - `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests
 - `rgx-core/src/execution.rs` backend dispatch logic

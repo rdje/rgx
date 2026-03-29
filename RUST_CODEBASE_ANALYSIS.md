@@ -9,17 +9,16 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block -- --nocapture` => pass
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the sibling local `../pgen` checkout present)
-  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm --check` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --offline` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features pgen-parser --offline` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features "pgen-parser lua javascript wasm" --offline` => pass
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features pgen-parser --offline` => pass
-  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets --offline` => pass with warnings
 - Current large-file concentration is still dominated by `rgx-core`:
   - `rgx-core/src/vm.rs`: 3960 lines
-  - `rgx-core/src/lib.rs`: 2437 lines
-  - `rgx-core/src/execution.rs`: 1912 lines
+  - `rgx-core/src/lib.rs`: 2598 lines
+  - `rgx-core/src/execution.rs`: 1987 lines
   - `rgx-core/src/lexer.rs`: 1832 lines
   - `rgx-core/src/parser.rs`: 1190 lines
 - Current scaffold concentration remains visible in several near-empty modules/crates:
@@ -43,13 +42,13 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - compiler validates code blocks against `ExecutionMode` and cargo features
   - VM lowers code blocks into inline opcodes and executes them during matching
   - engine/runtime materialize current match text, numbered captures, named captures, and host-provided variables into the execution context
-  - winning-path non-boolean Lua/JavaScript/native results are surfaced through `MatchResult.code_result`
+  - winning-path non-boolean Lua/JavaScript/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
 - The biggest remaining gaps are now narrower and clearer:
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` and `wasm` code blocks are still Rust-API-only; the CLI has no registration/configuration surface for them
-  - the current wasm ABI still lacks richer non-boolean result handling
+  - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
   - the real PGEN backend is green locally, but the verified PGEN `1.1.1` fix commit is still only present in the sibling local checkout and has not landed on PGEN `origin/main`
   - clean/distributed hosted validation for the real PGEN backend therefore still needs an explicit dependency/distribution decision
   - automated validation still misses benchmark trend capture
@@ -73,8 +72,8 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - capture slot `0` is the current overall match prefix for the current match attempt
   - numbered captures, named captures, and host-provided variables are available when their groups have completed or have been set through the Rust API
   - code blocks participate in backtracking and may execute multiple times during one overall match search
-  - Lua/JavaScript/native `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
-  - wasm keeps `module:function` plus exported `() -> i32` predicates and read-only `rgx` imports for position, full input text, numbered captures, named captures, and variables
+  - Lua/JavaScript/native/wasm `Numeric` and `Replacement` results now continue matching and the last winning-path non-boolean value is exposed through `MatchResult.code_result`
+  - wasm keeps `module:function` plus exported `() -> i32` predicates and `rgx` imports for position, full input text, numbered captures, named captures, variables, `emit_numeric(...)`, and `emit_replacement(...)`
 
 ### Parser interoperability / PGEN path
 - `docs/PARSER_CONTRACT.md` is the parser-boundary source of truth.
@@ -94,7 +93,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ExecutionMode::Pure` rejects code blocks with an explicit compile error.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
-- The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still does not expose richer non-boolean result handling.
+- The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
 - PGEN accepted possessive quantifiers are still rejected by the RGX parser adapter because RGX does not yet represent possessive quantifiers in its parser AST.
 
@@ -114,7 +113,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 
 ### Next
-- Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports, `MatchResult.code_result`, and numeric/replacement Rust helper APIs, most likely richer wasm result handling.
+- Design the next higher-value wasm/runtime slice beyond the current position/text/numbered-capture/named-capture/variable imports plus the initial `emit_numeric` / `emit_replacement` result helpers.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Decide how RGX should distribute the now-real PGEN backend cleanly while the verified `1.1.1` fix revision is still unpublished upstream (keep local-checkout integration, vendor a snapshot, or wait for upstream push).
 - Operationalize benchmark trend capture instead of relying on manual runs.
@@ -129,11 +128,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - JavaScript execution is still per-invocation via QuickJS and is wrapped so documented `return ...` style code works inside `(?{js:...})` blocks.
 - Native callback storage uses shared interior mutability, so the `Arc<ExecutionManager>` attached to the VM can receive post-compilation registrations without swapping runtime instances.
 - Host-provided execution variables now live on the shared `ExecutionManager` and are snapshotted into each per-call `ExecContext`, which keeps callout inputs deterministic under backtracking while still allowing Rust API updates between matches.
-- Wasm module storage follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime.
+- Wasm module storage follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime; per-call store data now also retains the last emitted wasm result payload until predicate completion.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, `rgx-bench/src/lib.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 
 ## High-confidence next actions
-1. Design and ship the next richer-result layer beyond `MatchResult.code_result` plus the current numeric/replacement helper APIs, especially wasm result handling.
+1. Design and ship the next wasm/runtime layer beyond the current import-based context slice plus initial `emit_numeric` / `emit_replacement` helpers.
 2. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 3. Resolve the dependency/distribution story for the real PGEN backend now that the verified fix commit is only available in the sibling local checkout.
 4. Add automated benchmark-trend capture to the default validation loop.

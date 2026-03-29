@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Extended wasm code blocks with emitted numeric and replacement results
+- Scope: wasm execution ABI/result surfacing, regression coverage, and roadmap/continuity documentation refreshes.
+- Changes:
+  - Root cause: the public richer-result slice already surfaced winning-path `Numeric(f64)` and `Replacement(String)` payloads for Lua/JavaScript/native backends, but the wasm path still dropped all non-boolean result metadata even after `MatchResult.code_result`, numeric helpers, and replacement helpers had shipped.
+  - Extended `rgx-core/src/execution.rs` so wasm modules can emit winning-path numeric and replacement payloads through new `rgx.emit_numeric(f64)` and `rgx.emit_replacement(ptr, len)` host imports while keeping the stable `(?{wasm:module:function})` / exported `() -> i32` predicate contract for success/failure.
+  - Stored the current wasm callout payload in per-invocation store data so the last emitted payload wins, failed predicates drop emitted payloads naturally, and successful predicates can surface emitted values as `ExecResult::Numeric(...)` / `ExecResult::Replacement(...)`.
+  - Added wasm regressions in `rgx-core/src/lib.rs` for the default no-emission case, numeric emission, replacement emission, last-emitted-wins behavior, failed-predicate payload discard, and invalid UTF-8 replacement payload failure.
+  - Refreshed `README.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped wasm behavior is documented truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Wasm is no longer predicate-only on the result side; winning-path numeric and replacement payloads now flow through the same public Rust APIs as Lua/JavaScript/native.
+  - The shipped wasm result ABI is still intentionally narrow: successful modules may emit only numeric or UTF-8 replacement payloads through host imports, `emit_replacement` still requires exported linear memory, and invalid guest payloads fail the current match path.
 ### 2026-03-29 - Activated the real local PGEN backend behind `pgen-parser`
 - Scope: parser-backend rollout, conformance hardening, CLI feature plumbing, and local workflow updates.
 - Changes:

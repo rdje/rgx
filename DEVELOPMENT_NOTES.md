@@ -33,9 +33,10 @@ Pipeline in `rgx-core`:
 - Public-path wasm module execution for `(?{wasm:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` through `Regex::register_wasm_module(...)` on the Rust API path
 - Host-provided execution variables can now be registered through `Regex::set_variable(...)` and are snapshotted into each code-block evaluation
 - Wasm predicates can now read current position, full input text, numbered captures, named captures, and host-provided variables through `rgx` host imports while keeping the exported `() -> i32` predicate entrypoint stable
+- Wasm modules can now also emit winning-path numeric and replacement payloads through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)` while still using the exported `() -> i32` predicate to decide success/failure
 - Code-block execution contexts now expose current overall match text, numbered captures, named captures, and host-provided variables to the execution layer
 - Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
-- Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native code blocks
+- Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native/wasm code blocks
 - Public numeric-result helper APIs now exist through `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)`, which collect winning-path `Numeric(f64)` payloads in match order and skip non-numeric matches
 - Public replacement-oriented APIs now exist through `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)`, which consume winning-path `Replacement(String)` payloads and leave non-replacement matches unchanged
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
@@ -165,8 +166,8 @@ Pipeline in `rgx-core`:
 - Unicode property classes (`\\p{...}`, `\\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
 - Backreference, recursion, and conditional syntax are still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
-- The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports, but richer result handling is still not exposed to wasm modules
-- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs, but wasm richer-result handling remains open
+- The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
+- The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
 - Benchmark trend capture is still separate from the default validation loop
@@ -179,7 +180,7 @@ Pipeline in `rgx-core`:
 5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
 6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
-8. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm result work and any future non-Rust configuration surface
+8. Expand the staged code-block rollout beyond the current first richer-result plus numeric/replacement helper slice, especially additional wasm ABI/result work and any future non-Rust configuration surface
 
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger

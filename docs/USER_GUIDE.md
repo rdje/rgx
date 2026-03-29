@@ -175,6 +175,32 @@ assert!(re.is_match(""));
 ```
 For the current wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
 
+Wasm richer-result example:
+
+```rust
+use rgx_core::{CodeBlockValue, ExecutionMode, Regex};
+
+let re = Regex::with_mode("cat(?{wasm:emit:cat_upper})", ExecutionMode::Safe)?;
+re.register_wasm_module(
+    "emit",
+    include_bytes!("emit.wasm"),
+)?;
+
+let first = re.find_first("cat dog").expect("expected wasm match");
+assert_eq!(
+    first.code_result,
+    Some(CodeBlockValue::Replacement("CAT".to_string()))
+);
+assert_eq!(re.replace_first_with_code("cat dog"), "CAT dog");
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+For this richer-result slice, the wasm module still exports `cat_upper() -> i32`, but it may also import:
+- `rgx.emit_numeric(value: f64)`
+- `rgx.emit_replacement(ptr, len)`
+
+Those imports set the current code block's winning-path payload when the exported predicate returns non-zero.
+
 JavaScript example:
 
 ```rust
@@ -216,7 +242,7 @@ What the execution context exposes today:
 - `pos`: current byte position in the input
 - `text`: full input text
 - Lua/JavaScript bindings expose `arg`, `named`, `vars`, `pos`, and `text`; native callbacks receive the same data through `ExecContext` helpers such as `current_match()`, `group()`, `named()`, and `variable()`.
-- Wasm currently exposes a smaller import-based context slice through the `rgx` namespace:
+- Wasm currently exposes a smaller import-based context/result slice through the `rgx` namespace:
   - `position() -> i32`
   - `text_length() -> i32`
   - `text_read(ptr, offset, len) -> i32`
@@ -233,17 +259,19 @@ What the execution context exposes today:
   - `variable_name_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
   - `variable_value_length(index) -> i32` (`-1` when the variable slot is unavailable)
   - `variable_value_read(index, ptr, offset, len) -> i32` (`-1` when the variable slot is unavailable)
+  - `emit_numeric(value: f64)`
+  - `emit_replacement(ptr, len)`
 - Named captures and host-provided variables are exposed to wasm through deterministic lexicographic ordering by name.
-- `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, and `variable_value_read` require the wasm module to export linear memory as `memory`.
+- `text_read`, `capture_read`, `named_capture_name_read`, `named_capture_value_read`, `variable_name_read`, `variable_value_read`, and `emit_replacement` require the wasm module to export linear memory as `memory`.
 - Capture slot `0` in the wasm ABI is still the current overall match prefix for the current match attempt.
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.
-- The current wasm ABI is still limited to `module:function` with an exported `() -> i32` predicate plus the read-only import helpers above.
-- Host-provided variables are read-only snapshots for each code-block evaluation, and richer non-boolean result handling is still not exposed to wasm modules.
+- The current wasm ABI still uses `module:function` with an exported `() -> i32` predicate; richer results are emitted indirectly through `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`.
+- Host-provided variables are read-only snapshots for each code-block evaluation.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
-- Malformed wasm context reads, missing exported memory, and invalid guest-memory writes also fail the current match path at runtime.
-- Lua/JavaScript/native numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`; wasm still remains predicate-only.
+- Malformed wasm context reads, missing exported memory, invalid guest-memory reads/writes, and invalid UTF-8 replacement payloads also fail the current match path at runtime.
+- Lua/JavaScript/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:
@@ -271,8 +299,9 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - They can fail the current path and allow normal regex backtracking to continue.
 - Boolean-style success/failure still drives path control.
 - Lua/JavaScript/native `return 123` or `return "..."` also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
+- Wasm keeps the exported `() -> i32` predicate contract, and may additionally call `rgx.emit_numeric(...)` or `rgx.emit_replacement(...)` before returning non-zero to surface a winning-path payload.
 - `replace_first_with_code` / `replace_all_with_code` consume only winning-path `Replacement(String)` values; numeric-only matches continue to round-trip unchanged in replacement mode.
-- Wasm currently remains predicate-only because its shipped ABI is still `module:function` with an exported `() -> i32`.
+- If a wasm module emits more than one non-boolean payload during one code-block execution, the last emitted payload wins.
 ### Branch reporting semantics
 - Branch reporting is intentionally scoped to top-level alternations.
 - `matched_branch_number` is 1-based and nested alternations do not override it.

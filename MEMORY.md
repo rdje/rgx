@@ -70,10 +70,11 @@ Live continuity memory for `rgx` sessions.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
 - Code blocks are now compiled into VM bytecode, executed during matching, and receive current overall match text plus numbered captures, named captures, and host-provided variables through the execution context.
-- Public `find_first` / `find_all` results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native code blocks while wasm remains predicate-only on the result side.
+- Public `find_first` / `find_all` results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` are now shipped on the Rust API path and collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
-- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI still has no native/wasm registration surface, and the current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, and variables.
+- The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
+- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, and the CLI still has no native/wasm registration surface.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now blocked at compile time with explicit unsupported errors, eliminating the old silent fallback-to-`Any` miscompile.
@@ -98,13 +99,23 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
-- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and first richer-result layer, most likely with richer wasm result handling next.
+- Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Decide how to distribute the real PGEN backend cleanly now that the verified `1.1.1` fix revision exists only in the local sibling checkout.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Extended the wasm code-block ABI so successful wasm predicates can emit winning-path `Numeric(f64)` and `Replacement(String)` payloads through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)` while keeping the exported `() -> i32` predicate contract stable.
+- Added wasm regressions for the default no-emission case, last-emitted-wins behavior, failed-predicate payload discard, and invalid UTF-8 replacement payload failure.
+- Re-ran the full local validation path after the wasm result work:
+  - `cargo test -p rgx-core --features wasm safe_mode_wasm_code_block -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- No new PGEN parser show-stopper surfaced while re-running the shared local CI path; the sibling-checkout `pgen-parser` slice remains green locally.
 - Verified that the four RGX-reported PGEN transport bugs are fixed in the local PGEN `1.1.1` checkout at `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
 - Replaced the `pgen-parser` placeholder path with a real PGEN AST-dump adapter in `rgx-core/src/parsing.rs`:
   - contract gates now require regex parser/integration release `>= 1.1.1`
