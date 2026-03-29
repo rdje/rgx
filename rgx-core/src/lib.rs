@@ -2490,11 +2490,56 @@ mod tests {
     }
 
     #[test]
-    fn parser_recursion_syntax_reports_explicit_unsupported_error() {
-        let result = Regex::compile("(?R)");
-        assert!(result.is_err(), "Recursion should not silently compile");
+    fn parser_entire_pattern_recursion_executes() {
+        let regex =
+            Regex::compile("a(?R)?b").expect("Failed to compile whole-pattern recursion syntax");
+        let nested = regex
+            .find_first("xxaaabbbzz")
+            .expect("Expected whole-pattern recursion match");
+        assert_eq!((nested.start, nested.end), (2, 8));
+        assert!(regex.is_match("ab"));
+        assert!(!regex.is_match("ccc"));
+    }
+
+    #[test]
+    fn parser_numbered_group_recursion_executes() {
+        let regex = Regex::compile(r"\A(a(?1)?b)\z")
+            .expect("Failed to compile numbered-group recursion syntax");
+        assert!(regex.is_match("ab"));
+        assert!(regex.is_match("aaabbb"));
+        assert!(!regex.is_match("aabbb"));
+    }
+
+    #[test]
+    fn parser_named_group_recursion_executes() {
+        let regex = Regex::compile(r"\A(?<word>a(?&word)?b)\z")
+            .expect("Failed to compile named-group recursion syntax");
+        assert!(regex.is_match("ab"));
+        assert!(regex.is_match("aaabbb"));
+        assert!(!regex.is_match("aabbb"));
+    }
+
+    #[test]
+    fn parser_missing_group_recursion_reports_compile_error() {
+        let result = Regex::compile("(?2)");
+        assert!(
+            result.is_err(),
+            "Recursive call to a missing group should not silently compile"
+        );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("recursion syntax is parsed but not yet integrated into VM execution"));
+        assert!(msg.contains("recursive subroutine '(?2)' refers to missing capture group"));
+    }
+
+    #[test]
+    fn parser_missing_named_group_recursion_reports_compile_error() {
+        let result = Regex::compile("(?&missing)");
+        assert!(
+            result.is_err(),
+            "Recursive call to a missing named group should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg
+            .contains("recursive subroutine '(?&missing)' refers to missing named capture group"));
     }
 
     #[test]
@@ -2691,6 +2736,12 @@ mod tests {
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
             (r"\A(?<g>a)?(?(g)b|c)\z", "ab", true),
             (r"\A(?<g>a)?(?(g)b|c)\z", "c", true),
+            ("a(?R)?b", "aaabbb", true),
+            ("a(?R)?b", "ccc", false),
+            (r"\A(a(?1)?b)\z", "aaabbb", true),
+            (r"\A(a(?1)?b)\z", "aabbb", false),
+            (r"\A(?<word>a(?&word)?b)\z", "aaabbb", true),
+            (r"\A(?<word>a(?&word)?b)\z", "aabbb", false),
             ("(?(?=ab)a|z)b", "ab", true),
             ("(?(?=ab)a|z)b", "zb", true),
             ("(?(?=ab)a|z)b", "xb", false),
@@ -2724,24 +2775,10 @@ mod tests {
 
     #[test]
     fn capability_matrix_explicit_unsupported_compile_boundary_cases() {
-        let cases = [
-            (
-                "(?R)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?1)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?&word)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?{lua:return true})",
-                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-            ),
-        ];
+        let cases = [(
+            "(?{lua:return true})",
+            "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
+        )];
 
         for (pattern, expected_msg) in cases {
             let err = match Regex::compile(pattern) {

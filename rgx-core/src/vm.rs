@@ -8,7 +8,10 @@
 //! - JIT compilation hints
 //! - Memoization for backtracking
 
-use crate::ast::{AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, Regex};
+use crate::ast::{
+    AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, RecursionTarget,
+    Regex,
+};
 use crate::execution::{
     CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager,
 };
@@ -197,6 +200,7 @@ const CONDITIONAL_KIND_LOOKAHEAD_POSITIVE: u8 = 1;
 const CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE: u8 = 2;
 const CONDITIONAL_KIND_LOOKBEHIND_POSITIVE: u8 = 3;
 const CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE: u8 = 4;
+const MAX_RECURSION_DEPTH: usize = 1024;
 
 /// Bytecode instruction with operands
 #[derive(Debug, Clone)]
@@ -259,6 +263,8 @@ pub struct CompiledCharClass {
 pub struct Program {
     /// Bytecode instructions optimized for cache locality
     pub code: Vec<u8>,
+    /// Runtime subroutine bytecode, indexed by recursion target ID (0 = whole pattern)
+    pub subroutines: Vec<Vec<u8>>,
     /// Pre-compiled character classes
     pub char_classes: Vec<CompiledCharClass>,
     /// String literals extracted for SIMD matching
@@ -328,6 +334,8 @@ pub struct ExecContext {
     pub backtrack_stack: Vec<BacktrackFrame>,
     /// Track which alternative is currently being executed
     pub current_alternative: Option<usize>,
+    /// Active recursion frames `(target_id, text_pos)` for zero-width cycle detection
+    pub recursion_stack: Vec<(usize, usize)>,
     /// Last non-boolean code-block value observed on the current path.
     pub code_result: Option<CodeBlockValue>,
 }
@@ -502,6 +510,7 @@ impl RegexVM {
             call_stack: Vec::new(),
             backtrack_stack: Vec::new(),
             current_alternative: None,
+            recursion_stack: Vec::new(),
             code_result: None,
         };
 
@@ -750,7 +759,46 @@ impl RegexVM {
             call_stack: ctx.call_stack.clone(),
             backtrack_stack: Vec::new(),
             current_alternative: ctx.current_alternative,
+            recursion_stack: ctx.recursion_stack.clone(),
             code_result: ctx.code_result.clone(),
+        }
+    }
+
+    /// Invoke a compiled recursion/subroutine target with basic cycle protection.
+    fn invoke_subroutine(&self, ctx: &mut ExecContext, target: usize) -> bool {
+        let Some(code) = self.program.subroutines.get(target) else {
+            return false;
+        };
+
+        if ctx.recursion_stack.len() >= MAX_RECURSION_DEPTH {
+            return false;
+        }
+
+        if ctx
+            .recursion_stack
+            .iter()
+            .any(|&(active_target, active_pos)| active_target == target && active_pos == ctx.pos)
+        {
+            return false;
+        }
+
+        let saved_pos = ctx.pos;
+        let saved_captures = ctx.captures.clone();
+        let saved_code_result = ctx.code_result.clone();
+        let saved_alternative = ctx.current_alternative;
+
+        ctx.recursion_stack.push((target, ctx.pos));
+        let matched = self.execute_subexpr(ctx, code);
+        ctx.recursion_stack.pop();
+        ctx.current_alternative = saved_alternative;
+
+        if matched {
+            true
+        } else {
+            ctx.pos = saved_pos;
+            ctx.captures = saved_captures;
+            ctx.code_result = saved_code_result;
+            false
         }
     }
 
@@ -1513,6 +1561,22 @@ impl RegexVM {
                         ip += offset;
                     }
                     continue;
+                }
+
+                OpCode::Call => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let target = code[ip] as usize;
+                    ip += 1;
+
+                    if self.invoke_subroutine(ctx, target) {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
                 }
 
                 OpCode::Split => {
@@ -2420,6 +2484,19 @@ impl RegexVM {
                     continue;
                 }
 
+                OpCode::Call => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let target = code[ip] as usize;
+                    ip += 1;
+
+                    if self.invoke_subroutine(ctx, target) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
+
                 OpCode::QuestionGreedy => {
                     if ip >= code.len() {
                         return false;
@@ -3290,8 +3367,10 @@ impl OptimizingCompiler {
 
         // Emit final Match instruction
         self.emit_op(OpCode::Match);
+        let subroutines = self.compile_subroutines(ast);
         let program = Program {
             code: self.code.clone(),
+            subroutines,
             char_classes: self.char_classes.clone(),
             string_literals: self.strings.clone(),
             named_groups: HashMap::new(),
@@ -3593,6 +3672,21 @@ impl OptimizingCompiler {
                 self.code.push(*group_id as u8);
             }
 
+            Regex::Recursion { target } => {
+                self.emit_op(OpCode::Call);
+                let target_id = match target {
+                    RecursionTarget::Entire => 0,
+                    RecursionTarget::Group(group_id) => *group_id as u8,
+                    RecursionTarget::NamedGroup(name) => self
+                        .named_groups
+                        .get(name)
+                        .copied()
+                        .expect("named recursion target should be validated before codegen")
+                        as u8,
+                };
+                self.code.push(target_id);
+            }
+
             Regex::Quantified { expr, quantifier } => {
                 match quantifier {
                     Quantifier::OneOrMore { lazy: true } => {
@@ -3743,7 +3837,7 @@ impl OptimizingCompiler {
     fn emit_subexpr_opcode(&mut self, op: OpCode, expr: &Regex) {
         self.emit_op(op);
 
-        let sub_code = self.compile_inline_subexpr(expr);
+        let sub_code = self.compile_nested_code(expr, self.group_counter);
 
         self.code.push(sub_code.len() as u8);
         self.code.extend(sub_code);
@@ -3812,8 +3906,12 @@ impl OptimizingCompiler {
     }
 
     fn compile_inline_subexpr(&mut self, expr: &Regex) -> Vec<u8> {
+        self.compile_nested_code(expr, self.group_counter)
+    }
+
+    fn compile_nested_code(&mut self, expr: &Regex, starting_group_counter: u32) -> Vec<u8> {
         let mut sub_compiler = OptimizingCompiler::with_named_groups(self.named_groups.clone());
-        sub_compiler.group_counter = self.group_counter;
+        sub_compiler.group_counter = starting_group_counter;
         sub_compiler.codegen_pass(expr, false);
 
         let char_class_base = self.char_classes.len();
@@ -3832,8 +3930,83 @@ impl OptimizingCompiler {
         self.flags.has_lookarounds |= sub_compiler.flags.has_lookarounds;
         self.flags.has_code_blocks |= sub_compiler.flags.has_code_blocks;
         self.flags.instruction_count += sub_compiler.flags.instruction_count;
+        self.group_counter = self.group_counter.max(sub_compiler.group_counter);
 
         sub_code
+    }
+
+    fn compile_subroutines(&mut self, ast: &Regex) -> Vec<Vec<u8>> {
+        let mut subroutines = vec![Vec::new(); self.group_counter as usize + 1];
+        subroutines[0] = self.compile_nested_code(ast, 0);
+
+        for (group_id, group_ast) in Self::collect_capturing_group_defs(ast) {
+            subroutines[group_id as usize] = self.compile_nested_code(&group_ast, group_id - 1);
+        }
+
+        subroutines
+    }
+
+    fn collect_capturing_group_defs(ast: &Regex) -> Vec<(u32, Regex)> {
+        let mut defs = Vec::new();
+        let mut next_group = 0;
+        Self::collect_capturing_group_defs_inner(ast, &mut next_group, &mut defs);
+        defs
+    }
+
+    fn collect_capturing_group_defs_inner(
+        ast: &Regex,
+        next_group: &mut u32,
+        defs: &mut Vec<(u32, Regex)>,
+    ) {
+        match ast {
+            Regex::Sequence(items) | Regex::Alternation(items) => {
+                for item in items {
+                    Self::collect_capturing_group_defs_inner(item, next_group, defs);
+                }
+            }
+            Regex::Quantified { expr, .. }
+            | Regex::Lookahead { expr, .. }
+            | Regex::Lookbehind { expr, .. } => {
+                Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+            }
+            Regex::Group { expr, kind, .. } => {
+                if matches!(kind, GroupKind::Capturing) {
+                    *next_group += 1;
+                    defs.push((*next_group, ast.clone()));
+                }
+                Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+            }
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    ConditionalTest::Lookahead { expr, .. }
+                    | ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+                    }
+                    ConditionalTest::GroupExists(_) | ConditionalTest::NamedGroupExists(_) => {}
+                }
+                Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);
+                if let Some(false_branch) = false_branch {
+                    Self::collect_capturing_group_defs_inner(false_branch, next_group, defs);
+                }
+            }
+            Regex::Char(_)
+            | Regex::CharClass(_)
+            | Regex::Dot
+            | Regex::Digit { .. }
+            | Regex::Word { .. }
+            | Regex::Space { .. }
+            | Regex::UnicodeClass { .. }
+            | Regex::Anchor(_)
+            | Regex::WordBoundary { .. }
+            | Regex::Backreference(_)
+            | Regex::Recursion { .. }
+            | Regex::CodeBlock { .. }
+            | Regex::Empty => {}
+        }
     }
 
     fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
@@ -3875,7 +4048,11 @@ impl OptimizingCompiler {
                 OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
                     ip += 2;
                 }
-                OpCode::SaveStart | OpCode::SaveEnd | OpCode::Backref | OpCode::SetAlternative => {
+                OpCode::SaveStart
+                | OpCode::SaveEnd
+                | OpCode::Backref
+                | OpCode::SetAlternative
+                | OpCode::Call => {
                     ip += 1;
                 }
                 OpCode::Lookahead
@@ -4078,6 +4255,8 @@ impl TryFrom<u8> for OpCode {
             0x42 => Ok(SplitLazy),
             0x43 => Ok(JumpIfMatch),
             0x44 => Ok(JumpIfNoMatch),
+            0x45 => Ok(Call),
+            0x46 => Ok(Return),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),

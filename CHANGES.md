@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Shipped recursion / subroutine execution on the default regex path
+- Scope: compiler validation, VM runtime wiring, recursion parity coverage, and status-doc refreshes.
+- Changes:
+  - Removed the old compile-time hard stop for current recursion forms and replaced it with explicit target validation for missing numbered and named subroutine references in `rgx-core/src/compiler.rs`.
+  - Added VM/runtime lowering for `(?R)`, `(?1)`, and `(?&name)` via compiled subroutine bytecode and guarded runtime calls in `rgx-core/src/vm.rs`, including zero-width cycle protection and preserved capture-state/backtracking behavior.
+  - Added parser-path runtime regressions and capability-matrix guardrails in `rgx-core/src/lib.rs` covering whole-pattern recursion, numbered-group recursion, named-group recursion, and missing-target compile errors.
+  - Promoted recursion from a known gap to supported PCRE2 differential coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and `docs/PARSER_CONTRACT.md` so recursion is described as a shipped default-path feature rather than a parser-only boundary.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core recursion -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_recursion_forms -- --nocapture`
+- Notes/impact:
+  - Current PCRE2-style recursion forms are no longer the main default-path regex gap for rgx.
+  - Broader returned-capture subroutine forms and newer conditional families remain planned follow-up work rather than part of this shipped slice.
+
 ### 2026-03-29 - Shipped possessive quantifiers on the default regex path
 - Scope: parser transport, runtime semantics hardening, parity coverage, and documentation refreshes.
 - Changes:

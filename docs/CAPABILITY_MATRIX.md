@@ -74,26 +74,20 @@ Current behavior contract for the shipped slice:
 Representative test anchors:
 - `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests
 - `rgx-core/src/execution.rs` backend dispatch logic
-## Advanced syntax still parsed but not runtime-integrated
-- Recursion (`(?R)`, `(?1)`, `(?&name)`): `parsed-only`
-Behavior contract:
-- These forms are accepted by parser/conformance tests where applicable.
-- Compilation intentionally fails with explicit error messages until VM/runtime integration lands.
-Representative test anchors:
-- `rgx-core/src/lib.rs` explicit compile-boundary tests
-- `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests
 ## Advanced syntax shipped on the default runtime path
+- Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `shipped`
 - Numeric backreferences (`\1`, `\2`, ...): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
 - Conditionals (`(?(...)yes|no)` current supported parser condition forms): `shipped`
 Behavior contract:
+- Recursion executes through guarded runtime subroutine calls against the whole pattern or the referenced capturing group, and compilation fails explicitly when a numbered or named recursion target does not exist.
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
 - Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
-- Compilation fails explicitly when a numeric backreference or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
+- Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
 Representative test anchors:
-- `rgx-core/src/lib.rs` numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
-- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences, Unicode property classes, and conditionals
+- `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for recursion, numeric backreferences, Unicode property classes, and conditionals
 ## Conditional runtime coverage (current shipped parser forms)
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)

@@ -113,7 +113,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
-- Recursion remains parsed-but-unintegrated and continues to fail explicitly at compile time.
+- Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
@@ -129,6 +129,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ### Now
 - PCRE2 parity hardening remains active and well-supported by tests and docs.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
+- Capability hardening improved again because recursion moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
@@ -141,7 +142,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Operationalize benchmark trend capture instead of relying on manual runs.
 
 ### Later
-- Finish larger regex-surface gaps: recursion and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

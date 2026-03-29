@@ -71,8 +71,7 @@ Current contract:
   - backreferences
   - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
 - Compiler/runtime status for those parser-recognized forms is:
-  - backreferences, Unicode property classes, and conditionals are integrated on the default regex path
-  - recursion still fails explicitly (not silently) until runtime integration lands
+  - recursion, backreferences, Unicode property classes, and conditionals are integrated on the default regex path
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
@@ -89,7 +88,7 @@ The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
-- Parse-success/compile-fail boundary for unintegrated runtime features.
+- Parse-success/compile-fail boundary for still-gated runtime features such as mode-restricted code blocks and missing capture-target references.
 
 When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
 

@@ -1283,24 +1283,10 @@ mod tests {
     #[test]
     fn parser_contract_parsed_but_unintegrated_features_fail_at_compile_boundary() {
         let compiler = crate::compiler::Compiler::new();
-        let cases = [
-            (
-                "(?{lua:return true})",
-                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-            ),
-            (
-                "(?R)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?1)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-            (
-                "(?&word)",
-                "recursion syntax is parsed but not yet integrated into VM execution",
-            ),
-        ];
+        let cases = [(
+            "(?{lua:return true})",
+            "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
+        )];
 
         for (pattern, expected_msg) in cases {
             parse_pattern(pattern).unwrap_or_else(|e| {

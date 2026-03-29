@@ -47,7 +47,8 @@ Pipeline in `rgx-core`:
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
 - Conditional runtime semantics are now integrated through the compiler/VM path, including missing-group and missing-name compile-time validation plus API/parity coverage
-- API/conformance guardrails explicitly verify compile-boundary errors for parsed-but-unintegrated recursion, invalid Unicode property classes, and disallowed code-block modes/languages
+- Recursion / subroutine runtime semantics are now integrated through the compiler/VM path for `(?R)`, `(?1)`, and `(?&name)`, including explicit compile-time validation for missing numbered and named recursion targets plus API/parity coverage
+- API/conformance guardrails explicitly verify compile-boundary errors for invalid Unicode property classes and disallowed code-block modes/languages
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
 - Public match results expose top-level alternation branch choice as a 1-based `matched_branch_number`
 - Parser support for capturing groups, non-capturing groups `(?:...)`, named groups `(?<name>...)`, and atomic groups `(?>...)`
@@ -172,8 +173,7 @@ Pipeline in `rgx-core`:
 - Any backend swap that changes parser behavior must update the parser contract statement, conformance tests, and changelog entries together.
 
 ## Known engineering gaps
-- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in recursion and other PCRE families beyond the currently covered conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
-- Recursion is still parsed-but-unintegrated at runtime
+- Parser/VM support for advanced regex syntax still has meaningful remaining gaps in newer PCRE families beyond the currently covered recursion, conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open

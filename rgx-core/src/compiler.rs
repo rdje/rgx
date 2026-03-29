@@ -217,9 +217,27 @@ impl Compiler {
             RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
                 resolve_unicode_property_class(name, *negated).err()
             }
-            RegexAst::Recursion { .. } => Some(
-                "recursion syntax is parsed but not yet integrated into VM execution".to_string(),
-            ),
+            RegexAst::Recursion { target } => match target {
+                crate::ast::RecursionTarget::Entire => None,
+                crate::ast::RecursionTarget::Group(group) => {
+                    if *group > total_groups {
+                        Some(format!(
+                            "recursive subroutine '(?{group})' refers to missing capture group"
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                crate::ast::RecursionTarget::NamedGroup(name) => {
+                    if named_groups.contains_key(name) {
+                        None
+                    } else {
+                        Some(format!(
+                            "recursive subroutine '(?&{name})' refers to missing named capture group"
+                        ))
+                    }
+                }
+            },
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
                 .iter()
                 .find_map(|item| self.feature_validation_message(item, total_groups, named_groups)),

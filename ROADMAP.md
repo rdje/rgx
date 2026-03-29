@@ -40,7 +40,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
-  - incrementally close remaining syntax gaps (numeric backreferences, conditionals, Unicode property classes, and possessive quantifiers now shipped; recursion still gated)
+  - incrementally close remaining syntax gaps (numeric backreferences, conditionals, Unicode property classes, possessive quantifiers, and current recursion forms are now shipped)
 
 ### Parser interoperability contract and conformance harness
 - Status: `in-progress`

@@ -273,12 +273,9 @@ Current limits for this slice:
 - Malformed wasm context reads, missing exported memory, invalid guest-memory reads/writes, and invalid UTF-8 replacement payloads also fail the current match path at runtime.
 - Lua/JavaScript/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
-### Current parsed-but-unintegrated syntax
+### Current advanced syntax status
 Unicode property classes are now part of the shipped runtime path. Patterns such as `\p{L}+`, `\P{L}+`, and `\p{Greek}+` compile and execute on the default path, and invalid property names fail explicitly at compile time.
-
-The parser still recognizes one major advanced construct that is not runtime-integrated yet:
-- recursion
-This continues to fail with an explicit compile-time message.
+Recursion / subroutine calls are also part of the shipped runtime path for the current supported forms `(?R)`, `(?1)`, and `(?&name)`. Missing numbered or named recursion targets fail explicitly at compile time.
 Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
 Conditionals are also part of the shipped runtime path for group-exists, named-group-exists, and lookaround conditions. Missing conditional group/name references fail explicitly at compile time.
 Possessive quantifiers are also part of the shipped runtime path. Forms such as `a*+`, `a++`, `a?+`, and `a{2,3}+` behave like their greedy equivalents wrapped in an atomic group, so they do not backtrack once that quantified piece has matched.

@@ -107,13 +107,18 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and any branch-reset / `DEFINE` / `(?[...])` boundary decisions.
-- Continue closing remaining parsed-but-unintegrated regex gaps (recursion remains the main one on the default regex path).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
 
 ## Session memory entries (newest first)
+### 2026-03-30
+- Shipped recursion / subroutine execution on the default regex path:
+  - `(?R)`, `(?1)`, and `(?&name)` now compile and execute through guarded VM subroutine calls instead of failing at compile time.
+  - Added explicit compile errors for missing numbered and named recursion targets.
+  - Promoted recursion into capability-matrix and PCRE2 differential coverage and removed the old known-gap status from the docs.
+
 ### 2026-03-29
 - Shipped possessive quantifiers on the default compiler/VM path:
   - extended lexer/parser tokenization and the default PGEN-backed parser adapter so `*+`, `++`, `?+`, and counted possessive repeats all lower into atomic-wrapped greedy quantified AST nodes

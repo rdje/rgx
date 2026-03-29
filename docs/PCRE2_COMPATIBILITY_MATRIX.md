@@ -12,10 +12,10 @@ Live compatibility tracker for `rgx` against PCRE2.
 - `out-of-scope`: behavior is not a parity target for PCRE2 comparison.
 
 ## Rough progress estimate
-- Tracked parity estimate: about `92%`
-  - Rationale: among the major regex feature families that this matrix currently tracks explicitly, recursion is now the only remaining item in the `rgx-gap` bucket and possessive quantifiers have moved into `parity-verified`.
-- Broader PCRE2 regex estimate: about `72%`
-  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including possessive quantifiers, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or still intentionally unsupported.
+- Tracked parity estimate: about `95%`
+  - Rationale: the major regex feature families tracked explicitly in this matrix are now all in the `parity-verified` bucket, including recursion, while a small amount of uncovered differential edge space still exists outside those headline families.
+- Broader PCRE2 regex estimate: about `75%`
+  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including recursion, possessive quantifiers, conditionals, and Unicode properties, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or intentionally outside the current shipped target surface.
 - These percentages are intentionally rough and hand-maintained.
   - They are not derived from a formal PCRE2 feature census.
   - Update them only when whole feature families move, not for tiny edge-case wins.
@@ -37,6 +37,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
 - Unicode property classes (`\p{...}`, `\P{...}`) in current covered forms: `parity-verified`
+- Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `parity-verified`
+  - differential coverage includes whole-pattern recursion plus numbered-group and named-group subroutine recursion forms
 - Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
   - differential coverage includes successful backreference matching, explicit no-match behavior, and alternation/lookahead cases that depend on capture restoration under backtracking
 - Conditionals (`(?(...)yes|no)` current supported parser forms): `parity-verified`
@@ -48,8 +50,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Explicit no-match parity checks (first-match = `None`, all-match = empty): `parity-verified`
 
 ## Known rgx gaps relative to PCRE2
-- Recursion (`(?R)`, `(?1)`, `(?&name)`): `rgx-gap`
-  - rgx currently parses and returns explicit compile-time unsupported errors.
+- No current headline gap families in this tracked matrix.
+  - Remaining PCRE2 follow-up work is concentrated in newer or broader advanced forms listed below rather than in the currently tracked baseline families.
 
 ## Supported / Gap / Planned checklist
 ### Supported today on the default regex path
@@ -60,6 +62,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Shorthand character classes and custom classes
 - Unicode property classes in the currently covered forms
 - Greedy/lazy/possessive quantifiers and counted ranges
+- Current recursion / subroutine recursion forms used by rgx (`(?R)`, `(?1)`, `(?&name)`)
 - Numeric backreferences
 - Current shipped conditional forms
   - group-exists
@@ -68,14 +71,14 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Positive and negative lookahead/lookbehind
 
 ### Explicitly unsupported or still open
-- Recursion / subroutine recursion forms currently used by rgx (`(?R)`, `(?1)`, `(?&name)`)
-
-### Planned next or broader PCRE2 follow-up
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
 - Branch-reset groups
 - `DEFINE` conditionals
 - Perl extended character classes `(?[...])`
+
+### Planned next or broader PCRE2 follow-up
+- Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion forms.
 These broader families are tracked in `ROADMAP.md` as follow-up work rather than as parity-verified support today.
 
 ## Out of scope for PCRE2 parity

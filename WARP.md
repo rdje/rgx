@@ -23,7 +23,7 @@ Repository-local guidance for Warp/Oz when working in `rgx`.
   - the shipped native/wasm slices are currently Rust-API-only because the CLI does not expose registration
   - the current wasm ABI keeps `module:function` -> exported `() -> i32` and adds `rgx` host imports for current position, full input text, numbered captures, named captures, and host-provided variables set through `Regex::set_variable(...)`; richer non-boolean result handling is still deferred there
   - numeric results are currently surfaced through match metadata plus dedicated numeric helper APIs; the replacement-oriented API layer still consumes only `Replacement(String)`
-  - recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated
+  - current recursion forms, conditionals, Unicode property classes, numeric backreferences, and possessive quantifiers are all shipped on the default regex path; newer PCRE2 advanced forms remain follow-up work
 - The default local parser is now the real submodule-backed PGEN backend; the recursive-descent parser remains available only as a fallback/reference path.
 ## Useful commands
 ```bash

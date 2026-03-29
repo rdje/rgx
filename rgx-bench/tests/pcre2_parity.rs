@@ -258,13 +258,6 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
     }
 }
 
-struct KnownGapCase {
-    name: &'static str,
-    pattern: &'static str,
-    input: &'static str,
-    expected_rgx_error: &'static str,
-}
-
 fn rgx_first_span(pattern: &str, input: &str) -> Result<Option<(usize, usize)>, String> {
     let regex = RgxRegex::compile(pattern)
         .map_err(|e| format!("rgx compile failed for '{pattern}': {e}"))?;
@@ -299,36 +292,6 @@ fn pcre2_all_spans(pattern: &str, input: &str) -> Result<Vec<(usize, usize)>, St
         spans.push((found.start(), found.end()));
     }
     Ok(spans)
-}
-
-fn assert_known_gap_case(case: &KnownGapCase) {
-    let rgx_err = match RgxRegex::compile(case.pattern) {
-        Ok(_) => panic!(
-            "[{}] rgx unexpectedly compiled known-gap pattern '{}'",
-            case.name, case.pattern
-        ),
-        Err(err) => err,
-    };
-    assert!(
-        rgx_err.to_string().contains(case.expected_rgx_error),
-        "[{}] rgx error mismatch for pattern '{}': {}",
-        case.name,
-        case.pattern,
-        rgx_err
-    );
-
-    let pcre2 = PcreRegex::new(case.pattern)
-        .unwrap_or_else(|e| panic!("[{}] pcre2 compile failed: {e}", case.name));
-    let matched = pcre2
-        .find(case.input.as_bytes())
-        .unwrap_or_else(|e| panic!("[{}] pcre2 execution failed: {e}", case.name));
-    assert!(
-        matched.is_some(),
-        "[{}] pcre2 should execute known-gap pattern '{}' on input '{}'",
-        case.name,
-        case.pattern,
-        case.input
-    );
 }
 
 #[test]
@@ -508,33 +471,65 @@ fn pcre2_parity_supported_unicode_property_classes() {
 }
 
 #[test]
-fn pcre2_parity_known_gap_recursion_compile_behavior() {
-    let cases = [
-        KnownGapCase {
+fn pcre2_parity_supported_recursion_forms() {
+    let first_cases = [
+        ParityCase {
             name: "recursion_entire_pattern",
             pattern: "a(?R)?b",
-            input: "ab",
-            expected_rgx_error:
-                "recursion syntax is parsed but not yet integrated into VM execution",
+            input: "xxaaabbbzz",
         },
-        KnownGapCase {
+        ParityCase {
             name: "recursion_group_number",
             pattern: "(a(?1)?b)",
-            input: "ab",
-            expected_rgx_error:
-                "recursion syntax is parsed but not yet integrated into VM execution",
+            input: "xxaaabbbzz",
         },
-        KnownGapCase {
+        ParityCase {
             name: "recursion_named_group",
             pattern: "(?<word>a(?&word)?b)",
-            input: "ab",
-            expected_rgx_error:
-                "recursion syntax is parsed but not yet integrated into VM execution",
+            input: "xxaaabbbzz",
         },
     ];
 
-    for case in cases {
-        assert_known_gap_case(&case);
+    for case in first_cases {
+        let rgx = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx error: {e}", case.name));
+        let pcre2 = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "recursion first-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+
+    let no_match_cases = [
+        ParityCase {
+            name: "recursion_entire_pattern_no_match",
+            pattern: "a(?R)?b",
+            input: "xxaabbbzz",
+        },
+        ParityCase {
+            name: "recursion_group_number_no_match",
+            pattern: "(a(?1)?b)",
+            input: "xxaabbbzz",
+        },
+        ParityCase {
+            name: "recursion_named_group_no_match",
+            pattern: "(?<word>a(?&word)?b)",
+            input: "xxaabbbzz",
+        },
+    ];
+
+    for case in no_match_cases {
+        let rgx = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx error: {e}", case.name));
+        let pcre2 = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 error: {e}", case.name));
+        assert_eq!(
+            rgx, pcre2,
+            "recursion no-match mismatch for case '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
     }
 }
 
