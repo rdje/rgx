@@ -1268,10 +1268,6 @@ mod tests {
                 "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
             ),
             (
-                r"(a)\1",
-                "backreferences are parsed but not yet integrated into VM execution",
-            ),
-            (
                 "(?R)",
                 "recursion syntax is parsed but not yet integrated into VM execution",
             ),

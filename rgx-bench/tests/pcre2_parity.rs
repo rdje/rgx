@@ -46,6 +46,11 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "cat scat cat",
         },
         ParityCase {
+            name: "backreference_all",
+            pattern: r"(ab)\1",
+            input: "abab xx ababab yy abab",
+        },
+        ParityCase {
             name: "positive_lookahead_all",
             pattern: "(?=ab)a",
             input: "abxxab",
@@ -204,6 +209,11 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: " \t\n",
         },
         ParityCase {
+            name: "no_match_backreference",
+            pattern: r"(a)\1",
+            input: "ab",
+        },
+        ParityCase {
             name: "no_match_lookbehind",
             pattern: "(?<=x)a",
             input: "ba",
@@ -360,6 +370,11 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             input: "a cat nap",
         },
         ParityCase {
+            name: "backreference",
+            pattern: r"(a|ab)\1",
+            input: "zzababxx",
+        },
+        ParityCase {
             name: "positive_lookahead",
             pattern: "(?=cat)c",
             input: "xxcat",
@@ -447,16 +462,6 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             case.name, case.pattern, case.input
         );
     }
-}
-
-#[test]
-fn pcre2_parity_known_gap_backreference_compile_behavior() {
-    assert_known_gap_case(&KnownGapCase {
-        name: "backreference_basic",
-        pattern: r"(a)\1",
-        input: "aa",
-        expected_rgx_error: "backreferences are parsed but not yet integrated into VM execution",
-    });
 }
 
 #[test]

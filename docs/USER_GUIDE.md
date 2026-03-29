@@ -275,11 +275,11 @@ Current limits for this slice:
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current parsed-but-unintegrated syntax
 The parser still recognizes several advanced constructs that are not runtime-integrated yet:
-- backreferences
 - recursion
 - conditionals
 - Unicode property classes
 These continue to fail with explicit compile-time messages.
+Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
 ## Level 3 - Gory details
 ### Execution model
 Pipeline:

@@ -9,15 +9,18 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
-  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features wasm safe_mode_wasm_code_block -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core backreference -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity -- --nocapture` => pass
   - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the sibling local `../pgen` checkout present)
 - Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 3960 lines
-  - `rgx-core/src/lib.rs`: 2598 lines
+  - `rgx-core/src/vm.rs`: 4030 lines
+  - `rgx-core/src/lib.rs`: 2655 lines
   - `rgx-core/src/execution.rs`: 1987 lines
   - `rgx-core/src/lexer.rs`: 1832 lines
   - `rgx-core/src/parser.rs`: 1190 lines
@@ -32,6 +35,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and it now has a real local alternative parser backend under `pgen-parser`.
+- Numeric backreferences are now part of that shipped default path:
+  - the compiler validates that numbered backreferences only target capture groups that actually exist
+  - the VM now emits/decodes/executes `Backref` bytecode in both top-level and subexpression execution paths
+  - parity and capability tests now treat numeric backreferences as supported behavior rather than a compile-boundary gap
 - `pgen-parser` is no longer a recursive-descent placeholder:
   - `rgx-core/src/parsing.rs` now calls into the PGEN embedding API
   - the stable regex AST dump is converted into canonical RGX AST structure for groups, lookarounds, conditionals, concatenation/alternation/pieces, and quantifiers
@@ -60,6 +67,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Shorthand and custom character classes, including negated shorthand classes
 - Greedy and lazy `?`, `*`, `+`, `{n,m}`, and `{n,}` quantifiers
 - Capturing, non-capturing, named, and atomic groups
+- Numeric backreferences (`\1`, `\2`, ...)
 - Positive and negative lookahead/lookbehind
 - Top-level alternation branch reporting
 
@@ -94,7 +102,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
-- Backreferences, recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
+- Recursion, conditionals, and Unicode property classes remain parsed-but-unintegrated and continue to fail explicitly at compile time.
 - PGEN accepted possessive quantifiers are still rejected by the RGX parser adapter because RGX does not yet represent possessive quantifiers in its parser AST.
 
 ## Codebase realities that matter for roadmap prioritization
@@ -110,6 +118,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ### Now
 - PCRE2 parity hardening remains active and well-supported by tests and docs.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
+- Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/native/wasm are real shipped slices on the documented Rust API path.
 
 ### Next
@@ -119,7 +128,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Operationalize benchmark trend capture instead of relying on manual runs.
 
 ### Later
-- Finish larger regex-surface gaps: backreferences, recursion, conditionals, Unicode property classes, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: recursion, conditionals, Unicode property classes, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

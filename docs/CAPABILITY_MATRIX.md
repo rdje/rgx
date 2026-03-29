@@ -74,7 +74,6 @@ Representative test anchors:
 - `rgx-core/src/lib.rs` feature-gated Lua/JavaScript/native/wasm code-block tests
 - `rgx-core/src/execution.rs` backend dispatch logic
 ## Advanced syntax still parsed but not runtime-integrated
-- Backreferences (`\1`, ...): `parsed-only`
 - Recursion (`(?R)`, `(?1)`, `(?&name)`): `parsed-only`
 - Conditionals (`(?(...)yes|no)` currently supported parser condition forms): `parsed-only`
 Behavior contract:
@@ -83,6 +82,14 @@ Behavior contract:
 Representative test anchors:
 - `rgx-core/src/lib.rs` explicit compile-boundary tests
 - `rgx-core/src/parsing.rs` conformance + compile-boundary guardrail tests
+## Advanced syntax shipped on the default runtime path
+- Numeric backreferences (`\1`, `\2`, ...): `shipped`
+Behavior contract:
+- Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
+- Compilation fails explicitly when a numeric backreference refers to a capture group that does not exist in the pattern.
+Representative test anchors:
+- `rgx-core/src/lib.rs` numeric backreference runtime and compile-boundary tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for numeric backreferences
 ## Conditional parser condition forms (current parser coverage)
 - Group-exists: `(?(1)yes|no)` (`parsed-only` at runtime)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`parsed-only` at runtime)

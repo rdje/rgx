@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Shipped numeric backreferences on the default regex path
+- Scope: compiler/VM backreference runtime integration, compile-boundary validation, parity coverage, and documentation refreshes.
+- Changes:
+  - Removed numeric backreferences from the generic parsed-but-unintegrated compile boundary in `rgx-core/src/compiler.rs` and replaced that blanket rejection with a dedicated validation pass that now rejects only invalid references to missing capture groups.
+  - Added capture-group counting plus compile-time diagnostics so patterns like `(a)\2` now fail explicitly with `backreference '\2' refers to missing capture group`.
+  - Wired `Regex::Backreference(...)` through `rgx-core/src/vm.rs` analysis, bytecode emission, opcode decoding, and both execution paths so numbered backreferences now compare against the bytes captured on the current winning path.
+  - Added AST-first and parser-path regressions in `rgx-core/src/lib.rs` covering successful numeric backreference matching, backtracking-sensitive capture restoration, lookahead interaction, and missing-group compile errors.
+  - Promoted numeric backreferences from known-gap coverage to supported parity coverage in `rgx-bench/tests/pcre2_parity.rs`.
+  - Refreshed `README.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so shipped status and remaining gaps are described truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core backreference -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - Numeric backreferences are no longer a parser-only or parity-gap family; they are now part of the supported default compiler/VM path.
+  - No new PGEN parser show-stopper surfaced while rerunning the shared local CI path with the real sibling-checkout PGEN backend enabled.
 ### 2026-03-29 - Extended wasm code blocks with emitted numeric and replacement results
 - Scope: wasm execution ABI/result surfacing, regression coverage, and roadmap/continuity documentation refreshes.
 - Changes:

@@ -1472,6 +1472,22 @@ impl RegexVM {
                     continue;
                 }
 
+                OpCode::Backref => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    if self.match_backreference(ctx, group_id) {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+
                 OpCode::Split => {
                     // Read jump offset (2 bytes, little-endian)
                     if ip + 1 >= code.len() {
@@ -1676,6 +1692,40 @@ impl RegexVM {
             return None;
         }
         Some(String::from_utf8_lossy(&ctx.text[start..end]).into_owned())
+    }
+
+    /// Match the current position against the bytes captured by a numbered group.
+    fn match_backreference(&self, ctx: &mut ExecContext, group_id: usize) -> bool {
+        let start_idx = group_id * 2;
+        let end_idx = start_idx + 1;
+        let (Some(capture_start), Some(capture_end)) = (
+            ctx.captures.get(start_idx).and_then(|&x| x),
+            ctx.captures.get(end_idx).and_then(|&x| x),
+        ) else {
+            return false;
+        };
+
+        if capture_start > capture_end || capture_end > ctx.text.len() {
+            return false;
+        }
+
+        let capture_len = capture_end - capture_start;
+        let Some(candidate_end) = ctx.pos.checked_add(capture_len) else {
+            return false;
+        };
+        if candidate_end > ctx.end {
+            return false;
+        }
+
+        if self.simd_compare(
+            &ctx.text[ctx.pos..candidate_end],
+            &ctx.text[capture_start..capture_end],
+        ) {
+            ctx.pos = candidate_end;
+            true
+        } else {
+            false
+        }
     }
 
     /// Read UTF-8 character from bytecode operands
@@ -2263,6 +2313,19 @@ impl RegexVM {
                         ctx.captures[end_idx] = Some(ctx.pos);
                     }
                     continue;
+                }
+
+                OpCode::Backref => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    if self.match_backreference(ctx, group_id) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
                 }
 
                 OpCode::Split => {
@@ -3121,6 +3184,7 @@ impl OptimizingCompiler {
             Regex::CharClass(_) => self.stats.char_classes += 1,
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
+            Regex::Backreference(_) => self.flags.has_backrefs = true,
             Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
                 self.flags.has_lookarounds = true;
                 self.analyze_pass(expr);
@@ -3336,6 +3400,11 @@ impl OptimizingCompiler {
 
             Regex::CodeBlock { lang, code } => {
                 self.emit_code_block(lang, code);
+            }
+
+            Regex::Backreference(group_id) => {
+                self.emit_op(OpCode::Backref);
+                self.code.push(*group_id as u8);
             }
 
             Regex::Quantified { expr, quantifier } => {
@@ -3613,6 +3682,7 @@ impl TryFrom<u8> for OpCode {
             0x63 => Ok(LookbehindNeg),
             0x64 => Ok(AtomicStart),
             0x65 => Ok(AtomicEnd),
+            0x66 => Ok(Backref),
             0x67 => Ok(CodeBlock),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),

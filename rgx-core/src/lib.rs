@@ -637,6 +637,26 @@ mod tests {
     }
 
     #[test]
+    fn ast_numeric_backreference_matches_previous_capture() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Group {
+                expr: Box::new(RegexAst::Sequence(vec![
+                    RegexAst::Char('a'),
+                    RegexAst::Char('b'),
+                ])),
+                kind: GroupKind::Capturing,
+                index: None,
+                name: None,
+            },
+            RegexAst::Backreference(1),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile backreference AST directly");
+        assert!(regex.is_match("abab"));
+        assert!(!regex.is_match("abac"));
+    }
+
+    #[test]
     fn parser_positive_lookahead_syntax() {
         let regex =
             Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
@@ -668,6 +688,40 @@ mod tests {
             Regex::compile("(?<!x)a").expect("Failed to compile parser-path lookbehind syntax");
         assert!(regex.is_match("ba"));
         assert!(!regex.is_match("xa"));
+    }
+
+    #[test]
+    fn parser_numeric_backreference_matches_previous_capture() {
+        let regex = Regex::compile(r"(a)\1").expect("Failed to compile numeric backreference");
+        let m = regex
+            .find_first("baa")
+            .expect("Expected numeric backreference match");
+        assert_eq!(m.start, 1);
+        assert_eq!(m.end, 3);
+        assert!(!regex.is_match("bab"));
+    }
+
+    #[test]
+    fn parser_numeric_backreference_restores_captures_under_backtracking() {
+        let regex =
+            Regex::compile(r"(a|ab)\1").expect("Failed to compile backtracking backreference");
+        let m = regex
+            .find_first("abab")
+            .expect("Expected backreference match after alternation backtracking");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 4);
+    }
+
+    #[test]
+    fn parser_numeric_backreference_inside_lookahead_uses_existing_capture() {
+        let regex = Regex::compile(r"(ab)(?=\1)\1")
+            .expect("Failed to compile lookahead backreference pattern");
+        let m = regex
+            .find_first("zababx")
+            .expect("Expected lookahead backreference match");
+        assert_eq!(m.start, 1);
+        assert_eq!(m.end, 5);
+        assert!(!regex.is_match("zabacx"));
     }
 
     #[test]
@@ -2349,11 +2403,14 @@ mod tests {
         );
     }
     #[test]
-    fn parser_backreference_syntax_reports_explicit_unsupported_error() {
-        let result = Regex::compile(r"(a)\1");
-        assert!(result.is_err(), "Backreference should not silently compile");
+    fn parser_backreference_to_missing_group_reports_compile_error() {
+        let result = Regex::compile(r"(a)\2");
+        assert!(
+            result.is_err(),
+            "Backreference to a missing group should not silently compile"
+        );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("backreferences are parsed but not yet integrated into VM execution"));
+        assert!(msg.contains(r"backreference '\2' refers to missing capture group"));
     }
 
     #[test]
@@ -2451,6 +2508,10 @@ mod tests {
             ("a+a", "aa", true),
             ("ab?b", "ab", true),
             ("(?<word>cat)", "xxcatyy", true),
+            (r"(a)\1", "baa", true),
+            (r"(a)\1", "bab", false),
+            (r"(a|ab)\1", "abab", true),
+            (r"(ab)(?=\1)\1", "zababx", true),
             ("(?>ab|a)c", "abc", true),
             ("(?!cat)c", "car", true),
             ("(?!cat)c", "cat", false),
@@ -2484,10 +2545,6 @@ mod tests {
     #[test]
     fn capability_matrix_explicit_unsupported_compile_boundary_cases() {
         let cases = [
-            (
-                r"(a)\1",
-                "backreferences are parsed but not yet integrated into VM execution",
-            ),
             (
                 "(?R)",
                 "recursion syntax is parsed but not yet integrated into VM execution",

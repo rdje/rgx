@@ -74,6 +74,10 @@ Live continuity memory for `rgx` sessions.
 - `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` are now shipped on the Rust API path and collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
 - The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
+- Numeric backreferences are now shipped on the default compiler/VM path:
+  - compile-time validation now rejects only missing-group references such as `(a)\2`
+  - runtime matching now executes numbered backreferences through real VM bytecode in both top-level and subexpression paths
+  - PCRE2 differential coverage now treats numeric backreferences as supported rather than as a known gap
 - `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, and the CLI still has no native/wasm registration surface.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
@@ -98,7 +102,7 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Continue closing remaining parsed-but-unintegrated regex gaps (backreferences, recursion, conditionals, Unicode property classes).
+- Continue closing remaining parsed-but-unintegrated regex gaps (recursion, conditionals, Unicode property classes).
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Decide how to distribute the real PGEN backend cleanly now that the verified `1.1.1` fix revision exists only in the local sibling checkout.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
@@ -106,6 +110,21 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Shipped numeric backreferences on the default compiler/VM path:
+  - removed the blanket parsed-but-unintegrated compile rejection and replaced it with dedicated missing-group validation in `rgx-core/src/compiler.rs`
+  - wired `Regex::Backreference(...)` through VM analysis, bytecode emission, opcode decoding, and execution in `rgx-core/src/vm.rs`
+  - added AST-first/parser-path regressions plus PCRE2 differential coverage for successful matching, explicit no-match behavior, backtracking-sensitive capture restoration, lookahead interaction, and missing-group compile errors
+- Re-ran targeted and full validation for the numeric-backreference slice:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core backreference -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- No new PGEN parser show-stopper surfaced while rerunning the shared local CI path; the sibling-checkout `pgen-parser` slice remains green locally.
 - Extended the wasm code-block ABI so successful wasm predicates can emit winning-path `Numeric(f64)` and `Replacement(String)` payloads through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)` while keeping the exported `() -> i32` predicate contract stable.
 - Added wasm regressions for the default no-emission case, last-emitted-wins behavior, failed-predicate payload discard, and invalid UTF-8 replacement payload failure.
 - Re-ran the full local validation path after the wasm result work:

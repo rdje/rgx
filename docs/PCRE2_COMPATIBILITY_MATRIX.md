@@ -25,6 +25,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - differential coverage includes bounded-range suffix backtracking scenarios (e.g., `{2,3}3`, `{2,3}?3`), exact-range `{n}` find-all behavior, and unbounded-range `{n,}` / `{n,}?` scan and suffix-sensitive cases
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
+- Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
+  - differential coverage includes successful backreference matching, explicit no-match behavior, and alternation/lookahead cases that depend on capture restoration under backtracking
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
   - positive/negative lookbehind: `parity-verified`
@@ -33,9 +35,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 
 ## Known rgx gaps relative to PCRE2
 - Unicode property classes (`\p{...}`, `\P{...}`): `rgx-gap`
-  - rgx currently parses and returns explicit compile-time unsupported errors.
-  - PCRE2 executes these forms.
-- Backreferences (`\1`, etc.): `rgx-gap`
   - rgx currently parses and returns explicit compile-time unsupported errors.
   - PCRE2 executes these forms.
 - Recursion (`(?R)`, `(?1)`, `(?&name)`): `rgx-gap`

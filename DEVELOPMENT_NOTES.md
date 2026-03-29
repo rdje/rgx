@@ -40,6 +40,7 @@ Pipeline in `rgx-core`:
 - Public numeric-result helper APIs now exist through `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)`, which collect winning-path `Numeric(f64)` payloads in match order and skip non-numeric matches
 - Public replacement-oriented APIs now exist through `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)`, which consume winning-path `Replacement(String)` payloads and leave non-replacement matches unchanged
 - Parser-path support for recursion syntax tokenization/parsing (`(?R)`, `(?1)`, `(?&name)`)
+- Numeric backreferences (`\1`, `\2`, ...) are now integrated through the compiler/VM path, including capture-aware runtime matching and compile-time rejection for references to missing capture groups
 - Parser-path support for conditional syntax tokenization/parsing:
   - group-exists forms (`(?(1)...)`)
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
@@ -55,7 +56,8 @@ Pipeline in `rgx-core`:
 - Live rgx-vs-PCRE2 parity matrix at `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 - Parser conformance harness scaffolding is in place
 - Differential parity harness baseline in `rgx-bench/tests/pcre2_parity.rs`
-- Differential known-gap parity checks currently cover backreference, recursion, conditional syntax families, and Unicode property classes
+- Differential known-gap parity checks currently cover recursion, conditional syntax families, and Unicode property classes
+- Differential supported-syntax parity now includes numeric backreferences, including backtracking-sensitive and no-match cases
 - Differential parity now verifies `{n,m}` scanning/earliest-match behavior against PCRE2
 - Differential supported-syntax parity now includes absolute text anchors (`\A`, `\Z`, `\z`) including final-newline behavior for `\Z`
 - Differential supported-syntax parity now includes bounded-range suffix backtracking scenarios (`{2,3}3`) in both first-match and find-all coverage
@@ -164,7 +166,7 @@ Pipeline in `rgx-core`:
 ## Known engineering gaps
 - Parser support for advanced regex syntax remains incomplete beyond the currently covered conditional condition forms and lookaround syntax
 - Unicode property classes (`\\p{...}`, `\\P{...}`) are parsed but not yet integrated into VM execution (compile currently returns explicit unsupported errors)
-- Backreference, recursion, and conditional syntax are still parsed-but-unintegrated at runtime
+- Recursion and conditional syntax are still parsed-but-unintegrated at runtime
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open

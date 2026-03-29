@@ -119,6 +119,15 @@ impl Compiler {
             self.mode
         );
         debug_log!("compiler", "AST: {:?}", ast);
+        if let Some(msg) = Self::backreference_validation_message(&ast) {
+            trace_exit!(
+                "compiler",
+                "Compiler::compile_ast_with_label",
+                "error={}",
+                msg
+            );
+            return Err(RgxError::Compile(msg));
+        }
         if let Some(msg) = self.feature_validation_message(&ast) {
             trace_decision!(
                 "compiler",
@@ -193,9 +202,6 @@ impl Compiler {
     fn feature_validation_message(&self, ast: &RegexAst) -> Option<String> {
         match ast {
             RegexAst::CodeBlock { lang, code } => self.code_block_validation_message(lang, code),
-            RegexAst::Backreference(_) => Some(
-                "backreferences are parsed but not yet integrated into VM execution".to_string(),
-            ),
             RegexAst::UnicodeClass { .. }
             | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { .. }) => Some(
                 "unicode property classes are parsed but not yet integrated into VM execution"
@@ -215,6 +221,65 @@ impl Compiler {
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. } => self.feature_validation_message(expr),
             _ => None,
+        }
+    }
+
+    fn backreference_validation_message(ast: &RegexAst) -> Option<String> {
+        let total_groups = Self::count_capture_groups(ast);
+        Self::backreference_validation_message_inner(ast, total_groups)
+    }
+
+    fn backreference_validation_message_inner(ast: &RegexAst, total_groups: u32) -> Option<String> {
+        match ast {
+            RegexAst::Backreference(group) if *group > total_groups => Some(format!(
+                "backreference '\\{}' refers to missing capture group",
+                group
+            )),
+            RegexAst::Backreference(_) => None,
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
+                .iter()
+                .find_map(|item| Self::backreference_validation_message_inner(item, total_groups)),
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Group { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. } => {
+                Self::backreference_validation_message_inner(expr, total_groups)
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let condition_message = match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::backreference_validation_message_inner(expr, total_groups)
+                    }
+                    crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::NamedGroupExists(_) => None,
+                };
+                condition_message
+                    .or_else(|| {
+                        Self::backreference_validation_message_inner(true_branch, total_groups)
+                    })
+                    .or_else(|| {
+                        false_branch.as_ref().and_then(|branch| {
+                            Self::backreference_validation_message_inner(branch, total_groups)
+                        })
+                    })
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => None,
         }
     }
 
@@ -287,6 +352,53 @@ impl Compiler {
                 "native" => None,
                 other => Some(format!("unsupported code-block language: {other}")),
             },
+        }
+    }
+
+    fn count_capture_groups(ast: &RegexAst) -> u32 {
+        match ast {
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
+                items.iter().map(Self::count_capture_groups).sum()
+            }
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. } => Self::count_capture_groups(expr),
+            RegexAst::Group { expr, kind, .. } => {
+                let current = u32::from(matches!(kind, crate::ast::GroupKind::Capturing));
+                current + Self::count_capture_groups(expr)
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let condition_count = match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::count_capture_groups(expr)
+                    }
+                    crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::NamedGroupExists(_) => 0,
+                };
+                condition_count
+                    + Self::count_capture_groups(true_branch)
+                    + false_branch
+                        .as_ref()
+                        .map_or(0, |branch| Self::count_capture_groups(branch))
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Backreference(_)
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => 0,
         }
     }
 

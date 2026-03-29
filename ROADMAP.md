@@ -40,7 +40,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
-  - incrementally close remaining syntax gaps (initial conditional parsing subset now wired)
+  - incrementally close remaining syntax gaps (numeric backreferences now shipped; conditional parsing subset wired)
 
 ### Parser interoperability contract and conformance harness
 - Status: `in-progress`
@@ -92,6 +92,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Shipped numeric backreferences on the default compiler/VM path, including backtracking-safe runtime matching, missing-group compile errors, and PCRE2 differential coverage.
 - Extended wasm code blocks with winning-path `Numeric` / `Replacement` result emission through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)`, including last-emitted-wins and invalid-payload failure coverage.
 - Extended the shared local/GitHub CI path so `./scripts/run-local-ci.sh` now covers the `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, and `all-languages`) instead of leaving those checks manual.
 - Added first dedicated numeric-result Rust APIs for code-block results by shipping `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` on top of winning-path `Numeric(f64)` payloads.
