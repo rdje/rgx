@@ -11,6 +11,15 @@ Live compatibility tracker for `rgx` against PCRE2.
 - `rgx-gap`: PCRE2 supports behavior that rgx does not yet execute.
 - `out-of-scope`: behavior is not a parity target for PCRE2 comparison.
 
+## Rough progress estimate
+- Tracked parity estimate: about `90%`
+  - Rationale: among the major regex feature families that this matrix currently tracks explicitly, only recursion remains in the `rgx-gap` bucket.
+- Broader PCRE2 regex estimate: about `70%`
+  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or still intentionally unsupported.
+- These percentages are intentionally rough and hand-maintained.
+  - They are not derived from a formal PCRE2 feature census.
+  - Update them only when whole feature families move, not for tiny edge-case wins.
+
 ## Parity-verified baseline
 Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Differential assertions currently verify both:
@@ -39,6 +48,35 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 ## Known rgx gaps relative to PCRE2
 - Recursion (`(?R)`, `(?1)`, `(?&name)`): `rgx-gap`
   - rgx currently parses and returns explicit compile-time unsupported errors.
+
+## Supported / Gap / Planned checklist
+### Supported today on the default regex path
+- Literals, concatenation, and alternation
+- Capturing, non-capturing, and named groups
+- Atomic groups
+- Anchors and word boundaries
+- Shorthand character classes and custom classes
+- Unicode property classes in the currently covered forms
+- Greedy/lazy quantifiers and counted ranges
+- Numeric backreferences
+- Current shipped conditional forms
+  - group-exists
+  - named-group-exists
+  - lookaround conditions
+- Positive and negative lookahead/lookbehind
+
+### Explicitly unsupported or still open
+- Recursion / subroutine recursion forms currently used by rgx (`(?R)`, `(?1)`, `(?&name)`)
+- Possessive quantifiers in the current rgx parser adapter
+  - PGEN may transport them, but rgx does not yet represent them in its parser AST / runtime path
+
+### Planned next or broader PCRE2 follow-up
+- Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
+- Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
+- Branch-reset groups
+- `DEFINE` conditionals
+- Perl extended character classes `(?[...])`
+These broader families are tracked in `ROADMAP.md` as follow-up work rather than as parity-verified support today.
 
 ## Out of scope for PCRE2 parity
 - rgx inline code blocks (`(?{lang:code})`): `out-of-scope`

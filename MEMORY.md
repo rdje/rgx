@@ -111,6 +111,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-29
+- Added a durable rough PCRE2 support estimate and checklist to `docs/PCRE2_COMPATIBILITY_MATRIX.md`:
+  - tracked parity estimate is now documented as roughly `90%`
+  - broader practical PCRE2 regex estimate is now documented as roughly `70%`
+  - the estimate is explicitly caveated as hand-maintained and family-based rather than a formal full-PCRE2 census
 - Shipped Unicode property classes on the default compiler/VM path:
   - added `rgx-core/src/unicode_support.rs` as a small bridge to `regex-syntax` so `\p{...}` / `\P{...}` resolve through maintained Unicode property tables instead of staying parser-only
   - removed the old blanket compile-boundary rejection in `rgx-core/src/compiler.rs` and replaced it with explicit invalid-property diagnostics

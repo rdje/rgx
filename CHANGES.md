@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-29 - Added a rough maintained PCRE2 support estimate and checklist
+- Scope: parity-tracking documentation only.
+- Changes:
+  - Expanded `docs/PCRE2_COMPATIBILITY_MATRIX.md` with a hand-maintained rough progress estimate so rgx now carries a durable approximate answer for “how much of PCRE2 regex do we support?”
+  - Added an explicit supported / open-gap / planned-follow-up checklist to the PCRE2 matrix so current parity-verified families are easier to scan without reading multiple docs together.
+  - Kept the estimate intentionally approximate and documented that it should move only when whole feature families move.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - No runtime behavior changed in this pass.
+  - The repo now has a stable, caveated rough-percent answer that can be kept current as major PCRE2 feature families land.
+
 ### 2026-03-29 - Shipped Unicode property classes on the default regex path
 - Scope: compiler/VM Unicode-property execution, compile-time validation, parity coverage, and documentation refreshes.
 - Changes:
