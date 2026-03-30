@@ -86,7 +86,7 @@ Live forward-looking tracker for rgx.
   - only revisit richer wasm ABI/result work after the preferred inline-language expansion path is clearer
 
 ### Multi-language code-block runtime expansion
-- Status: `planned`
+- Status: `in-progress`
 - Goal: extend code-block runtime support beyond initial languages while preserving deterministic behavior and safety guarantees.
 - Scope:
   - build on the now-shipped `lua`, `js` / `javascript`, and `rhai` inline/source-body slice
@@ -105,6 +105,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Hardened the shipped inline-language contract so JavaScript bare-expression bodies now drive predicate/result behavior instead of silently falling through, and added helper-API regression coverage across Lua/JavaScript/Rhai.
 - Shipped Rhai code blocks on the default execution path in `ExecutionMode::Safe` / `ExecutionMode::Full`, including feature-gated runtime tests, parser-contract coverage, and CI/doc refreshes.
 - Expanded code-block execution contexts with current match metadata (`match_start`, `match_end`, `match_length`, top-level `branch_number`) across native/Lua/JavaScript plus new wasm host imports.
 - Shipped possessive quantifiers on the default compiler/VM path by lowering `*+`, `++`, `?+`, and counted possessive forms through atomic-group semantics, including parser-path regressions and PCRE2 differential coverage.

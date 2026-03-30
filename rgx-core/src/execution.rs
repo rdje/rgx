@@ -580,7 +580,7 @@ pub mod lua {
 #[cfg(feature = "javascript")]
 pub mod javascript {
     use super::*;
-    use rquickjs::{Array, Context, Object, Runtime, Undefined, Value};
+    use rquickjs::{Array, Context, Ctx, Object, Runtime, Undefined, Value};
 
     /// JavaScript execution engine using QuickJS.
     ///
@@ -616,6 +616,47 @@ pub mod javascript {
             runtime.set_memory_limit(self.memory_limit_bytes);
             runtime.set_max_stack_size(self.max_stack_size_bytes);
             Ok(runtime)
+        }
+
+        fn eval_user_code<'js>(&self, ctx: Ctx<'js>, code: &str) -> rquickjs::Result<Value<'js>> {
+            // Prefer direct evaluation so bare expression bodies preserve their result value.
+            // Fall back to an IIFE when the source uses explicit `return ...` style.
+            match ctx.eval::<Value<'js>, _>(code) {
+                Ok(value) => Ok(value),
+                Err(_) => {
+                    let wrapped_code = format!("(function(){{\n{code}\n}})()");
+                    ctx.eval::<Value<'js>, _>(wrapped_code)
+                }
+            }
+        }
+
+        fn into_exec_result(val: Value<'_>) -> ExecResult {
+            if val.is_bool() {
+                if let Some(b) = val.as_bool() {
+                    return if b {
+                        ExecResult::Success
+                    } else {
+                        ExecResult::Failure
+                    };
+                }
+                return ExecResult::Success;
+            }
+            if val.is_number() {
+                if let Some(n) = val.as_number() {
+                    return ExecResult::Numeric(n);
+                }
+                return ExecResult::Success;
+            }
+            if val.is_string() {
+                if let Ok(s) = val.get::<String>() {
+                    return ExecResult::Replacement(s);
+                }
+                return ExecResult::Success;
+            }
+            if val.is_null() || val.is_undefined() {
+                return ExecResult::Success;
+            }
+            ExecResult::Success
         }
 
         /// Execute JavaScript code in sandboxed context
@@ -698,39 +739,8 @@ pub mod javascript {
                 globals.set("fetch", Undefined).ok();
                 globals.set("XMLHttpRequest", Undefined).ok();
 
-                // Execute the code inside an IIFE so `return ...` works
-                // consistently with the documented `(?{js:return ...})` style.
-                let wrapped_code = format!("(function(){{\n{code}\n}})()");
-                match ctx.eval::<Value, _>(wrapped_code) {
-                    Ok(val) => {
-                        if val.is_bool() {
-                            if let Some(b) = val.as_bool() {
-                                if b {
-                                    ExecResult::Success
-                                } else {
-                                    ExecResult::Failure
-                                }
-                            } else {
-                                ExecResult::Success
-                            }
-                        } else if val.is_number() {
-                            if let Some(n) = val.as_number() {
-                                ExecResult::Numeric(n)
-                            } else {
-                                ExecResult::Success
-                            }
-                        } else if val.is_string() {
-                            if let Ok(s) = val.get::<String>() {
-                                ExecResult::Replacement(s)
-                            } else {
-                                ExecResult::Success
-                            }
-                        } else if val.is_null() || val.is_undefined() {
-                            ExecResult::Success
-                        } else {
-                            ExecResult::Success
-                        }
-                    }
+                match self.eval_user_code(ctx.clone(), code) {
+                    Ok(val) => Self::into_exec_result(val),
                     Err(e) => ExecResult::Error(format!("JS error: {}", e)),
                 }
             })

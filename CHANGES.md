@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Hardened inline-language source-body semantics
+- Scope: JavaScript inline-body ergonomics, helper-API regression coverage, and roadmap/continuity documentation refreshes.
+- Changes:
+  - Fixed `rgx-core/src/execution.rs` so JavaScript code blocks now preserve direct expression results before falling back to wrapped `return ...` evaluation, which means bare expression bodies like `(?{js:named.word === "cat"})` now drive predicate and richer-result behavior correctly.
+  - Added `rgx-core/src/lib.rs` regressions covering the JavaScript bare-expression failure path plus numeric/replacement helper APIs across Lua, JavaScript, and Rhai.
+  - Updated `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `MEMORY.md`, `docs/CAPABILITY_MATRIX.md`, and `docs/USER_GUIDE.md` so the shipped inline-language contract is described truthfully.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - The shipped Lua/JavaScript/Rhai lane is now closer to one coherent source-body contract instead of treating JavaScript as return-only in practice.
+  - No parser transport changes were needed; this was a downstream RGX execution/runtime hardening slice.
+
 ### 2026-03-30 - Shipped Rhai code-block execution
 - Scope: embedded-language expansion, feature wiring, parser-contract coverage, and doc/CI refreshes.
 - Changes:

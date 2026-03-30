@@ -123,6 +123,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Hardened the shipped inline-language contract:
+  - JavaScript now preserves bare expression-body results before falling back to wrapped `return ...` execution, so `(?{js: ...})` expression bodies no longer silently behave like unconditional success.
+  - Added helper-API regressions for Lua / JavaScript / Rhai numeric and replacement results.
+  - `ROADMAP.md` now marks the multi-language code-block runtime expansion track as `in-progress`.
 - Shipped recursion / subroutine execution on the default regex path:
   - `(?R)`, `(?1)`, and `(?&name)` now compile and execute through guarded VM subroutine calls instead of failing at compile time.
   - Added explicit compile errors for missing numbered and named recursion targets.

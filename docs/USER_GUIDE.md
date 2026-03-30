@@ -139,7 +139,10 @@ Requirements:
   - `wasm` for `(?{wasm:...})`
 - Register native callbacks or wasm modules on the compiled `Regex` before matching.
 - Optional host-provided variables can be set on the compiled `Regex` via `set_variable(...)`.
-- Write code as a predicate body; Lua and JavaScript commonly use `return ...`, while Rhai can use a final expression directly.
+- Write code as a predicate/source body:
+  - Lua commonly uses `return ...`
+  - JavaScript supports either a bare expression body or explicit `return ...`
+  - Rhai can use a final expression directly
 
 Lua example:
 
@@ -208,7 +211,7 @@ JavaScript example:
 use rgx_core::{ExecutionMode, Regex};
 
 let re = Regex::with_mode(
-    r#"(?<word>cat)(?{js:return named.word === "cat";})"#,
+    r#"(?<word>cat)(?{js:named.word === "cat"})"#,
     ExecutionMode::Safe,
 )?;
 assert!(re.is_match("cat"));

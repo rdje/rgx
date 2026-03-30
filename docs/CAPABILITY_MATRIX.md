@@ -72,6 +72,10 @@ Current behavior contract for the shipped slice:
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
+- Current inline/source-body authoring expectations:
+  - Lua commonly uses explicit `return ...`
+  - JavaScript supports both bare expression bodies and explicit `return ...` bodies
+  - Rhai commonly uses a final expression value
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/Rhai/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.

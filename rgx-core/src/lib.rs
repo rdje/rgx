@@ -2571,6 +2571,26 @@ mod tests {
         assert_eq!(first.code_result, Some(CodeBlockValue::Numeric(0.0)));
     }
 
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_code_block_helpers_surface_numeric_and_replacement_results() {
+        let numeric = Regex::with_mode(r"(?{lua:return 1})", ExecutionMode::Safe)
+            .expect("Failed to compile Lua numeric-helper pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(1.0));
+        assert_eq!(numeric.find_all_numeric_with_code(""), vec![1.0]);
+
+        let replacement = Regex::with_mode(r#"cat(?{lua:return "CAT"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Lua replacement-helper pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+        assert_eq!(
+            replacement.replace_all_with_code("cat dog cat"),
+            "CAT dog CAT"
+        );
+    }
+
     #[cfg(feature = "javascript")]
     #[test]
     fn safe_mode_javascript_code_block_can_access_variables() {
@@ -2615,6 +2635,18 @@ mod tests {
 
     #[cfg(feature = "javascript")]
     #[test]
+    fn safe_mode_javascript_expression_body_can_fail_match() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{js:named.word === "dog"})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript expression-body pattern");
+
+        assert!(!regex.is_match("cat"));
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
     fn safe_mode_javascript_code_blocks_use_last_non_boolean_result() {
         let regex = Regex::with_mode(
             r#"(?{js:return 1;})(?{js:return "done";})"#,
@@ -2630,6 +2662,29 @@ mod tests {
         assert_eq!(
             first.code_result,
             Some(CodeBlockValue::Replacement("done".to_string()))
+        );
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_expression_body_helpers_surface_numeric_and_replacement_results() {
+        let numeric = Regex::with_mode(
+            r#"(?<digit>\d)(?{js:Number(named.digit)})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript numeric-helper pattern");
+        assert_eq!(numeric.find_first_numeric_with_code("7a8"), Some(7.0));
+        assert_eq!(numeric.find_all_numeric_with_code("7a8"), vec![7.0, 8.0]);
+
+        let replacement = Regex::with_mode(r#"cat(?{js:"CAT"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile JavaScript replacement-helper pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+        assert_eq!(
+            replacement.replace_all_with_code("cat dog cat"),
+            "CAT dog CAT"
         );
     }
 
@@ -2694,6 +2749,26 @@ mod tests {
         assert_eq!(
             first.code_result,
             Some(CodeBlockValue::Replacement("done".to_string()))
+        );
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_code_block_helpers_surface_numeric_and_replacement_results() {
+        let numeric = Regex::with_mode(r"(?{rhai: 1})", ExecutionMode::Safe)
+            .expect("Failed to compile Rhai numeric-helper pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(1.0));
+        assert_eq!(numeric.find_all_numeric_with_code(""), vec![1.0]);
+
+        let replacement = Regex::with_mode(r#"cat(?{rhai: "CAT"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Rhai replacement-helper pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+        assert_eq!(
+            replacement.replace_all_with_code("cat dog cat"),
+            "CAT dog CAT"
         );
     }
     #[test]
