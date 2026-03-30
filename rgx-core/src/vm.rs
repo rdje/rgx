@@ -3793,12 +3793,13 @@ impl OptimizingCompiler {
                 }
             }
 
-            Regex::Group { expr, kind, .. } => {
+            Regex::Group {
+                expr, kind, index, ..
+            } => {
                 match kind {
                     GroupKind::Capturing => {
-                        // Capturing group: allocate group ID and emit capture opcodes
-                        self.group_counter += 1;
-                        let group_id = self.group_counter;
+                        let group_id = index.unwrap_or_else(|| self.group_counter + 1);
+                        self.group_counter = self.group_counter.max(group_id);
 
                         // Update max capture group for flags
                         self.flags.max_capture_group = self.flags.max_capture_group.max(group_id);
@@ -3826,9 +3827,7 @@ impl OptimizingCompiler {
                         }
                     }
                     GroupKind::BranchReset => {
-                        panic!(
-                            "branch-reset groups '(?|...)' should be rejected during compiler validation before codegen"
-                        );
+                        self.codegen_pass(expr, false);
                     }
                 }
             }
@@ -3977,16 +3976,25 @@ impl OptimizingCompiler {
     }
 
     fn collect_capturing_group_defs(ast: &Regex) -> Vec<(u32, Regex)> {
-        let mut defs = Vec::new();
+        let mut defs = std::collections::BTreeMap::<u32, Vec<Regex>>::new();
         let mut next_group = 0;
         Self::collect_capturing_group_defs_inner(ast, &mut next_group, &mut defs);
-        defs
+        defs.into_iter()
+            .map(|(group_id, group_defs)| {
+                let group_ast = if group_defs.len() == 1 {
+                    group_defs.into_iter().next().expect("single group def")
+                } else {
+                    Regex::Alternation(group_defs)
+                };
+                (group_id, group_ast)
+            })
+            .collect()
     }
 
     fn collect_capturing_group_defs_inner(
         ast: &Regex,
         next_group: &mut u32,
-        defs: &mut Vec<(u32, Regex)>,
+        defs: &mut std::collections::BTreeMap<u32, Vec<Regex>>,
     ) {
         match ast {
             Regex::Sequence(items) | Regex::Alternation(items) => {
@@ -3999,10 +4007,13 @@ impl OptimizingCompiler {
             | Regex::Lookbehind { expr, .. } => {
                 Self::collect_capturing_group_defs_inner(expr, next_group, defs);
             }
-            Regex::Group { expr, kind, .. } => {
+            Regex::Group {
+                expr, kind, index, ..
+            } => {
                 if matches!(kind, GroupKind::Capturing) {
-                    *next_group += 1;
-                    defs.push((*next_group, ast.clone()));
+                    let group_id = index.unwrap_or_else(|| next_group.saturating_add(1));
+                    *next_group = (*next_group).max(group_id);
+                    defs.entry(group_id).or_default().push(ast.clone());
                 }
                 Self::collect_capturing_group_defs_inner(expr, next_group, defs);
             }

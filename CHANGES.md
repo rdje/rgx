@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Ship branch-reset runtime support
+- Scope: branch-reset capture-numbering semantics, compiler/VM integration, parser-contract alignment, and PCRE2 differential coverage.
+- Changes:
+  - Replaced the old branch-reset compile boundary with a compiler-side capture-index assignment pass that gives `(?|...)` top-level alternatives a shared numbering window and propagates the resulting maximum branch arity to later references.
+  - Updated the VM to honor compiler-assigned capture indices directly, made branch-reset wrappers transparent at codegen time, and adjusted subroutine-definition collection so duplicated branch-reset capture numbers stay representable downstream.
+  - Replaced the old compile-boundary regressions with AST/parser-path runtime coverage, promoted representative branch-reset backreference and conditional cases into the PCRE2 parity suite, and refreshed the capability/compatibility/parser-contract/roadmap continuity docs accordingly.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core branch_reset -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_first_match_span -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_no_match_consistency -- --nocapture`
+- Notes/impact:
+  - `(?|...)` is no longer just a safe parser boundary in RGX; it now executes on the default path with shared capture numbering and parity-backed downstream reference behavior.
+
 ### 2026-03-31 - Stabilize local CI package test matrix
 - Scope: local/GitHub validation reliability, submodule-backed PGEN build stability, and validation-doc alignment.
 - Changes:

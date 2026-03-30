@@ -1331,10 +1331,6 @@ mod tests {
                 "conditional '(?(-1)...)' refers to missing capture group",
             ),
             (
-                "(?|a|b)",
-                "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx",
-            ),
-            (
                 "(?[a-z])",
                 "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx",
             ),
@@ -1355,5 +1351,14 @@ mod tests {
                 "unexpected compile boundary message for pattern '{pattern}': {err}"
             );
         }
+    }
+
+    #[test]
+    fn parser_contract_branch_reset_group_executes_on_default_path() {
+        let regex = crate::Regex::compile(r"\A(?|(a)|(b))\1\z")
+            .expect("branch-reset fixture should compile on the default path");
+        assert!(regex.is_match("aa"));
+        assert!(regex.is_match("bb"));
+        assert!(!regex.is_match("ab"));
     }
 }

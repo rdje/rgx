@@ -80,7 +80,10 @@ Live continuity memory for `rgx` sessions.
   - `DEFINE` is treated as always false at runtime, so its one branch acts as a definition-only block and matching falls through as an empty else
   - numbered and named subroutine definitions inside `DEFINE` blocks are now usable later in the same pattern
   - invalid two-branch `DEFINE` forms still compile-reject explicitly to stay aligned with PCRE2
-- `(?|...)` branch-reset groups now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines PCRE2-style capture renumbering/runtime behavior.
+- `(?|...)` branch-reset groups are now shipped on the default regex path:
+  - the compiler assigns shared capture indices across the branch-reset group's top-level alternatives instead of numbering each branch independently
+  - later backreferences and conditionals now see the resulting PCRE2-style max-branch-arity numbering after the branch-reset group
+  - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
 - `(?[...])` Perl extended character classes now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines downstream set-algebra/runtime behavior.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
@@ -130,13 +133,19 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and the runtime policy for branch-reset groups plus Perl extended character classes.
+- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and the runtime/set-algebra policy for Perl extended character classes.
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-03-31
+- Shipped branch-reset groups on the default regex path:
+  - compiler-side capture-index assignment now gives the branch-reset group's top-level alternatives a shared numbering window instead of allocating fresh numbers per branch
+  - downstream backreferences and conditionals now see the correct PCRE2-style max-branch-arity numbering after the branch-reset group
+  - `rgx-core` regressions and `rgx-bench` parity cases now cover shared backreference behavior plus following conditional-group numbering
+
 ### 2026-03-30
 - Shipped single-branch `DEFINE` conditionals on the default regex path:
   - `DEFINE` is now treated as always false at runtime, so single-branch definition blocks fall through as an empty else instead of compile-rejecting

@@ -55,7 +55,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals execute on the default path as always-false definition blocks, while `(?|...)` now reaches a dedicated group kind and `(?[...])` now reaches `Regex::ExtendedCharClass`, so those still-gated forms fail with clear compile-time policy errors instead of being misread or silently dropped.
+- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals and branch-reset groups now execute on the default path, while `(?[...])` reaches `Regex::ExtendedCharClass` and still fails with a clear compile-time policy error instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -162,6 +162,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - PCRE2 parity hardening remains active and well-supported by tests and docs.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
 - Capability hardening improved again because recursion moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
+- Capability hardening improved again because branch-reset groups moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
 - Capability hardening improved again because relative conditional group references now execute on the default path instead of stopping at parser-only transport and compile-boundary guardrails.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
@@ -178,7 +179,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection and same-mode history separation exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`) plus real runtime semantics for parser-boundary forms like branch-reset groups and Perl extended character classes, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`) plus real runtime semantics for parser-boundary forms like Perl extended character classes, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

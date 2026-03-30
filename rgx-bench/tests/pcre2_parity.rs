@@ -51,6 +51,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "abab xx ababab yy abab",
         },
         ParityCase {
+            name: "branch_reset_backreference_all",
+            pattern: r"(?|(a)|(b))\1",
+            input: "aa bb ab ba",
+        },
+        ParityCase {
+            name: "branch_reset_conditional_all",
+            pattern: r"(?|(a)(b)|c)(?(2)d|e)",
+            input: "abd xx ce yy abe",
+        },
+        ParityCase {
             name: "positive_lookahead_all",
             pattern: "(?=ab)a",
             input: "abxxab",
@@ -214,6 +224,11 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "ab",
         },
         ParityCase {
+            name: "no_match_branch_reset_backreference",
+            pattern: r"(?|(a)|(b))\1",
+            input: "ab",
+        },
+        ParityCase {
             name: "no_match_lookbehind",
             pattern: "(?<=x)a",
             input: "ba",
@@ -336,6 +351,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "backreference",
             pattern: r"(a|ab)\1",
             input: "zzababxx",
+        },
+        ParityCase {
+            name: "branch_reset_backreference",
+            pattern: r"(?|(a)|(b))\1",
+            input: "xxbbzz",
+        },
+        ParityCase {
+            name: "branch_reset_conditional",
+            pattern: r"(?|(a)(b)|c)(?(2)d|e)",
+            input: "xxceyy",
         },
         ParityCase {
             name: "positive_lookahead",

@@ -21,9 +21,9 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Groups:
   - capturing/non-capturing/named groups: `shipped`
   - atomic groups `(?>...)`: `shipped`
-  - branch-reset groups `(?|...)`: `parsed-only`
-    - parser accepts and preserves the branch-reset wrapper explicitly
-    - compiler rejects it explicitly until RGX defines capture renumbering/runtime policy
+  - branch-reset groups `(?|...)`: `shipped`
+    - top-level alternatives inside the branch-reset wrapper now share the same capture numbering window
+    - downstream backreferences and conditionals see the PCRE2-style max-branch-arity numbering that follows the branch-reset group
 - Lookarounds:
   - lookahead/lookbehind (positive and negative): `shipped`
 Representative test anchors:
@@ -102,10 +102,11 @@ Behavior contract:
 - Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
   - `DEFINE` is treated as always false, so its single branch acts as a definition-only block and runtime behavior falls through as an empty else.
+- Branch-reset groups share capture numbers across their top-level alternatives instead of allocating fresh numbers per branch, and later references resolve against the maximum capture arity contributed by any branch.
 - Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named/relative-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
 Representative test anchors:
-- `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
-- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for recursion, numeric backreferences, Unicode property classes, and conditionals
+- `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, branch-reset, and conditional runtime/compile-boundary tests
+- `rgx-bench/tests/pcre2_parity.rs` differential parity cases for recursion, numeric backreferences, branch-reset semantics, Unicode property classes, and conditionals
 ## Conditional runtime coverage (current shipped parser forms)
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`shipped`)

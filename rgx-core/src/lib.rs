@@ -3151,19 +3151,53 @@ mod tests {
     }
 
     #[test]
-    fn parser_branch_reset_group_reports_explicit_compile_boundary() {
-        let result = Regex::compile("(?|(a)|(b))");
-        assert!(
-            result.is_err(),
-            "branch-reset group should not silently compile"
-        );
-        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains(
-                "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
-            ),
-            "unexpected branch-reset compile-boundary message: {msg}"
-        );
+    fn ast_branch_reset_group_shares_capture_slot_across_alternatives() {
+        let ast = RegexAst::Sequence(vec![
+            RegexAst::Group {
+                expr: Box::new(RegexAst::Alternation(vec![
+                    RegexAst::Group {
+                        expr: Box::new(RegexAst::Char('a')),
+                        kind: GroupKind::Capturing,
+                        index: None,
+                        name: None,
+                    },
+                    RegexAst::Group {
+                        expr: Box::new(RegexAst::Char('b')),
+                        kind: GroupKind::Capturing,
+                        index: None,
+                        name: None,
+                    },
+                ])),
+                kind: GroupKind::BranchReset,
+                index: None,
+                name: None,
+            },
+            RegexAst::Backreference(1),
+        ]);
+
+        let regex = Regex::from_ast(ast).expect("Failed to compile branch-reset AST directly");
+        assert!(regex.is_match("aa"));
+        assert!(regex.is_match("bb"));
+        assert!(!regex.is_match("ab"));
+    }
+
+    #[test]
+    fn parser_branch_reset_group_shares_capture_slot_across_alternatives() {
+        let regex =
+            Regex::compile(r"\A(?|(a)|(b))\1\z").expect("Failed to compile branch-reset syntax");
+        assert!(regex.is_match("aa"));
+        assert!(regex.is_match("bb"));
+        assert!(!regex.is_match("ab"));
+    }
+
+    #[test]
+    fn parser_branch_reset_group_uses_max_branch_arity_for_following_references() {
+        let regex = Regex::compile(r"\A(?|(a)(b)|c)(?(2)d|e)\z")
+            .expect("Failed to compile branch-reset conditional pattern");
+        assert!(regex.is_match("abd"));
+        assert!(regex.is_match("ce"));
+        assert!(!regex.is_match("abe"));
+        assert!(!regex.is_match("cd"));
     }
 
     #[test]

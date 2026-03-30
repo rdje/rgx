@@ -3,8 +3,8 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.12`
-- Last updated: `2026-03-30`
+- Version: `v0.1.13`
+- Last updated: `2026-03-31`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -76,11 +76,11 @@ Current contract:
   - backreferences
   - Perl extended character classes `(?[...])`
   - conditionals, including current group/named-group/lookaround forms, relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`, and single-branch `DEFINE` blocks
-  - branch-reset groups `(?|...)` as an explicit parsed-only boundary form
+  - branch-reset groups `(?|...)`
 - Compiler/runtime status for those parser-recognized forms is:
-  - recursion, backreferences, Unicode property classes, and current shipped conditional forms, including relative group-exists conditionals and single-branch `DEFINE` definition blocks, are integrated on the default regex path
+  - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
-  - branch-reset groups are parser-recognized but compile-rejected explicitly until RGX defines PCRE2-compatible capture-numbering/runtime policy
+  - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
   - Perl extended character classes are parser-recognized but compile-rejected explicitly until RGX defines downstream set-algebra/runtime policy
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
@@ -98,7 +98,7 @@ The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
-- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, branch-reset groups, Perl extended character classes, and missing capture-target references.
+- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, Perl extended character classes, and missing capture-target references.
 
 When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, Perl extended character classes, code-block tags, recursion, backreferences, current conditional families (including relative group-exists transport), and Unicode property classes.
 

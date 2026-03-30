@@ -119,6 +119,7 @@ impl Compiler {
             raw_label,
             self.mode
         );
+        let ast = Self::assign_capture_indices(ast);
         debug_log!("compiler", "AST: {:?}", ast);
         if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
             trace_exit!(
@@ -129,7 +130,7 @@ impl Compiler {
             );
             return Err(RgxError::Compile(msg));
         }
-        let total_groups = Self::count_capture_groups(&ast);
+        let total_groups = Self::max_capture_group(&ast);
         let named_groups = Self::collect_named_groups(&ast);
         let ast = Self::resolve_relative_conditionals(ast, total_groups)?;
 
@@ -221,6 +222,206 @@ impl Compiler {
         Ok(ast)
     }
 
+    fn assign_capture_indices(ast: RegexAst) -> RegexAst {
+        let (ast, _) = Self::assign_capture_indices_inner(ast, 1);
+        ast
+    }
+
+    fn assign_capture_indices_inner(ast: RegexAst, next_group: u32) -> (RegexAst, u32) {
+        match ast {
+            RegexAst::Sequence(items) => {
+                let mut next = next_group;
+                let mut assigned = Vec::with_capacity(items.len());
+                for item in items {
+                    let (item, assigned_next) = Self::assign_capture_indices_inner(item, next);
+                    next = assigned_next;
+                    assigned.push(item);
+                }
+                (RegexAst::Sequence(assigned), next)
+            }
+            RegexAst::Alternation(items) => {
+                let mut next = next_group;
+                let mut assigned = Vec::with_capacity(items.len());
+                for item in items {
+                    let (item, assigned_next) = Self::assign_capture_indices_inner(item, next);
+                    next = assigned_next;
+                    assigned.push(item);
+                }
+                (RegexAst::Alternation(assigned), next)
+            }
+            RegexAst::Quantified { expr, quantifier } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    RegexAst::Quantified {
+                        expr: Box::new(expr),
+                        quantifier,
+                    },
+                    next,
+                )
+            }
+            RegexAst::Group {
+                expr, kind, name, ..
+            } => match kind {
+                crate::ast::GroupKind::Capturing => {
+                    let group_id = next_group;
+                    let (expr, next) =
+                        Self::assign_capture_indices_inner(*expr, group_id.saturating_add(1));
+                    (
+                        RegexAst::Group {
+                            expr: Box::new(expr),
+                            kind,
+                            index: Some(group_id),
+                            name,
+                        },
+                        next,
+                    )
+                }
+                crate::ast::GroupKind::BranchReset => {
+                    let (expr, next) = Self::assign_branch_reset_expr(*expr, next_group);
+                    (
+                        RegexAst::Group {
+                            expr: Box::new(expr),
+                            kind,
+                            index: None,
+                            name,
+                        },
+                        next,
+                    )
+                }
+                crate::ast::GroupKind::NonCapturing | crate::ast::GroupKind::Atomic => {
+                    let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                    (
+                        RegexAst::Group {
+                            expr: Box::new(expr),
+                            kind,
+                            index: None,
+                            name,
+                        },
+                        next,
+                    )
+                }
+            },
+            RegexAst::Lookahead { expr, positive } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    RegexAst::Lookahead {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    next,
+                )
+            }
+            RegexAst::Lookbehind { expr, positive } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    RegexAst::Lookbehind {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    next,
+                )
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let (condition, next_after_condition) =
+                    Self::assign_capture_indices_condition(condition, next_group);
+                let (true_branch, next_after_true) =
+                    Self::assign_capture_indices_inner(*true_branch, next_after_condition);
+                let (false_branch, next_after_false) = if let Some(false_branch) = false_branch {
+                    let (false_branch, next_after_false) =
+                        Self::assign_capture_indices_inner(*false_branch, next_after_true);
+                    (Some(Box::new(false_branch)), next_after_false)
+                } else {
+                    (None, next_after_true)
+                };
+                (
+                    RegexAst::Conditional {
+                        condition,
+                        true_branch: Box::new(true_branch),
+                        false_branch,
+                    },
+                    next_after_false,
+                )
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Backreference(_)
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => (ast, next_group),
+        }
+    }
+
+    fn assign_branch_reset_expr(expr: RegexAst, next_group: u32) -> (RegexAst, u32) {
+        match expr {
+            RegexAst::Alternation(items) => {
+                let mut max_next = next_group;
+                let mut assigned = Vec::with_capacity(items.len());
+                for item in items {
+                    let (item, assigned_next) =
+                        Self::assign_capture_indices_inner(item, next_group);
+                    max_next = max_next.max(assigned_next);
+                    assigned.push(item);
+                }
+                (RegexAst::Alternation(assigned), max_next)
+            }
+            other => Self::assign_capture_indices_inner(other, next_group),
+        }
+    }
+
+    fn assign_capture_indices_condition(
+        condition: crate::ast::ConditionalTest,
+        next_group: u32,
+    ) -> (crate::ast::ConditionalTest, u32) {
+        match condition {
+            crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    crate::ast::ConditionalTest::Lookahead {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    next,
+                )
+            }
+            crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    crate::ast::ConditionalTest::Lookbehind {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    next,
+                )
+            }
+            crate::ast::ConditionalTest::GroupExists(group) => {
+                (crate::ast::ConditionalTest::GroupExists(group), next_group)
+            }
+            crate::ast::ConditionalTest::RelativeGroupExists(offset) => (
+                crate::ast::ConditionalTest::RelativeGroupExists(offset),
+                next_group,
+            ),
+            crate::ast::ConditionalTest::NamedGroupExists(name) => (
+                crate::ast::ConditionalTest::NamedGroupExists(name),
+                next_group,
+            ),
+            crate::ast::ConditionalTest::Define => {
+                (crate::ast::ConditionalTest::Define, next_group)
+            }
+        }
+    }
+
     fn resolve_relative_conditionals_inner(
         ast: RegexAst,
         opened_groups: u32,
@@ -266,13 +467,25 @@ impl Compiler {
                 index,
                 name,
             } => {
-                let inner_opened = if matches!(kind, crate::ast::GroupKind::Capturing) {
-                    opened_groups + 1
-                } else {
-                    opened_groups
-                };
                 let (expr, opened_after_expr) =
-                    Self::resolve_relative_conditionals_inner(*expr, inner_opened, total_groups)?;
+                    if matches!(kind, crate::ast::GroupKind::BranchReset) {
+                        Self::resolve_relative_conditionals_branch_reset(
+                            *expr,
+                            opened_groups,
+                            total_groups,
+                        )?
+                    } else {
+                        let inner_opened = if matches!(kind, crate::ast::GroupKind::Capturing) {
+                            index.unwrap_or_else(|| opened_groups.saturating_add(1))
+                        } else {
+                            opened_groups
+                        };
+                        Self::resolve_relative_conditionals_inner(
+                            *expr,
+                            inner_opened,
+                            total_groups,
+                        )?
+                    };
                 Ok((
                     RegexAst::Group {
                         expr: Box::new(expr),
@@ -357,6 +570,30 @@ impl Compiler {
         }
     }
 
+    fn resolve_relative_conditionals_branch_reset(
+        expr: RegexAst,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<(RegexAst, u32)> {
+        match expr {
+            RegexAst::Alternation(items) => {
+                let mut resolved = Vec::with_capacity(items.len());
+                let mut max_opened = opened_groups;
+                for item in items {
+                    let (item, opened_after_item) = Self::resolve_relative_conditionals_inner(
+                        item,
+                        opened_groups,
+                        total_groups,
+                    )?;
+                    max_opened = max_opened.max(opened_after_item);
+                    resolved.push(item);
+                }
+                Ok((RegexAst::Alternation(resolved), max_opened))
+            }
+            other => Self::resolve_relative_conditionals_inner(other, opened_groups, total_groups),
+        }
+    }
+
     fn parser_boundary_validation_message(ast: &RegexAst) -> Option<String> {
         match ast {
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
@@ -365,16 +602,7 @@ impl Compiler {
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. } => Self::parser_boundary_validation_message(expr),
-            RegexAst::Group { expr, kind, .. } => {
-                if matches!(kind, crate::ast::GroupKind::BranchReset) {
-                    Some(
-                        "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
-                            .to_string(),
-                    )
-                } else {
-                    Self::parser_boundary_validation_message(expr)
-                }
-            }
+            RegexAst::Group { expr, .. } => Self::parser_boundary_validation_message(expr),
             RegexAst::ExtendedCharClass { .. } => Some(
                 "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
                     .to_string(),
@@ -546,15 +774,8 @@ impl Compiler {
             | RegexAst::Lookbehind { expr, .. } => {
                 self.feature_validation_message(expr, total_groups, named_groups)
             }
-            RegexAst::Group { expr, kind, .. } => {
-                if matches!(kind, crate::ast::GroupKind::BranchReset) {
-                    Some(
-                        "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
-                            .to_string(),
-                    )
-                } else {
-                    self.feature_validation_message(expr, total_groups, named_groups)
-                }
+            RegexAst::Group { expr, .. } => {
+                self.feature_validation_message(expr, total_groups, named_groups)
             }
             RegexAst::Conditional {
                 condition,
@@ -613,7 +834,7 @@ impl Compiler {
     }
 
     fn backreference_validation_message(ast: &RegexAst) -> Option<String> {
-        let total_groups = Self::count_capture_groups(ast);
+        let total_groups = Self::max_capture_group(ast);
         Self::backreference_validation_message_inner(ast, total_groups)
     }
 
@@ -760,38 +981,44 @@ impl Compiler {
         }
     }
 
-    fn count_capture_groups(ast: &RegexAst) -> u32 {
+    fn max_capture_group(ast: &RegexAst) -> u32 {
         match ast {
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
-                items.iter().map(Self::count_capture_groups).sum()
+                items.iter().map(Self::max_capture_group).max().unwrap_or(0)
             }
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => Self::count_capture_groups(expr),
-            RegexAst::Group { expr, kind, .. } => {
-                let current = u32::from(matches!(kind, crate::ast::GroupKind::Capturing));
-                current + Self::count_capture_groups(expr)
+            | RegexAst::Lookbehind { expr, .. } => Self::max_capture_group(expr),
+            RegexAst::Group {
+                expr, kind, index, ..
+            } => {
+                let current = if matches!(kind, crate::ast::GroupKind::Capturing) {
+                    index.unwrap_or(0)
+                } else {
+                    0
+                };
+                current.max(Self::max_capture_group(expr))
             }
             RegexAst::Conditional {
                 condition,
                 true_branch,
                 false_branch,
             } => {
-                let condition_count = match condition {
+                let condition_max = match condition {
                     crate::ast::ConditionalTest::Lookahead { expr, .. }
                     | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
-                        Self::count_capture_groups(expr)
+                        Self::max_capture_group(expr)
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::Define => 0,
                 };
-                condition_count
-                    + Self::count_capture_groups(true_branch)
-                    + false_branch
-                        .as_ref()
-                        .map_or(0, |branch| Self::count_capture_groups(branch))
+                let true_max = Self::max_capture_group(true_branch);
+                let false_max = false_branch
+                    .as_ref()
+                    .map_or(0, |branch| Self::max_capture_group(branch));
+                condition_max.max(true_max).max(false_max)
             }
             RegexAst::Char(_)
             | RegexAst::CharClass(_)
@@ -812,37 +1039,37 @@ impl Compiler {
 
     fn collect_named_groups(ast: &RegexAst) -> std::collections::HashMap<String, u32> {
         let mut named_groups = std::collections::HashMap::new();
-        let mut next_group = 0;
-        Self::collect_named_groups_inner(ast, &mut next_group, &mut named_groups);
+        Self::collect_named_groups_inner(ast, &mut named_groups);
         named_groups
     }
 
     fn collect_named_groups_inner(
         ast: &RegexAst,
-        next_group: &mut u32,
         named_groups: &mut std::collections::HashMap<String, u32>,
     ) {
         match ast {
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
                 for item in items {
-                    Self::collect_named_groups_inner(item, next_group, named_groups);
+                    Self::collect_named_groups_inner(item, named_groups);
                 }
             }
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. } => {
-                Self::collect_named_groups_inner(expr, next_group, named_groups);
+                Self::collect_named_groups_inner(expr, named_groups);
             }
             RegexAst::Group {
-                expr, kind, name, ..
+                expr,
+                kind,
+                index,
+                name,
             } => {
                 if matches!(kind, crate::ast::GroupKind::Capturing) {
-                    *next_group += 1;
-                    if let Some(name) = name {
-                        named_groups.insert(name.clone(), *next_group);
+                    if let (Some(name), Some(group_id)) = (name, *index) {
+                        named_groups.insert(name.clone(), group_id);
                     }
                 }
-                Self::collect_named_groups_inner(expr, next_group, named_groups);
+                Self::collect_named_groups_inner(expr, named_groups);
             }
             RegexAst::Conditional {
                 condition,
@@ -852,16 +1079,16 @@ impl Compiler {
                 match condition {
                     crate::ast::ConditionalTest::Lookahead { expr, .. }
                     | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
-                        Self::collect_named_groups_inner(expr, next_group, named_groups);
+                        Self::collect_named_groups_inner(expr, named_groups);
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::Define => {}
                 }
-                Self::collect_named_groups_inner(true_branch, next_group, named_groups);
+                Self::collect_named_groups_inner(true_branch, named_groups);
                 if let Some(false_branch) = false_branch {
-                    Self::collect_named_groups_inner(false_branch, next_group, named_groups);
+                    Self::collect_named_groups_inner(false_branch, named_groups);
                 }
             }
             RegexAst::Char(_)
