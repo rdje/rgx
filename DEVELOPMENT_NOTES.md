@@ -34,7 +34,7 @@ Pipeline in `rgx-core`:
 - Parser-path support for positive/negative lookahead and lookbehind syntax
 - Parser-path support for code-block syntax tokenization/parsing (`(?{lang:code})`)
 - Public-path predicate execution for `(?{lua:...})`, `(?{js:...})` / `(?{javascript:...})`, and `(?{rhai:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` when the matching cargo feature is enabled
-- The CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE` and can optionally show top-level branch plus winning-path code-block details via `--show-details`
+- The CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE`, can register named wasm modules through repeatable `--wasm-module NAME=PATH`, and can optionally show top-level branch plus winning-path code-block details via `--show-details`
 - Public-path native callback execution for `(?{native:...})` in `ExecutionMode::Full` through `Regex::register_native(...)` on the Rust API path
 - Public-path wasm module execution for `(?{wasm:...})` in `ExecutionMode::Safe` / `ExecutionMode::Full` through `Regex::register_wasm_module(...)` on the Rust API path
 - Host-provided execution variables can now be registered through `Regex::set_variable(...)` and are snapshotted into each code-block evaluation
@@ -182,7 +182,7 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser/VM support for advanced regex syntax still has meaningful remaining gaps in newer PCRE families beyond the currently covered recursion, conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
-- Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
+- Native registration is still Rust-API-only, while wasm registration now also has a file-backed CLI path through `--wasm-module NAME=PATH`
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
 - The shipped inline-language lane is now tighter: Lua and JavaScript both accept either bare expression bodies or explicit `return ...` bodies, Rhai keeps its natural final-expression style, and Lua/JavaScript/Rhai helper-API behavior is covered explicitly in `rgx-core` regression tests

@@ -12,6 +12,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features javascript` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
@@ -72,10 +73,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - winning-path non-boolean Lua/JavaScript/Rhai/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
-  - the CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can optionally render branch/code-result details with `--show-details`, and now collects matches in one pass instead of calling `is_match` before `find_all`
+  - the CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can register file-backed wasm modules through repeatable `--wasm-module NAME=PATH`, can optionally render branch/code-result details with `--show-details`, and now collects matches in one pass instead of calling `is_match` before `find_all`
 - The biggest remaining gaps are now narrower and clearer:
   - `ExecutionMode::Pure` still rejects all code blocks by design
-  - `native` and `wasm` code blocks are still Rust-API-only; the CLI has no registration/configuration surface for them
+  - `native` code blocks are still Rust-API-only; wasm now has a file-backed CLI registration surface but still no broader external plugin/config story
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
   - the real PGEN backend is green locally through pinned submodule commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
@@ -98,7 +99,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `(?{js:...})` and `(?{javascript:...})` are shipped as predicate checkpoints in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `javascript` feature is enabled, and JavaScript source bodies now accept either bare expressions or explicit `return ...` bodies.
 - `(?{rhai:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `rhai` feature is enabled.
 - `(?{native:...})` is shipped on the Rust API path in `ExecutionMode::Full` after registering a callback on the compiled `Regex`.
-- `(?{wasm:...})` is shipped on the Rust API path in `ExecutionMode::Safe` or `ExecutionMode::Full` after registering a named wasm module on the compiled `Regex`.
+- `(?{wasm:...})` is shipped on the Rust API path in `ExecutionMode::Safe` or `ExecutionMode::Full` after registering a named wasm module on the compiled `Regex`, and on the CLI path through repeatable `--wasm-module NAME=PATH`.
 - Current execution-context contract for this slice:
   - capture slot `0` is the current overall match prefix for the current match attempt
   - current match start/end/length metadata plus the 1-based top-level branch number are now available to code-block runtimes when applicable
@@ -125,7 +126,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Explicit boundaries that remain in place
 - `ExecutionMode::Pure` rejects code blocks with an explicit compile error.
 - `ExecutionMode::Safe` still rejects `native` code blocks; they require `ExecutionMode::Full`.
-- The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
+- The CLI still has no native-registration surface, but it now exposes file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
 
@@ -150,14 +151,14 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because relative conditional group references now execute on the default path instead of stopping at parser-only transport and compile-boundary guardrails.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
-- Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
+- Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native are real shipped slices on the documented Rust API path, and wasm now spans both the Rust API path and the CLI's file-backed module-registration path.
 - Embedded inline-language hardening improved again because Lua and JavaScript now both preserve bare-expression predicate/result values instead of forcing users onto one syntax style per language.
 - Embedded inline-language hardening improved again because the CLI now exposes host-variable injection and richer optional match-detail rendering without pre-executing code blocks twice on the successful path.
 - Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, archives each capture locally, and reports delta against the most recent prior archived run instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next
 - Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.
-- Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
+- Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
 - Deepen the now-operational quick benchmark capture into a fuller release-profile longitudinal story.
 
@@ -177,7 +178,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
 
 ## High-confidence next actions
-1. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
+1. Decide whether native registration should stay Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 3. Deepen the quick benchmark history/delta capture into a fuller release-profile longitudinal story.
 4. Reduce warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`.

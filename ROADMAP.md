@@ -85,7 +85,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - keep Lua and JavaScript as the primary shipped inline source-body languages
   - treat wasm as an advanced registered-module/reference-style path rather than the main everyday inline code-block UX target
-  - decide later whether native/wasm configuration should expand beyond the current Rust-API-only surface once the inline-language story is mature
+  - decide later whether native should expand beyond the current Rust-API-only surface and whether wasm should grow beyond the new file-backed CLI module-registration path once the inline-language story is mature
   - only revisit richer wasm ABI/result work after the preferred inline-language expansion path is clearer
 
 ### Multi-language code-block runtime expansion
@@ -108,6 +108,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Added file-backed CLI wasm module registration through repeatable `--wasm-module NAME=PATH`, so `(?{wasm:module:function})` no longer requires Rust glue just to exercise registered modules from the command line.
 - Shipped relative conditional group references on the default regex path by resolving `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time, with API, parser-contract, and PCRE2 differential coverage.
 - Tightened the shipped inline-language CLI path by adding repeatable `--var NAME=VALUE`, optional `--show-details` match rendering, and single-pass match collection so CLI code blocks are not pre-executed twice before output.
 - Stabilized relative conditional group references on both parser backends first by transporting `(?(+1)...)` and `(?(-1)...)` as dedicated AST before the later default-path runtime integration landed.

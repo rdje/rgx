@@ -29,7 +29,7 @@ Representative test anchors:
 - `(?{js:...})` / `(?{javascript:...})`: `mode-gated shipped`
 - `(?{rhai:...})`: `mode-gated shipped`
 - `(?{native:...})`: `mode-gated shipped` on the Rust API path in `ExecutionMode::Full` after registration via `Regex::register_native(...)`; the CLI path still has no native-registration surface
-- `(?{wasm:...})`: `mode-gated shipped` on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration via `Regex::register_wasm_module(...)`; the CLI path still has no wasm-registration surface
+- `(?{wasm:...})`: `mode-gated shipped` on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration via `Regex::register_wasm_module(...)`, and on the CLI path through repeatable `--wasm-module NAME=PATH` when built with the `wasm` feature
 Current behavior contract for the shipped slice:
 - `ExecutionMode::Pure` rejects all code blocks.
 - `ExecutionMode::Safe` accepts only the currently integrated sandboxed backends, with matching cargo features enabled:
@@ -72,7 +72,7 @@ Current behavior contract for the shipped slice:
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
-- The shipped CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE`, while native/wasm registration still remains Rust-API-only.
+- The shipped CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE` and file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`, while native registration still remains Rust-API-only.
 - Current inline/source-body authoring expectations:
   - Lua supports both bare expression bodies and explicit `return ...` bodies
   - JavaScript supports both bare expression bodies and explicit `return ...` bodies

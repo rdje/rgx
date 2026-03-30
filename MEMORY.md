@@ -83,7 +83,7 @@ Live continuity memory for `rgx` sessions.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
 - The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, current match metadata, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
 - Relative conditional group references `(?(+1)...)` and `(?(-1)...)` now parse on both the recursive-descent and default PGEN-backed parser paths as dedicated AST and execute on the default compiler/VM path after compile-time resolution to absolute group checks.
-- The CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can optionally print branch/code-result details through `--show-details`, and no longer pre-executes successful code-block patterns once via `is_match` before collecting matches.
+- The CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can register named wasm modules through repeatable `--wasm-module NAME=PATH`, can optionally print branch/code-result details through `--show-details`, and no longer pre-executes successful code-block patterns once via `is_match` before collecting matches.
 - Numeric backreferences are now shipped on the default compiler/VM path:
   - compile-time validation now rejects only missing-group references such as `(a)\2`
   - runtime matching now executes numbered backreferences through real VM bytecode in both top-level and subexpression paths
@@ -92,7 +92,7 @@ Live continuity memory for `rgx` sessions.
   - both parser backends lower `*+`, `++`, `?+`, and counted possessive forms into atomic-wrapped greedy quantified AST nodes
   - runtime behavior now blocks backtracking into the possessive piece while still allowing straightforward success cases
   - PCRE2 differential coverage now treats possessive quantifiers as supported rather than as a parser-adapter gap
-- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, and the CLI still has no native/wasm registration surface.
+- `ExecutionMode::Pure` still rejects code blocks, `ExecutionMode::Safe` still rejects `native`, the CLI now supports file-backed wasm module registration, and native callback registration still remains Rust-API-only.
 - End-anchor (`$`) parity mismatch was fixed and reclassified as supported.
 - Absolute text-anchor parity for `\A`, `\Z`, and `\z` is now fixed end-to-end, including runtime execution, parser-path/API regression coverage, PCRE2 differential tests, and direct CLI smoke verification.
 - Unicode property classes (`\p{...}`, `\P{...}`) are now shipped on the default compiler/VM path:
@@ -123,10 +123,14 @@ Live continuity memory for `rgx` sessions.
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
-- Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces.
+- Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Extended the shipped CLI code-block surface with file-backed wasm module registration:
+  - added repeatable `--wasm-module NAME=PATH` in `rgx-cli` so `(?{wasm:module:function})` can be exercised without Rust glue when the CLI is built with the `wasm` feature
+  - added CLI parsing/application tests, including successful module registration from a temp WAT-assembled module plus explicit missing-file / missing-feature failure coverage
+  - refreshed state/docs so wasm is no longer described as Rust-API-only on the CLI path, while native remains explicitly Rust-API-only
 - Shipped relative conditional group references on the default regex path:
   - compiler now resolves `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time instead of rejecting them at the old parser/runtime boundary
   - added AST and parser-path runtime regressions plus explicit missing-target compile errors for unresolved relative references

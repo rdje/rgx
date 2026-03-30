@@ -1274,6 +1274,7 @@ dependencies = [
  "once_cell",
  "rgx-core",
  "tracing",
+ "wat",
 ]
 
 [[package]]

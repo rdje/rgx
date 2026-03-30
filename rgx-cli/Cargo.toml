@@ -23,3 +23,6 @@ clap = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 once_cell = "1.19"
+
+[dev-dependencies]
+wat = { workspace = true }

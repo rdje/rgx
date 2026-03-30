@@ -4,6 +4,7 @@ use rgx_core::log::Verbosity;
 use rgx_core::CodeBlockValue;
 use rgx_core::{ExecutionMode, MatchResult, Regex};
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -22,6 +23,10 @@ struct Cli {
     /// Host-provided code-block variable (`NAME=VALUE`), repeatable
     #[arg(long = "var", value_name = "NAME=VALUE")]
     variables: Vec<CliVariable>,
+
+    /// Register a named wasm module for `(?{wasm:module:function})` (`NAME=PATH`), repeatable
+    #[arg(long = "wasm-module", value_name = "NAME=PATH")]
+    wasm_modules: Vec<CliWasmModule>,
 
     /// Enable high-verbosity output (legacy alias for --verbosity high)
     #[arg(long, short = 'd')]
@@ -74,6 +79,32 @@ impl FromStr for CliVariable {
         Ok(Self {
             name: name.to_string(),
             value: value.to_string(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CliWasmModule {
+    name: String,
+    path: PathBuf,
+}
+
+impl FromStr for CliWasmModule {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let (name, path) = raw
+            .split_once('=')
+            .ok_or_else(|| "expected NAME=PATH".to_string())?;
+        if name.is_empty() {
+            return Err("WASM module name must be non-empty".to_string());
+        }
+        if path.is_empty() {
+            return Err("WASM module path must be non-empty".to_string());
+        }
+        Ok(Self {
+            name: name.to_string(),
+            path: PathBuf::from(path),
         })
     }
 }
@@ -199,6 +230,29 @@ fn apply_cli_variables(regex: &Regex, variables: &[CliVariable]) -> anyhow::Resu
     Ok(())
 }
 
+fn apply_cli_wasm_modules(regex: &Regex, wasm_modules: &[CliWasmModule]) -> anyhow::Result<()> {
+    for wasm_module in wasm_modules {
+        let module_bytes = std::fs::read(&wasm_module.path).with_context(|| {
+            format!(
+                "failed to read CLI wasm module '{}' from '{}'",
+                wasm_module.name,
+                wasm_module.path.display()
+            )
+        })?;
+        regex
+            .register_wasm_module(wasm_module.name.clone(), module_bytes)
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!(
+                    "failed to register CLI wasm module '{}' from '{}'",
+                    wasm_module.name,
+                    wasm_module.path.display()
+                )
+            })?;
+    }
+    Ok(())
+}
+
 fn collect_matches(regex: &Regex, input: &str) -> Vec<MatchResult> {
     regex.find_all(input)
 }
@@ -235,7 +289,7 @@ fn main() -> anyhow::Result<()> {
     rgx_core::trace_enter!(
         "cli",
         "main",
-        "mode_arg={},pattern_len={},input_arg_len={},verbosity={},quiet={},trace_log={},vars={},show_details={}",
+        "mode_arg={},pattern_len={},input_arg_len={},verbosity={},quiet={},trace_log={},vars={},wasm_modules={},show_details={}",
         cli.mode,
         cli.pattern.len(),
         cli.text.len(),
@@ -243,6 +297,7 @@ fn main() -> anyhow::Result<()> {
         cli.quiet,
         cli.trace_log,
         cli.variables.len(),
+        cli.wasm_modules.len(),
         cli.show_details
     );
 
@@ -276,6 +331,10 @@ fn main() -> anyhow::Result<()> {
         logger.debug("main", &format!("Pattern: '{}'", cli.pattern));
         logger.debug("main", &format!("Execution mode: {:?}", cli.mode));
         logger.debug("main", &format!("CLI variables: {}", cli.variables.len()));
+        logger.debug(
+            "main",
+            &format!("CLI wasm modules: {}", cli.wasm_modules.len()),
+        );
         logger.debug("main", &format!("Show details: {}", cli.show_details));
         if !cli.text.is_empty() {
             logger.debug("main", &format!("Input text: '{}'", cli.text));
@@ -309,6 +368,17 @@ fn main() -> anyhow::Result<()> {
         Regex::with_mode(&cli.pattern, mode)?
     };
     let regex = regex_result;
+
+    if !cli.wasm_modules.is_empty() {
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!(
+                "Registering {} CLI wasm modules on compiled regex",
+                cli.wasm_modules.len()
+            ),
+        );
+        apply_cli_wasm_modules(&regex, &cli.wasm_modules)?;
+    }
 
     if !cli.variables.is_empty() {
         LOGGER.lock().unwrap().debug(
@@ -394,6 +464,7 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use rgx_core::{ExecResult, ExecutionMode};
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -419,6 +490,35 @@ mod tests {
     fn cli_variable_rejects_malformed_assignments() {
         assert!("env".parse::<CliVariable>().is_err());
         assert!("=prod".parse::<CliVariable>().is_err());
+    }
+
+    #[test]
+    fn cli_wasm_module_parses_name_path_pairs() {
+        assert_eq!(
+            "truthy=/tmp/truthy.wasm"
+                .parse::<CliWasmModule>()
+                .expect("parse wasm module"),
+            CliWasmModule {
+                name: "truthy".to_string(),
+                path: PathBuf::from("/tmp/truthy.wasm"),
+            }
+        );
+        assert_eq!(
+            "emit=artifacts/path=with=equals.wasm"
+                .parse::<CliWasmModule>()
+                .expect("parse wasm module path with equals"),
+            CliWasmModule {
+                name: "emit".to_string(),
+                path: PathBuf::from("artifacts/path=with=equals.wasm"),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_wasm_module_rejects_malformed_assignments() {
+        assert!("truthy".parse::<CliWasmModule>().is_err());
+        assert!("=module.wasm".parse::<CliWasmModule>().is_err());
+        assert!("truthy=".parse::<CliWasmModule>().is_err());
     }
 
     #[test]
@@ -490,5 +590,87 @@ mod tests {
             .expect("register callback");
 
         assert!(regex.is_match(""));
+    }
+
+    #[test]
+    fn apply_cli_wasm_modules_reports_missing_files() {
+        let regex = Regex::with_mode("cat", ExecutionMode::Safe).expect("compile regex");
+        let module = CliWasmModule {
+            name: "missing".to_string(),
+            path: std::env::temp_dir().join("rgx-cli-missing-module-do-not-create.wasm"),
+        };
+
+        let err = apply_cli_wasm_modules(&regex, &[module]).expect_err("missing file should fail");
+        let msg = err.to_string();
+        assert!(msg.contains("failed to read CLI wasm module 'missing'"));
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[test]
+    fn apply_cli_wasm_modules_surfaces_registration_failures_without_cli_wasm_feature() {
+        let regex = Regex::with_mode("(?{native:placeholder})", ExecutionMode::Full)
+            .expect("compile regex");
+        let temp_path = std::env::temp_dir().join("rgx-cli-wasm-feature-gate.bin");
+        std::fs::write(&temp_path, [0_u8, 1, 2, 3]).expect("write placeholder module bytes");
+        let module = CliWasmModule {
+            name: "truthy".to_string(),
+            path: temp_path.clone(),
+        };
+
+        let err = apply_cli_wasm_modules(&regex, &[module])
+            .expect_err("missing wasm feature should fail");
+        let msg = err.to_string();
+        assert!(msg.contains("failed to register CLI wasm module 'truthy'"));
+        let error_chain = err.chain().map(ToString::to_string).collect::<Vec<_>>();
+        assert!(
+            error_chain
+                .iter()
+                .any(|cause| cause.contains("WASM module registration requires the `wasm` cargo feature"))
+                || error_chain
+                    .iter()
+                    .any(|cause| cause.contains("Failed to compile WASM module truthy")),
+            "expected either a wasm feature-gate error or an invalid-module error in chain: {err:#}"
+        );
+
+        std::fs::remove_file(temp_path).ok();
+    }
+
+    #[cfg(feature = "wasm")]
+    fn temp_test_wasm_path(name: &str) -> PathBuf {
+        let unique = format!(
+            "rgx-cli-{name}-{}-{}.wasm",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after unix epoch")
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
+    #[cfg(feature = "wasm")]
+    #[test]
+    fn apply_cli_wasm_modules_registers_modules_for_safe_patterns() {
+        let regex = Regex::with_mode("(?{wasm:truthy:evaluate})", ExecutionMode::Safe)
+            .expect("compile regex");
+        let module_path = temp_test_wasm_path("truthy");
+        let module_bytes = wat::parse_str(
+            r#"(module
+                (func (export "evaluate") (result i32)
+                    i32.const 1)
+            )"#,
+        )
+        .expect("assemble WAT module");
+        std::fs::write(&module_path, module_bytes).expect("write wasm module");
+
+        let module = CliWasmModule {
+            name: "truthy".to_string(),
+            path: module_path.clone(),
+        };
+        apply_cli_wasm_modules(&regex, &[module]).expect("register CLI wasm module");
+
+        assert!(regex.is_match(""));
+
+        std::fs::remove_file(module_path).ok();
     }
 }

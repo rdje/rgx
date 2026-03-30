@@ -43,6 +43,7 @@ cargo run --bin rgx-cli -- "(?:cat|dog)" "pet dog"
 Useful CLI options for the shipped code-block slice:
 - `--mode pure|safe|full` selects the execution mode
 - `--var NAME=VALUE` injects a host-provided variable for code-block evaluation and may be repeated
+- `--wasm-module NAME=PATH` registers a named wasm module for `(?{wasm:module:function})` and may be repeated
 - `--show-details` appends top-level branch and winning-path code-block result details when available
 
 Examples with code blocks:
@@ -50,6 +51,7 @@ Examples with code blocks:
 ```bash
 cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
 cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai: 7})' "cat"
+cargo run --bin rgx-cli --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
 ```
 ### Rust API
 Use the high-level API for normal matching:
@@ -149,7 +151,8 @@ Requirements:
   - `javascript` for `(?{js:...})` / `(?{javascript:...})`
   - `rhai` for `(?{rhai:...})`
   - `wasm` for `(?{wasm:...})`
-- Register native callbacks or wasm modules on the compiled `Regex` before matching.
+- Register native callbacks on the compiled `Regex` before matching.
+- Register wasm modules on the compiled `Regex` before matching, or use `rgx-cli --wasm-module NAME=PATH` for the CLI path.
 - Optional host-provided variables can be set on the compiled `Regex` via `set_variable(...)`.
 - Write code as a predicate/source body:
   - Lua supports either a bare expression body or explicit `return ...`
@@ -190,6 +193,16 @@ assert!(re.is_match(""));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 For the current wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where `0` means predicate failure and any non-zero value means success.
+
+CLI wasm example:
+
+```bash
+cargo run --bin rgx-cli --features wasm -- \
+  --mode safe \
+  --wasm-module truthy=./truthy.wasm \
+  '(?{wasm:truthy:evaluate})' \
+  ""
+```
 
 Wasm richer-result example:
 

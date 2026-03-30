@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Added CLI wasm module registration
+- Scope: wasm code-block usability from `rgx-cli`, CLI parsing/application tests, and shipped-surface documentation refreshes.
+- Changes:
+  - Added repeatable `--wasm-module NAME=PATH` support in `rgx-cli/src/main.rs`, which reads named wasm binaries from disk and registers them on the compiled regex before matching.
+  - Added CLI tests covering wasm-module argument parsing, missing-file failures, missing-feature registration failures, and successful safe-mode registration from a temp WAT-assembled module.
+  - Refreshed `README.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped CLI/runtime boundary now describes wasm accurately while keeping native registration explicitly Rust-API-only.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm`
+- Notes/impact:
+  - This makes the advanced wasm backend practically exercisable from the CLI without changing its intentionally reference-shaped `module:function` contract.
+  - The next surface decision is now narrower: native callbacks are still Rust-API-only, and wasm can be evaluated from the CLI without broadening it into a general plugin system.
+
 ### 2026-03-30 - Shipped relative conditional-group runtime support
 - Scope: conditional runtime parity, compiler rewrite policy, parser-contract alignment, and docs/test refreshes.
 - Changes:
