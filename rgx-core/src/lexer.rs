@@ -988,6 +988,8 @@ impl<'a> Lexer<'a> {
 
     /// Parse conditional start:
     /// - (?(1)...)
+    /// - (?(+1)...)
+    /// - (?(-1)...)
     /// - (?(<name>)...)
     /// - (?(name)...)
     /// - (?(?=expr)...)
@@ -1031,6 +1033,33 @@ impl<'a> Lexer<'a> {
                     });
                 }
                 ConditionalTest::GroupExists(group_num)
+            }
+            Some('+') | Some('-') => {
+                let sign = if self.current == Some('-') { -1 } else { 1 };
+                self.advance(); // Skip '+' or '-'
+
+                let mut number_str = String::new();
+                while let Some(d) = self.current {
+                    if d.is_ascii_digit() {
+                        number_str.push(d);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+
+                let group_offset =
+                    number_str
+                        .parse::<i32>()
+                        .map_err(|_| LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        })?;
+                if group_offset == 0 {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                ConditionalTest::RelativeGroupExists(sign * group_offset)
             }
             Some('<') => {
                 self.advance(); // Skip '<'
@@ -1638,6 +1667,46 @@ mod tests {
             vec![
                 Token::ConditionalStart {
                     condition: ConditionalTest::GroupExists(1),
+                },
+                Token::Char('y'),
+                Token::Char('e'),
+                Token::Char('s'),
+                Token::Alternation,
+                Token::Char('n'),
+                Token::Char('o'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_relative_group_exists_positive() {
+        let tokens = tokenize_all("(?(+1)yes|no)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::RelativeGroupExists(1),
+                },
+                Token::Char('y'),
+                Token::Char('e'),
+                Token::Char('s'),
+                Token::Alternation,
+                Token::Char('n'),
+                Token::Char('o'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_relative_group_exists_negative() {
+        let tokens = tokenize_all("(?(-1)yes|no)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::RelativeGroupExists(-1),
                 },
                 Token::Char('y'),
                 Token::Char('e'),

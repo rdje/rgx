@@ -1077,6 +1077,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_conditional_relative_group_exists_positive() {
+        let mut parser = Parser::new("(?(+1)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(
+                    condition,
+                    crate::ast::ConditionalTest::RelativeGroupExists(1)
+                );
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_relative_group_exists_negative() {
+        let mut parser = Parser::new("(?(-1)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(
+                    condition,
+                    crate::ast::ConditionalTest::RelativeGroupExists(-1)
+                );
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                let false_branch = false_branch.expect("Expected false branch");
+                assert!(matches!(*false_branch, Regex::Char('b')));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
     fn test_parse_conditional_named_group_exists_without_false_branch() {
         let mut parser = Parser::new("(?(<word>)a)").unwrap();
         let ast = parser.parse().unwrap();

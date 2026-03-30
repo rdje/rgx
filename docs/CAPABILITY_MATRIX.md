@@ -94,7 +94,7 @@ Behavior contract:
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
 - Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
-- Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
+- Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named-group reference refers to a capture group that does not exist in the pattern, when a relative conditional group reference is used before runtime support exists, or when a Unicode property name is invalid.
 Representative test anchors:
 - `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
 - `rgx-bench/tests/pcre2_parity.rs` differential parity cases for recursion, numeric backreferences, Unicode property classes, and conditionals
@@ -107,6 +107,11 @@ Representative test anchors:
   - `(?(?<=expr)yes|no)`
   - `(?(?<!expr)yes|no)`
   (`shipped`)
+## Parsed-only conditional boundary
+- Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`parsed-only`)
+Current behavior:
+- Both parser backends now build dedicated relative-offset conditional AST for these forms.
+- RGX still fails them explicitly at compile time until runtime semantics are chosen and validated.
 ## Notes for roadmap usage
 - This matrix is implementation-facing and must reflect verified behavior only.
 - Aspirational goals (broader code-block language support, richer wasm ABI, richer result semantics, full PCRE2 parity) belong in `ROADMAP.md` and `PROJECT_VISION.md`.

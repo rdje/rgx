@@ -3100,10 +3100,20 @@ mod tests {
 
     #[test]
     fn capability_matrix_explicit_unsupported_compile_boundary_cases() {
-        let cases = [(
-            "(?{lua:return true})",
-            "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-        )];
+        let cases = [
+            (
+                "(?{lua:return true})",
+                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
+            ),
+            (
+                "(?(+1)a|b)",
+                "relative conditional group references are parsed but not yet supported",
+            ),
+            (
+                "(?(-1)a|b)",
+                "relative conditional group references are parsed but not yet supported",
+            ),
+        ];
 
         for (pattern, expected_msg) in cases {
             let err = match Regex::compile(pattern) {

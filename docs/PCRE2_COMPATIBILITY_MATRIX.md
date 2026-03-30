@@ -13,7 +13,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 
 ## Rough progress estimate
 - Tracked parity estimate: about `95%`
-  - Rationale: the major regex feature families tracked explicitly in this matrix are now all in the `parity-verified` bucket, including recursion, while a small amount of uncovered differential edge space still exists outside those headline families.
+  - Rationale: the major regex feature families tracked explicitly in this matrix are now mostly in the `parity-verified` bucket, including recursion, while a small conditional-family gap plus some uncovered differential edge space still remain.
 - Broader PCRE2 regex estimate: about `75%`
   - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including recursion, possessive quantifiers, conditionals, and Unicode properties, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or intentionally outside the current shipped target surface.
 - These percentages are intentionally rough and hand-maintained.
@@ -50,8 +50,9 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Explicit no-match parity checks (first-match = `None`, all-match = empty): `parity-verified`
 
 ## Known rgx gaps relative to PCRE2
-- No current headline gap families in this tracked matrix.
-  - Remaining PCRE2 follow-up work is concentrated in newer or broader advanced forms listed below rather than in the currently tracked baseline families.
+- Relative conditional group references `(?(+n)...)` / `(?(-n)...)`: `rgx-gap`
+  - Both parser backends now recognize and transport these forms, but RGX still rejects them explicitly at compile time until runtime semantics are chosen and tested.
+- Remaining PCRE2 follow-up work is concentrated in newer or broader advanced forms listed below rather than in the currently parity-verified baseline families.
 
 ## Supported / Gap / Planned checklist
 ### Supported today on the default regex path
@@ -71,6 +72,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Positive and negative lookahead/lookbehind
 
 ### Explicitly unsupported or still open
+- Relative conditional group references such as `(?(+1)...)` and `(?(-1)...)` (currently parsed by both backends but rejected at compile time on purpose)
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
 - Branch-reset groups
@@ -78,7 +80,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Perl extended character classes `(?[...])`
 
 ### Planned next or broader PCRE2 follow-up
-- Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion forms.
+- Decide runtime policy for the already parsed relative conditional-group family, then drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion forms.
 These broader families are tracked in `ROADMAP.md` as follow-up work rather than as parity-verified support today.
 
 ## Out of scope for PCRE2 parity

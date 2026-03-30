@@ -9,6 +9,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
   - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass (confirmed previous-run delta reporting)
@@ -50,6 +54,9 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - both parser backends lower `*+`, `++`, `?+`, and counted possessive forms into atomic-wrapped greedy quantified AST nodes
   - runtime behavior now blocks backtracking into the possessive piece while still allowing ordinary success cases that need no suffix backtracking
   - parity and capability tests now treat possessive quantifiers as supported behavior rather than as a parser-adapter gap
+- Relative conditional group references are now part of the stable parser boundary on both parser paths:
+  - `(?(+1)...)` and `(?(-1)...)` now transport through both the recursive-descent parser and the default PGEN-backed adapter as `ConditionalTest::RelativeGroupExists(offset)`
+  - RGX still rejects these forms explicitly at compile time until runtime semantics are chosen, which keeps both parser backends aligned without silently over-claiming support
 - The default PGEN-backed parser path is no longer a recursive-descent placeholder:
   - `rgx-core/src/parsing.rs` now calls into the PGEN embedding API
   - the stable regex AST dump is converted into canonical RGX AST structure for groups, lookarounds, conditionals, concatenation/alternation/pieces, and quantifiers
@@ -108,7 +115,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - shorthand and Unicode property classes
   - group families
   - lookarounds
-  - conditionals with and without false branches
+  - conditionals with and without false branches, including relative group-exists transport
   - code-block tags (`lua`, `js`, `javascript`, `rhai`, `native`, `wasm`)
   - recursion and numeric backreferences
 - Direct local validation confirms the four previously reported PGEN transport bugs are fixed in the local `1.1.1` checkout.
@@ -119,6 +126,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The CLI still has no native- or wasm-registration surface, so those shipped slices are currently Rust-API-only.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
+- Relative conditional group references `(?(+1)...)` and `(?(-1)...)` now parse consistently on both backends but still fail at an explicit compile boundary until runtime semantics are defined.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
@@ -138,6 +146,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because the real PGEN parser backend now participates in local validation instead of remaining a placeholder.
 - Capability hardening improved again because recursion moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
+- Capability hardening improved again because relative conditional group references now parse consistently on both parser backends and fail explicitly at the compile boundary instead of diverging or degrading silently.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
@@ -149,6 +158,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
 - Deepen the now-operational quick benchmark capture into a fuller release-profile longitudinal story.
+- Decide runtime or longer-term explicit-boundary policy for relative conditional group references as the broader conditional-family PCRE2 follow-up is scoped.
 
 ### Later
 - Finish larger regex-surface gaps: newer PCRE2 advanced forms and the still-declared-but-unwired opcode families.

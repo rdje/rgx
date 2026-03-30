@@ -271,6 +271,9 @@ impl Compiler {
                             ))
                         }
                     }
+                    crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
+                        "relative conditional group references are parsed but not yet supported: '(?({offset:+})...)'"
+                    )),
                     crate::ast::ConditionalTest::Lookahead { expr, .. }
                     | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
                         self.feature_validation_message(expr, total_groups, named_groups)
@@ -322,6 +325,7 @@ impl Compiler {
                         Self::backreference_validation_message_inner(expr, total_groups)
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_) => None,
                 };
                 condition_message
@@ -458,6 +462,7 @@ impl Compiler {
                         Self::count_capture_groups(expr)
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_) => 0,
                 };
                 condition_count
@@ -527,6 +532,7 @@ impl Compiler {
                         Self::collect_named_groups_inner(expr, next_group, named_groups);
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_) => {}
                 }
                 Self::collect_named_groups_inner(true_branch, next_group, named_groups);

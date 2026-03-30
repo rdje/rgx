@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Hardened the relative-conditional parser boundary
+- Scope: parser interoperability, conditional AST transport, compile-boundary guardrails, and status-document refreshes.
+- Changes:
+  - Added dedicated AST transport for relative conditional group references so `(?(+1)...)` and `(?(-1)...)` now parse into `ConditionalTest::RelativeGroupExists(offset)` on both the recursive-descent parser and the default PGEN-backed adapter.
+  - Extended lexer, parser, and API-level regressions to cover positive/negative relative conditional offsets and to lock the compile boundary explicitly instead of letting backend behavior drift.
+  - Hardened compiler/VM safety boundaries so relative conditional group references now fail with a deliberate unsupported compile error until RGX defines runtime semantics for them.
+  - Refreshed `docs/PARSER_CONTRACT.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `RUST_CODEBASE_ANALYSIS.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the parser/runtime boundary is documented consistently.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This keeps the default PGEN-backed build and the recursive-descent reference backend aligned on a real PCRE-family conditional form without over-claiming runtime support.
+  - The next decision point is no longer parser transport; it is whether RGX wants to execute relative conditional group references or keep them as an explicit long-term boundary.
+
 ### 2026-03-30 - Added local benchmark trend history and delta reporting
 - Scope: quick benchmark capture operationalization, bench-side regression coverage, and validation/docs refreshes.
 - Changes:

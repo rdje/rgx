@@ -205,6 +205,8 @@ pub enum AnchorType {
 pub enum ConditionalTest {
     /// Test if capture group exists (?(1)...)
     GroupExists(u32),
+    /// Test if a relative capture group exists (?(+1)...) or (?(-1)...)
+    RelativeGroupExists(i32),
     /// Test if named group exists (?(<name>)...)  
     NamedGroupExists(String),
     /// Lookahead test (?(?=...)...) or (?(?!...)...)

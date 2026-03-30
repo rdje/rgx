@@ -3,8 +3,8 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.7`
-- Last updated: `2026-03-29`
+- Version: `v0.1.8`
+- Last updated: `2026-03-30`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -49,6 +49,8 @@ Required invariants:
   - Unicode property classes like `\p{L}` / `\P{Greek}` -> `Regex::UnicodeClass { name, negated }`
   - conditional (currently supported parser tests):
     - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
+    - `(?(+1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(1), ... }`
+    - `(?(-1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(-1), ... }`
     - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
     - `(?(name)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
     - `(?(?=expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: true }, ... }`
@@ -69,9 +71,10 @@ Current contract:
   - code blocks
   - recursion
   - backreferences
-  - conditionals (group/named-group/positive+negative-lookaround forms in parser tests)
+  - conditionals, including current group/named-group/lookaround forms plus relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`
 - Compiler/runtime status for those parser-recognized forms is:
-  - recursion, backreferences, Unicode property classes, and conditionals are integrated on the default regex path
+  - recursion, backreferences, Unicode property classes, and current shipped conditional forms are integrated on the default regex path
+  - relative conditional group references are intentionally held at an explicit compile boundary until RGX defines runtime semantics for them
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
@@ -88,9 +91,9 @@ The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
-- Parse-success/compile-fail boundary for still-gated runtime features such as mode-restricted code blocks and missing capture-target references.
+- Parse-success/compile-fail boundary for still-gated runtime features such as mode-restricted code blocks, relative conditional group references, and missing capture-target references.
 
-When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, code-block tags, recursion, backreferences, conditionals, and Unicode property classes.
+When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, code-block tags, recursion, backreferences, current conditional families (including relative group-exists transport), and Unicode property classes.
 
 Current rollout note:
 - The default `rgx-core` build now includes `pgen-parser`, so `parse_pattern(...)` uses the real PGEN AST-dump adapter unless default features are explicitly disabled.

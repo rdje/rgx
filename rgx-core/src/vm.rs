@@ -3418,7 +3418,9 @@ impl OptimizingCompiler {
                         self.flags.has_lookarounds = true;
                         self.analyze_pass(expr);
                     }
-                    ConditionalTest::GroupExists(_) | ConditionalTest::NamedGroupExists(_) => {}
+                    ConditionalTest::GroupExists(_)
+                    | ConditionalTest::RelativeGroupExists(_)
+                    | ConditionalTest::NamedGroupExists(_) => {}
                 }
                 self.analyze_pass(true_branch);
                 if let Some(false_branch) = false_branch {
@@ -3853,6 +3855,11 @@ impl OptimizingCompiler {
                 self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
                 self.code.push(*group_id as u8);
             }
+            ConditionalTest::RelativeGroupExists(offset) => {
+                panic!(
+                    "relative conditional group references should fail at compile boundary before codegen: {offset:+}"
+                );
+            }
             ConditionalTest::NamedGroupExists(name) => {
                 let group_id = self
                     .named_groups
@@ -3989,7 +3996,9 @@ impl OptimizingCompiler {
                     | ConditionalTest::Lookbehind { expr, .. } => {
                         Self::collect_capturing_group_defs_inner(expr, next_group, defs);
                     }
-                    ConditionalTest::GroupExists(_) | ConditionalTest::NamedGroupExists(_) => {}
+                    ConditionalTest::GroupExists(_)
+                    | ConditionalTest::RelativeGroupExists(_)
+                    | ConditionalTest::NamedGroupExists(_) => {}
                 }
                 Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);
                 if let Some(false_branch) = false_branch {

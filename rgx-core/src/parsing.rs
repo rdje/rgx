@@ -858,12 +858,20 @@ impl<'a> PgenAstAdapter<'a> {
                     "invalid positive conditional group reference '{text}'"
                 ))
             })?;
-            return Ok(ConditionalTest::GroupExists(group));
+            return Ok(ConditionalTest::RelativeGroupExists(group as i32));
         }
         if text.starts_with('-') {
-            return Err(RgxError::Compile(format!(
-                "pgen accepted negative conditional group reference '{text}', but rgx does not yet represent that form in its parser AST"
-            )));
+            let group = text.parse::<i32>().map_err(|_| {
+                self.contract_error(&format!(
+                    "invalid negative conditional group reference '{text}'"
+                ))
+            })?;
+            if group == 0 {
+                return Err(self.contract_error(&format!(
+                    "invalid negative conditional group reference '{text}'"
+                )));
+            }
+            return Ok(ConditionalTest::RelativeGroupExists(group));
         }
         if !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit()) {
             let group = text.parse::<u32>().map_err(|_| {
@@ -1140,6 +1148,8 @@ mod tests {
             "(?<=z)a",
             "(?<!x)a",
             "(?(1)a|b)",
+            "(?(+1)a|b)",
+            "(?(-1)a|b)",
             "(?(<word>)a)",
             "(?(<word>)a|b)",
             "(?(word)a|b)",
@@ -1284,10 +1294,20 @@ mod tests {
     #[test]
     fn parser_contract_parsed_but_unintegrated_features_fail_at_compile_boundary() {
         let compiler = crate::compiler::Compiler::new();
-        let cases = [(
-            "(?{lua:return true})",
-            "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
-        )];
+        let cases = [
+            (
+                "(?{lua:return true})",
+                "code blocks require ExecutionMode::Safe or ExecutionMode::Full",
+            ),
+            (
+                "(?(+1)a|b)",
+                "relative conditional group references are parsed but not yet supported",
+            ),
+            (
+                "(?(-1)a|b)",
+                "relative conditional group references are parsed but not yet supported",
+            ),
+        ];
 
         for (pattern, expected_msg) in cases {
             parse_pattern(pattern).unwrap_or_else(|e| {
