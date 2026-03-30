@@ -101,6 +101,7 @@ Behavior contract:
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
 - Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
+  - `DEFINE` is treated as always false, so its single branch acts as a definition-only block and runtime behavior falls through as an empty else.
 - Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named/relative-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
 Representative test anchors:
 - `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, and conditional runtime/compile-boundary tests
@@ -109,9 +110,10 @@ Representative test anchors:
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)
-- `DEFINE` conditionals: `(?(DEFINE)yes|no)` (`parsed-only`)
-  - parser accepts and preserves the `DEFINE` condition explicitly
-  - compiler rejects it explicitly until RGX chooses runtime policy for this PCRE2 form
+- `DEFINE` conditionals: `(?(DEFINE)yes)` (`shipped`)
+  - the `DEFINE` test is treated as always false on the current match path
+  - the single branch remains available for numbered and named subroutine definitions while runtime behavior falls through as an empty else
+  - `(?(DEFINE)yes|no)` compile-rejects explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
 - Lookaround conditions:
   - `(?(?=expr)yes|no)`
   - `(?(?!expr)yes|no)`

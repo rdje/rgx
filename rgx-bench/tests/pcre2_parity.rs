@@ -866,6 +866,11 @@ fn pcre2_parity_supported_conditionals() {
             input: "ab c ac cab",
         },
         ParityCase {
+            name: "conditional_define_named_subroutine",
+            pattern: r"\A(?(DEFINE)(?<word>a+))(?&word)\z",
+            input: "aaa",
+        },
+        ParityCase {
             name: "conditional_relative_group_exists_backward",
             pattern: "(a)?(?(-1)b|c)",
             input: "ab c ac cab",

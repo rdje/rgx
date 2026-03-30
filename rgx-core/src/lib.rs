@@ -3116,16 +3116,38 @@ mod tests {
     }
 
     #[test]
-    fn parser_define_conditional_reports_explicit_compile_boundary() {
-        let result = Regex::compile("(?(DEFINE)a)");
+    fn parser_define_conditional_with_false_branch_reports_compile_error() {
+        let result = Regex::compile("(?(DEFINE)a|b)");
         assert!(
             result.is_err(),
-            "DEFINE conditional should not silently compile"
+            "DEFINE conditional with false branch should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains(
-            "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx"
-        ));
+        assert!(msg.contains("conditional '(?(DEFINE)...)' does not support a false branch"));
+    }
+
+    #[test]
+    fn parser_define_conditional_without_false_branch_acts_like_empty_else() {
+        let regex = Regex::compile(r"\A(?(DEFINE)a)\z")
+            .expect("Failed to compile DEFINE conditional without false branch");
+        assert!(regex.is_match(""));
+        assert!(!regex.is_match("a"));
+    }
+
+    #[test]
+    fn parser_define_conditional_can_define_numbered_subroutine_for_later_use() {
+        let regex = Regex::compile(r"\A(?(DEFINE)(a+))(?1)\z")
+            .expect("Failed to compile DEFINE conditional with numbered subroutine definition");
+        assert!(regex.is_match("aaa"));
+        assert!(!regex.is_match("bbb"));
+    }
+
+    #[test]
+    fn parser_define_conditional_can_define_named_subroutine_for_later_use() {
+        let regex = Regex::compile(r"\A(?(DEFINE)(?<word>a+))(?&word)\z")
+            .expect("Failed to compile DEFINE conditional with named subroutine definition");
+        assert!(regex.is_match("aaa"));
+        assert!(!regex.is_match("bbb"));
     }
 
     #[test]
@@ -3232,6 +3254,8 @@ mod tests {
             (r"\A(a)?(?(-1)b|c)\z", "ac", false),
             (r"\A(?<g>a)?(?(g)b|c)\z", "ab", true),
             (r"\A(?<g>a)?(?(g)b|c)\z", "c", true),
+            (r"\A(?(DEFINE)(a+))\z", "", true),
+            (r"\A(?(DEFINE)(?<word>a+))(?&word)\z", "aaa", true),
             (r"\A(?(+1)a|b)(a)\z", "ba", true),
             (r"\A(?(+1)a|b)(a)\z", "aa", false),
             ("a(?R)?b", "aaabbb", true),

@@ -580,10 +580,16 @@ impl Compiler {
                             ))
                         }
                     }
-                    crate::ast::ConditionalTest::Define => Some(
-                        "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx"
-                            .to_string(),
-                    ),
+                    crate::ast::ConditionalTest::Define => {
+                        if false_branch.is_some() {
+                            Some(
+                                "conditional '(?(DEFINE)...)' does not support a false branch"
+                                    .to_string(),
+                            )
+                        } else {
+                            None
+                        }
+                    }
                     crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
                         "internal compiler error: unresolved relative conditional group reference '(?({offset:+})...)'"
                     )),

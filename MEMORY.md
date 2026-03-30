@@ -73,7 +73,10 @@ Live continuity memory for `rgx` sessions.
   - `./scripts/run-local-ci.sh`
 - Hosted CI now checks out submodules recursively; because `subs/pgen` is private, GitHub Actions may still need `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
 - Quick benchmark capture now keeps shared plus mode-scoped latest snapshots and archives timestamped local history under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`; `trend_capture` / `scripts/capture-benchmark-trends.sh` auto-compare only against same-mode history and still accept explicit archived baselines via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
-- `(?(DEFINE)...)` now has an explicit parser/AST boundary on both parser backends and compile-rejects cleanly instead of being treated like a named-group conditional.
+- Single-branch `DEFINE` conditionals are now shipped on the default regex path:
+  - `DEFINE` is treated as always false at runtime, so its one branch acts as a definition-only block and matching falls through as an empty else
+  - numbered and named subroutine definitions inside `DEFINE` blocks are now usable later in the same pattern
+  - invalid two-branch `DEFINE` forms still compile-reject explicitly to stay aligned with PCRE2
 - `(?|...)` branch-reset groups now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines PCRE2-style capture renumbering/runtime behavior.
 - `(?[...])` Perl extended character classes now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines downstream set-algebra/runtime behavior.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
@@ -132,6 +135,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Shipped single-branch `DEFINE` conditionals on the default regex path:
+  - `DEFINE` is now treated as always false at runtime, so single-branch definition blocks fall through as an empty else instead of compile-rejecting
+  - numbered and named subroutine definitions inside `DEFINE` now remain available for later `(?1)` / `(?&name)` calls on the shipped path
+  - invalid two-branch `DEFINE` forms still fail explicitly at compile time so RGX stays aligned with PCRE2's single-branch rule
 - Hardened the Perl extended-character-class parser boundary:
   - both parser backends now preserve `(?[...])` as `Regex::ExtendedCharClass { content }` instead of leaving this newer PCRE2 family as an ambiguous parser gap
   - the public compile path now fails early with an explicit extended-character-class policy message until RGX chooses downstream set-algebra/runtime semantics

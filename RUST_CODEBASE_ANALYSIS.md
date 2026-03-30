@@ -54,7 +54,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition, `(?|...)` now reaches a dedicated group kind, and `(?[...])` now reaches `Regex::ExtendedCharClass`, so all three forms fail with clear compile-time policy errors instead of being misread or silently dropped.
+- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals execute on the default path as always-false definition blocks, while `(?|...)` now reaches a dedicated group kind and `(?[...])` now reaches `Regex::ExtendedCharClass`, so those still-gated forms fail with clear compile-time policy errors instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time

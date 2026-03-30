@@ -1331,10 +1331,6 @@ mod tests {
                 "conditional '(?(-1)...)' refers to missing capture group",
             ),
             (
-                "(?(DEFINE)a)",
-                "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx",
-            ),
-            (
                 "(?|a|b)",
                 "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx",
             ),

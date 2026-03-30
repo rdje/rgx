@@ -42,7 +42,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
   - differential coverage includes successful backreference matching, explicit no-match behavior, and alternation/lookahead cases that depend on capture restoration under backtracking
 - Conditionals (`(?(...)yes|no)` current supported parser forms): `parity-verified`
-  - differential coverage includes group-exists, named-group-exists, and lookaround conditions for both first-match and all-match span parity
+  - differential coverage includes group-exists, named-group-exists, single-branch `DEFINE` definition blocks, and lookaround conditions for both first-match and all-match span parity
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
   - positive/negative lookbehind: `parity-verified`
@@ -67,6 +67,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - group-exists
   - relative-group-exists
   - named-group-exists
+  - single-branch `DEFINE` definition blocks
   - lookaround conditions
 - Positive and negative lookahead/lookbehind
 
@@ -75,8 +76,6 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
 - Branch-reset groups
   - current RGX boundary is parser-recognized but compile-rejected explicitly; PCRE2-style capture renumbering/runtime behavior is still open
-- `DEFINE` conditionals
-  - current RGX boundary is parser-recognized but compile-rejected explicitly; runtime behavior is still open
 - Perl extended character classes `(?[...])`
   - current RGX boundary is parser-recognized but compile-rejected explicitly; downstream set-algebra/runtime behavior is still open
 

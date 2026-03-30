@@ -201,6 +201,7 @@ const CONDITIONAL_KIND_LOOKAHEAD_POSITIVE: u8 = 1;
 const CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE: u8 = 2;
 const CONDITIONAL_KIND_LOOKBEHIND_POSITIVE: u8 = 3;
 const CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE: u8 = 4;
+const CONDITIONAL_KIND_DEFINE_FALSE: u8 = 5;
 const MAX_RECURSION_DEPTH: usize = 1024;
 
 /// Bytecode instruction with operands
@@ -2831,6 +2832,7 @@ impl RegexVM {
                     Some(!matched)
                 }
             }
+            CONDITIONAL_KIND_DEFINE_FALSE => Some(false),
             _ => None,
         }
     }
@@ -3885,9 +3887,7 @@ impl OptimizingCompiler {
                 self.code.push(group_id as u8);
             }
             ConditionalTest::Define => {
-                panic!(
-                    "conditional '(?(DEFINE)...)' should be rejected during compiler validation before codegen"
-                );
+                self.code.push(CONDITIONAL_KIND_DEFINE_FALSE);
             }
             ConditionalTest::Lookahead { expr, positive } => {
                 self.code.push(if *positive {
@@ -4147,6 +4147,7 @@ impl OptimizingCompiler {
                             self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
                             ip = end;
                         }
+                        CONDITIONAL_KIND_DEFINE_FALSE => {}
                         _ => return,
                     }
                     ip += 2;

@@ -111,7 +111,7 @@ Live forward-looking tracker for rgx.
 ## Done recently (snapshot)
 - Hardened Perl extended character classes as an explicit parser boundary so `(?[...])` now round-trips through both parser backends and compile-rejects cleanly instead of remaining an ambiguous parser gap.
 - Hardened branch-reset groups as an explicit parser boundary so `(?|...)` now round-trips through both parser backends and compile-rejects cleanly instead of remaining an ambiguous parser gap.
-- Hardened `DEFINE` conditionals as an explicit parser boundary so `(?(DEFINE)...)` now parses into dedicated AST on both parser backends and compile-rejects cleanly instead of masquerading as a named-group conditional.
+- Shipped single-branch `DEFINE` conditionals on the default regex path by treating `DEFINE` as always false while keeping its branch available for numbered and named subroutine definitions, with explicit compile-time rejection for invalid false-branch forms.
 - Hardened the shipped Rhai source-body contract so explicit `return ...` bodies are now locked in alongside final-expression authoring, with regression coverage and docs aligned to the actual runtime behavior.
 - Separated benchmark trend artifacts into mode-scoped latest snapshots and history directories so auto-selected comparison baselines no longer mix quick-profile and full-profile captures, while still preserving explicit archived-baseline selection.
 - Added file-backed CLI wasm module registration through repeatable `--wasm-module NAME=PATH`, so `(?{wasm:module:function})` no longer requires Rust glue just to exercise registered modules from the command line.

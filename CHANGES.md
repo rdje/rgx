@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Ship single-branch DEFINE conditionals
+- Scope: conditional runtime parity, PCRE2-aligned `DEFINE` validation, and parser-boundary contract refreshes.
+- Changes:
+  - Removed the old compile-boundary rejection for single-branch `DEFINE` conditionals and taught the VM to execute `DEFINE` as an always-false conditional operand, which makes its branch act as a definition-only block with empty-else runtime behavior.
+  - Preserved PCRE2's rule that `DEFINE` may not have a false branch, so `(?(DEFINE)yes|no)` now fails explicitly at compile time instead of drifting into RGX-only semantics.
+  - Added runtime regressions for empty-else `DEFINE` behavior plus numbered and named subroutine definitions inside `DEFINE`, promoted representative `DEFINE` coverage into the PCRE2 differential conditional suite, and refreshed the parser contract/capability/compatibility/continuity docs accordingly.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core define -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+- Notes/impact:
+  - RGX now executes the practical PCRE2 `DEFINE` pattern shape instead of leaving it at a parser-only boundary, while still rejecting invalid two-branch `DEFINE` forms rather than inventing non-PCRE2 behavior.
+
 ### 2026-03-30 - Harden Perl extended-character-class parser boundary
 - Scope: parser-boundary hardening for newer PCRE2 character-class syntax, explicit compile-policy messaging, and parser/PGEN alignment.
 - Changes:
