@@ -66,7 +66,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
   - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
-  - audit downstream RGX handling for branch-reset groups, `DEFINE` conditionals, and Perl extended character classes `(?[...])` once parser transport is available and verified
+  - audit downstream RGX handling for branch-reset groups and Perl extended character classes `(?[...])` once parser transport is available and verified
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 
 ### Performance validation loop
@@ -108,6 +108,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Hardened `DEFINE` conditionals as an explicit parser boundary so `(?(DEFINE)...)` now parses into dedicated AST on both parser backends and compile-rejects cleanly instead of masquerading as a named-group conditional.
 - Hardened the shipped Rhai source-body contract so explicit `return ...` bodies are now locked in alongside final-expression authoring, with regression coverage and docs aligned to the actual runtime behavior.
 - Separated benchmark trend artifacts into mode-scoped latest snapshots and history directories so auto-selected comparison baselines no longer mix quick-profile and full-profile captures, while still preserving explicit archived-baseline selection.
 - Added file-backed CLI wasm module registration through repeatable `--wasm-module NAME=PATH`, so `(?{wasm:module:function})` no longer requires Rust glue just to exercise registered modules from the command line.

@@ -12,8 +12,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features javascript` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_define_conditional_reports_explicit_compile_boundary -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_define_condition -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
@@ -50,6 +53,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
+- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition and fails with a clear compile-time policy error instead of being misread as a named-group conditional.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -169,7 +173,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection and same-mode history separation exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`, branch-reset groups, Perl extended character classes) and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

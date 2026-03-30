@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.8`
+- Version: `v0.1.9`
 - Last updated: `2026-03-30`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -53,6 +53,7 @@ Required invariants:
     - `(?(-1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(-1), ... }`
     - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
     - `(?(name)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
+    - `(?(DEFINE)yes|no)` -> `Regex::Conditional { condition: Define, ... }`
     - `(?(?=expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: true }, ... }`
     - `(?(?!expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: false }, ... }`
     - `(?(?<=expr)yes|no)` -> `Regex::Conditional { condition: Lookbehind { expr, positive: true }, ... }`
@@ -72,8 +73,10 @@ Current contract:
   - recursion
   - backreferences
   - conditionals, including current group/named-group/lookaround forms plus relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`
+  - `DEFINE` conditionals as an explicit parsed-only boundary form
 - Compiler/runtime status for those parser-recognized forms is:
   - recursion, backreferences, Unicode property classes, and current shipped conditional forms, including relative group-exists conditionals, are integrated on the default regex path
+  - `DEFINE` conditionals are parser-recognized but compile-rejected explicitly until RGX defines downstream runtime policy
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

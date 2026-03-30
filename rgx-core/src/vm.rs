@@ -3420,7 +3420,8 @@ impl OptimizingCompiler {
                     }
                     ConditionalTest::GroupExists(_)
                     | ConditionalTest::RelativeGroupExists(_)
-                    | ConditionalTest::NamedGroupExists(_) => {}
+                    | ConditionalTest::NamedGroupExists(_)
+                    | ConditionalTest::Define => {}
                 }
                 self.analyze_pass(true_branch);
                 if let Some(false_branch) = false_branch {
@@ -3869,6 +3870,11 @@ impl OptimizingCompiler {
                 self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
                 self.code.push(group_id as u8);
             }
+            ConditionalTest::Define => {
+                panic!(
+                    "conditional '(?(DEFINE)...)' should be rejected during compiler validation before codegen"
+                );
+            }
             ConditionalTest::Lookahead { expr, positive } => {
                 self.code.push(if *positive {
                     CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
@@ -3998,7 +4004,8 @@ impl OptimizingCompiler {
                     }
                     ConditionalTest::GroupExists(_)
                     | ConditionalTest::RelativeGroupExists(_)
-                    | ConditionalTest::NamedGroupExists(_) => {}
+                    | ConditionalTest::NamedGroupExists(_)
+                    | ConditionalTest::Define => {}
                 }
                 Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);
                 if let Some(false_branch) = false_branch {

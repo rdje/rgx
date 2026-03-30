@@ -75,6 +75,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
 - Branch-reset groups
 - `DEFINE` conditionals
+  - current RGX boundary is parser-recognized but compile-rejected explicitly; runtime behavior is still open
 - Perl extended character classes `(?[...])`
 
 ### Planned next or broader PCRE2 follow-up

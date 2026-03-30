@@ -1168,6 +1168,25 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_conditional_define_condition() {
+        let mut parser = Parser::new("(?(DEFINE)a)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                assert_eq!(condition, crate::ast::ConditionalTest::Define);
+                assert!(matches!(*true_branch, Regex::Char('a')));
+                assert!(false_branch.is_none());
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
     fn test_parse_conditional_lookahead_condition() {
         let mut parser = Parser::new("(?(?=ab)x|y)").unwrap();
         let ast = parser.parse().unwrap();

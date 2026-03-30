@@ -3116,6 +3116,19 @@ mod tests {
     }
 
     #[test]
+    fn parser_define_conditional_reports_explicit_compile_boundary() {
+        let result = Regex::compile("(?(DEFINE)a)");
+        assert!(
+            result.is_err(),
+            "DEFINE conditional should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains(
+            "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx"
+        ));
+    }
+
+    #[test]
     fn parser_conditional_missing_relative_group_reports_compile_error() {
         let cases = [
             (

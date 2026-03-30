@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Harden DEFINE conditional parser boundary
+- Scope: parser-boundary hardening for newer PCRE2 conditionals, explicit compile-policy messaging, and parser/PGEN alignment.
+- Changes:
+  - Added `ConditionalTest::Define` to the regex AST and taught both parser backends to preserve `(?(DEFINE)...)` explicitly instead of misclassifying it as a named-group conditional.
+  - Updated the default PGEN AST adapter, parser-contract fixtures, and public compile path so `DEFINE` conditionals now round-trip through the parser boundary and fail with a deliberate compile-time policy message.
+  - Refreshed the roadmap/capability/compatibility docs so `DEFINE` is now tracked as a parsed-only boundary rather than an ambiguous gap.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_define_conditional_reports_explicit_compile_boundary -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_define_condition -- --nocapture`
+- Notes/impact:
+  - Newer PCRE2 conditional syntax can now reach RGX downstream without silently changing meaning, which makes future runtime-policy work much safer.
+
 ### 2026-03-30 - Separated benchmark history by capture mode
 - Scope: benchmark trend longitudinal safety, mode-aware baseline resolution, wrapper output clarity, and roadmap/doc alignment.
 - Changes:

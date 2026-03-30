@@ -391,6 +391,9 @@ impl Compiler {
                 crate::ast::ConditionalTest::NamedGroupExists(name),
                 opened_groups,
             )),
+            crate::ast::ConditionalTest::Define => {
+                Ok((crate::ast::ConditionalTest::Define, opened_groups))
+            }
         }
     }
 
@@ -493,6 +496,10 @@ impl Compiler {
                             ))
                         }
                     }
+                    crate::ast::ConditionalTest::Define => Some(
+                        "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx"
+                            .to_string(),
+                    ),
                     crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
                         "internal compiler error: unresolved relative conditional group reference '(?({offset:+})...)'"
                     )),
@@ -548,7 +555,8 @@ impl Compiler {
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
-                    | crate::ast::ConditionalTest::NamedGroupExists(_) => None,
+                    | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::Define => None,
                 };
                 condition_message
                     .or_else(|| {
@@ -685,7 +693,8 @@ impl Compiler {
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
-                    | crate::ast::ConditionalTest::NamedGroupExists(_) => 0,
+                    | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::Define => 0,
                 };
                 condition_count
                     + Self::count_capture_groups(true_branch)
@@ -755,7 +764,8 @@ impl Compiler {
                     }
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
-                    | crate::ast::ConditionalTest::NamedGroupExists(_) => {}
+                    | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::Define => {}
                 }
                 Self::collect_named_groups_inner(true_branch, next_group, named_groups);
                 if let Some(false_branch) = false_branch {

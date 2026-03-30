@@ -1102,7 +1102,11 @@ impl<'a> Lexer<'a> {
                         position: start_pos,
                     });
                 }
-                ConditionalTest::NamedGroupExists(name)
+                if name == "DEFINE" {
+                    ConditionalTest::Define
+                } else {
+                    ConditionalTest::NamedGroupExists(name)
+                }
             }
             Some('?') => {
                 self.advance(); // Skip '?' in condition test
@@ -1768,6 +1772,21 @@ mod tests {
                 Token::Char('a'),
                 Token::Alternation,
                 Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_define_condition() {
+        let tokens = tokenize_all("(?(DEFINE)a)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::Define,
+                },
+                Token::Char('a'),
                 Token::GroupEnd,
             ]
         );

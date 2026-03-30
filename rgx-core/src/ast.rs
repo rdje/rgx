@@ -209,6 +209,8 @@ pub enum ConditionalTest {
     RelativeGroupExists(i32),
     /// Test if named group exists (?(<name>)...)  
     NamedGroupExists(String),
+    /// DEFINE conditional (?(DEFINE)...)
+    Define,
     /// Lookahead test (?(?=...)...) or (?(?!...)...)
     Lookahead { expr: Box<Regex>, positive: bool },
     /// Lookbehind test (?(?<=...)...) or (?(?<!...)...)

@@ -852,6 +852,9 @@ impl<'a> PgenAstAdapter<'a> {
         {
             return Ok(ConditionalTest::NamedGroupExists(inner.to_string()));
         }
+        if text == "DEFINE" {
+            return Ok(ConditionalTest::Define);
+        }
         if let Some(value) = text.strip_prefix('+') {
             let group = value.parse::<u32>().map_err(|_| {
                 self.contract_error(&format!(
@@ -1153,6 +1156,7 @@ mod tests {
             "(?(<word>)a)",
             "(?(<word>)a|b)",
             "(?(word)a|b)",
+            "(?(DEFINE)a)",
             "(?(?=ab)x|y)",
             "(?(?!ab)x|y)",
             "(?(?<=z)a|b)",
@@ -1306,6 +1310,10 @@ mod tests {
             (
                 "(?(-1)a|b)",
                 "conditional '(?(-1)...)' refers to missing capture group",
+            ),
+            (
+                "(?(DEFINE)a)",
+                "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx",
             ),
         ];
 

@@ -103,6 +103,9 @@ Representative test anchors:
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)
+- `DEFINE` conditionals: `(?(DEFINE)yes|no)` (`parsed-only`)
+  - parser accepts and preserves the `DEFINE` condition explicitly
+  - compiler rejects it explicitly until RGX chooses runtime policy for this PCRE2 form
 - Lookaround conditions:
   - `(?(?=expr)yes|no)`
   - `(?(?!expr)yes|no)`
