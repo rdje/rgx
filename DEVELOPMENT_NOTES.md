@@ -94,7 +94,8 @@ Pipeline in `rgx-core`:
 - `cargo check -p rgx-core --features javascript` and `cargo check -p rgx-core --features all-languages` now pass again
 - Local-first CI path now exists:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
-  - `./scripts/run-local-ci.sh` now covers the default PGEN-backed workspace plus the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`, `all-languages`) and `rgx-cli --features pgen-parser`
+  - `./scripts/run-local-ci.sh` now covers explicit RGX package tests (`rgx-core`, `rgx-cli`, `rgx-bench`, `rgx-wasm`) plus the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`, `all-languages`) and `rgx-cli --features pgen-parser`
+  - that explicit package matrix is intentional because the umbrella `cargo test --workspace` path has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent per-package RGX coverage stays stable
   - shared CI is now expected to initialize the committed `subs/pgen` submodule before running that same validation path
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source and CI execution files, and reports compile-time `include!`-style macro usage
 - `Cargo.lock` is intentionally tracked so local validation and GitHub CI share the same dependency resolution

@@ -69,8 +69,11 @@ Live continuity memory for `rgx` sessions.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm`
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
   - `./scripts/run-local-ci.sh`
+  - the default local CI loop now uses an explicit RGX package test matrix instead of `cargo test --workspace`, because the umbrella workspace run has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency
 - Hosted CI now checks out submodules recursively; because `subs/pgen` is private, GitHub Actions may still need `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
 - Quick benchmark capture now keeps shared plus mode-scoped latest snapshots and archives timestamped local history under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`; `trend_capture` / `scripts/capture-benchmark-trends.sh` auto-compare only against same-mode history and still accept explicit archived baselines via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 - Single-branch `DEFINE` conditionals are now shipped on the default regex path:
@@ -109,8 +112,8 @@ Live continuity memory for `rgx` sessions.
   - PCRE2 differential coverage now treats representative Unicode property behavior as supported rather than as a known gap
 - Local-first CI is now available:
   - `.github/workflows/ci.yml` delegates to `./scripts/run-local-ci.sh`
-  - `./scripts/run-local-ci.sh` now covers the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `wasm`, `all-languages`) plus `rgx-cli --features pgen-parser`
-  - hosted GitHub CI currently exports `RGX_SKIP_PGEN_CHECKS=1` until the verified PGEN `1.1.1` revision is published upstream
+  - `./scripts/run-local-ci.sh` now covers explicit RGX package tests (`rgx-core`, `rgx-cli`, `rgx-bench`, `rgx-wasm`) plus the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`, `all-languages`) and `rgx-cli --features pgen-parser`
+  - the explicit package matrix is intentional because `cargo test --workspace` has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent per-package RGX coverage stays stable
   - `scripts/check-ci-paths.sh` verifies CI-critical paths are git-controlled, rejects absolute filesystem paths in Rust source/CI execution files, and currently reports that there are no compile-time `include!`-style macros in workspace source
 - `Cargo.lock` is now intentionally tracked so local and GitHub CI use the same dependency resolution
 - `RUST_CODEBASE_ANALYSIS.md` now exists as the live roadmap-grounded assessment of the Rust workspace and is part of the Rust commit workflow review path.

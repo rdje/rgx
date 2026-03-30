@@ -41,7 +41,13 @@ fi
 
 run_step "cargo fmt --check (RGX workspace packages)" cargo fmt --manifest-path Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm --check
 
-run_step "cargo test --workspace" cargo test --manifest-path Cargo.toml --workspace
+# Keep package coverage explicit here. The submodule-backed PGEN default path has
+# shown intermittent hangs under the umbrella `cargo test --workspace` command,
+# while the equivalent per-package RGX coverage remains stable and precise.
+run_step "cargo test -p rgx-core" cargo test --manifest-path Cargo.toml -p rgx-core
+run_step "cargo test -p rgx-cli" cargo test --manifest-path Cargo.toml -p rgx-cli
+run_step "cargo test -p rgx-bench" cargo test --manifest-path Cargo.toml -p rgx-bench
+run_step "cargo test -p rgx-wasm" cargo test --manifest-path Cargo.toml -p rgx-wasm
 
 run_step "cargo test -p rgx-core --features pgen-parser" cargo test --manifest-path Cargo.toml -p rgx-core --features pgen-parser
 run_step "cargo test -p rgx-cli --features pgen-parser" cargo test --manifest-path Cargo.toml -p rgx-cli --features pgen-parser

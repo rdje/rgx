@@ -49,7 +49,7 @@ If you are new to the repo, use this order:
 
 ### CI / automation paths
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
-- [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for the shared workspace + `rgx-core` feature-matrix validation path
+- [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for explicit RGX package tests plus the `rgx-core` / `rgx-cli` feature-matrix validation path
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
 - [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes shared plus mode-scoped summaries and archives under `target/benchmark-trends/`
 
@@ -86,7 +86,10 @@ It does **not** need to be updated on every commit—only when those entry-point
 ## Build, test, run
 ```bash
 cargo build
-cargo test --workspace
+cargo test -p rgx-core
+cargo test -p rgx-cli
+cargo test -p rgx-bench
+cargo test -p rgx-wasm
 cargo test -p rgx-core vm::
 cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 ```
@@ -100,10 +103,11 @@ The default RGX build now expects the committed `subs/pgen` submodule carrying t
 The quick benchmark capture path now keeps shared `latest.md` / `latest.tsv` plus mode-scoped `latest-quick.*` / `latest-full.*`, archives runs under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`, and auto-compares only against the most recent archived capture from the same mode while still allowing an explicit archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 
 That submodule-backed path now covers:
-- the default PGEN-backed workspace formatting/tests
+- the default PGEN-backed RGX package test matrix (`rgx-core`, `rgx-cli`, `rgx-bench`, `rgx-wasm`)
 - `rgx-core` feature checks for `pgen-parser`, `lua`, `javascript`, `rhai`, and `wasm`
 - `rgx-cli` build/test coverage with `--features pgen-parser`
 - combined-language build coverage through `--features all-languages`
+- and it intentionally avoids the flakier umbrella `cargo test --workspace` path, which has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency
 
 Fresh clones should use `git clone --recurse-submodules ...` or run `git submodule update --init --recursive` before building.
 Because `subs/pgen` is private, hosted GitHub CI may need a `RGX_SUBMODULES_TOKEN` secret if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.

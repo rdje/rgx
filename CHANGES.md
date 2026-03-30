@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Stabilize local CI package test matrix
+- Scope: local/GitHub validation reliability, submodule-backed PGEN build stability, and validation-doc alignment.
+- Changes:
+  - Replaced the flaky umbrella `cargo test --workspace` step in `scripts/run-local-ci.sh` with explicit RGX package tests for `rgx-core`, `rgx-cli`, `rgx-bench`, and `rgx-wasm`, while preserving the existing feature-matrix and benchmark-capture coverage.
+  - Updated `README.md`, `docs/USER_GUIDE.md`, `DEVELOPMENT_NOTES.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the repo now documents the explicit package-matrix validation path consistently.
+- Validation:
+  - `bash -n /Users/richarddje/Documents/github/rgx/scripts/run-local-ci.sh`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This keeps RGX’s local and hosted CI story broad without depending on the intermittently hanging `cargo test --workspace` path seen with the submodule-backed `pgen` default parser build.
+
 ### 2026-03-30 - Ship single-branch DEFINE conditionals
 - Scope: conditional runtime parity, PCRE2-aligned `DEFINE` validation, and parser-boundary contract refreshes.
 - Changes:

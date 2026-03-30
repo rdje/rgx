@@ -3,7 +3,7 @@ Live end-user guide for rgx.
 
 This guide is intentionally layered so you can start simple and go as deep as needed.
 ## Living-document policy
-- Last updated: 2026-03-30
+- Last updated: 2026-03-31
 - This is a live document and should be updated as user-visible behavior changes.
 - Keep examples and feature-status notes aligned with current shipped behavior.
 - For recent changes and validation details, cross-check `CHANGES.md` and `RUST_CODEBASE_ANALYSIS.md`.
@@ -23,7 +23,11 @@ cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
 Run tests:
 
 ```bash
-cargo test --workspace
+cargo test -p rgx-core
+cargo test -p rgx-cli
+cargo test -p rgx-bench
+cargo test -p rgx-wasm
+./scripts/run-local-ci.sh
 ```
 ## Level 1 - Practical usage
 ### CLI
