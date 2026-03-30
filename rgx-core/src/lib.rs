@@ -687,6 +687,55 @@ mod tests {
     }
 
     #[test]
+    fn ast_relative_conditional_group_exists_resolves_runtime_branch() {
+        let backward = RegexAst::Sequence(vec![
+            RegexAst::Anchor(crate::ast::AnchorType::AbsStart),
+            RegexAst::Quantified {
+                expr: Box::new(RegexAst::Group {
+                    expr: Box::new(RegexAst::Char('a')),
+                    kind: GroupKind::Capturing,
+                    index: None,
+                    name: None,
+                }),
+                quantifier: crate::ast::Quantifier::ZeroOrOne { lazy: false },
+            },
+            RegexAst::Conditional {
+                condition: crate::ast::ConditionalTest::RelativeGroupExists(-1),
+                true_branch: Box::new(RegexAst::Char('b')),
+                false_branch: Some(Box::new(RegexAst::Char('c'))),
+            },
+            RegexAst::Anchor(crate::ast::AnchorType::AbsEndNoNL),
+        ]);
+
+        let backward = Regex::from_ast(backward)
+            .expect("Failed to compile backward relative-conditional AST directly");
+        assert!(backward.is_match("ab"));
+        assert!(backward.is_match("c"));
+        assert!(!backward.is_match("ac"));
+
+        let forward = RegexAst::Sequence(vec![
+            RegexAst::Anchor(crate::ast::AnchorType::AbsStart),
+            RegexAst::Conditional {
+                condition: crate::ast::ConditionalTest::RelativeGroupExists(1),
+                true_branch: Box::new(RegexAst::Char('a')),
+                false_branch: Some(Box::new(RegexAst::Char('b'))),
+            },
+            RegexAst::Group {
+                expr: Box::new(RegexAst::Char('a')),
+                kind: GroupKind::Capturing,
+                index: None,
+                name: None,
+            },
+            RegexAst::Anchor(crate::ast::AnchorType::AbsEndNoNL),
+        ]);
+
+        let forward = Regex::from_ast(forward)
+            .expect("Failed to compile forward relative-conditional AST directly");
+        assert!(forward.is_match("ba"));
+        assert!(!forward.is_match("aa"));
+    }
+
+    #[test]
     fn parser_positive_lookahead_syntax() {
         let regex =
             Regex::compile("(?=cat)c").expect("Failed to compile parser-path lookahead syntax");
@@ -2877,6 +2926,20 @@ mod tests {
     }
 
     #[test]
+    fn parser_conditional_relative_group_exists_selects_runtime_branch() {
+        let backward = Regex::compile(r"\A(a)?(?(-1)b|c)\z")
+            .expect("Failed to compile backward relative-group conditional syntax");
+        assert!(backward.is_match("ab"));
+        assert!(backward.is_match("c"));
+        assert!(!backward.is_match("ac"));
+
+        let forward = Regex::compile(r"\A(?(+1)a|b)(a)\z")
+            .expect("Failed to compile forward relative-group conditional syntax");
+        assert!(forward.is_match("ba"));
+        assert!(!forward.is_match("aa"));
+    }
+
+    #[test]
     fn parser_unicode_property_letters_match_runtime_path() {
         let regex = Regex::compile(r"\p{L}+")
             .expect("Failed to compile Unicode property class for letters");
@@ -3020,6 +3083,33 @@ mod tests {
     }
 
     #[test]
+    fn parser_conditional_missing_relative_group_reports_compile_error() {
+        let cases = [
+            (
+                "(?(+1)a|b)",
+                "conditional '(?(+1)...)' refers to missing capture group",
+            ),
+            (
+                "(?(-1)a|b)",
+                "conditional '(?(-1)...)' refers to missing capture group",
+            ),
+        ];
+
+        for (pattern, expected_msg) in cases {
+            let result = Regex::compile(pattern);
+            assert!(
+                result.is_err(),
+                "Relative conditional missing-group reference should not silently compile: {pattern}"
+            );
+            let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(
+                msg.contains(expected_msg),
+                "unexpected missing relative-group compile message for pattern '{pattern}': {msg}"
+            );
+        }
+    }
+
+    #[test]
     fn capability_matrix_supported_parser_path_cases() {
         let cases = [
             ("cat|dog", "pet dog", true),
@@ -3059,8 +3149,13 @@ mod tests {
             (r"\A(a)?(?(1)b|c)\z", "ab", true),
             (r"\A(a)?(?(1)b|c)\z", "c", true),
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
+            (r"\A(a)?(?(-1)b|c)\z", "ab", true),
+            (r"\A(a)?(?(-1)b|c)\z", "c", true),
+            (r"\A(a)?(?(-1)b|c)\z", "ac", false),
             (r"\A(?<g>a)?(?(g)b|c)\z", "ab", true),
             (r"\A(?<g>a)?(?(g)b|c)\z", "c", true),
+            (r"\A(?(+1)a|b)(a)\z", "ba", true),
+            (r"\A(?(+1)a|b)(a)\z", "aa", false),
             ("a(?R)?b", "aaabbb", true),
             ("a(?R)?b", "ccc", false),
             (r"\A(a(?1)?b)\z", "aaabbb", true),
@@ -3099,7 +3194,7 @@ mod tests {
     }
 
     #[test]
-    fn capability_matrix_explicit_unsupported_compile_boundary_cases() {
+    fn capability_matrix_explicit_compile_boundary_and_validation_cases() {
         let cases = [
             (
                 "(?{lua:return true})",
@@ -3107,11 +3202,11 @@ mod tests {
             ),
             (
                 "(?(+1)a|b)",
-                "relative conditional group references are parsed but not yet supported",
+                "conditional '(?(+1)...)' refers to missing capture group",
             ),
             (
                 "(?(-1)a|b)",
-                "relative conditional group references are parsed but not yet supported",
+                "conditional '(?(-1)...)' refers to missing capture group",
             ),
         ];
 

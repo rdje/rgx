@@ -866,6 +866,16 @@ fn pcre2_parity_supported_conditionals() {
             input: "ab c ac cab",
         },
         ParityCase {
+            name: "conditional_relative_group_exists_backward",
+            pattern: "(a)?(?(-1)b|c)",
+            input: "ab c ac cab",
+        },
+        ParityCase {
+            name: "conditional_relative_group_exists_forward",
+            pattern: "(?(+1)a|b)(a)",
+            input: "ba aa aba",
+        },
+        ParityCase {
             name: "conditional_lookahead",
             pattern: "(?(?=ab)a|z)b",
             input: "ab zb xb",

@@ -82,7 +82,7 @@ Live continuity memory for `rgx` sessions.
 - `Regex::find_first_numeric_with_code(...)` and `Regex::find_all_numeric_with_code(...)` are now shipped on the Rust API path and collect winning-path `Numeric(f64)` payloads in match order while skipping non-numeric matches.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
 - The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, current match metadata, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
-- Relative conditional group references `(?(+1)...)` and `(?(-1)...)` now parse on both the recursive-descent and default PGEN-backed parser paths as dedicated AST, and RGX now rejects them explicitly at compile time until runtime semantics are chosen.
+- Relative conditional group references `(?(+1)...)` and `(?(-1)...)` now parse on both the recursive-descent and default PGEN-backed parser paths as dedicated AST and execute on the default compiler/VM path after compile-time resolution to absolute group checks.
 - The CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can optionally print branch/code-result details through `--show-details`, and no longer pre-executes successful code-block patterns once via `is_match` before collecting matches.
 - Numeric backreferences are now shipped on the default compiler/VM path:
   - compile-time validation now rejects only missing-group references such as `(a)\2`
@@ -120,7 +120,6 @@ Live continuity memory for `rgx` sessions.
 
 ## Next likely tasks
 - Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and any branch-reset / `DEFINE` / `(?[...])` boundary decisions.
-- Decide whether relative conditional group references should remain a deliberate compile boundary or move onto the shipped runtime path as part of the broader conditional-family follow-up.
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
@@ -128,13 +127,17 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Shipped relative conditional group references on the default regex path:
+  - compiler now resolves `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time instead of rejecting them at the old parser/runtime boundary
+  - added AST and parser-path runtime regressions plus explicit missing-target compile errors for unresolved relative references
+  - promoted the feature into `rgx-bench/tests/pcre2_parity.rs` conditionals coverage and refreshed parser/capability/PCRE2/docs state accordingly
 - Tightened the CLI code-block surface:
   - added repeatable `--var NAME=VALUE` so CLI users can drive the shipped host-variable path for Lua / JavaScript / Rhai code blocks
   - added `--show-details` so CLI match lines can expose top-level branch numbers and winning-path code-block results when desired
   - switched CLI matching to single-pass `find_all` collection so successful code-block patterns are not executed once by `is_match` and then again for output
 - Hardened the relative-conditional parser boundary:
   - both parser backends now parse `(?(+1)...)` and `(?(-1)...)` into dedicated `RelativeGroupExists(offset)` AST instead of collapsing or diverging
-  - RGX now rejects those forms explicitly at compile time until runtime semantics are chosen
+  - this parser-boundary work landed before the later default-path runtime support and kept both backends aligned while the runtime semantics were still pending
   - validation covered lexer regressions, parser-contract fixtures, and capability-matrix compile-boundary guardrails
 - Added automated benchmark trend capture:
   - `rgx-bench/src/lib.rs` now holds shared benchmark fixtures instead of remaining a placeholder.

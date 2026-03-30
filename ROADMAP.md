@@ -40,7 +40,6 @@ Live forward-looking tracker for rgx.
 - Scope:
   - align parser tokenization/AST output with VM-supported constructs
   - keep parser behavior consistent with API tests
-  - keep relative conditional group references `(?(+1)...)` / `(?(-1)...)` structurally aligned across both parser backends until runtime semantics are chosen
   - incrementally close remaining syntax gaps (numeric backreferences, conditionals, Unicode property classes, possessive quantifiers, and current recursion forms are now shipped)
 
 ### Parser interoperability contract and conformance harness
@@ -50,7 +49,6 @@ Live forward-looking tracker for rgx.
   - maintain a versioned parser interoperability contract
   - keep fixture-based parser conformance tests around the active parser boundary
   - enforce parse-success/compile-unsupported boundary checks for unintegrated runtime features
-  - keep relative conditional group references in the parse-success/compile-unsupported conformance set until they move to a shipped runtime path
   - keep downstream integration guidance aligned to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`
 
 ### Capability matrix hardening
@@ -59,7 +57,6 @@ Live forward-looking tracker for rgx.
 - Scope:
   - maintain `docs/CAPABILITY_MATRIX.md` as source of truth for shipped-vs-scaffolded status
   - expand integration tests for user-facing APIs
-  - keep parsed-only conditional families such as relative group references documented explicitly instead of blending them into the shipped conditional surface
   - keep docs synchronized with verified behavior
 
 ## Next (near-term)
@@ -111,8 +108,9 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Shipped relative conditional group references on the default regex path by resolving `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time, with API, parser-contract, and PCRE2 differential coverage.
 - Tightened the shipped inline-language CLI path by adding repeatable `--var NAME=VALUE`, optional `--show-details` match rendering, and single-pass match collection so CLI code blocks are not pre-executed twice before output.
-- Hardened relative conditional group references so `(?(+1)...)` and `(?(-1)...)` now parse into dedicated AST on both parser backends while still failing explicitly at compile time until runtime semantics are chosen.
+- Stabilized relative conditional group references on both parser backends first by transporting `(?(+1)...)` and `(?(-1)...)` as dedicated AST before the later default-path runtime integration landed.
 - Deepened the quick benchmark-trend loop so each capture now archives timestamped history under `target/benchmark-trends/history/` and summarizes delta versus the most recent prior archived capture.
 - Tightened the shipped inline-language ergonomics again so Lua now accepts bare expression bodies as well as explicit `return ...`, matching the JavaScript/Rhai source-body direction more closely.
 - Added automated quick benchmark-trend capture to the default local validation loop via `scripts/capture-benchmark-trends.sh` and `rgx-bench/src/bin/trend_capture.rs`.

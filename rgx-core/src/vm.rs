@@ -3857,7 +3857,7 @@ impl OptimizingCompiler {
             }
             ConditionalTest::RelativeGroupExists(offset) => {
                 panic!(
-                    "relative conditional group references should fail at compile boundary before codegen: {offset:+}"
+                    "internal compiler error: unresolved relative conditional group reference reached codegen: {offset:+}"
                 );
             }
             ConditionalTest::NamedGroupExists(name) => {

@@ -54,7 +54,7 @@ Pipeline in `rgx-core`:
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
 - Conditional runtime semantics are now integrated through the compiler/VM path, including missing-group and missing-name compile-time validation plus API/parity coverage
-- Relative conditional group references now parse into dedicated AST nodes on both parser backends, but RGX still rejects them explicitly at compile time until runtime semantics are chosen
+- Relative conditional group references now parse into dedicated AST nodes on both parser backends and resolve to shipped runtime behavior through compile-time rewriting to absolute group-exists checks
 - Recursion / subroutine runtime semantics are now integrated through the compiler/VM path for `(?R)`, `(?1)`, and `(?&name)`, including explicit compile-time validation for missing numbered and named recursion targets plus API/parity coverage
 - API/conformance guardrails explicitly verify compile-boundary errors for invalid Unicode property classes and disallowed code-block modes/languages
 - Public API (`Regex::compile`, `is_match`, `find_first`, `find_all`) connected to the compiler/VM path
@@ -182,7 +182,6 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser/VM support for advanced regex syntax still has meaningful remaining gaps in newer PCRE families beyond the currently covered recursion, conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
-- Relative conditional group references are now parser-stable but remain an intentional compile boundary until RGX decides their runtime semantics
 - Native and wasm registration are currently Rust-API-only; the CLI does not expose callback/module registration
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
@@ -200,7 +199,7 @@ Pipeline in `rgx-core`:
 3. Deepen the new quick benchmark-trend capture into a fuller release-profile / longitudinal comparison story and prioritize measurable wins
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
 5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
-6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness), including deciding when parsed-only relative conditional references should gain runtime semantics
+6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness), including newer PCRE advanced families beyond the now-shipped relative conditional references
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
 8. Expand the staged code-block rollout with the preferred inline-language direction in mind: prioritize Lua/JavaScript/Rhai ergonomics first, while treating further wasm ABI/result work as secondary unless product needs force it higher
 

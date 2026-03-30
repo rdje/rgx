@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Shipped relative conditional-group runtime support
+- Scope: conditional runtime parity, compiler rewrite policy, parser-contract alignment, and docs/test refreshes.
+- Changes:
+  - Promoted relative conditional group references `(?(+1)...)` and `(?(-1)...)` from parser-only transport into the default compiler/VM path by resolving them to absolute `GroupExists(n)` checks at compile time.
+  - Added AST and parser-path regressions covering both backward and forward relative references, and tightened compile-time validation so unresolved relative references still fail explicitly with missing-capture errors.
+  - Extended `rgx-bench/tests/pcre2_parity.rs` so the supported-conditionals differential suite now covers the relative conditional family against PCRE2.
+  - Refreshed `README.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PARSER_CONTRACT.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped/default-path status is documented consistently.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core relative_group -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+- Notes/impact:
+  - This closes the last intentionally held conditional-family parser/runtime boundary on the default regex path without adding new VM conditional opcodes.
+  - Broader PCRE2 conditional follow-up work now shifts to newer families such as `R&name`, `VERSION[...]`, and `DEFINE`, rather than the baseline relative group-reference forms.
+
 ### 2026-03-30 - Tightened CLI code-block ergonomics
 - Scope: CLI code-block usability, host-variable surface, match-detail rendering, and validation/doc refreshes.
 - Changes:

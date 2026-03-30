@@ -122,6 +122,7 @@ impl Compiler {
         debug_log!("compiler", "AST: {:?}", ast);
         let total_groups = Self::count_capture_groups(&ast);
         let named_groups = Self::collect_named_groups(&ast);
+        let ast = Self::resolve_relative_conditionals(ast, total_groups)?;
 
         if let Some(msg) = Self::backreference_validation_message(&ast) {
             trace_exit!(
@@ -203,6 +204,227 @@ impl Compiler {
             program,
         })
     }
+
+    fn resolve_relative_conditionals(ast: RegexAst, total_groups: u32) -> Result<RegexAst> {
+        let (ast, resolved_groups) =
+            Self::resolve_relative_conditionals_inner(ast, 0, total_groups)?;
+        debug_assert_eq!(resolved_groups, total_groups);
+        Ok(ast)
+    }
+
+    fn resolve_relative_conditionals_inner(
+        ast: RegexAst,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<(RegexAst, u32)> {
+        match ast {
+            RegexAst::Sequence(items) => {
+                let mut next_opened = opened_groups;
+                let mut resolved = Vec::with_capacity(items.len());
+                for item in items {
+                    let (item, opened_after_item) =
+                        Self::resolve_relative_conditionals_inner(item, next_opened, total_groups)?;
+                    next_opened = opened_after_item;
+                    resolved.push(item);
+                }
+                Ok((RegexAst::Sequence(resolved), next_opened))
+            }
+            RegexAst::Alternation(items) => {
+                let mut next_opened = opened_groups;
+                let mut resolved = Vec::with_capacity(items.len());
+                for item in items {
+                    let (item, opened_after_item) =
+                        Self::resolve_relative_conditionals_inner(item, next_opened, total_groups)?;
+                    next_opened = opened_after_item;
+                    resolved.push(item);
+                }
+                Ok((RegexAst::Alternation(resolved), next_opened))
+            }
+            RegexAst::Quantified { expr, quantifier } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    RegexAst::Quantified {
+                        expr: Box::new(expr),
+                        quantifier,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => {
+                let inner_opened = if matches!(kind, crate::ast::GroupKind::Capturing) {
+                    opened_groups + 1
+                } else {
+                    opened_groups
+                };
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, inner_opened, total_groups)?;
+                Ok((
+                    RegexAst::Group {
+                        expr: Box::new(expr),
+                        kind,
+                        index,
+                        name,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            RegexAst::Lookahead { expr, positive } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    RegexAst::Lookahead {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            RegexAst::Lookbehind { expr, positive } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    RegexAst::Lookbehind {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let (condition, opened_after_condition) = Self::resolve_relative_conditional_test(
+                    condition,
+                    opened_groups,
+                    total_groups,
+                )?;
+                let (true_branch, opened_after_true) = Self::resolve_relative_conditionals_inner(
+                    *true_branch,
+                    opened_after_condition,
+                    total_groups,
+                )?;
+                let (false_branch, opened_after_false) = if let Some(false_branch) = false_branch {
+                    let (false_branch, opened_after_false) =
+                        Self::resolve_relative_conditionals_inner(
+                            *false_branch,
+                            opened_after_true,
+                            total_groups,
+                        )?;
+                    (Some(Box::new(false_branch)), opened_after_false)
+                } else {
+                    (None, opened_after_true)
+                };
+                Ok((
+                    RegexAst::Conditional {
+                        condition,
+                        true_branch: Box::new(true_branch),
+                        false_branch,
+                    },
+                    opened_after_false,
+                ))
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Backreference(_)
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => Ok((ast, opened_groups)),
+        }
+    }
+
+    fn resolve_relative_conditional_test(
+        condition: crate::ast::ConditionalTest,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<(crate::ast::ConditionalTest, u32)> {
+        match condition {
+            crate::ast::ConditionalTest::RelativeGroupExists(offset) => {
+                let resolved =
+                    Self::resolve_relative_group_reference(offset, opened_groups, total_groups)?;
+                Ok((
+                    crate::ast::ConditionalTest::GroupExists(resolved),
+                    opened_groups,
+                ))
+            }
+            crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    crate::ast::ConditionalTest::Lookahead {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    crate::ast::ConditionalTest::Lookbehind {
+                        expr: Box::new(expr),
+                        positive,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            crate::ast::ConditionalTest::GroupExists(group) => Ok((
+                crate::ast::ConditionalTest::GroupExists(group),
+                opened_groups,
+            )),
+            crate::ast::ConditionalTest::NamedGroupExists(name) => Ok((
+                crate::ast::ConditionalTest::NamedGroupExists(name),
+                opened_groups,
+            )),
+        }
+    }
+
+    fn resolve_relative_group_reference(
+        offset: i32,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<u32> {
+        let missing_reference = || {
+            RgxError::Compile(format!(
+                "conditional '(?({offset:+})...)' refers to missing capture group"
+            ))
+        };
+
+        if offset == 0 {
+            return Err(missing_reference());
+        }
+
+        let resolved = if offset > 0 {
+            opened_groups.checked_add(offset as u32)
+        } else {
+            let distance = offset.unsigned_abs();
+            if distance > opened_groups {
+                None
+            } else {
+                Some(opened_groups - distance + 1)
+            }
+        }
+        .filter(|group| *group > 0 && *group <= total_groups)
+        .ok_or_else(missing_reference)?;
+
+        Ok(resolved)
+    }
+
     fn feature_validation_message(
         &self,
         ast: &RegexAst,
@@ -272,7 +494,7 @@ impl Compiler {
                         }
                     }
                     crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
-                        "relative conditional group references are parsed but not yet supported: '(?({offset:+})...)'"
+                        "internal compiler error: unresolved relative conditional group reference '(?({offset:+})...)'"
                     )),
                     crate::ast::ConditionalTest::Lookahead { expr, .. }
                     | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {

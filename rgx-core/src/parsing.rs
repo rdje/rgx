@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     #[test]
-    fn parser_contract_parsed_but_unintegrated_features_fail_at_compile_boundary() {
+    fn parser_contract_parse_success_compile_validation_cases_remain_explicit() {
         let compiler = crate::compiler::Compiler::new();
         let cases = [
             (
@@ -1301,11 +1301,11 @@ mod tests {
             ),
             (
                 "(?(+1)a|b)",
-                "relative conditional group references are parsed but not yet supported",
+                "conditional '(?(+1)...)' refers to missing capture group",
             ),
             (
                 "(?(-1)a|b)",
-                "relative conditional group references are parsed but not yet supported",
+                "conditional '(?(-1)...)' refers to missing capture group",
             ),
         ];
 
@@ -1315,7 +1315,7 @@ mod tests {
             });
             let err = match compiler.compile(pattern) {
                 Ok(_) => panic!(
-                    "pattern should fail at compile boundary until runtime integration lands: {pattern}"
+                    "pattern should fail with an explicit compile-time boundary/validation error: {pattern}"
                 ),
                 Err(err) => err,
             };
