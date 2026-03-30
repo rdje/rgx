@@ -185,7 +185,7 @@ Pipeline in `rgx-core`:
 - Native registration is still Rust-API-only, while wasm registration now also has a file-backed CLI path through `--wasm-module NAME=PATH`
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
-- The shipped inline-language lane is now tighter: Lua and JavaScript both accept either bare expression bodies or explicit `return ...` bodies, Rhai keeps its natural final-expression style, and Lua/JavaScript/Rhai helper-API behavior is covered explicitly in `rgx-core` regression tests
+- The shipped inline-language lane is now tighter: Lua, JavaScript, and Rhai all accept either bare expression bodies or explicit `return ...` bodies, and Lua/JavaScript/Rhai helper-API behavior is covered explicitly in `rgx-core` regression tests
 - The CLI no longer does a boolean pre-check before collecting matches, which matters for code-block patterns because it avoids one extra round of callback/script execution on successful runs
 - The current product direction is to avoid using wasm as the benchmark for everyday inline code-block ergonomics; it remains supported, but future inline-language prioritization should compare against the shipped Lua/JavaScript/Rhai lane first
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder

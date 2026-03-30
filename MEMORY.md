@@ -56,6 +56,7 @@ Live continuity memory for `rgx` sessions.
 - Rhai code blocks are now shipped locally in RGX as a feature-gated inline backend:
   - `(?{rhai:...})` now executes in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `rhai` cargo feature enabled
   - default PGEN-backed parsing already transports the `rhai` tag through the generic code-block path, and RGX now locks that in with parser-conformance fixtures
+  - explicit `return ...` Rhai source bodies are also now locked in by regression tests, so the shipped inline-language contract matches Lua/JavaScript more closely than older docs implied
   - upstream PGEN still has not explicitly published `rhai` as a marker in its contract, so RGX docs should keep that distinction visible
 - After the upstream `1.1.0` contract refresh, the live complaint surface is narrower again: plain `(?{...})` and `lua` / `js` / `javascript` payload classes are now explicitly defined, while `native` / `wasm` tags, stronger JS/Lua shielding, runtime semantics, and AST semantic upgrade guarantees remain the main open points.
 - The default RGX build now exercises a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs` through the pinned `subs/pgen` submodule:
@@ -74,6 +75,7 @@ Live continuity memory for `rgx` sessions.
 - Quick benchmark capture now keeps timestamped local history under `target/benchmark-trends/history/` and reports ratio deltas against the most recent prior archived capture in `latest.md`.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
+- Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.
 - Native callbacks are now shipped on the Rust API path in `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Wasm modules are now shipped on the Rust API path in `ExecutionMode::Safe` / `ExecutionMode::Full` after registration on the compiled `Regex`.
 - Host-provided execution variables are now shipped on the Rust API path via `Regex::set_variable(...)` and are snapshotted into each per-call `ExecContext`.
@@ -127,6 +129,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Hardened the shipped Rhai source-body contract:
+  - explicit `return ...` Rhai bodies were already working on the real runtime path, but the repo still described Rhai too narrowly
+  - added regression coverage for explicit-return predicate matching plus numeric/replacement helper flows
+  - refreshed README / user guide / capability/status docs so Lua, JavaScript, and Rhai are all described as supporting both bare expressions and explicit `return ...` bodies
 - Extended the shipped CLI code-block surface with file-backed wasm module registration:
   - added repeatable `--wasm-module NAME=PATH` in `rgx-cli` so `(?{wasm:module:function})` can be exercised without Rust glue when the CLI is built with the `wasm` feature
   - added CLI parsing/application tests, including successful module registration from a temp WAT-assembled module plus explicit missing-file / missing-feature failure coverage

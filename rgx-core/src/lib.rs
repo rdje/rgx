@@ -2794,6 +2794,18 @@ mod tests {
 
     #[cfg(feature = "rhai")]
     #[test]
+    fn safe_mode_rhai_explicit_return_body_can_match() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{rhai: return named["word"] == "cat";})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai explicit-return pattern");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
     fn safe_mode_rhai_code_block_can_access_match_metadata() {
         let regex = Regex::with_mode(
             r#"foo|cat(?{rhai: match_start == 2 && match_end == 5 && match_length == 3 && branch_number == 2})"#,
@@ -2852,6 +2864,27 @@ mod tests {
             "CAT dog CAT"
         );
     }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_explicit_return_helpers_surface_numeric_and_replacement_results() {
+        let numeric = Regex::with_mode(r"(?{rhai: return 1;})", ExecutionMode::Safe)
+            .expect("Failed to compile Rhai explicit-return numeric-helper pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(1.0));
+        assert_eq!(numeric.find_all_numeric_with_code(""), vec![1.0]);
+
+        let replacement = Regex::with_mode(r#"cat(?{rhai: return "CAT";})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Rhai explicit-return replacement-helper pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+        assert_eq!(
+            replacement.replace_all_with_code("cat dog cat"),
+            "CAT dog CAT"
+        );
+    }
+
     #[test]
     fn parser_backreference_to_missing_group_reports_compile_error() {
         let result = Regex::compile(r"(a)\2");

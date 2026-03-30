@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Hardened Rhai explicit-return ergonomics
+- Scope: inline-language contract hardening for Rhai, regression coverage, and shipped-surface documentation alignment.
+- Changes:
+  - Added `rgx-core/src/lib.rs` regressions proving Rhai source bodies accept explicit `return ...` bodies for predicate matching plus numeric/replacement helper flows, in addition to the already-shipped final-expression style.
+  - Refreshed `README.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the repo now describes the Rhai contract the same way the runtime already behaves.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_explicit_return_body_can_match -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_explicit_return_helpers_surface_numeric_and_replacement_results -- --nocapture`
+- Notes/impact:
+  - This closes a small but real documentation/contract gap in the preferred Lua/JavaScript/Rhai inline-language lane.
+  - Everyday authoring is now intentionally aligned across all three shipped source-body languages: bare expressions still work, and explicit `return ...` bodies are also a supported choice.
+
 ### 2026-03-30 - Added CLI wasm module registration
 - Scope: wasm code-block usability from `rgx-cli`, CLI parsing/application tests, and shipped-surface documentation refreshes.
 - Changes:

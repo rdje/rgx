@@ -76,7 +76,7 @@ Current behavior contract for the shipped slice:
 - Current inline/source-body authoring expectations:
   - Lua supports both bare expression bodies and explicit `return ...` bodies
   - JavaScript supports both bare expression bodies and explicit `return ...` bodies
-  - Rhai commonly uses a final expression value
+  - Rhai supports both final expression values and explicit `return ...` bodies
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/Rhai/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.

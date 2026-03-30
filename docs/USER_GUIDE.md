@@ -50,7 +50,7 @@ Examples with code blocks:
 
 ```bash
 cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
-cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai: 7})' "cat"
+cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
 cargo run --bin rgx-cli --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
 ```
 ### Rust API
@@ -157,7 +157,7 @@ Requirements:
 - Write code as a predicate/source body:
   - Lua supports either a bare expression body or explicit `return ...`
   - JavaScript supports either a bare expression body or explicit `return ...`
-  - Rhai can use a final expression directly
+  - Rhai supports either a final expression value or explicit `return ...`
 
 Lua example:
 
@@ -249,7 +249,7 @@ Rhai example:
 use rgx_core::{ExecutionMode, Regex};
 
 let re = Regex::with_mode(
-    r#"(?<word>cat)(?{rhai: named["word"] == "cat"})"#,
+    r#"(?<word>cat)(?{rhai: return named["word"] == "cat";})"#,
     ExecutionMode::Safe,
 )?;
 assert!(re.is_match("cat"));

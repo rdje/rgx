@@ -118,7 +118,7 @@ cargo run --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a cat"
 CLI code-block examples:
 ```bash
 cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
-cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai: 7})' "cat"
+cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
 cargo run --bin rgx-cli --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
 ```
 
@@ -131,6 +131,7 @@ Most mature path today is the VM/compiler pipeline in `rgx-core`, with public AP
 Embedded code-block execution is now available on the public path for Lua, JavaScript, and Rhai code blocks in `ExecutionMode::Safe` / `ExecutionMode::Full` when the corresponding cargo feature is enabled, for registered wasm modules in `ExecutionMode::Safe` / `ExecutionMode::Full` with the `wasm` feature enabled, and for `native` callbacks in `ExecutionMode::Full` through the Rust API after registration on a compiled `Regex`.
 Host-provided execution variables can now be set on compiled regexes via `Regex::set_variable(...)` and are snapshotted into Lua, JavaScript, Rhai, native, and wasm code-block evaluation.
 The CLI now exposes that same host-variable slice through repeated `--var NAME=VALUE` flags for code-block-enabled patterns, can register named wasm modules through repeatable `--wasm-module NAME=PATH` when built with the `wasm` feature, and can surface top-level branch numbers plus winning-path `code_result` values through `--show-details` without changing the default plain-span output.
+Lua, JavaScript, and Rhai now all support either bare expression bodies or explicit `return ...` bodies on the shipped inline-language path.
 Lua, JavaScript, Rhai, native, and wasm code blocks can now also return first-slice richer non-boolean match metadata: `find_first` and `find_all` expose the last winning-path value through `MatchResult.code_result` / `CodeBlockValue`.
 The Rust API now also ships first dedicated numeric-result and replacement-oriented helpers on top of that slice: `find_first_numeric_with_code(...)` / `find_all_numeric_with_code(...)` collect winning-path `Numeric(f64)` payloads in match order, while `replace_first_with_code(...)` / `replace_all_with_code(...)` consume winning-path `Replacement(String)` payloads and preserve non-replacement matches unchanged.
 The current wasm slice keeps the stable `(?{wasm:module:function})` / exported `() -> i32` predicate surface while optionally exposing `rgx` imports for current position, current match start/end/length metadata, top-level branch number when available, full input text, numbered captures, named captures, host-provided variables, and initial richer-result emission through `emit_numeric(...)` / `emit_replacement(...)`.
