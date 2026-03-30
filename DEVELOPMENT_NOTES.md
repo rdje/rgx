@@ -187,7 +187,7 @@ Pipeline in `rgx-core`:
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Julia/Python embedding remain intentionally deferred until after the Lua/JavaScript/Rhai direction is clearer
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
-- Quick benchmark trend capture is now part of the default validation loop through `scripts/capture-benchmark-trends.sh`, while deeper release-profile tracking remains a separate follow-up
+- Quick benchmark trend capture is now part of the default validation loop through `scripts/capture-benchmark-trends.sh`; each run archives a timestamped local snapshot and reports deltas versus the most recent prior archived capture, while deeper release-profile tracking remains a separate follow-up
 
 ## Immediate priorities
 1. Expand and maintain the PCRE2 compatibility matrix with explicit exceptions/gaps and executable differential tests

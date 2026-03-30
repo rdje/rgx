@@ -18,3 +18,4 @@ echo "[capture-benchmark-trends.sh] Capturing ${mode} benchmark trends into ${ou
 cargo run "${profile_args[@]}" --manifest-path Cargo.toml -p rgx-bench --bin trend_capture -- --mode "$mode" --output-dir "$output_dir"
 
 echo "[capture-benchmark-trends.sh] Benchmark trend summary available at ${output_dir}/latest.md"
+echo "[capture-benchmark-trends.sh] Archived history available under ${output_dir}/history/"

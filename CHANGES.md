@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Added local benchmark trend history and delta reporting
+- Scope: quick benchmark capture operationalization, bench-side regression coverage, and validation/docs refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so each quick/full capture now archives timestamped `history/<unix>.md` and `history/<unix>.tsv` snapshots in addition to refreshing `latest.md` / `latest.tsv`.
+  - Added comparison logic and bench-side tests so `latest.md` now reports median ratio deltas plus top regressions/improvements against the most recent prior archived capture when one exists.
+  - Updated `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the validation story reflects the new archival/comparison behavior.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke`
+  - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - The quick benchmark loop is still intentionally directional, but it now leaves a durable local history trail and immediately tells us whether the latest run moved up or down versus the previous archived capture.
+
 ### 2026-03-30 - Aligned Lua code-block authoring with JS and Rhai
 - Scope: Lua source-body ergonomics, regression coverage, and inline-language contract documentation refreshes.
 - Changes:

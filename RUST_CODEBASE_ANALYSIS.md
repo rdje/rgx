@@ -9,6 +9,9 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
+  - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass (confirmed previous-run delta reporting)
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core full_mode_native_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_code_block_can_access_match_metadata -- --nocapture` => pass
@@ -67,7 +70,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
   - the real PGEN backend is green locally through pinned submodule commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
-  - the default benchmark trend capture is now directional and low-overhead rather than a full release-profile benchmark story
+  - the default benchmark trend capture is now directional and low-overhead, but it now preserves timestamped local history and highlights delta versus the most recent prior archived capture instead of only overwriting a one-off latest file
 
 ## What is shipped today
 ### Default public regex path
@@ -127,7 +130,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure now has two tiers:
   - criterion throughput benches in `rgx-bench/benches/throughput.rs`
-  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode
+  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode, writing both `latest.*` summaries and timestamped history snapshots with previous-run delta sections
 
 ## Roadmap alignment
 ### Now
@@ -139,13 +142,13 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
 - Embedded inline-language hardening improved again because Lua and JavaScript now both preserve bare-expression predicate/result values instead of forcing users onto one syntax style per language.
-- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary instead of leaving all benchmark capture to manual ad hoc runs.
+- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, archives each capture locally, and reports delta against the most recent prior archived run instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next
 - Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.
 - Decide whether native/wasm registration should remain Rust-API-only or gain configured CLI/external surfaces later.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
-- Operationalize benchmark trend capture instead of relying on manual runs.
+- Deepen the now-operational quick benchmark capture into a fuller release-profile longitudinal story.
 
 ### Later
 - Finish larger regex-surface gaps: newer PCRE2 advanced forms and the still-declared-but-unwired opcode families.
@@ -165,5 +168,5 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## High-confidence next actions
 1. Decide whether native/wasm registration should stay Rust-API-only or gain configured CLI/external surfaces.
 2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
-3. Deepen the new benchmark trend capture from quick directional summaries into a fuller release-profile longitudinal story.
+3. Deepen the quick benchmark history/delta capture into a fuller release-profile longitudinal story.
 4. Reduce warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`.

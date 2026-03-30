@@ -4,7 +4,7 @@ use rgx_core::Regex;
 use std::fmt::Write as _;
 use std::fs;
 use std::hint::black_box;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const SEARCH_PATTERN_NAMES: &[&str] = &["literal_simple", "email_basic", "capture_groups"];
@@ -33,7 +33,7 @@ impl CaptureMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum BenchmarkKind {
     Compile,
     FindFirst,
@@ -48,6 +48,15 @@ impl BenchmarkKind {
             Self::FindAll => "find_all",
         }
     }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "compile" => Some(Self::Compile),
+            "find_first" => Some(Self::FindFirst),
+            "find_all" => Some(Self::FindAll),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -56,11 +65,11 @@ struct CliOptions {
     output_dir: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TrendSample {
     kind: BenchmarkKind,
-    pattern_name: &'static str,
-    description: &'static str,
+    pattern_name: String,
+    description: String,
     input_size: Option<usize>,
     rgx_ns_per_iter: f64,
     pcre2_ns_per_iter: f64,
@@ -85,6 +94,43 @@ impl TrendSample {
             .map(|size| size.to_string())
             .unwrap_or_else(|| "-".to_string())
     }
+
+    fn key(&self) -> SampleKey {
+        SampleKey {
+            kind: self.kind,
+            pattern_name: self.pattern_name.clone(),
+            input_size: self.input_size,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SampleKey {
+    kind: BenchmarkKind,
+    pattern_name: String,
+    input_size: Option<usize>,
+}
+
+#[derive(Debug)]
+struct HistoricalCapture {
+    generated_at_unix: u64,
+    samples: Vec<TrendSample>,
+}
+
+#[derive(Debug, Clone)]
+struct ComparisonSample {
+    current: TrendSample,
+    previous: TrendSample,
+}
+
+impl ComparisonSample {
+    fn ratio_change_fraction(&self) -> f64 {
+        (self.current.ratio_rgx_over_pcre2() / self.previous.ratio_rgx_over_pcre2()) - 1.0
+    }
+
+    fn ratio_change_label(&self) -> String {
+        format_change_label(self.ratio_change_fraction())
+    }
 }
 
 fn main() -> Result<(), String> {
@@ -101,8 +147,22 @@ fn main() -> Result<(), String> {
             options.output_dir.display()
         )
     })?;
+    let history_dir = options.output_dir.join("history");
+    fs::create_dir_all(&history_dir).map_err(|err| {
+        format!(
+            "failed to create benchmark trend history directory {}: {err}",
+            history_dir.display()
+        )
+    })?;
 
-    let markdown = render_markdown(&samples, options.mode, generated_at_unix);
+    let previous_capture = load_most_recent_historical_capture(&history_dir)?;
+
+    let markdown = render_markdown(
+        &samples,
+        options.mode,
+        generated_at_unix,
+        previous_capture.as_ref(),
+    );
     let tsv = render_tsv(&samples);
 
     let markdown_path = options.output_dir.join("latest.md");
@@ -121,10 +181,31 @@ fn main() -> Result<(), String> {
         )
     })?;
 
+    let history_markdown_path = history_dir.join(format!("{generated_at_unix}.md"));
+    fs::write(&history_markdown_path, markdown.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write archived markdown benchmark summary {}: {err}",
+            history_markdown_path.display()
+        )
+    })?;
+
+    let history_tsv_path = history_dir.join(format!("{generated_at_unix}.tsv"));
+    fs::write(&history_tsv_path, tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write archived tabular benchmark summary {}: {err}",
+            history_tsv_path.display()
+        )
+    })?;
+
     println!(
         "[trend_capture] Wrote benchmark trend summary to {} and {}",
         markdown_path.display(),
         tsv_path.display()
+    );
+    println!(
+        "[trend_capture] Archived benchmark snapshot to {} and {}",
+        history_markdown_path.display(),
+        history_tsv_path.display()
     );
     println!();
     println!("{markdown}");
@@ -221,8 +302,8 @@ fn measure_compile_case(
 
     Ok(TrendSample {
         kind: BenchmarkKind::Compile,
-        pattern_name: pattern.name,
-        description: pattern.description,
+        pattern_name: pattern.name.to_string(),
+        description: pattern.description.to_string(),
         input_size: None,
         rgx_ns_per_iter,
         pcre2_ns_per_iter,
@@ -261,8 +342,8 @@ fn measure_find_first_case(
 
     Ok(TrendSample {
         kind: BenchmarkKind::FindFirst,
-        pattern_name: pattern.name,
-        description: pattern.description,
+        pattern_name: pattern.name.to_string(),
+        description: pattern.description.to_string(),
         input_size: Some(input_size),
         rgx_ns_per_iter,
         pcre2_ns_per_iter,
@@ -292,8 +373,8 @@ fn measure_find_all_case(
 
     Ok(TrendSample {
         kind: BenchmarkKind::FindAll,
-        pattern_name: pattern.name,
-        description: pattern.description,
+        pattern_name: pattern.name.to_string(),
+        description: pattern.description.to_string(),
         input_size: Some(input_size),
         rgx_ns_per_iter,
         pcre2_ns_per_iter,
@@ -351,13 +432,175 @@ fn median(samples: &mut [f64]) -> f64 {
     }
 }
 
-fn render_markdown(samples: &[TrendSample], mode: CaptureMode, generated_at_unix: u64) -> String {
+fn load_most_recent_historical_capture(
+    history_dir: &Path,
+) -> Result<Option<HistoricalCapture>, String> {
+    if !history_dir.exists() {
+        return Ok(None);
+    }
+
+    let entries = fs::read_dir(history_dir).map_err(|err| {
+        format!(
+            "failed to read benchmark trend history directory {}: {err}",
+            history_dir.display()
+        )
+    })?;
+
+    let mut latest_capture = None;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            format!(
+                "failed to read an entry from benchmark trend history directory {}: {err}",
+                history_dir.display()
+            )
+        })?;
+        if let Some(candidate) = parse_history_entry(entry)? {
+            if latest_capture
+                .as_ref()
+                .map(|capture: &HistoricalCapture| {
+                    capture.generated_at_unix < candidate.generated_at_unix
+                })
+                .unwrap_or(true)
+            {
+                latest_capture = Some(candidate);
+            }
+        }
+    }
+
+    Ok(latest_capture)
+}
+
+fn parse_history_entry(entry: fs::DirEntry) -> Result<Option<HistoricalCapture>, String> {
+    let path = entry.path();
+    if path.extension().and_then(|ext| ext.to_str()) != Some("tsv") {
+        return Ok(None);
+    }
+
+    let generated_at_unix = match path.file_stem().and_then(|stem| stem.to_str()) {
+        Some(value) => value.parse::<u64>().map_err(|err| {
+            format!(
+                "failed to parse benchmark trend history filename {} as unix timestamp: {err}",
+                path.display()
+            )
+        })?,
+        None => {
+            return Err(format!(
+                "failed to read benchmark trend history filename for {}",
+                path.display()
+            ))
+        }
+    };
+
+    let raw = fs::read_to_string(&path).map_err(|err| {
+        format!(
+            "failed to read benchmark trend history snapshot {}: {err}",
+            path.display()
+        )
+    })?;
+    let samples = parse_tsv(&raw)?;
+
+    Ok(Some(HistoricalCapture {
+        generated_at_unix,
+        samples,
+    }))
+}
+
+fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
+    let mut lines = raw.lines();
+    let Some(header) = lines.next() else {
+        return Err("benchmark trend tsv was empty".to_string());
+    };
+    let expected_header =
+        "kind\tpattern\tinput_size\trgx_ns_per_iter\tpcre2_ns_per_iter\trgx_over_pcre2\tdescription";
+    if header != expected_header {
+        return Err(format!(
+            "benchmark trend tsv header mismatch: expected `{expected_header}`, found `{header}`"
+        ));
+    }
+
+    let mut samples = Vec::new();
+    for (line_index, line) in lines.enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let columns = line.split('\t').collect::<Vec<_>>();
+        if columns.len() != 7 {
+            return Err(format!(
+                "benchmark trend tsv line {} expected 7 columns, found {}",
+                line_index + 2,
+                columns.len()
+            ));
+        }
+        let kind = BenchmarkKind::from_str(columns[0]).ok_or_else(|| {
+            format!(
+                "benchmark trend tsv line {} has unknown benchmark kind `{}`",
+                line_index + 2,
+                columns[0]
+            )
+        })?;
+        let input_size = if columns[2] == "-" {
+            None
+        } else {
+            Some(columns[2].parse::<usize>().map_err(|err| {
+                format!(
+                    "benchmark trend tsv line {} has invalid input size `{}`: {err}",
+                    line_index + 2,
+                    columns[2]
+                )
+            })?)
+        };
+        let rgx_ns_per_iter = columns[3].parse::<f64>().map_err(|err| {
+            format!(
+                "benchmark trend tsv line {} has invalid rgx ns/iter `{}`: {err}",
+                line_index + 2,
+                columns[3]
+            )
+        })?;
+        let pcre2_ns_per_iter = columns[4].parse::<f64>().map_err(|err| {
+            format!(
+                "benchmark trend tsv line {} has invalid pcre2 ns/iter `{}`: {err}",
+                line_index + 2,
+                columns[4]
+            )
+        })?;
+        samples.push(TrendSample {
+            kind,
+            pattern_name: columns[1].to_string(),
+            description: columns[6].to_string(),
+            input_size,
+            rgx_ns_per_iter,
+            pcre2_ns_per_iter,
+        });
+    }
+
+    Ok(samples)
+}
+
+fn render_markdown(
+    samples: &[TrendSample],
+    mode: CaptureMode,
+    generated_at_unix: u64,
+    previous_capture: Option<&HistoricalCapture>,
+) -> String {
     let mut out = String::new();
     writeln!(&mut out, "# Benchmark Trend Capture").ok();
     writeln!(&mut out).ok();
     writeln!(&mut out, "- Mode: `{}`", mode.as_str()).ok();
     writeln!(&mut out, "- Generated at (unix): `{generated_at_unix}`").ok();
     writeln!(&mut out, "- Samples: `{}`", samples.len()).ok();
+    match previous_capture {
+        Some(capture) => {
+            writeln!(
+                &mut out,
+                "- Previous capture: `{}`",
+                capture.generated_at_unix
+            )
+            .ok();
+        }
+        None => {
+            writeln!(&mut out, "- Previous capture: `none`").ok();
+        }
+    }
     writeln!(&mut out).ok();
     writeln!(&mut out, "## Aggregate Ratios").ok();
     for kind in [
@@ -378,6 +621,8 @@ fn render_markdown(samples: &[TrendSample], mode: CaptureMode, generated_at_unix
         };
         writeln!(&mut out, "- `{}`: {summary}", kind.as_str()).ok();
     }
+    writeln!(&mut out).ok();
+    render_comparison_markdown(&mut out, samples, previous_capture);
     writeln!(&mut out).ok();
     writeln!(
         &mut out,
@@ -433,4 +678,250 @@ fn render_tsv(samples: &[TrendSample]) -> String {
         .ok();
     }
     out
+}
+
+fn render_comparison_markdown(
+    out: &mut String,
+    current_samples: &[TrendSample],
+    previous_capture: Option<&HistoricalCapture>,
+) {
+    writeln!(out, "## Delta vs Previous Capture").ok();
+    match previous_capture {
+        None => {
+            writeln!(out, "- No prior archived benchmark capture was available.").ok();
+        }
+        Some(previous_capture) => {
+            let comparisons = compare_samples(current_samples, &previous_capture.samples);
+            if comparisons.is_empty() {
+                writeln!(
+                    out,
+                    "- Previous capture `{}` did not share any comparable benchmark rows with the current capture.",
+                    previous_capture.generated_at_unix
+                )
+                .ok();
+                return;
+            }
+
+            writeln!(
+                out,
+                "- Comparing against archived capture `{}`.",
+                previous_capture.generated_at_unix
+            )
+            .ok();
+            writeln!(out).ok();
+            writeln!(out, "### Median Ratio Change By Kind").ok();
+            for kind in [
+                BenchmarkKind::Compile,
+                BenchmarkKind::FindFirst,
+                BenchmarkKind::FindAll,
+            ] {
+                let mut changes = comparisons
+                    .iter()
+                    .filter(|comparison| comparison.current.kind == kind)
+                    .map(ComparisonSample::ratio_change_fraction)
+                    .collect::<Vec<_>>();
+                if changes.is_empty() {
+                    continue;
+                }
+                let change = median(&mut changes);
+                writeln!(
+                    out,
+                    "- `{}`: {}",
+                    kind.as_str(),
+                    format_change_label(change)
+                )
+                .ok();
+            }
+            writeln!(out).ok();
+
+            let mut regressions = comparisons
+                .iter()
+                .filter(|comparison| comparison.ratio_change_fraction() > 0.0)
+                .collect::<Vec<_>>();
+            regressions.sort_by(|left, right| {
+                right
+                    .ratio_change_fraction()
+                    .total_cmp(&left.ratio_change_fraction())
+            });
+
+            let mut improvements = comparisons
+                .iter()
+                .filter(|comparison| comparison.ratio_change_fraction() < 0.0)
+                .collect::<Vec<_>>();
+            improvements.sort_by(|left, right| {
+                left.ratio_change_fraction()
+                    .total_cmp(&right.ratio_change_fraction())
+            });
+
+            writeln!(out, "### Biggest Regressions").ok();
+            if regressions.is_empty() {
+                writeln!(out, "- None").ok();
+            } else {
+                for comparison in regressions.into_iter().take(3) {
+                    writeln!(
+                        out,
+                        "- `{}` / `{}` / `{}`: {} ({} -> {})",
+                        comparison.current.kind.as_str(),
+                        comparison.current.pattern_name,
+                        comparison.current.input_label(),
+                        comparison.ratio_change_label(),
+                        comparison.previous.ratio_label(),
+                        comparison.current.ratio_label()
+                    )
+                    .ok();
+                }
+            }
+            writeln!(out).ok();
+
+            writeln!(out, "### Biggest Improvements").ok();
+            if improvements.is_empty() {
+                writeln!(out, "- None").ok();
+            } else {
+                for comparison in improvements.into_iter().take(3) {
+                    writeln!(
+                        out,
+                        "- `{}` / `{}` / `{}`: {} ({} -> {})",
+                        comparison.current.kind.as_str(),
+                        comparison.current.pattern_name,
+                        comparison.current.input_label(),
+                        comparison.ratio_change_label(),
+                        comparison.previous.ratio_label(),
+                        comparison.current.ratio_label()
+                    )
+                    .ok();
+                }
+            }
+        }
+    }
+}
+
+fn compare_samples(
+    current_samples: &[TrendSample],
+    previous_samples: &[TrendSample],
+) -> Vec<ComparisonSample> {
+    let previous_by_key = previous_samples
+        .iter()
+        .cloned()
+        .map(|sample| (sample.key(), sample))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    current_samples
+        .iter()
+        .filter_map(|sample| {
+            previous_by_key
+                .get(&sample.key())
+                .cloned()
+                .map(|previous| ComparisonSample {
+                    current: sample.clone(),
+                    previous,
+                })
+        })
+        .collect()
+}
+
+fn format_change_label(change_fraction: f64) -> String {
+    if change_fraction.abs() < 0.0001 {
+        "flat".to_string()
+    } else if change_fraction < 0.0 {
+        format!("{:.2}% improvement", change_fraction.abs() * 100.0)
+    } else {
+        format!("{:.2}% regression", change_fraction * 100.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(
+        kind: BenchmarkKind,
+        pattern_name: &str,
+        input_size: Option<usize>,
+        rgx_ns_per_iter: f64,
+        pcre2_ns_per_iter: f64,
+    ) -> TrendSample {
+        TrendSample {
+            kind,
+            pattern_name: pattern_name.to_string(),
+            description: format!("desc:{pattern_name}"),
+            input_size,
+            rgx_ns_per_iter,
+            pcre2_ns_per_iter,
+        }
+    }
+
+    #[test]
+    fn render_tsv_round_trips_through_parser() {
+        let samples = vec![
+            sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+            sample(
+                BenchmarkKind::FindFirst,
+                "email_basic",
+                Some(1000),
+                25.0,
+                10.0,
+            ),
+        ];
+
+        let parsed = parse_tsv(&render_tsv(&samples)).expect("rendered tsv should parse");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].kind, BenchmarkKind::Compile);
+        assert_eq!(parsed[0].pattern_name, "literal_simple");
+        assert_eq!(parsed[0].input_size, None);
+        assert!((parsed[0].rgx_ns_per_iter - 10.0).abs() < 0.0001);
+        assert_eq!(parsed[1].kind, BenchmarkKind::FindFirst);
+        assert_eq!(parsed[1].pattern_name, "email_basic");
+        assert_eq!(parsed[1].input_size, Some(1000));
+        assert!((parsed[1].pcre2_ns_per_iter - 10.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn render_markdown_reports_previous_capture_deltas() {
+        let current = vec![
+            sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+            sample(
+                BenchmarkKind::FindFirst,
+                "email_basic",
+                Some(1000),
+                18.0,
+                9.0,
+            ),
+            sample(
+                BenchmarkKind::FindAll,
+                "capture_groups",
+                Some(1000),
+                30.0,
+                10.0,
+            ),
+        ];
+        let previous = HistoricalCapture {
+            generated_at_unix: 1700000000,
+            samples: vec![
+                sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                sample(
+                    BenchmarkKind::FindFirst,
+                    "email_basic",
+                    Some(1000),
+                    30.0,
+                    10.0,
+                ),
+                sample(
+                    BenchmarkKind::FindAll,
+                    "capture_groups",
+                    Some(1000),
+                    25.0,
+                    10.0,
+                ),
+            ],
+        };
+
+        let markdown = render_markdown(&current, CaptureMode::Quick, 1800000000, Some(&previous));
+        assert!(markdown.contains("## Delta vs Previous Capture"));
+        assert!(markdown.contains("Previous capture: `1700000000`"));
+        assert!(markdown.contains("Comparing against archived capture `1700000000`."));
+        assert!(markdown.contains("literal_simple"));
+        assert!(markdown.contains("email_basic"));
+        assert!(markdown.contains("improvement"));
+        assert!(markdown.contains("regression"));
+    }
 }

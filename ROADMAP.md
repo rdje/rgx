@@ -75,6 +75,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - run and track `rgx-bench` baselines against recent changes
   - keep the default local validation loop emitting a low-overhead quick trend summary under `target/benchmark-trends/`
+  - preserve timestamped local history snapshots and surface delta summaries against the most recent prior archived capture
   - preserve a higher-fidelity `full` mode for slower bench-profile captures when deeper measurement is needed
   - prioritize optimizations with measurable impact
 
@@ -107,6 +108,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Deepened the quick benchmark-trend loop so each capture now archives timestamped history under `target/benchmark-trends/history/` and summarizes delta versus the most recent prior archived capture.
 - Tightened the shipped inline-language ergonomics again so Lua now accepts bare expression bodies as well as explicit `return ...`, matching the JavaScript/Rhai source-body direction more closely.
 - Added automated quick benchmark-trend capture to the default local validation loop via `scripts/capture-benchmark-trends.sh` and `rgx-bench/src/bin/trend_capture.rs`.
 - Hardened the shipped inline-language contract so JavaScript bare-expression bodies now drive predicate/result behavior instead of silently falling through, and added helper-API regression coverage across Lua/JavaScript/Rhai.
