@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Harden Perl extended-character-class parser boundary
+- Scope: parser-boundary hardening for newer PCRE2 character-class syntax, explicit compile-policy messaging, and parser/PGEN alignment.
+- Changes:
+  - Added `Regex::ExtendedCharClass { content }` plus recursive-descent token/parser transport for `(?[...])`, and taught the default PGEN AST adapter to map `extended_class` into the same canonical RGX AST.
+  - Updated the public compile path so Perl extended character classes now fail early with a deliberate compile-time policy message instead of staying an ambiguous parser gap.
+  - Refreshed the parser contract, capability matrix, compatibility matrix, roadmap, and continuity notes so `(?[...])` is now tracked as a parsed-only boundary while downstream runtime/set-algebra semantics remain future work.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_extended_char_class_reports_explicit_compile_boundary -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+- Notes/impact:
+  - Newer PCRE2 extended character-class syntax can now reach RGX downstream safely through both parser backends without implying that RGX already executes PCRE2 set-algebra semantics.
+
 ### 2026-03-30 - Harden branch-reset group parser boundary
 - Scope: parser-boundary hardening for newer PCRE2 group syntax, explicit compile-policy messaging, and parser/PGEN alignment.
 - Changes:

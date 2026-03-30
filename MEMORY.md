@@ -75,6 +75,7 @@ Live continuity memory for `rgx` sessions.
 - Quick benchmark capture now keeps shared plus mode-scoped latest snapshots and archives timestamped local history under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`; `trend_capture` / `scripts/capture-benchmark-trends.sh` auto-compare only against same-mode history and still accept explicit archived baselines via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 - `(?(DEFINE)...)` now has an explicit parser/AST boundary on both parser backends and compile-rejects cleanly instead of being treated like a named-group conditional.
 - `(?|...)` branch-reset groups now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines PCRE2-style capture renumbering/runtime behavior.
+- `(?[...])` Perl extended character classes now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines downstream set-algebra/runtime behavior.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.
@@ -123,7 +124,7 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, the runtime policy for branch-reset groups, and any remaining `DEFINE` / `(?[...])` boundary decisions.
+- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and the runtime policy for branch-reset groups plus Perl extended character classes.
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
@@ -131,6 +132,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Hardened the Perl extended-character-class parser boundary:
+  - both parser backends now preserve `(?[...])` as `Regex::ExtendedCharClass { content }` instead of leaving this newer PCRE2 family as an ambiguous parser gap
+  - the public compile path now fails early with an explicit extended-character-class policy message until RGX chooses downstream set-algebra/runtime semantics
+  - refreshed parser/capability/PCRE2/docs state so Perl extended character classes are tracked as a parsed-only boundary rather than as an unclassified unsupported family
 - Hardened the branch-reset parser boundary:
   - both parser backends now preserve `(?|...)` as `GroupKind::BranchReset` instead of rejecting or dropping the wrapper shape
   - the public compile path now fails early with an explicit branch-reset policy message before RGX capture-numbering logic can make invalid assumptions

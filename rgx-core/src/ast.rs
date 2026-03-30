@@ -28,6 +28,8 @@ pub enum Regex {
     // Unicode classes
     /// \p{...} or \P{...} (Unicode properties)
     UnicodeClass { name: String, negated: bool },
+    /// PCRE2/Perl extended character class syntax (?[...])
+    ExtendedCharClass { content: String },
 
     // Quantified expressions
     /// Expression with quantifier (* + ? {n,m})

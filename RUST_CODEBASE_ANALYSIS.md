@@ -15,6 +15,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_define_conditional_reports_explicit_compile_boundary -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_define_condition -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
@@ -53,7 +54,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition, and `(?|...)` now reaches a dedicated group kind, so both forms fail with clear compile-time policy errors instead of being misread or silently dropped.
+- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition, `(?|...)` now reaches a dedicated group kind, and `(?[...])` now reaches `Regex::ExtendedCharClass`, so all three forms fail with clear compile-time policy errors instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -126,6 +127,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - range quantifiers
   - possessive quantifiers
   - shorthand and Unicode property classes
+  - Perl extended character classes
   - group families
   - lookarounds
   - conditionals with and without false branches, including relative group-exists transport
@@ -139,6 +141,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The CLI still has no native-registration surface, but it now exposes file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
+- Perl extended character classes are parser-recognized on both parser backends but still compile-rejected until RGX chooses downstream set-algebra/runtime semantics.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
@@ -173,7 +176,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection and same-mode history separation exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`, Perl extended character classes) plus real runtime semantics for parser-boundary forms like branch-reset groups, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`) plus real runtime semantics for parser-boundary forms like branch-reset groups and Perl extended character classes, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

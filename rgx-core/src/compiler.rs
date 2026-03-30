@@ -347,6 +347,7 @@ impl Compiler {
             | RegexAst::Word { .. }
             | RegexAst::Space { .. }
             | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
@@ -374,6 +375,10 @@ impl Compiler {
                     Self::parser_boundary_validation_message(expr)
                 }
             }
+            RegexAst::ExtendedCharClass { .. } => Some(
+                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
+                    .to_string(),
+            ),
             RegexAst::Conditional {
                 condition,
                 true_branch,
@@ -505,6 +510,10 @@ impl Compiler {
             RegexAst::UnicodeClass { name, negated } => {
                 resolve_unicode_property_class(name, *negated).err()
             }
+            RegexAst::ExtendedCharClass { .. } => Some(
+                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
+                    .to_string(),
+            ),
             RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
                 resolve_unicode_property_class(name, *negated).err()
             }
@@ -650,6 +659,7 @@ impl Compiler {
             | RegexAst::Word { .. }
             | RegexAst::Space { .. }
             | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Recursion { .. }
@@ -784,6 +794,7 @@ impl Compiler {
             | RegexAst::Word { .. }
             | RegexAst::Space { .. }
             | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
@@ -854,6 +865,7 @@ impl Compiler {
             | RegexAst::Word { .. }
             | RegexAst::Space { .. }
             | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)

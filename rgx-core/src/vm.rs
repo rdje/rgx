@@ -180,6 +180,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Word { .. } => "Word",
         Regex::Space { .. } => "Space",
         Regex::UnicodeClass { .. } => "UnicodeClass",
+        Regex::ExtendedCharClass { .. } => "ExtendedCharClass",
         Regex::Anchor(_) => "Anchor",
         Regex::WordBoundary { .. } => "WordBoundary",
         Regex::Sequence(_) => "Sequence",
@@ -3398,7 +3399,9 @@ impl OptimizingCompiler {
     fn analyze_pass(&mut self, ast: &Regex) {
         match ast {
             Regex::Char(_) => self.stats.literal_chars += 1,
-            Regex::CharClass(_) | Regex::UnicodeClass { .. } => self.stats.char_classes += 1,
+            Regex::CharClass(_) | Regex::UnicodeClass { .. } | Regex::ExtendedCharClass { .. } => {
+                self.stats.char_classes += 1
+            }
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
             Regex::Backreference(_) => self.flags.has_backrefs = true,
@@ -3507,6 +3510,12 @@ impl OptimizingCompiler {
                 let class_id = self.compile_char_class(&ranges, false);
                 self.emit_op(OpCode::CharClass);
                 self.code.push(class_id as u8);
+            }
+
+            Regex::ExtendedCharClass { .. } => {
+                panic!(
+                    "Perl extended character classes '(?[...])' should be rejected during compiler validation before codegen"
+                );
             }
 
             Regex::Anchor(anchor) => match anchor {
@@ -4024,6 +4033,7 @@ impl OptimizingCompiler {
             | Regex::Word { .. }
             | Regex::Space { .. }
             | Regex::UnicodeClass { .. }
+            | Regex::ExtendedCharClass { .. }
             | Regex::Anchor(_)
             | Regex::WordBoundary { .. }
             | Regex::Backreference(_)

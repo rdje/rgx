@@ -63,6 +63,7 @@ impl<'a> Lexer<'a> {
             Token::WordBoundaryNeg => "WordBoundaryNeg",
             Token::UnicodeClass { .. } => "UnicodeClass",
             Token::UnicodeClassNeg { .. } => "UnicodeClassNeg",
+            Token::ExtendedCharClass { .. } => "ExtendedCharClass",
             Token::Star => "Star",
             Token::Plus => "Plus",
             Token::Question => "Question",
@@ -752,7 +753,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?(...)), (?{lang:code})
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?[...]), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -866,6 +867,7 @@ impl<'a> Lexer<'a> {
                 self.advance(); // Skip '|'
                 Ok(Token::BranchResetGroupStart)
             }
+            Some('[') => self.parse_extended_char_class(start_pos),
             Some('R') => {
                 self.advance(); // Skip 'R'
                 if self.current == Some(')') {
@@ -989,6 +991,54 @@ impl<'a> Lexer<'a> {
             Err(err) => trace_exit!("lexer", "Lexer::parse_group", "ok=false,error={}", err),
         }
         result
+    }
+
+    fn parse_extended_char_class(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip '[' after "(?"
+        let mut content = String::new();
+        let mut bracket_depth = 1usize;
+        let mut escaped = false;
+
+        loop {
+            match self.current {
+                Some(ch) if escaped => {
+                    content.push(ch);
+                    escaped = false;
+                    self.advance();
+                }
+                Some('\\') => {
+                    content.push('\\');
+                    escaped = true;
+                    self.advance();
+                }
+                Some('[') => {
+                    bracket_depth += 1;
+                    content.push('[');
+                    self.advance();
+                }
+                Some(']') if bracket_depth == 1 && self.peek() == Some(')') => {
+                    self.advance(); // Skip ']'
+                    self.advance(); // Skip ')'
+                    break;
+                }
+                Some(']') => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    content.push(']');
+                    self.advance();
+                }
+                Some(ch) => {
+                    content.push(ch);
+                    self.advance();
+                }
+                None => {
+                    return Err(LexError::UnterminatedGroup {
+                        position: start_pos,
+                    })
+                }
+            }
+        }
+
+        Ok(Token::ExtendedCharClass { content })
     }
 
     /// Parse conditional start:
@@ -1680,6 +1730,17 @@ mod tests {
                 Token::Char('b'),
                 Token::GroupEnd,
             ]
+        );
+    }
+
+    #[test]
+    fn test_extended_char_class_tokens() {
+        let tokens = tokenize_all("(?[a-z])").unwrap();
+        assert_eq!(
+            tokens,
+            vec![Token::ExtendedCharClass {
+                content: "a-z".to_string(),
+            }]
         );
     }
 

@@ -14,6 +14,9 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) and word boundaries: `shipped`
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
+- Perl extended character classes `(?[...])`: `parsed-only`
+  - parser accepts and preserves the extended-class payload explicitly
+  - compiler rejects it explicitly until RGX defines downstream set-algebra/runtime policy
 - Quantifiers (greedy/lazy/possessive `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`

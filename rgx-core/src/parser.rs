@@ -94,6 +94,7 @@ impl<'a> Parser<'a> {
             Regex::Word { .. } => "Word",
             Regex::Space { .. } => "Space",
             Regex::UnicodeClass { .. } => "UnicodeClass",
+            Regex::ExtendedCharClass { .. } => "ExtendedCharClass",
             Regex::Anchor(_) => "Anchor",
             Regex::WordBoundary { .. } => "WordBoundary",
             Regex::Sequence(_) => "Sequence",
@@ -549,6 +550,12 @@ impl<'a> Parser<'a> {
                 let code = code.clone();
                 self.advance()?;
                 Ok(Regex::CodeBlock { lang, code })
+            }
+
+            Some(Token::ExtendedCharClass { content }) => {
+                let content = content.clone();
+                self.advance()?;
+                Ok(Regex::ExtendedCharClass { content })
             }
 
             Some(Token::Recursion { target }) => {
@@ -1025,6 +1032,19 @@ mod tests {
                 }
             }
             other => panic!("Expected branch-reset group, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_extended_char_class() {
+        let mut parser = Parser::new("(?[a-z])").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::ExtendedCharClass { content } => {
+                assert_eq!(content, "a-z");
+            }
+            other => panic!("Expected extended character class, got: {other:?}"),
         }
     }
 

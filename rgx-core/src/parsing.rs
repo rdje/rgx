@@ -696,6 +696,7 @@ impl<'a> PgenAstAdapter<'a> {
             "lookaround" | "lookahead_pos" | "lookahead_neg" | "lookbehind_pos"
             | "lookbehind_neg" => self.convert_lookaround(actual),
             "conditional" => self.convert_conditional(actual),
+            "extended_class" => self.convert_extended_char_class(actual),
             _ => self.parse_leaf_fragment(actual),
         }
     }
@@ -794,6 +795,19 @@ impl<'a> PgenAstAdapter<'a> {
             false_branch: false_branch
                 .map(|branch| self.convert_conditional_branch(branch).map(Box::new))
                 .transpose()?,
+        })
+    }
+
+    fn convert_extended_char_class(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        let content = fragment
+            .strip_prefix("(?[")
+            .and_then(|value| value.strip_suffix("])"))
+            .ok_or_else(|| {
+                self.contract_error("pgen extended_class did not retain '(?[...])' delimiters")
+            })?;
+        Ok(Regex::ExtendedCharClass {
+            content: content.to_string(),
         })
     }
 
@@ -1150,6 +1164,7 @@ mod tests {
             "(abc)",
             "(?:a)(?<word>b)(?>c)",
             "(?|a|b)",
+            "(?[a-z])",
             "(?=ab)c",
             "(?!ab)c",
             "(?<=z)a",
@@ -1322,6 +1337,10 @@ mod tests {
             (
                 "(?|a|b)",
                 "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx",
+            ),
+            (
+                "(?[a-z])",
+                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx",
             ),
         ];
 

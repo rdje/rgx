@@ -78,6 +78,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - `DEFINE` conditionals
   - current RGX boundary is parser-recognized but compile-rejected explicitly; runtime behavior is still open
 - Perl extended character classes `(?[...])`
+  - current RGX boundary is parser-recognized but compile-rejected explicitly; downstream set-algebra/runtime behavior is still open
 
 ### Planned next or broader PCRE2 follow-up
 - Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion and conditional forms.

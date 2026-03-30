@@ -3145,6 +3145,22 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_reports_explicit_compile_boundary() {
+        let result = Regex::compile("(?[a-z])");
+        assert!(
+            result.is_err(),
+            "extended character class should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains(
+                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
+            ),
+            "unexpected extended-char-class compile-boundary message: {msg}"
+        );
+    }
+
+    #[test]
     fn parser_conditional_missing_relative_group_reports_compile_error() {
         let cases = [
             (

@@ -49,6 +49,10 @@ pub enum Token {
     UnicodeClassNeg {
         name: String,
     },
+    /// (?[...]) - Perl/PCRE2 extended character class
+    ExtendedCharClass {
+        content: String,
+    },
 
     // Quantifiers
     /// * (zero or more, greedy)
