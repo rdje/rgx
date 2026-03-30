@@ -9,6 +9,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Current verified snapshot
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features javascript` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
@@ -71,6 +72,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - winning-path non-boolean Lua/JavaScript/Rhai/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
+  - the CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can optionally render branch/code-result details with `--show-details`, and now collects matches in one pass instead of calling `is_match` before `find_all`
 - The biggest remaining gaps are now narrower and clearer:
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` and `wasm` code blocks are still Rust-API-only; the CLI has no registration/configuration surface for them
@@ -151,6 +153,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
 - Embedded inline-language hardening improved again because Lua and JavaScript now both preserve bare-expression predicate/result values instead of forcing users onto one syntax style per language.
+- Embedded inline-language hardening improved again because the CLI now exposes host-variable injection and richer optional match-detail rendering without pre-executing code blocks twice on the successful path.
 - Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, archives each capture locally, and reports delta against the most recent prior archived run instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next

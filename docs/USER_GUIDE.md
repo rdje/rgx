@@ -39,6 +39,18 @@ Examples:
 cargo run --bin rgx-cli -- "\d+" "abc123def"
 cargo run --bin rgx-cli -- "(?:cat|dog)" "pet dog"
 ```
+
+Useful CLI options for the shipped code-block slice:
+- `--mode pure|safe|full` selects the execution mode
+- `--var NAME=VALUE` injects a host-provided variable for code-block evaluation and may be repeated
+- `--show-details` appends top-level branch and winning-path code-block result details when available
+
+Examples with code blocks:
+
+```bash
+cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
+cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai: 7})' "cat"
+```
 ### Rust API
 Use the high-level API for normal matching:
 
@@ -293,6 +305,8 @@ What the execution context exposes today:
 
 Current limits for this slice:
 - The CLI does not yet expose native or wasm registration.
+- The CLI now does expose host-provided code-block variables through repeated `--var NAME=VALUE`.
+- The CLI can optionally show top-level branch and winning-path `code_result` details through `--show-details`, but the default output remains plain `start..end` spans for scripting stability.
 - The current wasm ABI still uses `module:function` with an exported `() -> i32` predicate; richer results are emitted indirectly through `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`.
 - Host-provided variables are read-only snapshots for each code-block evaluation.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.

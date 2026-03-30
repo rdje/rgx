@@ -111,6 +111,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Tightened the shipped inline-language CLI path by adding repeatable `--var NAME=VALUE`, optional `--show-details` match rendering, and single-pass match collection so CLI code blocks are not pre-executed twice before output.
 - Hardened relative conditional group references so `(?(+1)...)` and `(?(-1)...)` now parse into dedicated AST on both parser backends while still failing explicitly at compile time until runtime semantics are chosen.
 - Deepened the quick benchmark-trend loop so each capture now archives timestamped history under `target/benchmark-trends/history/` and summarizes delta versus the most recent prior archived capture.
 - Tightened the shipped inline-language ergonomics again so Lua now accepts bare expression bodies as well as explicit `return ...`, matching the JavaScript/Rhai source-body direction more closely.

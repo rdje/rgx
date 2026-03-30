@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Tightened CLI code-block ergonomics
+- Scope: CLI code-block usability, host-variable surface, match-detail rendering, and validation/doc refreshes.
+- Changes:
+  - Added repeatable `--var NAME=VALUE` support in `rgx-cli/src/main.rs` so CLI users can inject host-provided variables into shipped code-block patterns without dropping to the Rust API.
+  - Added opt-in `--show-details` match rendering so CLI output can include top-level branch numbers and winning-path `code_result` values when available, while keeping the default plain `start..end` span output stable.
+  - Switched the CLI matching path to collect matches directly instead of calling `is_match` before `find_all`, which avoids one extra round of callback/script execution on successful code-block patterns.
+  - Added CLI unit tests for variable parsing, detail rendering, host-variable application, and the single-pass match-collection behavior, and extended local CI to validate `rgx-cli --features all-languages`.
+  - Refreshed `README.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped CLI surface is documented consistently.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features javascript`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === \"prod\"})' ''`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai: 7})' 'cat'`
+- Notes/impact:
+  - This strengthens the preferred Lua/JavaScript/Rhai inline-language lane without broadening the CLI into native/wasm registration yet.
+  - The default CLI output shape remains backward-friendly for span-oriented scripting, while `--show-details` opts into the richer match metadata.
+
 ### 2026-03-30 - Hardened the relative-conditional parser boundary
 - Scope: parser interoperability, conditional AST transport, compile-boundary guardrails, and status-document refreshes.
 - Changes:

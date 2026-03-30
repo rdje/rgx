@@ -83,6 +83,7 @@ Live continuity memory for `rgx` sessions.
 - `Regex::replace_first_with_code(...)` and `Regex::replace_all_with_code(...)` are now shipped on the Rust API path and consume winning-path `Replacement(String)` payloads while leaving predicate-only and numeric-only matches unchanged in the rebuilt output.
 - The current wasm ABI now combines registered `module:function` / exported `() -> i32` predicates with `rgx` host imports for current position, current match metadata, full input text, numbered captures, named captures, variables, and initial numeric/replacement result emission.
 - Relative conditional group references `(?(+1)...)` and `(?(-1)...)` now parse on both the recursive-descent and default PGEN-backed parser paths as dedicated AST, and RGX now rejects them explicitly at compile time until runtime semantics are chosen.
+- The CLI now exposes host-provided code-block variables through repeated `--var NAME=VALUE`, can optionally print branch/code-result details through `--show-details`, and no longer pre-executes successful code-block patterns once via `is_match` before collecting matches.
 - Numeric backreferences are now shipped on the default compiler/VM path:
   - compile-time validation now rejects only missing-group references such as `(a)\2`
   - runtime matching now executes numbered backreferences through real VM bytecode in both top-level and subexpression paths
@@ -127,6 +128,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Tightened the CLI code-block surface:
+  - added repeatable `--var NAME=VALUE` so CLI users can drive the shipped host-variable path for Lua / JavaScript / Rhai code blocks
+  - added `--show-details` so CLI match lines can expose top-level branch numbers and winning-path code-block results when desired
+  - switched CLI matching to single-pass `find_all` collection so successful code-block patterns are not executed once by `is_match` and then again for output
 - Hardened the relative-conditional parser boundary:
   - both parser backends now parse `(?(+1)...)` and `(?(-1)...)` into dedicated `RelativeGroupExists(offset)` AST instead of collapsing or diverging
   - RGX now rejects those forms explicitly at compile time until runtime semantics are chosen

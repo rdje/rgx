@@ -51,6 +51,7 @@ run_step "cargo test -p rgx-core --features javascript" cargo test --manifest-pa
 run_step "cargo test -p rgx-core --features rhai" cargo test --manifest-path Cargo.toml -p rgx-core --features rhai
 run_step "cargo test -p rgx-core --features wasm" cargo test --manifest-path Cargo.toml -p rgx-core --features wasm
 run_step "cargo check -p rgx-core --features all-languages" cargo check --manifest-path Cargo.toml -p rgx-core --features all-languages
+run_step "cargo test -p rgx-cli --features all-languages" cargo test --manifest-path Cargo.toml -p rgx-cli --features all-languages
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets
 

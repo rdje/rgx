@@ -72,6 +72,7 @@ Current behavior contract for the shipped slice:
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
+- The shipped CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE`, while native/wasm registration still remains Rust-API-only.
 - Current inline/source-body authoring expectations:
   - Lua supports both bare expression bodies and explicit `return ...` bodies
   - JavaScript supports both bare expression bodies and explicit `return ...` bodies

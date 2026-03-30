@@ -1,6 +1,10 @@
+use anyhow::Context;
 use clap::Parser;
 use rgx_core::log::Verbosity;
-use rgx_core::{ExecutionMode, Regex};
+use rgx_core::CodeBlockValue;
+use rgx_core::{ExecutionMode, MatchResult, Regex};
+use std::fmt::Write as _;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -14,6 +18,10 @@ struct Cli {
     /// Execution mode: pure | safe | full
     #[arg(long, value_parser = ["pure", "safe", "full"], default_value = "pure")]
     mode: String,
+
+    /// Host-provided code-block variable (`NAME=VALUE`), repeatable
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    variables: Vec<CliVariable>,
 
     /// Enable high-verbosity output (legacy alias for --verbosity high)
     #[arg(long, short = 'd')]
@@ -35,12 +43,39 @@ struct Cli {
     #[arg(long)]
     trace_log: bool,
 
+    /// Include branch/code-block details in match output when available
+    #[arg(long)]
+    show_details: bool,
+
     /// Pattern to match
     pattern: String,
 
     /// Input text (if omitted, reads from stdin)
     #[arg(default_value = "")]
     text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CliVariable {
+    name: String,
+    value: String,
+}
+
+impl FromStr for CliVariable {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let (name, value) = raw
+            .split_once('=')
+            .ok_or_else(|| "expected NAME=VALUE".to_string())?;
+        if name.is_empty() {
+            return Err("variable name must be non-empty".to_string());
+        }
+        Ok(Self {
+            name: name.to_string(),
+            value: value.to_string(),
+        })
+    }
 }
 
 /// Global logger for the entire rgx system
@@ -149,6 +184,47 @@ fn configure_logging_environment(cli: &Cli, verbosity: Verbosity) {
     }
 }
 
+fn apply_cli_variables(regex: &Regex, variables: &[CliVariable]) -> anyhow::Result<()> {
+    for variable in variables {
+        regex
+            .set_variable(variable.name.clone(), variable.value.clone())
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!(
+                    "failed to set CLI variable '{}'; code-block variables require a compiled regex with an attached execution manager",
+                    variable.name
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn collect_matches(regex: &Regex, input: &str) -> Vec<MatchResult> {
+    regex.find_all(input)
+}
+
+fn format_code_result(value: &CodeBlockValue) -> String {
+    match value {
+        CodeBlockValue::Replacement(text) => format!("replacement:{text:?}"),
+        CodeBlockValue::Numeric(number) => format!("numeric:{number}"),
+    }
+}
+
+fn format_match_line(m: &MatchResult, show_details: bool) -> String {
+    if !show_details {
+        return format!("{}..{}", m.start, m.end);
+    }
+
+    let mut line = format!("{}..{}", m.start, m.end);
+    if let Some(branch_number) = m.matched_branch_number {
+        let _ = write!(line, " branch={branch_number}");
+    }
+    if let Some(code_result) = &m.code_result {
+        let _ = write!(line, " code={}", format_code_result(code_result));
+    }
+    line
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let verbosity = resolve_verbosity(&cli);
@@ -159,13 +235,15 @@ fn main() -> anyhow::Result<()> {
     rgx_core::trace_enter!(
         "cli",
         "main",
-        "mode_arg={},pattern_len={},input_arg_len={},verbosity={},quiet={},trace_log={}",
+        "mode_arg={},pattern_len={},input_arg_len={},verbosity={},quiet={},trace_log={},vars={},show_details={}",
         cli.mode,
         cli.pattern.len(),
         cli.text.len(),
         verbosity.as_str(),
         cli.quiet,
-        cli.trace_log
+        cli.trace_log,
+        cli.variables.len(),
+        cli.show_details
     );
 
     // Set up logging based on resolved verbosity.
@@ -197,6 +275,8 @@ fn main() -> anyhow::Result<()> {
         let logger = LOGGER.lock().unwrap();
         logger.debug("main", &format!("Pattern: '{}'", cli.pattern));
         logger.debug("main", &format!("Execution mode: {:?}", cli.mode));
+        logger.debug("main", &format!("CLI variables: {}", cli.variables.len()));
+        logger.debug("main", &format!("Show details: {}", cli.show_details));
         if !cli.text.is_empty() {
             logger.debug("main", &format!("Input text: '{}'", cli.text));
         }
@@ -230,6 +310,17 @@ fn main() -> anyhow::Result<()> {
     };
     let regex = regex_result;
 
+    if !cli.variables.is_empty() {
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!(
+                "Applying {} CLI variables to compiled regex",
+                cli.variables.len()
+            ),
+        );
+        apply_cli_variables(&regex, &cli.variables)?;
+    }
+
     let input = if cli.text.is_empty() {
         rgx_core::trace_decision!(
             "cli",
@@ -259,27 +350,24 @@ fn main() -> anyhow::Result<()> {
         "main",
         &format!("Testing pattern against {} bytes of input", input.len()),
     );
-    let matched = regex.is_match(&input);
+    let matches = collect_matches(&regex, &input);
+    let matched = !matches.is_empty();
     rgx_core::trace_decision!(
         "cli",
-        "regex.is_match(input)",
+        "!matches.is_empty()",
         matched,
-        "input_len={}",
-        input.len()
+        "input_len={},matches={}",
+        input.len(),
+        matches.len()
     );
     if matched {
-        LOGGER
-            .lock()
-            .unwrap()
-            .debug("main", "Pattern MATCHES! Finding all occurrences...");
-        let matches = regex.find_all(&input);
-        LOGGER
-            .lock()
-            .unwrap()
-            .debug("main", &format!("Found {} matches", matches.len()));
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!("Pattern MATCHES! Found {} matches", matches.len()),
+        );
 
         for (i, m) in matches.iter().enumerate() {
-            println!("{}..{}", m.start, m.end);
+            println!("{}", format_match_line(m, cli.show_details));
             LOGGER.lock().unwrap().trace(
                 "main",
                 &format!(
@@ -300,4 +388,107 @@ fn main() -> anyhow::Result<()> {
     rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rgx_core::{ExecResult, ExecutionMode};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn cli_variable_parses_name_value_pairs() {
+        assert_eq!(
+            "env=prod".parse::<CliVariable>().expect("parse env var"),
+            CliVariable {
+                name: "env".to_string(),
+                value: "prod".to_string(),
+            }
+        );
+        assert_eq!(
+            "token=a=b".parse::<CliVariable>().expect("parse token var"),
+            CliVariable {
+                name: "token".to_string(),
+                value: "a=b".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_variable_rejects_malformed_assignments() {
+        assert!("env".parse::<CliVariable>().is_err());
+        assert!("=prod".parse::<CliVariable>().is_err());
+    }
+
+    #[test]
+    fn format_match_line_preserves_plain_span_output_by_default() {
+        let m = MatchResult {
+            start: 2,
+            end: 5,
+            matched_branch_number: Some(2),
+            code_result: Some(CodeBlockValue::Numeric(7.0)),
+        };
+
+        assert_eq!(format_match_line(&m, false), "2..5");
+    }
+
+    #[test]
+    fn format_match_line_includes_optional_branch_and_code_details() {
+        let m = MatchResult {
+            start: 2,
+            end: 5,
+            matched_branch_number: Some(2),
+            code_result: Some(CodeBlockValue::Replacement("CAT".to_string())),
+        };
+
+        assert_eq!(
+            format_match_line(&m, true),
+            r#"2..5 branch=2 code=replacement:"CAT""#
+        );
+    }
+
+    #[test]
+    fn collect_matches_avoids_duplicate_code_execution_prechecks() {
+        let regex =
+            Regex::with_mode(r#"a(?{native:count})"#, ExecutionMode::Full).expect("compile regex");
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let callback_invocations = Arc::clone(&invocations);
+        regex
+            .register_native("count", move |_| {
+                callback_invocations.fetch_add(1, Ordering::SeqCst);
+                ExecResult::Success
+            })
+            .expect("register callback");
+
+        let matches = collect_matches(&regex, "a");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn apply_cli_variables_sets_host_variables_on_compiled_regex() {
+        let regex = Regex::with_mode(r#"(?{native:check_env})"#, ExecutionMode::Full)
+            .expect("compile regex");
+        apply_cli_variables(
+            &regex,
+            &[CliVariable {
+                name: "env".to_string(),
+                value: "prod".to_string(),
+            }],
+        )
+        .expect("set CLI variables");
+        regex
+            .register_native("check_env", |ctx| {
+                if ctx.variable("env").as_deref() == Some("prod") {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("register callback");
+
+        assert!(regex.is_match(""));
+    }
 }
