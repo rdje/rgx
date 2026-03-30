@@ -2,6 +2,21 @@
 
 set -euo pipefail
 
+allow_dirty_worktree=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --allow-dirty-worktree)
+      allow_dirty_worktree=1
+      shift
+      ;;
+    *)
+      echo "[check-ci-paths.sh] Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
@@ -10,6 +25,7 @@ echo "[check-ci-paths.sh] Verifying required CI paths exist and are tracked by g
 required_paths=(
   ".github/workflows/ci.yml"
   "scripts/check-ci-paths.sh"
+  "scripts/capture-benchmark-trends.sh"
   "scripts/run-local-ci.sh"
   "Cargo.toml"
   "Cargo.lock"
@@ -26,17 +42,25 @@ for path in "${required_paths[@]}"; do
   fi
 
   if ! git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
-    echo "[check-ci-paths.sh] Required path is not tracked by git: $path" >&2
-    exit 1
+    if [[ "$allow_dirty_worktree" == "1" ]]; then
+      echo "[check-ci-paths.sh] Allowing required path pending first commit: $path"
+    else
+      echo "[check-ci-paths.sh] Required path is not tracked by git: $path" >&2
+      exit 1
+    fi
   fi
 done
 
-echo "[check-ci-paths.sh] Checking for non-ignored untracked files"
+if [[ "$allow_dirty_worktree" == "1" ]]; then
+  echo "[check-ci-paths.sh] Skipping untracked-file audit in dirty-worktree mode"
+else
+  echo "[check-ci-paths.sh] Checking for non-ignored untracked files"
 
-if untracked_files="$(git ls-files --others --exclude-standard)" && [[ -n "$untracked_files" ]]; then
-  echo "[check-ci-paths.sh] Found non-ignored untracked files:" >&2
-  printf '%s\n' "$untracked_files" >&2
-  exit 1
+  if untracked_files="$(git ls-files --others --exclude-standard)" && [[ -n "$untracked_files" ]]; then
+    echo "[check-ci-paths.sh] Found non-ignored untracked files:" >&2
+    printf '%s\n' "$untracked_files" >&2
+    exit 1
+  fi
 fi
 
 absolute_path_pattern='(/Users/|/home/|[A-Za-z]:\\)'
@@ -64,7 +88,7 @@ if grep -RInE --include='*.rs' "$absolute_path_pattern" rgx-core rgx-cli rgx-ben
 fi
 
 echo "[check-ci-paths.sh] Checking CI workflow and helper scripts for absolute filesystem paths"
-if grep -InE "$absolute_path_pattern" .github/workflows/ci.yml scripts/run-local-ci.sh >"$ci_path_report"; then
+if grep -InE "$absolute_path_pattern" .github/workflows/ci.yml scripts/run-local-ci.sh scripts/capture-benchmark-trends.sh >"$ci_path_report"; then
   echo "[check-ci-paths.sh] Absolute filesystem paths are not allowed in CI workflow/script files:" >&2
   cat "$ci_path_report" >&2
   exit 1

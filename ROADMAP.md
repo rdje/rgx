@@ -70,10 +70,12 @@ Live forward-looking tracker for rgx.
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 
 ### Performance validation loop
-- Status: `planned`
+- Status: `in-progress`
 - Goal: tighten benchmark-driven optimization workflow.
 - Scope:
   - run and track `rgx-bench` baselines against recent changes
+  - keep the default local validation loop emitting a low-overhead quick trend summary under `target/benchmark-trends/`
+  - preserve a higher-fidelity `full` mode for slower bench-profile captures when deeper measurement is needed
   - prioritize optimizations with measurable impact
 
 ### Embedded code-path expansion beyond phase 1
@@ -105,6 +107,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Added automated quick benchmark-trend capture to the default local validation loop via `scripts/capture-benchmark-trends.sh` and `rgx-bench/src/bin/trend_capture.rs`.
 - Hardened the shipped inline-language contract so JavaScript bare-expression bodies now drive predicate/result behavior instead of silently falling through, and added helper-API regression coverage across Lua/JavaScript/Rhai.
 - Shipped Rhai code blocks on the default execution path in `ExecutionMode::Safe` / `ExecutionMode::Full`, including feature-gated runtime tests, parser-contract coverage, and CI/doc refreshes.
 - Expanded code-block execution contexts with current match metadata (`match_start`, `match_end`, `match_length`, top-level `branch_number`) across native/Lua/JavaScript plus new wasm host imports.

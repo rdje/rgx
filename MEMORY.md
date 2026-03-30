@@ -123,6 +123,10 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-03-30
+- Added automated benchmark trend capture:
+  - `rgx-bench/src/lib.rs` now holds shared benchmark fixtures instead of remaining a placeholder.
+  - `rgx-bench/src/bin/trend_capture.rs` writes quick benchmark summaries to `target/benchmark-trends/latest.md` and `latest.tsv`.
+  - `scripts/run-local-ci.sh` now runs `scripts/capture-benchmark-trends.sh` by default, with `RGX_SKIP_BENCH_TRENDS=1` as an escape hatch and `RGX_BENCHMARK_TREND_MODE=full` for slower bench-profile captures.
 - Hardened the shipped inline-language contract:
   - JavaScript now preserves bare expression-body results before falling back to wrapped `return ...` execution, so `(?{js: ...})` expression bodies no longer silently behave like unconditional success.
   - Added helper-API regressions for Lua / JavaScript / Rhai numeric and replacement results.

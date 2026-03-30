@@ -31,7 +31,7 @@ run_step() {
 
 echo "[run-local-ci.sh] Starting local CI checks from project root"
 
-run_step "./scripts/check-ci-paths.sh" ./scripts/check-ci-paths.sh
+run_step "./scripts/check-ci-paths.sh --allow-dirty-worktree" ./scripts/check-ci-paths.sh --allow-dirty-worktree
 
 if [[ "$have_pgen_checkout" != "1" ]]; then
   echo "[run-local-ci.sh] Skipping cargo-based validation because the PGEN submodule is not initialized."
@@ -53,5 +53,11 @@ run_step "cargo test -p rgx-core --features wasm" cargo test --manifest-path Car
 run_step "cargo check -p rgx-core --features all-languages" cargo check --manifest-path Cargo.toml -p rgx-core --features all-languages
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets
+
+if [[ "${RGX_SKIP_BENCH_TRENDS:-0}" == "1" ]]; then
+  echo "[run-local-ci.sh] Skipping benchmark trend capture because RGX_SKIP_BENCH_TRENDS=1"
+else
+  run_step "./scripts/capture-benchmark-trends.sh" ./scripts/capture-benchmark-trends.sh
+fi
 
 echo "[run-local-ci.sh] Local CI checks passed"

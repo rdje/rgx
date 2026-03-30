@@ -187,12 +187,12 @@ Pipeline in `rgx-core`:
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder
 - Julia/Python embedding remain intentionally deferred until after the Lua/JavaScript/Rhai direction is clearer
 - JavaScript/WASM root modules remain scaffold-level in user-facing flow even though feature builds now compile
-- Benchmark trend capture is still separate from the default validation loop
+- Quick benchmark trend capture is now part of the default validation loop through `scripts/capture-benchmark-trends.sh`, while deeper release-profile tracking remains a separate follow-up
 
 ## Immediate priorities
 1. Expand and maintain the PCRE2 compatibility matrix with explicit exceptions/gaps and executable differential tests
 2. Expand differential and integration tests to improve semantic parity and accuracy confidence
-3. Track benchmark parity trends against PCRE2 in `rgx-bench` and prioritize measurable wins
+3. Deepen the new quick benchmark-trend capture into a fuller release-profile / longitudinal comparison story and prioritize measurable wins
 4. Expand parser contract and conformance fixtures to reduce PGEN integration risk
 5. Exercise the eventual real PGEN backend using the published PGEN reporting protocol so parser bugs can be handed upstream cleanly
 6. Parser completeness for advanced grouping/assertion/code-block syntax (in parallel with PGEN readiness)

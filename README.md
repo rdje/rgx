@@ -43,12 +43,15 @@ If you are new to the repo, use this order:
 
 ### CLI / benchmark / parity paths
 - [`rgx-cli/src/main.rs`](rgx-cli/src/main.rs) — CLI argument handling and invocation path
+- [`rgx-bench/src/lib.rs`](rgx-bench/src/lib.rs) — shared benchmark fixtures and synthetic input generators
+- [`rgx-bench/src/bin/trend_capture.rs`](rgx-bench/src/bin/trend_capture.rs) — lightweight benchmark trend capture used by the local validation loop
 - [`rgx-bench/tests/pcre2_parity.rs`](rgx-bench/tests/pcre2_parity.rs) — differential parity checks vs PCRE2
 
 ### CI / automation paths
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
 - [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for the shared workspace + `rgx-core` feature-matrix validation path
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
+- [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes summaries under `target/benchmark-trends/`
 
 ## Documentation index (all `.md` files)
 ### Root markdown files

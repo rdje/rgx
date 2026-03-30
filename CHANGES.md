@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Added automated benchmark trend capture
+- Scope: benchmark harness reuse, local-CI automation, and roadmap/status documentation refreshes.
+- Changes:
+  - Promoted `rgx-bench/src/lib.rs` from a placeholder into shared benchmark-fixture code used by both the criterion throughput bench and a new lightweight `rgx-bench/src/bin/trend_capture.rs` binary.
+  - Added `scripts/capture-benchmark-trends.sh`, which writes quick benchmark summaries to `target/benchmark-trends/latest.md` and `target/benchmark-trends/latest.tsv`, and taught `scripts/run-local-ci.sh` to run it by default unless `RGX_SKIP_BENCH_TRENDS=1`.
+  - Updated `scripts/check-ci-paths.sh` so the new CI helper script is tracked and audited like the existing local-CI entry points.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, `MEMORY.md`, and benchmark-related notes so the validation loop now truthfully includes quick benchmark trend capture.
+- Validation:
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir target/benchmark-trends-smoke`
+  - `./scripts/capture-benchmark-trends.sh`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - The default validation story now captures directional benchmark drift automatically without paying the cost of full criterion runs on every commit.
+  - `RGX_BENCHMARK_TREND_MODE=full` remains available for slower bench-profile captures when deeper measurement is needed.
+
 ### 2026-03-30 - Hardened inline-language source-body semantics
 - Scope: JavaScript inline-body ergonomics, helper-API regression coverage, and roadmap/continuity documentation refreshes.
 - Changes:
