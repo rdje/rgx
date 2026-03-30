@@ -97,7 +97,7 @@ git submodule update --init --recursive
 ./scripts/run-local-ci.sh
 ```
 The default RGX build now expects the committed `subs/pgen` submodule carrying the pinned PGEN regex `1.1.1` fixes.
-The quick benchmark capture path now keeps `latest.md` / `latest.tsv`, archives each run under `target/benchmark-trends/history/`, and compares the latest run against the most recent previous archived capture when one exists.
+The quick benchmark capture path now keeps `latest.md` / `latest.tsv`, archives each run under `target/benchmark-trends/history/`, and can compare the latest run against either the most recent previous archived capture or an explicitly requested archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 
 That submodule-backed path now covers:
 - the default PGEN-backed workspace formatting/tests

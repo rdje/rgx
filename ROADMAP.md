@@ -113,7 +113,7 @@ Live forward-looking tracker for rgx.
 - Shipped relative conditional group references on the default regex path by resolving `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time, with API, parser-contract, and PCRE2 differential coverage.
 - Tightened the shipped inline-language CLI path by adding repeatable `--var NAME=VALUE`, optional `--show-details` match rendering, and single-pass match collection so CLI code blocks are not pre-executed twice before output.
 - Stabilized relative conditional group references on both parser backends first by transporting `(?(+1)...)` and `(?(-1)...)` as dedicated AST before the later default-path runtime integration landed.
-- Deepened the quick benchmark-trend loop so each capture now archives timestamped history under `target/benchmark-trends/history/` and summarizes delta versus the most recent prior archived capture.
+- Deepened the quick benchmark-trend loop again so each capture can now compare against either the most recent prior archived snapshot or an explicit archived baseline while still preserving timestamped history under `target/benchmark-trends/history/`.
 - Tightened the shipped inline-language ergonomics again so Lua now accepts bare expression bodies as well as explicit `return ...`, matching the JavaScript/Rhai source-body direction more closely.
 - Added automated quick benchmark-trend capture to the default local validation loop via `scripts/capture-benchmark-trends.sh` and `rgx-bench/src/bin/trend_capture.rs`.
 - Hardened the shipped inline-language contract so JavaScript bare-expression bodies now drive predicate/result behavior instead of silently falling through, and added helper-API regression coverage across Lua/JavaScript/Rhai.

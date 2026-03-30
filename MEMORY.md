@@ -72,7 +72,7 @@ Live continuity memory for `rgx` sessions.
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
   - `./scripts/run-local-ci.sh`
 - Hosted CI now checks out submodules recursively; because `subs/pgen` is private, GitHub Actions may still need `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
-- Quick benchmark capture now keeps timestamped local history under `target/benchmark-trends/history/` and reports ratio deltas against the most recent prior archived capture in `latest.md`.
+- Quick benchmark capture now keeps timestamped local history under `target/benchmark-trends/history/`, and `trend_capture` / `scripts/capture-benchmark-trends.sh` can report ratio deltas against either the most recent prior archived capture or an explicit archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.

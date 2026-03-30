@@ -109,6 +109,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
   - The quick benchmark loop is still intentionally directional, but it now leaves a durable local history trail and immediately tells us whether the latest run moved up or down versus the previous archived capture.
 
+### 2026-03-30 - Added explicit benchmark baseline selection
+- Scope: benchmark trend capture usability, wrapper parity, and validation/docs refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` with `--compare-against <auto|none|unix-timestamp>` so captures can compare against the latest prior archive, disable comparison entirely, or target a specific archived baseline.
+  - Updated `scripts/capture-benchmark-trends.sh` to pass through `RGX_BENCHMARK_COMPARE_AGAINST`, which keeps the default local CI path simple while enabling targeted local longitudinal checks.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the benchmark-validation story reflects the new explicit-baseline path.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-explicit-smoke --compare-against none`
+  - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-explicit-smoke RGX_BENCHMARK_COMPARE_AGAINST=1774884688 ./scripts/capture-benchmark-trends.sh`
+- Notes/impact:
+  - The quick benchmark loop is still intentionally directional, but it no longer forces every local comparison to be “latest versus immediate predecessor”; we can now target a known archived baseline when chasing or confirming specific regressions.
+
 ### 2026-03-30 - Aligned Lua code-block authoring with JS and Rhai
 - Scope: Lua source-body ergonomics, regression coverage, and inline-language contract documentation refreshes.
 - Changes:

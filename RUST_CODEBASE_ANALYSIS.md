@@ -18,6 +18,8 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
   - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass (confirmed previous-run delta reporting)
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-explicit-smoke --compare-against none` => pass
+  - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-explicit-smoke RGX_BENCHMARK_COMPARE_AGAINST=1774884688 ./scripts/capture-benchmark-trends.sh` => pass (confirmed explicit archived-baseline comparison via wrapper)
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core full_mode_native_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_code_block_can_access_match_metadata -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_code_block_can_access_match_metadata -- --nocapture` => pass
@@ -155,13 +157,13 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native are real shipped slices on the documented Rust API path, and wasm now spans both the Rust API path and the CLI's file-backed module-registration path.
 - Embedded inline-language hardening improved again because Lua, JavaScript, and Rhai are now all documented/tested as supporting both bare-expression and explicit-`return` source bodies on the shipped path.
 - Embedded inline-language hardening improved again because the CLI now exposes host-variable injection and richer optional match-detail rendering without pre-executing code blocks twice on the successful path.
-- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, archives each capture locally, and reports delta against the most recent prior archived run instead of leaving all benchmark capture to manual ad hoc runs.
+- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, archives each capture locally, and can report delta against either the most recent prior archived run or a requested archived baseline instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next
 - Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 - Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen` without operator intervention.
-- Deepen the now-operational quick benchmark capture into a fuller release-profile longitudinal story.
+- Deepen the now-operational quick benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection exists for targeted local comparisons.
 
 ### Later
 - Finish larger regex-surface gaps: newer PCRE2 advanced forms and the still-declared-but-unwired opcode families.
