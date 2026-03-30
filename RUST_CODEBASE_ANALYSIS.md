@@ -30,7 +30,6 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `rgx-core/src/wasm.rs`
   - `rgx-core/src/cache.rs`
   - `rgx-core/src/simd.rs`
-  - `rgx-bench/src/lib.rs`
   - `rgx-wasm/src/lib.rs`
 
 ## Executive summary
@@ -58,6 +57,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - compiler validates code blocks against `ExecutionMode` and cargo features
   - VM lowers code blocks into inline opcodes and executes them during matching
   - engine/runtime materialize current match text, current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables into the execution context
+  - Lua and JavaScript now both accept either bare expression bodies or explicit `return ...` bodies, while Rhai keeps the same final-expression authoring model
   - winning-path non-boolean Lua/JavaScript/Rhai/native/wasm results are surfaced through `MatchResult.code_result`
   - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` collect winning-path numeric payloads
   - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` consume winning-path replacement payloads
@@ -82,7 +82,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Top-level alternation branch reporting
 
 ### Execution-mode / feature-gated path
-- `(?{lua:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled.
+- `(?{lua:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `lua` feature is enabled, and Lua source bodies now accept either bare expressions or explicit `return ...` bodies.
 - `(?{js:...})` and `(?{javascript:...})` are shipped as predicate checkpoints in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `javascript` feature is enabled, and JavaScript source bodies now accept either bare expressions or explicit `return ...` bodies.
 - `(?{rhai:...})` is shipped as a predicate checkpoint in `ExecutionMode::Safe` or `ExecutionMode::Full` when the `rhai` feature is enabled.
 - `(?{native:...})` is shipped on the Rust API path in `ExecutionMode::Full` after registering a callback on the compiled `Regex`.
@@ -138,7 +138,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.
 - Embedded code execution is no longer parsed-only scaffolding; Lua/JavaScript/Rhai/native/wasm are real shipped slices on the documented Rust API path.
-- Embedded inline-language hardening improved again because JavaScript now preserves bare-expression predicate/result values instead of silently treating those bodies as unconditional success.
+- Embedded inline-language hardening improved again because Lua and JavaScript now both preserve bare-expression predicate/result values instead of forcing users onto one syntax style per language.
 - Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next

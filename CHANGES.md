@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Aligned Lua code-block authoring with JS and Rhai
+- Scope: Lua source-body ergonomics, regression coverage, and inline-language contract documentation refreshes.
+- Changes:
+  - Updated `rgx-core/src/execution.rs` so the Lua engine now tries direct evaluation first and then falls back to `return ...` wrapping, which lets `(?{lua:...})` accept bare expression bodies without dropping support for explicit `return ...` chunks.
+  - Added `rgx-core/src/lib.rs` regressions covering Lua bare-expression predicate matching plus numeric/replacement helper behavior.
+  - Refreshed `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped inline-language contract describes Lua/JavaScript/Rhai consistently.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_expression_body_can_match -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_expression_body_helpers_surface_numeric_and_replacement_results -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - The everyday inline-language story is now more coherent: Lua, JavaScript, and Rhai all support expression-style authoring, while Lua/JavaScript still keep explicit `return ...` available when users want it.
+  - No parser transport change was needed; this is a runtime ergonomics improvement on the shipped execution path.
+
 ### 2026-03-30 - Added automated benchmark trend capture
 - Scope: benchmark harness reuse, local-CI automation, and roadmap/status documentation refreshes.
 - Changes:

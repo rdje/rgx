@@ -73,7 +73,7 @@ Current behavior contract for the shipped slice:
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
 - Current inline/source-body authoring expectations:
-  - Lua commonly uses explicit `return ...`
+  - Lua supports both bare expression bodies and explicit `return ...` bodies
   - JavaScript supports both bare expression bodies and explicit `return ...` bodies
   - Rhai commonly uses a final expression value
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/Rhai/native/wasm code blocks.

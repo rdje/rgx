@@ -140,7 +140,7 @@ Requirements:
 - Register native callbacks or wasm modules on the compiled `Regex` before matching.
 - Optional host-provided variables can be set on the compiled `Regex` via `set_variable(...)`.
 - Write code as a predicate/source body:
-  - Lua commonly uses `return ...`
+  - Lua supports either a bare expression body or explicit `return ...`
   - JavaScript supports either a bare expression body or explicit `return ...`
   - Rhai can use a final expression directly
 
@@ -150,7 +150,7 @@ Lua example:
 use rgx_core::{ExecutionMode, Regex};
 
 let re = Regex::with_mode(
-    r#"(?<word>cat)(?{lua:return named.word == "cat"})"#,
+    r#"(?<word>cat)(?{lua:named.word == "cat"})"#,
     ExecutionMode::Safe,
 )?;
 assert!(re.is_match("cat"));

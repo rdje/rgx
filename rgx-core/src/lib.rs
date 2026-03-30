@@ -2507,6 +2507,18 @@ mod tests {
 
     #[cfg(feature = "lua")]
     #[test]
+    fn safe_mode_lua_expression_body_can_match() {
+        let regex = Regex::with_mode(
+            r#"(?<word>cat)(?{lua:named.word == "cat"})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua expression-body pattern");
+        assert!(regex.is_match("cat"));
+        assert!(!regex.is_match("dog"));
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
     fn safe_mode_lua_code_block_can_access_named_captures() {
         let regex = Regex::with_mode(
             r#"(?<word>cat)(?{lua:return named.word == "cat"})"#,
@@ -2581,6 +2593,26 @@ mod tests {
 
         let replacement = Regex::with_mode(r#"cat(?{lua:return "CAT"})"#, ExecutionMode::Safe)
             .expect("Failed to compile Lua replacement-helper pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+        assert_eq!(
+            replacement.replace_all_with_code("cat dog cat"),
+            "CAT dog CAT"
+        );
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_expression_body_helpers_surface_numeric_and_replacement_results() {
+        let numeric = Regex::with_mode(r"(?{lua:1})", ExecutionMode::Safe)
+            .expect("Failed to compile Lua numeric-expression helper pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(1.0));
+        assert_eq!(numeric.find_all_numeric_with_code(""), vec![1.0]);
+
+        let replacement = Regex::with_mode(r#"cat(?{lua:"CAT"})"#, ExecutionMode::Safe)
+            .expect("Failed to compile Lua replacement-expression helper pattern");
         assert_eq!(
             replacement.replace_first_with_code("cat dog cat"),
             "CAT dog cat"

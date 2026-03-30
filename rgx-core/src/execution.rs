@@ -524,6 +524,19 @@ pub mod lua {
 
             Ok(())
         }
+
+        fn eval_user_code<'lua>(&self, lua: &'lua Lua, code: &str) -> mlua::Result<Value<'lua>> {
+            // Prefer direct evaluation so explicit `return ...` bodies and full chunks keep
+            // working. Fall back to `return ...` wrapping so bare expression bodies behave
+            // like the shipped JavaScript/Rhai source-body contract.
+            match lua.load(code).eval::<Value>() {
+                Ok(value) => Ok(value),
+                Err(_) => {
+                    let wrapped_code = format!("return {code}");
+                    lua.load(&wrapped_code).eval::<Value>()
+                }
+            }
+        }
     }
 
     impl ExecutionEngine for LuaEngine {
@@ -534,8 +547,7 @@ pub mod lua {
                 return ExecResult::Error(format!("Context setup failed: {}", e));
             }
 
-            // Execute the code
-            let result = lua.load(code).eval::<Value>();
+            let result = self.eval_user_code(&lua, code);
             match result {
                 Ok(Value::Boolean(b)) => {
                     if b {
