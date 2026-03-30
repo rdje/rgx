@@ -147,6 +147,7 @@ struct SampleKey {
 #[derive(Debug, Clone)]
 struct HistoricalCapture {
     generated_at_unix: u64,
+    mode: CaptureMode,
     samples: Vec<TrendSample>,
 }
 
@@ -160,7 +161,9 @@ impl ComparisonBaseline {
     fn resolved_label(&self) -> String {
         match (&self.selection, &self.capture) {
             (ComparisonBaselineSelection::None, _) => "disabled".to_string(),
-            (_, Some(capture)) => capture.generated_at_unix.to_string(),
+            (_, Some(capture)) => {
+                format!("{} ({})", capture.generated_at_unix, capture.mode.as_str())
+            }
             _ => "none".to_string(),
         }
     }
@@ -196,15 +199,23 @@ fn main() -> Result<(), String> {
             options.output_dir.display()
         )
     })?;
-    let history_dir = options.output_dir.join("history");
-    fs::create_dir_all(&history_dir).map_err(|err| {
+    let history_root = options.output_dir.join("history");
+    fs::create_dir_all(&history_root).map_err(|err| {
         format!(
             "failed to create benchmark trend history directory {}: {err}",
-            history_dir.display()
+            history_root.display()
+        )
+    })?;
+    let mode_history_dir = history_dir_for_mode(&history_root, options.mode);
+    fs::create_dir_all(&mode_history_dir).map_err(|err| {
+        format!(
+            "failed to create mode-scoped benchmark trend history directory {}: {err}",
+            mode_history_dir.display()
         )
     })?;
 
-    let comparison_baseline = load_comparison_baseline(&history_dir, options.compare_against)?;
+    let comparison_baseline =
+        load_comparison_baseline(&history_root, options.mode, options.compare_against)?;
 
     let markdown = render_markdown(
         &samples,
@@ -230,7 +241,27 @@ fn main() -> Result<(), String> {
         )
     })?;
 
-    let history_markdown_path = history_dir.join(format!("{generated_at_unix}.md"));
+    let mode_markdown_path = options
+        .output_dir
+        .join(format!("latest-{}.md", options.mode.as_str()));
+    fs::write(&mode_markdown_path, markdown.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write mode-scoped markdown benchmark summary {}: {err}",
+            mode_markdown_path.display()
+        )
+    })?;
+
+    let mode_tsv_path = options
+        .output_dir
+        .join(format!("latest-{}.tsv", options.mode.as_str()));
+    fs::write(&mode_tsv_path, tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write mode-scoped tabular benchmark summary {}: {err}",
+            mode_tsv_path.display()
+        )
+    })?;
+
+    let history_markdown_path = mode_history_dir.join(format!("{generated_at_unix}.md"));
     fs::write(&history_markdown_path, markdown.as_bytes()).map_err(|err| {
         format!(
             "failed to write archived markdown benchmark summary {}: {err}",
@@ -238,7 +269,7 @@ fn main() -> Result<(), String> {
         )
     })?;
 
-    let history_tsv_path = history_dir.join(format!("{generated_at_unix}.tsv"));
+    let history_tsv_path = mode_history_dir.join(format!("{generated_at_unix}.tsv"));
     fs::write(&history_tsv_path, tsv.as_bytes()).map_err(|err| {
         format!(
             "failed to write archived tabular benchmark summary {}: {err}",
@@ -247,9 +278,11 @@ fn main() -> Result<(), String> {
     })?;
 
     println!(
-        "[trend_capture] Wrote benchmark trend summary to {} and {}",
+        "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
         markdown_path.display(),
-        tsv_path.display()
+        tsv_path.display(),
+        mode_markdown_path.display(),
+        mode_tsv_path.display()
     );
     println!(
         "[trend_capture] Archived benchmark snapshot to {} and {}",
@@ -501,8 +534,32 @@ fn median(samples: &mut [f64]) -> f64 {
     }
 }
 
+fn history_dir_for_mode(history_root: &Path, mode: CaptureMode) -> PathBuf {
+    history_root.join(mode.as_str())
+}
+
 fn load_most_recent_historical_capture(
+    history_root: &Path,
+    mode: CaptureMode,
+) -> Result<Option<HistoricalCapture>, String> {
+    if let Some(capture) = load_most_recent_historical_capture_from_dir(
+        &history_dir_for_mode(history_root, mode),
+        mode,
+    )? {
+        return Ok(Some(capture));
+    }
+
+    // Legacy unscoped history entries were effectively quick-mode captures.
+    if mode == CaptureMode::Quick {
+        return load_most_recent_historical_capture_from_dir(history_root, CaptureMode::Quick);
+    }
+
+    Ok(None)
+}
+
+fn load_most_recent_historical_capture_from_dir(
     history_dir: &Path,
+    mode: CaptureMode,
 ) -> Result<Option<HistoricalCapture>, String> {
     if !history_dir.exists() {
         return Ok(None);
@@ -523,7 +580,7 @@ fn load_most_recent_historical_capture(
                 history_dir.display()
             )
         })?;
-        if let Some(candidate) = parse_history_entry(entry)? {
+        if let Some(candidate) = parse_history_entry(entry, mode)? {
             if latest_capture
                 .as_ref()
                 .map(|capture: &HistoricalCapture| {
@@ -540,14 +597,17 @@ fn load_most_recent_historical_capture(
 }
 
 fn load_comparison_baseline(
-    history_dir: &Path,
+    history_root: &Path,
+    mode: CaptureMode,
     selection: ComparisonBaselineSelection,
 ) -> Result<ComparisonBaseline, String> {
     let capture = match selection {
-        ComparisonBaselineSelection::Auto => load_most_recent_historical_capture(history_dir)?,
+        ComparisonBaselineSelection::Auto => {
+            load_most_recent_historical_capture(history_root, mode)?
+        }
         ComparisonBaselineSelection::None => None,
         ComparisonBaselineSelection::Timestamp(generated_at_unix) => {
-            load_historical_capture_by_timestamp(history_dir, generated_at_unix)?
+            load_historical_capture_by_timestamp(history_root, mode, generated_at_unix)?
         }
     };
 
@@ -555,18 +615,37 @@ fn load_comparison_baseline(
 }
 
 fn load_historical_capture_by_timestamp(
-    history_dir: &Path,
+    history_root: &Path,
+    mode: CaptureMode,
     generated_at_unix: u64,
 ) -> Result<Option<HistoricalCapture>, String> {
-    let path = history_dir.join(format!("{generated_at_unix}.tsv"));
+    let path = history_dir_for_mode(history_root, mode).join(format!("{generated_at_unix}.tsv"));
     if !path.exists() {
+        if mode == CaptureMode::Quick {
+            let legacy_path = history_root.join(format!("{generated_at_unix}.tsv"));
+            if !legacy_path.exists() {
+                return Ok(None);
+            }
+            return Ok(Some(load_historical_capture(
+                &legacy_path,
+                generated_at_unix,
+                CaptureMode::Quick,
+            )?));
+        }
         return Ok(None);
     }
 
-    Ok(Some(load_historical_capture(&path, generated_at_unix)?))
+    Ok(Some(load_historical_capture(
+        &path,
+        generated_at_unix,
+        mode,
+    )?))
 }
 
-fn parse_history_entry(entry: fs::DirEntry) -> Result<Option<HistoricalCapture>, String> {
+fn parse_history_entry(
+    entry: fs::DirEntry,
+    mode: CaptureMode,
+) -> Result<Option<HistoricalCapture>, String> {
     let path = entry.path();
     if path.extension().and_then(|ext| ext.to_str()) != Some("tsv") {
         return Ok(None);
@@ -587,12 +666,17 @@ fn parse_history_entry(entry: fs::DirEntry) -> Result<Option<HistoricalCapture>,
         }
     };
 
-    Ok(Some(load_historical_capture(&path, generated_at_unix)?))
+    Ok(Some(load_historical_capture(
+        &path,
+        generated_at_unix,
+        mode,
+    )?))
 }
 
 fn load_historical_capture(
     path: &Path,
     generated_at_unix: u64,
+    mode: CaptureMode,
 ) -> Result<HistoricalCapture, String> {
     let raw = fs::read_to_string(path).map_err(|err| {
         format!(
@@ -604,6 +688,7 @@ fn load_historical_capture(
 
     Ok(HistoricalCapture {
         generated_at_unix,
+        mode,
         samples,
     })
 }
@@ -724,7 +809,7 @@ fn render_markdown(
         writeln!(&mut out, "- `{}`: {summary}", kind.as_str()).ok();
     }
     writeln!(&mut out).ok();
-    render_comparison_markdown(&mut out, samples, comparison_baseline);
+    render_comparison_markdown(&mut out, samples, mode, comparison_baseline);
     writeln!(&mut out).ok();
     writeln!(
         &mut out,
@@ -785,6 +870,7 @@ fn render_tsv(samples: &[TrendSample]) -> String {
 fn render_comparison_markdown(
     out: &mut String,
     current_samples: &[TrendSample],
+    current_mode: CaptureMode,
     comparison_baseline: &ComparisonBaseline,
 ) {
     writeln!(out, "## Delta vs Comparison Baseline").ok();
@@ -801,7 +887,8 @@ fn render_comparison_markdown(
         (ComparisonBaselineSelection::Timestamp(timestamp), None) => {
             writeln!(
                 out,
-                "- Requested archived capture `{timestamp}` was not found."
+                "- Requested archived `{}` capture `{timestamp}` was not found.",
+                current_mode.as_str()
             )
             .ok();
         }
@@ -819,11 +906,13 @@ fn render_comparison_markdown(
 
             let intro = match selection {
                 ComparisonBaselineSelection::Auto => format!(
-                    "- Comparing against archived capture `{}`.",
+                    "- Comparing against archived `{}` capture `{}`.",
+                    previous_capture.mode.as_str(),
                     previous_capture.generated_at_unix
                 ),
                 ComparisonBaselineSelection::Timestamp(_) => format!(
-                    "- Comparing against requested archived capture `{}`.",
+                    "- Comparing against requested archived `{}` capture `{}`.",
+                    previous_capture.mode.as_str(),
                     previous_capture.generated_at_unix
                 ),
                 ComparisonBaselineSelection::None => unreachable!(),
@@ -957,6 +1046,51 @@ fn format_change_label(change_fraction: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new(prefix: &str) -> Self {
+            let unique = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "rgx-trend-capture-{prefix}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("temp test dir should be creatable");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_history_capture(
+        history_root: &Path,
+        mode: Option<CaptureMode>,
+        generated_at_unix: u64,
+        samples: &[TrendSample],
+    ) {
+        let history_dir = match mode {
+            Some(mode) => history_dir_for_mode(history_root, mode),
+            None => history_root.to_path_buf(),
+        };
+        fs::create_dir_all(&history_dir).expect("history directory should be creatable");
+        let path = history_dir.join(format!("{generated_at_unix}.tsv"));
+        fs::write(&path, render_tsv(samples)).expect("history capture should be writable");
+    }
 
     fn sample(
         kind: BenchmarkKind,
@@ -1051,6 +1185,7 @@ mod tests {
         ];
         let previous = HistoricalCapture {
             generated_at_unix: 1700000000,
+            mode: CaptureMode::Quick,
             samples: vec![
                 sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
                 sample(
@@ -1083,8 +1218,8 @@ mod tests {
         );
         assert!(markdown.contains("## Delta vs Comparison Baseline"));
         assert!(markdown.contains("Compare against request: `auto`"));
-        assert!(markdown.contains("Resolved comparison baseline: `1700000000`"));
-        assert!(markdown.contains("Comparing against archived capture `1700000000`."));
+        assert!(markdown.contains("Resolved comparison baseline: `1700000000 (quick)`"));
+        assert!(markdown.contains("Comparing against archived `quick` capture `1700000000`."));
         assert!(markdown.contains("literal_simple"));
         assert!(markdown.contains("email_basic"));
         assert!(markdown.contains("improvement"));
@@ -1160,6 +1295,90 @@ mod tests {
 
         assert!(markdown.contains("Compare against request: `1700000000`"));
         assert!(markdown.contains("Resolved comparison baseline: `none`"));
-        assert!(markdown.contains("Requested archived capture `1700000000` was not found."));
+        assert!(markdown.contains("Requested archived `quick` capture `1700000000` was not found."));
+    }
+
+    #[test]
+    fn auto_baseline_prefers_mode_scoped_history() {
+        let temp_dir = TempTestDir::new("quick-mode-history");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(
+            &history_root,
+            Some(CaptureMode::Quick),
+            1800000000,
+            &samples,
+        );
+
+        let baseline = load_comparison_baseline(
+            &history_root,
+            CaptureMode::Quick,
+            ComparisonBaselineSelection::Auto,
+        )
+        .expect("auto quick baseline should load");
+
+        let capture = baseline.capture.expect("quick baseline should resolve");
+        assert_eq!(capture.generated_at_unix, 1800000000);
+        assert_eq!(capture.mode, CaptureMode::Quick);
+    }
+
+    #[test]
+    fn full_auto_baseline_does_not_fall_back_to_legacy_quick_history() {
+        let temp_dir = TempTestDir::new("full-mode-history");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(&history_root, None, 1700000000, &samples);
+
+        let baseline = load_comparison_baseline(
+            &history_root,
+            CaptureMode::Full,
+            ComparisonBaselineSelection::Auto,
+        )
+        .expect("auto full baseline lookup should succeed");
+
+        assert!(baseline.capture.is_none());
+    }
+
+    #[test]
+    fn quick_explicit_timestamp_can_fall_back_to_legacy_history() {
+        let temp_dir = TempTestDir::new("quick-legacy-history");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(&history_root, None, 1700000000, &samples);
+
+        let baseline = load_comparison_baseline(
+            &history_root,
+            CaptureMode::Quick,
+            ComparisonBaselineSelection::Timestamp(1700000000),
+        )
+        .expect("explicit quick baseline lookup should succeed");
+
+        let capture = baseline
+            .capture
+            .expect("quick legacy baseline should resolve");
+        assert_eq!(capture.generated_at_unix, 1700000000);
+        assert_eq!(capture.mode, CaptureMode::Quick);
     }
 }

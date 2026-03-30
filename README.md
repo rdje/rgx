@@ -44,14 +44,14 @@ If you are new to the repo, use this order:
 ### CLI / benchmark / parity paths
 - [`rgx-cli/src/main.rs`](rgx-cli/src/main.rs) — CLI argument handling and invocation path
 - [`rgx-bench/src/lib.rs`](rgx-bench/src/lib.rs) — shared benchmark fixtures and synthetic input generators
-- [`rgx-bench/src/bin/trend_capture.rs`](rgx-bench/src/bin/trend_capture.rs) — lightweight benchmark trend capture used by the local validation loop, including timestamped history snapshots and previous-run deltas
+- [`rgx-bench/src/bin/trend_capture.rs`](rgx-bench/src/bin/trend_capture.rs) — lightweight benchmark trend capture used by the local validation loop, including mode-scoped latest snapshots, timestamped history, and same-mode delta reporting
 - [`rgx-bench/tests/pcre2_parity.rs`](rgx-bench/tests/pcre2_parity.rs) — differential parity checks vs PCRE2
 
 ### CI / automation paths
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
 - [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for the shared workspace + `rgx-core` feature-matrix validation path
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
-- [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes summaries plus archived history under `target/benchmark-trends/`
+- [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes shared plus mode-scoped summaries and archives under `target/benchmark-trends/`
 
 ## Documentation index (all `.md` files)
 ### Root markdown files
@@ -97,7 +97,7 @@ git submodule update --init --recursive
 ./scripts/run-local-ci.sh
 ```
 The default RGX build now expects the committed `subs/pgen` submodule carrying the pinned PGEN regex `1.1.1` fixes.
-The quick benchmark capture path now keeps `latest.md` / `latest.tsv`, archives each run under `target/benchmark-trends/history/`, and can compare the latest run against either the most recent previous archived capture or an explicitly requested archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
+The quick benchmark capture path now keeps shared `latest.md` / `latest.tsv` plus mode-scoped `latest-quick.*` / `latest-full.*`, archives runs under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`, and auto-compares only against the most recent archived capture from the same mode while still allowing an explicit archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`.
 
 That submodule-backed path now covers:
 - the default PGEN-backed workspace formatting/tests
@@ -139,5 +139,5 @@ Unicode property classes, recursion/subroutine calls, numeric backreferences, an
 The default parser path now drives a real PGEN-backed parser adapter in `rgx-core/src/parsing.rs`, with a one-constant local switch for forcing the recursive-descent reference backend when needed.
 Current PGEN regex integration review is intentionally constrained to the published `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` surface and its referenced contract documents.
 The current integration dependency is now pinned as the `subs/pgen` submodule at verified fix commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
-The quick benchmark validation slice is now a little more operationally useful: each local CI capture preserves a timestamped benchmark history snapshot and summarizes ratio deltas versus the prior archived run instead of only overwriting a single latest file.
+The quick benchmark validation slice is now a little more operationally useful: each local CI capture preserves mode-scoped benchmark history, keeps both shared and per-mode latest snapshots, and summarizes ratio deltas without mixing quick-profile and full-profile baselines.
 Read SESSION_BOOTSTRAP.md and start from there.

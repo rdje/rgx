@@ -75,7 +75,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - run and track `rgx-bench` baselines against recent changes
   - keep the default local validation loop emitting a low-overhead quick trend summary under `target/benchmark-trends/`
-  - preserve timestamped local history snapshots and surface delta summaries against the most recent prior archived capture
+  - preserve mode-scoped latest snapshots plus timestamped local history and surface delta summaries against the most recent prior archived capture from the same benchmark mode
   - preserve a higher-fidelity `full` mode for slower bench-profile captures when deeper measurement is needed
   - prioritize optimizations with measurable impact
 
@@ -109,6 +109,7 @@ Live forward-looking tracker for rgx.
 
 ## Done recently (snapshot)
 - Hardened the shipped Rhai source-body contract so explicit `return ...` bodies are now locked in alongside final-expression authoring, with regression coverage and docs aligned to the actual runtime behavior.
+- Separated benchmark trend artifacts into mode-scoped latest snapshots and history directories so auto-selected comparison baselines no longer mix quick-profile and full-profile captures, while still preserving explicit archived-baseline selection.
 - Added file-backed CLI wasm module registration through repeatable `--wasm-module NAME=PATH`, so `(?{wasm:module:function})` no longer requires Rust glue just to exercise registered modules from the command line.
 - Shipped relative conditional group references on the default regex path by resolving `(?(+1)...)` / `(?(-1)...)` to absolute conditional-group checks at compile time, with API, parser-contract, and PCRE2 differential coverage.
 - Tightened the shipped inline-language CLI path by adding repeatable `--var NAME=VALUE`, optional `--show-details` match rendering, and single-pass match collection so CLI code blocks are not pre-executed twice before output.

@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Separated benchmark history by capture mode
+- Scope: benchmark trend longitudinal safety, mode-aware baseline resolution, wrapper output clarity, and roadmap/doc alignment.
+- Changes:
+  - Updated `rgx-bench/src/bin/trend_capture.rs` so archived benchmark artifacts now live under mode-scoped history directories, shared output also keeps `latest-quick.*` / `latest-full.*`, and automatic baseline lookup stays within the current capture mode instead of mixing quick and full runs.
+  - Added regression coverage for mode-scoped baseline preference, safe legacy quick-history fallback, and the guardrail that `full` mode does not silently reuse legacy quick-only archives.
+  - Refreshed `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark-capture contract and roadmap now describe the new mode-aware behavior consistently.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-mode-smoke.JSCCE6 --compare-against none`
+  - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-mode-smoke.JSCCE6 RGX_BENCHMARK_TREND_MODE=full ./scripts/capture-benchmark-trends.sh`
+  - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-mode-smoke.JSCCE6 ./scripts/capture-benchmark-trends.sh`
+- Notes/impact:
+  - This closes a real measurement-quality gap: the default quick validation loop and the slower bench-profile flow can now coexist in one output tree without contaminating each other's automatic comparisons.
+  - The next benchmark follow-up can focus on deeper release/longitudinal reporting instead of first fixing mixed-profile baseline selection.
+
 ### 2026-03-30 - Hardened Rhai explicit-return ergonomics
 - Scope: inline-language contract hardening for Rhai, regression coverage, and shipped-surface documentation alignment.
 - Changes:
