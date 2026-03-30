@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.9`
+- Version: `v0.1.10`
 - Last updated: `2026-03-30`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -34,6 +34,7 @@ Required invariants:
   - `(?:...)` -> `Regex::Group { kind: NonCapturing, ... }`
   - `(?<name>...)` -> `Regex::Group { kind: Capturing, name: Some(name), index: None }`
   - `(?>...)` -> `Regex::Group { kind: Atomic, ... }`
+  - `(?|...)` -> `Regex::Group { kind: BranchReset, ... }`
 - Lookaround forms map as:
   - `(?=...)` / `(?!...)` -> `Regex::Lookahead { positive: true/false, ... }`
   - `(?<=...)` / `(?<!...)` -> `Regex::Lookbehind { positive: true/false, ... }`
@@ -74,9 +75,11 @@ Current contract:
   - backreferences
   - conditionals, including current group/named-group/lookaround forms plus relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`
   - `DEFINE` conditionals as an explicit parsed-only boundary form
+  - branch-reset groups `(?|...)` as an explicit parsed-only boundary form
 - Compiler/runtime status for those parser-recognized forms is:
   - recursion, backreferences, Unicode property classes, and current shipped conditional forms, including relative group-exists conditionals, are integrated on the default regex path
   - `DEFINE` conditionals are parser-recognized but compile-rejected explicitly until RGX defines downstream runtime policy
+  - branch-reset groups are parser-recognized but compile-rejected explicitly until RGX defines PCRE2-compatible capture-numbering/runtime policy
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
@@ -95,7 +98,7 @@ The conformance harness checks:
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks and missing capture-target references.
 
-When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, code-block tags, recursion, backreferences, current conditional families (including relative group-exists transport), and Unicode property classes.
+When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, code-block tags, recursion, backreferences, current conditional families (including relative group-exists transport), and Unicode property classes.
 
 Current rollout note:
 - The default `rgx-core` build now includes `pgen-parser`, so `parse_pattern(...)` uses the real PGEN AST-dump adapter unless default features are explicitly disabled.

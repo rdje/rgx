@@ -91,6 +91,8 @@ pub enum GroupKind {
     NonCapturing,
     /// Atomic group (?>...) - no backtracking
     Atomic,
+    /// Branch-reset group (?|...) - parser-recognized, runtime semantics pending
+    BranchReset,
 }
 
 /// Quantifier specification

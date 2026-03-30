@@ -690,7 +690,9 @@ impl<'a> PgenAstAdapter<'a> {
         let actual = self.alternative_child(node).unwrap_or(node);
         match actual.rule_name.as_str() {
             "group" | "capturing_group" | "noncapturing_group" | "named_group"
-            | "python_named_group" | "atomic_group" => self.convert_group(actual),
+            | "python_named_group" | "atomic_group" | "branch_reset_group" => {
+                self.convert_group(actual)
+            }
             "lookaround" | "lookahead_pos" | "lookahead_neg" | "lookbehind_pos"
             | "lookbehind_neg" => self.convert_lookaround(actual),
             "conditional" => self.convert_conditional(actual),
@@ -717,6 +719,7 @@ impl<'a> PgenAstAdapter<'a> {
             "capturing_group" => (GroupKind::Capturing, None),
             "noncapturing_group" => (GroupKind::NonCapturing, None),
             "atomic_group" => (GroupKind::Atomic, None),
+            "branch_reset_group" => (GroupKind::BranchReset, None),
             "named_group" | "python_named_group" => {
                 let name = self
                     .first_descendant(actual, "name")
@@ -1146,6 +1149,7 @@ mod tests {
             r"dog\z",
             "(abc)",
             "(?:a)(?<word>b)(?>c)",
+            "(?|a|b)",
             "(?=ab)c",
             "(?!ab)c",
             "(?<=z)a",
@@ -1314,6 +1318,10 @@ mod tests {
             (
                 "(?(DEFINE)a)",
                 "conditional '(?(DEFINE)...)' is parser-recognized but not yet executed by rgx",
+            ),
+            (
+                "(?|a|b)",
+                "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx",
             ),
         ];
 

@@ -18,6 +18,9 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Groups:
   - capturing/non-capturing/named groups: `shipped`
   - atomic groups `(?>...)`: `shipped`
+  - branch-reset groups `(?|...)`: `parsed-only`
+    - parser accepts and preserves the branch-reset wrapper explicitly
+    - compiler rejects it explicitly until RGX defines capture renumbering/runtime policy
 - Lookarounds:
   - lookahead/lookbehind (positive and negative): `shipped`
 Representative test anchors:

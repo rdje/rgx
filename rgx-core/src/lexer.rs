@@ -77,6 +77,7 @@ impl<'a> Lexer<'a> {
             Token::NamedGroupStart { .. } => "NamedGroupStart",
             Token::NonCapturingGroupStart => "NonCapturingGroupStart",
             Token::AtomicGroupStart => "AtomicGroupStart",
+            Token::BranchResetGroupStart => "BranchResetGroupStart",
             Token::GroupEnd => "GroupEnd",
             Token::LookaheadPos => "LookaheadPos",
             Token::LookaheadNeg => "LookaheadNeg",
@@ -751,7 +752,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?(...)), (?{lang:code})
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -860,6 +861,10 @@ impl<'a> Lexer<'a> {
             Some('>') => {
                 self.advance(); // Skip '>'
                 Ok(Token::AtomicGroupStart)
+            }
+            Some('|') => {
+                self.advance(); // Skip '|'
+                Ok(Token::BranchResetGroupStart)
             }
             Some('R') => {
                 self.advance(); // Skip 'R'
@@ -1659,6 +1664,21 @@ mod tests {
                 Token::Recursion {
                     target: RecursionTarget::NamedGroup("name".to_string()),
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_branch_reset_group_tokens() {
+        let tokens = tokenize_all("(?|a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::BranchResetGroupStart,
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
             ]
         );
     }

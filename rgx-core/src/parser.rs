@@ -694,6 +694,31 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            Some(Token::BranchResetGroupStart) => {
+                self.advance()?; // consume '(?|'
+                let expr = self.parse_alternation()?;
+
+                match self.peek() {
+                    Some(Token::GroupEnd) => {
+                        self.advance()?; // consume ')'
+                        Ok(Regex::Group {
+                            expr: Box::new(expr),
+                            kind: GroupKind::BranchReset,
+                            index: None,
+                            name: None,
+                        })
+                    }
+                    _ => Err(LexError::UnexpectedEOF {
+                        expected: "closing parenthesis ')'".to_string(),
+                        position: self
+                            .current_token
+                            .as_ref()
+                            .map(|t| t.position.clone())
+                            .unwrap_or_else(|| crate::token::Position::start()),
+                    }),
+                }
+            }
+
             Some(Token::LookaheadPos) => {
                 self.advance()?; // consume '(?='
                 let expr = self.parse_alternation()?;
@@ -974,6 +999,32 @@ mod tests {
                 assert!(matches!(kind, GroupKind::Atomic));
             }
             _ => panic!("Expected atomic group"),
+        }
+    }
+
+    #[test]
+    fn test_parse_branch_reset_group() {
+        let mut parser = Parser::new("(?|a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Group {
+                expr, kind, name, ..
+            } => {
+                assert!(matches!(kind, GroupKind::BranchReset));
+                assert_eq!(name, None);
+                match *expr {
+                    Regex::Alternation(alternatives) => {
+                        assert_eq!(alternatives.len(), 2);
+                        assert!(matches!(alternatives[0], Regex::Char('a')));
+                        assert!(matches!(alternatives[1], Regex::Char('b')));
+                    }
+                    other => {
+                        panic!("Expected alternation inside branch-reset group, got: {other:?}")
+                    }
+                }
+            }
+            other => panic!("Expected branch-reset group, got: {other:?}"),
         }
     }
 

@@ -53,7 +53,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition and fails with a clear compile-time policy error instead of being misread as a named-group conditional.
+- Newer PCRE2 syntax is starting to get explicit downstream boundaries before runtime support lands: `(?(DEFINE)...)` now reaches a dedicated AST condition, and `(?|...)` now reaches a dedicated group kind, so both forms fail with clear compile-time policy errors instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -173,7 +173,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection and same-mode history separation exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`, branch-reset groups, Perl extended character classes) and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `R&name` / `VERSION[...]`, Perl extended character classes) plus real runtime semantics for parser-boundary forms like branch-reset groups, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

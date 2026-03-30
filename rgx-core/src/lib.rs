@@ -3129,6 +3129,22 @@ mod tests {
     }
 
     #[test]
+    fn parser_branch_reset_group_reports_explicit_compile_boundary() {
+        let result = Regex::compile("(?|(a)|(b))");
+        assert!(
+            result.is_err(),
+            "branch-reset group should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains(
+                "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
+            ),
+            "unexpected branch-reset compile-boundary message: {msg}"
+        );
+    }
+
+    #[test]
     fn parser_conditional_missing_relative_group_reports_compile_error() {
         let cases = [
             (

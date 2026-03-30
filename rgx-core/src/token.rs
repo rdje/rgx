@@ -88,6 +88,8 @@ pub enum Token {
     NonCapturingGroupStart,
     /// (?>  - Start of atomic group (no backtracking)
     AtomicGroupStart,
+    /// (?| - Start of a branch-reset group
+    BranchResetGroupStart,
     /// ) - End of any group
     GroupEnd,
 

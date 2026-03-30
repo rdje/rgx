@@ -3814,6 +3814,11 @@ impl OptimizingCompiler {
                             self.codegen_pass(expr, false);
                         }
                     }
+                    GroupKind::BranchReset => {
+                        panic!(
+                            "branch-reset groups '(?|...)' should be rejected during compiler validation before codegen"
+                        );
+                    }
                 }
             }
 

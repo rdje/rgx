@@ -74,6 +74,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
 - Branch-reset groups
+  - current RGX boundary is parser-recognized but compile-rejected explicitly; PCRE2-style capture renumbering/runtime behavior is still open
 - `DEFINE` conditionals
   - current RGX boundary is parser-recognized but compile-rejected explicitly; runtime behavior is still open
 - Perl extended character classes `(?[...])`

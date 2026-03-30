@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-30 - Harden branch-reset group parser boundary
+- Scope: parser-boundary hardening for newer PCRE2 group syntax, explicit compile-policy messaging, and parser/PGEN alignment.
+- Changes:
+  - Added `GroupKind::BranchReset` plus recursive-descent token/parser transport for `(?|...)`, and taught the default PGEN AST adapter to map `branch_reset_group` into the same canonical RGX AST.
+  - Updated the public compile path so branch-reset groups now fail early with a deliberate compile-time policy message before RGX's normal capture-numbering logic can make invalid assumptions.
+  - Refreshed the parser contract, capability matrix, compatibility matrix, roadmap, and continuity notes so branch-reset groups are now tracked as a parsed-only boundary rather than an ambiguous parser gap.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_branch_reset_group_reports_explicit_compile_boundary -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core branch_reset -- --nocapture`
+- Notes/impact:
+  - Newer PCRE2 branch-reset syntax can now reach RGX downstream safely through both parser backends without pretending RGX already implements PCRE2's capture renumbering semantics.
+
 ### 2026-03-30 - Harden DEFINE conditional parser boundary
 - Scope: parser-boundary hardening for newer PCRE2 conditionals, explicit compile-policy messaging, and parser/PGEN alignment.
 - Changes:

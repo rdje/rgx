@@ -120,6 +120,15 @@ impl Compiler {
             self.mode
         );
         debug_log!("compiler", "AST: {:?}", ast);
+        if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
+            trace_exit!(
+                "compiler",
+                "Compiler::compile_ast_with_label",
+                "error={}",
+                msg
+            );
+            return Err(RgxError::Compile(msg));
+        }
         let total_groups = Self::count_capture_groups(&ast);
         let named_groups = Self::collect_named_groups(&ast);
         let ast = Self::resolve_relative_conditionals(ast, total_groups)?;
@@ -347,6 +356,63 @@ impl Compiler {
         }
     }
 
+    fn parser_boundary_validation_message(ast: &RegexAst) -> Option<String> {
+        match ast {
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
+                .iter()
+                .find_map(Self::parser_boundary_validation_message),
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. } => Self::parser_boundary_validation_message(expr),
+            RegexAst::Group { expr, kind, .. } => {
+                if matches!(kind, crate::ast::GroupKind::BranchReset) {
+                    Some(
+                        "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
+                            .to_string(),
+                    )
+                } else {
+                    Self::parser_boundary_validation_message(expr)
+                }
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                let condition_message = match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::parser_boundary_validation_message(expr)
+                    }
+                    crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::RelativeGroupExists(_)
+                    | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::Define => None,
+                };
+                condition_message
+                    .or_else(|| Self::parser_boundary_validation_message(true_branch))
+                    .or_else(|| {
+                        false_branch
+                            .as_ref()
+                            .and_then(|branch| Self::parser_boundary_validation_message(branch))
+                    })
+            }
+            RegexAst::Char(_)
+            | RegexAst::CharClass(_)
+            | RegexAst::Dot
+            | RegexAst::Digit { .. }
+            | RegexAst::Word { .. }
+            | RegexAst::Space { .. }
+            | RegexAst::UnicodeClass { .. }
+            | RegexAst::Anchor(_)
+            | RegexAst::WordBoundary { .. }
+            | RegexAst::Backreference(_)
+            | RegexAst::Recursion { .. }
+            | RegexAst::CodeBlock { .. }
+            | RegexAst::Empty => None,
+        }
+    }
+
     fn resolve_relative_conditional_test(
         condition: crate::ast::ConditionalTest,
         opened_groups: u32,
@@ -467,10 +533,19 @@ impl Compiler {
                 .iter()
                 .find_map(|item| self.feature_validation_message(item, total_groups, named_groups)),
             RegexAst::Quantified { expr, .. }
-            | RegexAst::Group { expr, .. }
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. } => {
                 self.feature_validation_message(expr, total_groups, named_groups)
+            }
+            RegexAst::Group { expr, kind, .. } => {
+                if matches!(kind, crate::ast::GroupKind::BranchReset) {
+                    Some(
+                        "branch-reset groups '(?|...)' are parser-recognized but not yet executed by rgx"
+                            .to_string(),
+                    )
+                } else {
+                    self.feature_validation_message(expr, total_groups, named_groups)
+                }
             }
             RegexAst::Conditional {
                 condition,
