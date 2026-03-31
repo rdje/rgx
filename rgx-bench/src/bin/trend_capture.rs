@@ -367,13 +367,13 @@ fn main() -> Result<(), String> {
     };
     let history_summary_markdown = render_history_summary_markdown(history_captures, options.mode);
     let history_summary_tsv = render_history_summary_tsv(history_captures, options.mode);
+    let profile_pairs = build_profile_pair_rows(&quick_captures, &full_captures);
     let overview_rows = [
         build_mode_overview_row(&quick_captures, CaptureMode::Quick),
         build_mode_overview_row(&full_captures, CaptureMode::Full),
     ];
-    let overview_markdown = render_overview_markdown(&overview_rows);
-    let overview_tsv = render_overview_tsv(&overview_rows);
-    let profile_pairs = build_profile_pair_rows(&quick_captures, &full_captures);
+    let overview_markdown = render_overview_markdown(&overview_rows, &profile_pairs);
+    let overview_tsv = render_overview_tsv(&overview_rows, &profile_pairs);
     let profile_pairs_markdown = render_profile_pairs_markdown(&profile_pairs);
     let profile_pairs_tsv = render_profile_pairs_tsv(&profile_pairs);
     let profile_history_rows = build_profile_history_rows(&profile_pairs);
@@ -1481,7 +1481,7 @@ fn build_profile_pair_delta_entries(
     .collect()
 }
 
-fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
+fn render_overview_markdown(rows: &[ModeOverviewRow], profile_pairs: &[ProfilePairRow]) -> String {
     let mut out = String::new();
     writeln!(&mut out, "# Benchmark Trend Overview").ok();
     writeln!(&mut out).ok();
@@ -1541,21 +1541,95 @@ fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
         .ok();
     }
 
+    writeln!(&mut out).ok();
+    writeln!(&mut out, "## Latest Shared Label Pair").ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "- Shared labels with both quick and full captures: `{}`",
+        profile_pairs.len()
+    )
+    .ok();
+
+    if let Some(pair) = profile_pairs.first() {
+        writeln!(
+            &mut out,
+            "- Latest shared label: `{}` at `{}`",
+            pair.label,
+            pair_latest_generated_at_unix(pair)
+        )
+        .ok();
+        writeln!(&mut out).ok();
+        writeln!(
+            &mut out,
+            "| Label | Latest pair unix | Quick capture | Full capture | Quick compile median | Full compile median | Full compile vs quick | Quick find-first median | Full find-first median | Full find-first vs quick | Quick find-all median | Full find-all median | Full find-all vs quick |"
+        )
+        .ok();
+        writeln!(
+            &mut out,
+            "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        )
+        .ok();
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            pair.label,
+            pair_latest_generated_at_unix(pair),
+            pair.quick_generated_at_unix,
+            pair.full_generated_at_unix,
+            pair.quick_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.compile_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.quick_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.find_first_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.quick_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.find_all_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    } else {
+        writeln!(
+            &mut out,
+            "- No shared quick/full capture labels are archived yet."
+        )
+        .ok();
+    }
+
     out
 }
 
-fn render_overview_tsv(rows: &[ModeOverviewRow]) -> String {
+fn render_overview_tsv(rows: &[ModeOverviewRow], profile_pairs: &[ProfilePairRow]) -> String {
     let mut out = String::new();
+    let latest_profile_pair = profile_pairs.first();
     writeln!(
         &mut out,
-        "mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction"
+        "mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction\tlatest_shared_label\tlatest_shared_pair_unix\tlatest_shared_quick_generated_at_unix\tlatest_shared_full_generated_at_unix\tlatest_shared_compile_full_vs_quick_fraction\tlatest_shared_find_first_full_vs_quick_fraction\tlatest_shared_find_all_full_vs_quick_fraction"
     )
     .ok();
 
     for row in rows {
         writeln!(
             &mut out,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             row.mode.as_str(),
             row.entries,
             row.oldest_generated_at_unix
@@ -1571,6 +1645,28 @@ fn render_overview_tsv(rows: &[ModeOverviewRow]) -> String {
             format_optional_tsv_number(row.compile_delta),
             format_optional_tsv_number(row.find_first_delta),
             format_optional_tsv_number(row.find_all_delta),
+            latest_profile_pair
+                .map(|pair| pair.label.clone())
+                .unwrap_or_else(|| "-".to_string()),
+            latest_profile_pair
+                .map(pair_latest_generated_at_unix)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            latest_profile_pair
+                .map(|pair| pair.quick_generated_at_unix.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            latest_profile_pair
+                .map(|pair| pair.full_generated_at_unix.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            format_optional_tsv_number(
+                latest_profile_pair.and_then(|pair| pair.compile_full_vs_quick)
+            ),
+            format_optional_tsv_number(
+                latest_profile_pair.and_then(|pair| pair.find_first_full_vs_quick)
+            ),
+            format_optional_tsv_number(
+                latest_profile_pair.and_then(|pair| pair.find_all_full_vs_quick)
+            ),
         )
         .ok();
     }
@@ -2665,11 +2761,30 @@ mod tests {
             build_mode_overview_row(&[], CaptureMode::Full),
         ];
 
-        let markdown = render_overview_markdown(&rows);
+        let profile_pairs = vec![ProfilePairRow {
+            label: "pair-head".to_string(),
+            quick_generated_at_unix: 1800000000,
+            full_generated_at_unix: 1810000000,
+            quick_compile_ratio: Some(2.0),
+            full_compile_ratio: Some(1.5),
+            compile_full_vs_quick: Some(-0.25),
+            quick_find_first_ratio: Some(1.8),
+            full_find_first_ratio: Some(2.1),
+            find_first_full_vs_quick: Some(0.166667),
+            quick_find_all_ratio: Some(3.3),
+            full_find_all_ratio: Some(3.0),
+            find_all_full_vs_quick: Some(-0.090909),
+        }];
+
+        let markdown = render_overview_markdown(&rows, &profile_pairs);
         assert!(markdown.contains("# Benchmark Trend Overview"));
         assert!(markdown.contains("Modes covered: `2`"));
         assert!(markdown.contains("| quick | 1 | 1800000000 | 1800000000 | quick-head |"));
         assert!(markdown.contains("| full | 0 | - | - | - | - | - | - | - | - | - |"));
+        assert!(markdown.contains("## Latest Shared Label Pair"));
+        assert!(markdown.contains("Shared labels with both quick and full captures: `1`"));
+        assert!(markdown.contains("- Latest shared label: `pair-head` at `1810000000`"));
+        assert!(markdown.contains("| pair-head | 1810000000 | 1800000000 | 1810000000 | 2.00x slower median | 1.50x slower median | 25.00% improvement | 1.80x slower median | 2.10x slower median | 16.67% regression | 3.30x slower median | 3.00x slower median | 9.09% improvement |"));
     }
 
     #[test]
@@ -2727,11 +2842,26 @@ mod tests {
             build_mode_overview_row(&[], CaptureMode::Quick),
         ];
 
-        let tsv = render_overview_tsv(&rows);
+        let profile_pairs = vec![ProfilePairRow {
+            label: "pair-head".to_string(),
+            quick_generated_at_unix: 1700000000,
+            full_generated_at_unix: 1800000000,
+            quick_compile_ratio: Some(2.0),
+            full_compile_ratio: Some(2.2),
+            compile_full_vs_quick: Some(0.1),
+            quick_find_first_ratio: Some(2.0),
+            full_find_first_ratio: Some(1.8),
+            find_first_full_vs_quick: Some(-0.1),
+            quick_find_all_ratio: Some(3.0),
+            full_find_all_ratio: Some(3.3),
+            find_all_full_vs_quick: Some(0.1),
+        }];
+
+        let tsv = render_overview_tsv(&rows, &profile_pairs);
         assert!(tsv
             .contains("mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel"));
-        assert!(tsv.contains("full\t2\t1700000000\t1800000000\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"));
-        assert!(tsv.contains("quick\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-"));
+        assert!(tsv.contains("full\t2\t1700000000\t1800000000\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000\tpair-head\t1800000000\t1700000000\t1800000000\t0.100000\t-0.100000\t0.100000"));
+        assert!(tsv.contains("quick\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\tpair-head\t1800000000\t1700000000\t1800000000\t0.100000\t-0.100000\t0.100000"));
     }
 
     #[test]

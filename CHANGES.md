@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Surface latest shared pair in benchmark overview
+- Scope: benchmark landing-artifact ergonomics, release-profile visibility, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so `overview.md` / `overview.tsv` now surface the newest shared quick/full label pair alongside the per-mode latest quick/full state.
+  - Reused the existing `profile-pairs.*` data so the overview can expose current shared-label quick/full medians and full-vs-quick deltas without inventing another aggregation path.
+  - Added focused `trend_capture` coverage for the richer overview markdown/TSV shape, including the duplicated machine-readable shared-pair fields in `overview.tsv`.
+  - Updated `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the overview artifact is documented as the current landing page for both mode state and latest shared quick/full pair context.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This makes `overview.*` the single quickest place to inspect both “latest quick/full mode state” and “latest shared quick/full revision pair” before drilling into the deeper paired-history reports.
+
 ### 2026-03-31 - Add latest-pair callouts to rolling benchmark history
 - Scope: benchmark release-profile readability, benchmark-report ergonomics, and validation/doc refreshes.
 - Changes:
