@@ -208,6 +208,21 @@ struct HistorySummaryRow {
     find_all_delta: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct ModeOverviewRow {
+    mode: CaptureMode,
+    entries: usize,
+    oldest_generated_at_unix: Option<u64>,
+    latest_generated_at_unix: Option<u64>,
+    latest_label: Option<String>,
+    compile_ratio: Option<f64>,
+    find_first_ratio: Option<f64>,
+    find_all_ratio: Option<f64>,
+    compile_delta: Option<f64>,
+    find_first_delta: Option<f64>,
+    find_all_delta: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CaptureMetadata {
     label: Option<String>,
@@ -309,6 +324,18 @@ fn main() -> Result<(), String> {
     let history_captures = load_historical_captures(&history_root, options.mode)?;
     let history_summary_markdown = render_history_summary_markdown(&history_captures, options.mode);
     let history_summary_tsv = render_history_summary_tsv(&history_captures, options.mode);
+    let overview_rows = [
+        build_mode_overview_row(
+            &load_historical_captures(&history_root, CaptureMode::Quick)?,
+            CaptureMode::Quick,
+        ),
+        build_mode_overview_row(
+            &load_historical_captures(&history_root, CaptureMode::Full)?,
+            CaptureMode::Full,
+        ),
+    ];
+    let overview_markdown = render_overview_markdown(&overview_rows);
+    let overview_tsv = render_overview_tsv(&overview_rows);
 
     let history_summary_markdown_path = options
         .output_dir
@@ -334,6 +361,22 @@ fn main() -> Result<(), String> {
         )
     })?;
 
+    let overview_markdown_path = options.output_dir.join("overview.md");
+    fs::write(&overview_markdown_path, overview_markdown.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write benchmark overview markdown {}: {err}",
+            overview_markdown_path.display()
+        )
+    })?;
+
+    let overview_tsv_path = options.output_dir.join("overview.tsv");
+    fs::write(&overview_tsv_path, overview_tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write benchmark overview tabular summary {}: {err}",
+            overview_tsv_path.display()
+        )
+    })?;
+
     println!(
         "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
         markdown_path.display(),
@@ -350,6 +393,11 @@ fn main() -> Result<(), String> {
         "[trend_capture] Wrote rolling history summary to {} and {}",
         history_summary_markdown_path.display(),
         history_summary_tsv_path.display()
+    );
+    println!(
+        "[trend_capture] Wrote cross-mode benchmark overview to {} and {}",
+        overview_markdown_path.display(),
+        overview_tsv_path.display()
     );
     println!();
     println!("{markdown}");
@@ -1142,6 +1190,122 @@ fn render_history_summary_tsv(captures: &[HistoricalCapture], mode: CaptureMode)
     out
 }
 
+fn build_mode_overview_row(captures: &[HistoricalCapture], mode: CaptureMode) -> ModeOverviewRow {
+    let latest_summary = build_history_summary_rows(captures).pop();
+    let latest_capture = captures.last();
+
+    ModeOverviewRow {
+        mode,
+        entries: captures.len(),
+        oldest_generated_at_unix: captures.first().map(|capture| capture.generated_at_unix),
+        latest_generated_at_unix: latest_capture.map(|capture| capture.generated_at_unix),
+        latest_label: latest_capture.and_then(|capture| capture.label.clone()),
+        compile_ratio: latest_summary.as_ref().and_then(|row| row.compile_ratio),
+        find_first_ratio: latest_summary.as_ref().and_then(|row| row.find_first_ratio),
+        find_all_ratio: latest_summary.as_ref().and_then(|row| row.find_all_ratio),
+        compile_delta: latest_summary.as_ref().and_then(|row| row.compile_delta),
+        find_first_delta: latest_summary.as_ref().and_then(|row| row.find_first_delta),
+        find_all_delta: latest_summary.as_ref().and_then(|row| row.find_all_delta),
+    }
+}
+
+fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
+    let mut out = String::new();
+    writeln!(&mut out, "# Benchmark Trend Overview").ok();
+    writeln!(&mut out).ok();
+    writeln!(&mut out, "- Modes covered: `{}`", rows.len()).ok();
+    writeln!(
+        &mut out,
+        "- Latest capture count across modes: `{}`",
+        rows.iter()
+            .filter(|row| row.latest_generated_at_unix.is_some())
+            .count()
+    )
+    .ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "| Mode | Entries | Oldest | Latest | Label | Compile median | Find First median | Find All median | Compile delta vs previous | Find First delta vs previous | Find All delta vs previous |"
+    )
+    .ok();
+    writeln!(
+        &mut out,
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .ok();
+
+    for row in rows {
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            row.mode.as_str(),
+            row.entries,
+            row.oldest_generated_at_unix
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            row.latest_generated_at_unix
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            row.latest_label.clone().unwrap_or_else(|| "-".to_string()),
+            row.compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.compile_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_first_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_all_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_overview_tsv(rows: &[ModeOverviewRow]) -> String {
+    let mut out = String::new();
+    writeln!(
+        &mut out,
+        "mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction"
+    )
+    .ok();
+
+    for row in rows {
+        writeln!(
+            &mut out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.mode.as_str(),
+            row.entries,
+            row.oldest_generated_at_unix
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            row.latest_generated_at_unix
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            row.latest_label.clone().unwrap_or_else(|| "-".to_string()),
+            format_optional_tsv_number(row.compile_ratio),
+            format_optional_tsv_number(row.find_first_ratio),
+            format_optional_tsv_number(row.find_all_ratio),
+            format_optional_tsv_number(row.compile_delta),
+            format_optional_tsv_number(row.find_first_delta),
+            format_optional_tsv_number(row.find_all_delta),
+        )
+        .ok();
+    }
+
+    out
+}
+
 fn render_tsv(samples: &[TrendSample], label: Option<&str>) -> String {
     let mut out = String::new();
     if let Some(label) = label {
@@ -1815,6 +1979,106 @@ mod tests {
         assert!(tsv.contains(
             "1800000000\tfull\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"
         ));
+    }
+
+    #[test]
+    fn render_overview_markdown_reports_latest_state_for_each_mode() {
+        let rows = vec![
+            build_mode_overview_row(
+                &[HistoricalCapture {
+                    generated_at_unix: 1800000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("quick-head".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            18.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            33.0,
+                            10.0,
+                        ),
+                    ],
+                }],
+                CaptureMode::Quick,
+            ),
+            build_mode_overview_row(&[], CaptureMode::Full),
+        ];
+
+        let markdown = render_overview_markdown(&rows);
+        assert!(markdown.contains("# Benchmark Trend Overview"));
+        assert!(markdown.contains("Modes covered: `2`"));
+        assert!(markdown.contains("| quick | 1 | 1800000000 | 1800000000 | quick-head |"));
+        assert!(markdown.contains("| full | 0 | - | - | - | - | - | - | - | - | - |"));
+    }
+
+    #[test]
+    fn render_overview_tsv_reports_latest_state_for_each_mode() {
+        let rows = vec![
+            build_mode_overview_row(
+                &[
+                    HistoricalCapture {
+                        generated_at_unix: 1700000000,
+                        mode: CaptureMode::Full,
+                        label: Some("base-full".to_string()),
+                        samples: vec![
+                            sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                            sample(
+                                BenchmarkKind::FindFirst,
+                                "email_basic",
+                                Some(1000),
+                                20.0,
+                                10.0,
+                            ),
+                            sample(
+                                BenchmarkKind::FindAll,
+                                "capture_groups",
+                                Some(1000),
+                                30.0,
+                                10.0,
+                            ),
+                        ],
+                    },
+                    HistoricalCapture {
+                        generated_at_unix: 1800000000,
+                        mode: CaptureMode::Full,
+                        label: Some("head-full".to_string()),
+                        samples: vec![
+                            sample(BenchmarkKind::Compile, "literal_simple", None, 11.0, 5.0),
+                            sample(
+                                BenchmarkKind::FindFirst,
+                                "email_basic",
+                                Some(1000),
+                                18.0,
+                                10.0,
+                            ),
+                            sample(
+                                BenchmarkKind::FindAll,
+                                "capture_groups",
+                                Some(1000),
+                                33.0,
+                                10.0,
+                            ),
+                        ],
+                    },
+                ],
+                CaptureMode::Full,
+            ),
+            build_mode_overview_row(&[], CaptureMode::Quick),
+        ];
+
+        let tsv = render_overview_tsv(&rows);
+        assert!(tsv
+            .contains("mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel"));
+        assert!(tsv.contains("full\t2\t1700000000\t1800000000\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"));
+        assert!(tsv.contains("quick\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-"));
     }
 
     #[test]

@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add cross-mode benchmark overview artifacts
+- Scope: benchmark longitudinal visibility, quick/full release-profile ergonomics, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so each run now also writes `overview.md` / `overview.tsv`, a compact cross-mode summary of the latest archived quick/full capture state including entry counts, labels, aggregate medians, and delta-vs-previous values per mode.
+  - Reused the existing history-summary aggregation path so the overview stays mode-scoped, history-backed, and resilient when one mode has not been captured yet.
+  - Added focused `trend_capture` coverage for overview markdown/TSV rendering across populated and empty modes.
+  - Updated `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark workflow now documents the new cross-mode overview artifact.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This gives RGX one stable place to inspect the latest quick/full benchmark story together without manually opening both mode-specific history summaries.
+
 ### 2026-03-31 - Add label-based benchmark baseline selection
 - Scope: benchmark trend baseline ergonomics, revision-targeted comparison, and continuity/doc refreshes.
 - Changes:

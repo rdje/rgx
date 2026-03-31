@@ -97,7 +97,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
   - the real PGEN backend is green locally through pinned submodule commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
-  - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
+  - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, emits a cross-mode `overview.*` for latest quick/full state, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
 
 ## What is shipped today
 ### Default public regex path
@@ -160,7 +160,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure now has two tiers:
   - criterion throughput benches in `rgx-bench/benches/throughput.rs`
-  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode, writing both `latest.*` summaries, rolling `history-*.{md,tsv}` summaries, and timestamped history snapshots with previous-run delta sections
+  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode, writing `latest.*` summaries, a cross-mode `overview.*`, rolling `history-*.{md,tsv}` summaries, and timestamped history snapshots with previous-run delta sections
 
 ## Roadmap alignment
 ### Now
@@ -177,7 +177,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Embedded inline-language hardening improved again because Lua, JavaScript, and Rhai are now all documented/tested as supporting both bare-expression and explicit-`return` source bodies on the shipped path.
 - Embedded inline-language hardening improved again because statement-style Lua/JavaScript/Rhai code blocks can now emit winning-path numeric/replacement payloads explicitly instead of depending only on direct non-boolean returns.
 - Embedded inline-language hardening improved again because the CLI now exposes host-variable injection and richer optional match-detail rendering without pre-executing code blocks twice on the successful path.
-- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, preserves shared plus mode-scoped latest snapshots, writes mode-scoped rolling history summaries, archives each capture locally under the matching benchmark mode, records git-derived capture labels by default through the wrapper, and can report delta against either the most recent same-mode archived run or a requested archived baseline instead of leaving all benchmark capture to manual ad hoc runs.
+- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, preserves shared plus mode-scoped latest snapshots, writes a cross-mode overview plus mode-scoped rolling history summaries, archives each capture locally under the matching benchmark mode, records git-derived capture labels by default through the wrapper, and can report delta against either the most recent same-mode archived run or a requested archived baseline instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next
 - Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.

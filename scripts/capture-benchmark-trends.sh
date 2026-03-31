@@ -30,4 +30,5 @@ cargo run "${profile_args[@]}" --manifest-path Cargo.toml -p rgx-bench --bin tre
 
 echo "[capture-benchmark-trends.sh] Benchmark trend summary available at ${output_dir}/latest.md and ${output_dir}/latest-${mode}.md"
 echo "[capture-benchmark-trends.sh] Rolling ${mode} history summary available at ${output_dir}/history-${mode}.md and ${output_dir}/history-${mode}.tsv"
+echo "[capture-benchmark-trends.sh] Cross-mode overview available at ${output_dir}/overview.md and ${output_dir}/overview.tsv"
 echo "[capture-benchmark-trends.sh] Archived ${mode} history available under ${output_dir}/history/${mode}/"
