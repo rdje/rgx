@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add label-based benchmark baseline selection
+- Scope: benchmark trend baseline ergonomics, revision-targeted comparison, and continuity/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so `--compare-against` now accepts `label:<text>` in addition to `auto`, `none`, and unix timestamps, while keeping explicit selection mode-scoped and backward-compatible with older unlabeled history snapshots.
+  - Taught archived baseline resolution to pick the most recent same-mode capture whose stored label matches the requested label, and refreshed the markdown summary text so resolved baselines now surface labels when present.
+  - Added focused `trend_capture` coverage for label-based argument parsing, empty-label rejection, missing-label reporting, and newest-match resolution when archived captures reuse the same label.
+  - Refreshed `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark validation story now documents the explicit `label:<text>` selector alongside the existing timestamp-based baseline flow.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - Benchmark comparisons can now target a stable revision-style label without requiring users to remember archived unix timestamps.
+
 ### 2026-03-31 - Add benchmark capture labels to longitudinal history
 - Scope: benchmark trend identity tracking, revision-aware longitudinal reporting, wrapper defaults, and validation/doc refreshes.
 - Changes:

@@ -67,11 +67,12 @@ struct CliOptions {
     label: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ComparisonBaselineSelection {
     Auto,
     None,
     Timestamp(u64),
+    Label(String),
 }
 
 impl ComparisonBaselineSelection {
@@ -79,22 +80,32 @@ impl ComparisonBaselineSelection {
         match value {
             "auto" => Ok(Self::Auto),
             "none" => Ok(Self::None),
-            other => other
-                .parse::<u64>()
-                .map(Self::Timestamp)
-                .map_err(|_| {
+            other => {
+                if let Some(label) = other.strip_prefix("label:") {
+                    if label.is_empty() {
+                        return Err(
+                            "unsupported --compare-against value `label:`; expected `label:<text>`"
+                                .to_string(),
+                        );
+                    }
+                    return Ok(Self::Label(label.to_string()));
+                }
+
+                other.parse::<u64>().map(Self::Timestamp).map_err(|_| {
                     format!(
-                        "unsupported --compare-against value `{other}`; expected `auto`, `none`, or a unix timestamp"
+                        "unsupported --compare-against value `{other}`; expected `auto`, `none`, `label:<text>`, or a unix timestamp"
                     )
-                }),
+                })
+            }
         }
     }
 
-    fn requested_label(self) -> String {
+    fn requested_label(&self) -> String {
         match self {
             Self::Auto => "auto".to_string(),
             Self::None => "none".to_string(),
             Self::Timestamp(timestamp) => timestamp.to_string(),
+            Self::Label(label) => format!("label:{label}"),
         }
     }
 }
@@ -163,9 +174,7 @@ impl ComparisonBaseline {
     fn resolved_label(&self) -> String {
         match (&self.selection, &self.capture) {
             (ComparisonBaselineSelection::None, _) => "disabled".to_string(),
-            (_, Some(capture)) => {
-                format!("{} ({})", capture.generated_at_unix, capture.mode.as_str())
-            }
+            (_, Some(capture)) => format_capture_label(capture),
             _ => "none".to_string(),
         }
     }
@@ -379,7 +388,8 @@ where
             }
             "--compare-against" => {
                 let value = args.next().ok_or_else(|| {
-                    "--compare-against requires `auto`, `none`, or a unix timestamp".to_string()
+                    "--compare-against requires `auto`, `none`, `label:<text>`, or a unix timestamp"
+                        .to_string()
                 })?;
                 compare_against = ComparisonBaselineSelection::parse(&value)?;
             }
@@ -409,7 +419,7 @@ where
 
 fn print_usage() {
     println!(
-        "trend_capture --mode <quick|full> --output-dir <path> --compare-against <auto|none|unix-timestamp> --label <text>"
+        "trend_capture --mode <quick|full> --output-dir <path> --compare-against <auto|none|unix-timestamp|label:text> --label <text>"
     );
 }
 
@@ -667,13 +677,16 @@ fn load_comparison_baseline(
     mode: CaptureMode,
     selection: ComparisonBaselineSelection,
 ) -> Result<ComparisonBaseline, String> {
-    let capture = match selection {
+    let capture = match &selection {
         ComparisonBaselineSelection::Auto => {
             load_most_recent_historical_capture(history_root, mode)?
         }
         ComparisonBaselineSelection::None => None,
         ComparisonBaselineSelection::Timestamp(generated_at_unix) => {
-            load_historical_capture_by_timestamp(history_root, mode, generated_at_unix)?
+            load_historical_capture_by_timestamp(history_root, mode, *generated_at_unix)?
+        }
+        ComparisonBaselineSelection::Label(label) => {
+            load_historical_capture_by_label(history_root, mode, label)?
         }
     };
 
@@ -706,6 +719,17 @@ fn load_historical_capture_by_timestamp(
         generated_at_unix,
         mode,
     )?))
+}
+
+fn load_historical_capture_by_label(
+    history_root: &Path,
+    mode: CaptureMode,
+    label: &str,
+) -> Result<Option<HistoricalCapture>, String> {
+    Ok(load_historical_captures(history_root, mode)?
+        .into_iter()
+        .rev()
+        .find(|capture| capture.label.as_deref() == Some(label)))
 }
 
 fn parse_history_entry(
@@ -1145,6 +1169,17 @@ fn render_tsv(samples: &[TrendSample], label: Option<&str>) -> String {
     out
 }
 
+fn format_capture_label(capture: &HistoricalCapture) -> String {
+    match capture.label.as_deref() {
+        Some(label) => format!(
+            "{} ({}, label:{label})",
+            capture.generated_at_unix,
+            capture.mode.as_str()
+        ),
+        None => format!("{} ({})", capture.generated_at_unix, capture.mode.as_str()),
+    }
+}
+
 fn render_comparison_markdown(
     out: &mut String,
     current_samples: &[TrendSample],
@@ -1170,13 +1205,21 @@ fn render_comparison_markdown(
             )
             .ok();
         }
+        (ComparisonBaselineSelection::Label(label), None) => {
+            writeln!(
+                out,
+                "- Requested archived `{}` capture with label `{label}` was not found.",
+                current_mode.as_str()
+            )
+            .ok();
+        }
         (selection, Some(previous_capture)) => {
             let comparisons = compare_samples(current_samples, &previous_capture.samples);
             if comparisons.is_empty() {
                 writeln!(
                     out,
                     "- Comparison baseline `{}` did not share any comparable benchmark rows with the current capture.",
-                    previous_capture.generated_at_unix
+                    format_capture_label(previous_capture)
                 )
                 .ok();
                 return;
@@ -1190,6 +1233,11 @@ fn render_comparison_markdown(
                 ),
                 ComparisonBaselineSelection::Timestamp(_) => format!(
                     "- Comparing against requested archived `{}` capture `{}`.",
+                    previous_capture.mode.as_str(),
+                    previous_capture.generated_at_unix
+                ),
+                ComparisonBaselineSelection::Label(label) => format!(
+                    "- Comparing against requested archived `{}` capture `{}` selected by label `{label}`.",
                     previous_capture.mode.as_str(),
                     previous_capture.generated_at_unix
                 ),
@@ -1418,6 +1466,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_accepts_compare_against_label() {
+        let options = parse_args_from([
+            "--compare-against".to_string(),
+            "label:main-dirty".to_string(),
+        ])
+        .expect("label baseline should parse");
+
+        assert_eq!(
+            options.compare_against,
+            ComparisonBaselineSelection::Label("main-dirty".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_args_rejects_empty_compare_against_label() {
+        let err = parse_args_from(["--compare-against".to_string(), "label:".to_string()])
+            .expect_err("empty label baseline should fail");
+
+        assert!(err.contains("expected `label:<text>`"));
+    }
+
+    #[test]
     fn parse_args_accepts_disabled_comparison() {
         let options = parse_args_from(["--compare-against".to_string(), "none".to_string()])
             .expect("disabled comparison baseline should parse");
@@ -1510,7 +1580,8 @@ mod tests {
         assert!(markdown.contains("## Delta vs Comparison Baseline"));
         assert!(markdown.contains("Label: `head-1800000000`"));
         assert!(markdown.contains("Compare against request: `auto`"));
-        assert!(markdown.contains("Resolved comparison baseline: `1700000000 (quick)`"));
+        assert!(markdown
+            .contains("Resolved comparison baseline: `1700000000 (quick, label:base-1700000000)`"));
         assert!(markdown.contains("Comparing against archived `quick` capture `1700000000`."));
         assert!(markdown.contains("literal_simple"));
         assert!(markdown.contains("email_basic"));
@@ -1590,6 +1661,45 @@ mod tests {
         assert!(markdown.contains("Compare against request: `1700000000`"));
         assert!(markdown.contains("Resolved comparison baseline: `none`"));
         assert!(markdown.contains("Requested archived `quick` capture `1700000000` was not found."));
+    }
+
+    #[test]
+    fn render_markdown_reports_missing_requested_label_baseline() {
+        let current = vec![
+            sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+            sample(
+                BenchmarkKind::FindFirst,
+                "email_basic",
+                Some(1000),
+                18.0,
+                9.0,
+            ),
+            sample(
+                BenchmarkKind::FindAll,
+                "capture_groups",
+                Some(1000),
+                30.0,
+                10.0,
+            ),
+        ];
+        let comparison_baseline = ComparisonBaseline {
+            selection: ComparisonBaselineSelection::Label("release-candidate".to_string()),
+            capture: None,
+        };
+
+        let markdown = render_markdown(
+            &current,
+            CaptureMode::Quick,
+            1800000000,
+            None,
+            &comparison_baseline,
+        );
+
+        assert!(markdown.contains("Compare against request: `label:release-candidate`"));
+        assert!(markdown.contains("Resolved comparison baseline: `none`"));
+        assert!(markdown.contains(
+            "Requested archived `quick` capture with label `release-candidate` was not found."
+        ));
     }
 
     #[test]
@@ -1857,5 +1967,46 @@ mod tests {
         assert_eq!(capture.generated_at_unix, 1700000000);
         assert_eq!(capture.mode, CaptureMode::Quick);
         assert_eq!(capture.label.as_deref(), Some("legacy-quick"));
+    }
+
+    #[test]
+    fn label_baseline_prefers_most_recent_matching_capture() {
+        let temp_dir = TempTestDir::new("label-history");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(
+            &history_root,
+            Some(CaptureMode::Quick),
+            1700000000,
+            Some("main"),
+            &samples,
+        );
+        write_history_capture(
+            &history_root,
+            Some(CaptureMode::Quick),
+            1800000000,
+            Some("main"),
+            &samples,
+        );
+
+        let baseline = load_comparison_baseline(
+            &history_root,
+            CaptureMode::Quick,
+            ComparisonBaselineSelection::Label("main".to_string()),
+        )
+        .expect("label baseline lookup should succeed");
+
+        let capture = baseline
+            .capture
+            .expect("matching label baseline should resolve");
+        assert_eq!(capture.generated_at_unix, 1800000000);
+        assert_eq!(capture.label.as_deref(), Some("main"));
     }
 }

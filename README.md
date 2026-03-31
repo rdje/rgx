@@ -44,14 +44,14 @@ If you are new to the repo, use this order:
 ### CLI / benchmark / parity paths
 - [`rgx-cli/src/main.rs`](rgx-cli/src/main.rs) — CLI argument handling and invocation path
 - [`rgx-bench/src/lib.rs`](rgx-bench/src/lib.rs) — shared benchmark fixtures and synthetic input generators
-- [`rgx-bench/src/bin/trend_capture.rs`](rgx-bench/src/bin/trend_capture.rs) — lightweight benchmark trend capture used by the local validation loop, including mode-scoped latest snapshots, timestamped history, same-mode delta reporting, rolling history summaries, and optional capture labels
+- [`rgx-bench/src/bin/trend_capture.rs`](rgx-bench/src/bin/trend_capture.rs) — lightweight benchmark trend capture used by the local validation loop, including mode-scoped latest snapshots, timestamped history, same-mode delta reporting, rolling history summaries, optional capture labels, and explicit label-based baseline selection
 - [`rgx-bench/tests/pcre2_parity.rs`](rgx-bench/tests/pcre2_parity.rs) — differential parity checks vs PCRE2
 
 ### CI / automation paths
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — GitHub Actions workflow
 - [`scripts/run-local-ci.sh`](scripts/run-local-ci.sh) — local-first CI entry point for explicit RGX package tests plus the `rgx-core` / `rgx-cli` feature-matrix validation path
 - [`scripts/check-ci-paths.sh`](scripts/check-ci-paths.sh) — CI path/tracked-file guardrails
-- [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes shared plus mode-scoped summaries, rolling history summaries, git-derived capture labels, and archives under `target/benchmark-trends/`
+- [`scripts/capture-benchmark-trends.sh`](scripts/capture-benchmark-trends.sh) — quick benchmark trend capture wrapper that writes shared plus mode-scoped summaries, rolling history summaries, git-derived capture labels, forwards explicit baseline selection, and archives under `target/benchmark-trends/`
 
 ## Documentation index (all `.md` files)
 ### Root markdown files
@@ -100,7 +100,7 @@ git submodule update --init --recursive
 ./scripts/run-local-ci.sh
 ```
 The default RGX build now expects the committed `subs/pgen` submodule carrying the pinned PGEN regex `1.1.1` fixes.
-The quick benchmark capture path now keeps shared `latest.md` / `latest.tsv` plus mode-scoped `latest-quick.*` / `latest-full.*`, writes rolling longitudinal summaries to `history-quick.*` / `history-full.*`, archives runs under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`, auto-compares only against the most recent archived capture from the same mode while still allowing an explicit archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`, and records an optional capture label via `--label` / `RGX_BENCHMARK_TREND_LABEL` that the wrapper defaults from the current git revision (`<short-sha>` or `<short-sha>-dirty`).
+The quick benchmark capture path now keeps shared `latest.md` / `latest.tsv` plus mode-scoped `latest-quick.*` / `latest-full.*`, writes rolling longitudinal summaries to `history-quick.*` / `history-full.*`, archives runs under `target/benchmark-trends/history/quick/` and `target/benchmark-trends/history/full/`, auto-compares only against the most recent archived capture from the same mode while still allowing an explicit archived baseline via `--compare-against` / `RGX_BENCHMARK_COMPARE_AGAINST`, accepts that explicit baseline as either a unix timestamp or `label:<text>`, and records an optional capture label via `--label` / `RGX_BENCHMARK_TREND_LABEL` that the wrapper defaults from the current git revision (`<short-sha>` or `<short-sha>-dirty`).
 
 That submodule-backed path now covers:
 - the default PGEN-backed RGX package test matrix (`rgx-core`, `rgx-cli`, `rgx-bench`, `rgx-wasm`)

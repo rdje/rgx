@@ -97,7 +97,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
   - the real PGEN backend is green locally through pinned submodule commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
-  - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, records an optional revision label for each archived capture, and highlights delta versus the most recent prior archived capture from the same mode instead of only overwriting a one-off latest file
+  - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
 
 ## What is shipped today
 ### Default public regex path

@@ -110,6 +110,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Deepened benchmark trend capture again so explicit same-mode baseline selection can now target either a unix timestamp or a capture label via `label:<text>`, with newest-match resolution when multiple archived captures reuse the same label.
 - Deepened benchmark trend capture again so each archived quick/full run can now carry an explicit label, the wrapper defaults that label from the current git revision, and the rolling history summaries surface those labels alongside timestamped ratio/delta rows.
 - Extended benchmark trend capture again so each quick/full run now also writes mode-scoped rolling history summaries (`history-quick.*` / `history-full.*`) with aggregate median ratios and delta-vs-previous columns, not just one latest snapshot plus one comparison baseline.
 - Shipped current recursion-condition conditionals on the default regex path by teaching both parser backends plus the compiler/VM to preserve `(?(R)...)` / `(?(Rn)...)`, honor PCRE2's `R` / `Rn` named-group ambiguity rule, and execute those conditionals against the active recursion level with explicit missing-group validation.
