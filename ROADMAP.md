@@ -66,6 +66,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
   - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` are shipped
+    - current blocker: the pinned PGEN backend rejects the minimal `R&name` reproducer `(?(R&word)a|b)` at byte 0; tracked locally as `pgen-issues/PGEN-RGX-0005.yaml`
   - decide explicit compile-boundary versus runtime/set-algebra behavior for Perl extended character classes `(?[...])` now that parser transport and compile-boundary guardrails are in place on both parser backends
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 

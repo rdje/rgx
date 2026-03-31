@@ -78,6 +78,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 ### Explicitly unsupported or still open
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
+  - current pinned PGEN parser blocker: `(?(R&word)a|b)` is rejected at byte 0 on the default generated backend; tracked in `pgen-issues/PGEN-RGX-0005.yaml`
 - Perl extended character classes `(?[...])`
   - current RGX boundary is parser-recognized but compile-rejected explicitly; downstream set-algebra/runtime behavior is still open
 

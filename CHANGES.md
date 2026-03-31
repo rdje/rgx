@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Log named recursion-condition parser gap in PGEN
+- Scope: PGEN integration bug triage, issue-bundle capture, and roadmap/continuity refresh.
+- Changes:
+  - Attempted the next PCRE2 10.47+ feature slice for named recursion-condition conditionals `(?(R&name)...)`, but did not ship RGX code because the default PGEN parser rejects the syntax before RGX compilation.
+  - Reduced the failure to a minimal parser-only reproducer, `(?(R&word)a|b)`, and captured a new local upstream-style issue bundle in `pgen-issues/PGEN-RGX-0005.yaml` plus `pgen-issues/artifacts/PGEN-RGX-0005/`.
+  - Recorded the exact generated-backend evidence for the current pinned PGEN submodule revision (`1.1.1` / `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`), including structured contract/outcome JSON and a debug trace log.
+  - Reverted the speculative RGX parser/compiler/runtime edits for `R&name` support so the repo stays aligned with what the default PGEN-backed build can actually parse today.
+  - Updated `ROADMAP.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` to record that `(?(R&name)...)` is still roadmap work and is currently blocked at the parser transport layer by local issue `PGEN-RGX-0005`.
+- Validation:
+  - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_current/Cargo.toml -- pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0005`
+  - `PGEN_TRACE_VERBOSITY=debug subs/pgen/rust/target/debug/parseability_probe --parse regex pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0005/pgen_trace.log`
+  - `subs/pgen/rust/target/debug/parseability_probe --parse regex /tmp/pgen-rgx-0005-control.txt --profile regex_default`
+- Notes/impact:
+  - The blocker is now precise and forwardable to PGEN: named recursion-condition syntax fails at byte 0 on the generated regex backend, while the numeric control form `(?(R1)...)` still parses.
+
 ### 2026-03-31 - Consolidate benchmark trend artifact writing internals
 - Scope: benchmark-tooling internal cleanup, validation hardening, and continuity doc refreshes.
 - Changes:

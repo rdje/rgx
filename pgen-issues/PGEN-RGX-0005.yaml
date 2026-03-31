@@ -1,0 +1,78 @@
+id: PGEN-RGX-0005
+summary: |
+  Regex parser rejects named recursion-condition syntax (?(R&name)...) instead of transporting it as a conditional recursion test
+status: open
+opened_at: 2026-03-31T17:43:19Z
+first_seen_at: 2026-03-31T17:43:19Z
+last_updated_at: 2026-03-31T17:43:19Z
+parser_backend: pgen
+parser_backend_version: 1.1.1
+rgx_commit: 4dbc1fc016d85232c71ee806e0f13f64bf977b50
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --offline --manifest-path /tmp/pgen_issue_bundle_current/Cargo.toml -- pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0005
+    PGEN_TRACE_VERBOSITY=debug subs/pgen/rust/target/debug/parseability_probe --parse regex pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0005/pgen_trace.log
+  pattern: '(?(R&word)a|b)'
+  input: '(?(R&word)a|b)'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77
+    Regex parser release version: 1.1.1
+    Regex integration contract version: 1.1.1
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+    Rust toolchain: rustc 1.89.0 (29483883e 2025-08-04)
+    Relevant Cargo feature: generated_parsers
+    Stable report bundle: pgen-issues/artifacts/PGEN-RGX-0005/
+
+    RGX discovered this while attempting the next PCRE2 10.47+ follow-up slice:
+    named recursion-condition support for `(?(R&name)...)`.
+    The fuller RGX-side target pattern was `\A(?<word>a(?(R&word)b|c)(?&word)?d)\z`,
+    but the parser bug reduces to the smaller conditional-only sample recorded above.
+expected_behavior: |
+  The published regex parser should accept named recursion-condition syntax such as `(?(R&word)a|b)` and transport it through the conditional-recursion family, just as it already accepts current recursion-condition forms like `(?(R)a|b)` and `(?(R1)a|b)`.
+
+  If named recursion conditions are intentionally outside the published regex contract, the integration contract should say so explicitly rather than advertising generic recursion conditions without distinguishing the unsupported named form.
+actual_behavior: |
+  The generated regex backend rejects the minimal sample `(?(R&word)a|b)` with:
+  - `E_PARSE_FAILURE`
+  - message: `generated regex parse failed: Parser did not consume full input at position 0`
+  - location: byte 0, line 1, column 1
+
+  No AST dump is produced because the parser fails before any accepted tree is returned.
+reproduction: |
+  Exact tracked reproducer bundle:
+  - pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt
+  - pgen-issues/artifacts/PGEN-RGX-0005/host_call_site.md
+  - pgen-issues/artifacts/PGEN-RGX-0005/pgen_contract.json
+  - pgen-issues/artifacts/PGEN-RGX-0005/pgen_parse_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0005/pgen_ast_dump_outcome.json
+  - pgen-issues/artifacts/PGEN-RGX-0005/pgen_trace.log
+
+  Key facts from the bundle:
+  - pgen_contract.json reports supports_regex_generated_backend=true, regex_parser_release_version=1.1.1, and regex_integration_contract_version=1.1.1.
+  - pgen_parse_outcome.json reports status=failure with diagnostic code `E_PARSE_FAILURE`.
+  - the reported failure location is byte 0 / line 1 / column 1 on the exact minimal sample `(?(R&word)a|b)`.
+  - pgen_ast_dump_outcome.json also reports status=failure with no AST dump payload.
+
+  Useful control check run against the same generated backend:
+  - `(?(R1)a|b)` parses successfully through `parseability_probe --parse regex ... --profile regex_default`.
+
+  That control evidence suggests the gap is specific to the named recursion-condition form `R&name`, not the already-shipped numeric recursion-condition family.
+impact: |
+  RGX cannot ship `(?(R&name)...)` support, or even a clean compile-boundary policy around that syntax, while the default PGEN parser rejects the construct before RGX's compiler sees it.
+
+  This also leaves the current PCRE2 10.47+ follow-up roadmap partially blocked on the parser side: newer conditional forms cannot be evaluated end-to-end if the transport layer fails at byte 0.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Pending upstream PGEN fix and downstream re-verification against the same local repro bundle.
