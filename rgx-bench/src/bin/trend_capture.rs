@@ -64,6 +64,7 @@ struct CliOptions {
     mode: CaptureMode,
     output_dir: PathBuf,
     compare_against: ComparisonBaselineSelection,
+    label: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +149,7 @@ struct SampleKey {
 struct HistoricalCapture {
     generated_at_unix: u64,
     mode: CaptureMode,
+    label: Option<String>,
     samples: Vec<TrendSample>,
 }
 
@@ -188,12 +190,18 @@ impl ComparisonSample {
 #[derive(Debug, Clone)]
 struct HistorySummaryRow {
     generated_at_unix: u64,
+    label: Option<String>,
     compile_ratio: Option<f64>,
     find_first_ratio: Option<f64>,
     find_all_ratio: Option<f64>,
     compile_delta: Option<f64>,
     find_first_delta: Option<f64>,
     find_all_delta: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CaptureMetadata {
+    label: Option<String>,
 }
 
 fn main() -> Result<(), String> {
@@ -232,9 +240,10 @@ fn main() -> Result<(), String> {
         &samples,
         options.mode,
         generated_at_unix,
+        options.label.as_deref(),
         &comparison_baseline,
     );
-    let tsv = render_tsv(&samples);
+    let tsv = render_tsv(&samples, options.label.as_deref());
 
     let markdown_path = options.output_dir.join("latest.md");
     fs::write(&markdown_path, markdown.as_bytes()).map_err(|err| {
@@ -350,6 +359,7 @@ where
     let mut mode = CaptureMode::Quick;
     let mut output_dir = PathBuf::from("target/benchmark-trends");
     let mut compare_against = ComparisonBaselineSelection::Auto;
+    let mut label = None;
 
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -373,6 +383,12 @@ where
                 })?;
                 compare_against = ComparisonBaselineSelection::parse(&value)?;
             }
+            "--label" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--label requires a non-empty value".to_string())?;
+                label = Some(value);
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -387,12 +403,13 @@ where
         mode,
         output_dir,
         compare_against,
+        label,
     })
 }
 
 fn print_usage() {
     println!(
-        "trend_capture --mode <quick|full> --output-dir <path> --compare-against <auto|none|unix-timestamp>"
+        "trend_capture --mode <quick|full> --output-dir <path> --compare-against <auto|none|unix-timestamp> --label <text>"
     );
 }
 
@@ -733,18 +750,40 @@ fn load_historical_capture(
             path.display()
         )
     })?;
-    let samples = parse_tsv(&raw)?;
+    let (metadata, samples) = parse_tsv_with_metadata(&raw)?;
 
     Ok(HistoricalCapture {
         generated_at_unix,
         mode,
+        label: metadata.label,
         samples,
     })
 }
 
+#[cfg(test)]
 fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
-    let mut lines = raw.lines();
-    let Some(header) = lines.next() else {
+    Ok(parse_tsv_with_metadata(raw)?.1)
+}
+
+fn parse_tsv_with_metadata(raw: &str) -> Result<(CaptureMetadata, Vec<TrendSample>), String> {
+    let mut metadata = CaptureMetadata::default();
+    let mut lines = raw.lines().enumerate().peekable();
+
+    while let Some((_, line)) = lines.peek().copied() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            lines.next();
+            continue;
+        }
+
+        let Some(metadata_line) = trimmed.strip_prefix("# ") else {
+            break;
+        };
+        parse_tsv_metadata_line(metadata_line, &mut metadata)?;
+        lines.next();
+    }
+
+    let Some((_, header)) = lines.next() else {
         return Err("benchmark trend tsv was empty".to_string());
     };
     let expected_header =
@@ -756,7 +795,7 @@ fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
     }
 
     let mut samples = Vec::new();
-    for (line_index, line) in lines.enumerate() {
+    for (line_index, line) in lines {
         if line.trim().is_empty() {
             continue;
         }
@@ -764,14 +803,14 @@ fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
         if columns.len() != 7 {
             return Err(format!(
                 "benchmark trend tsv line {} expected 7 columns, found {}",
-                line_index + 2,
+                line_index + 1,
                 columns.len()
             ));
         }
         let kind = BenchmarkKind::from_str(columns[0]).ok_or_else(|| {
             format!(
                 "benchmark trend tsv line {} has unknown benchmark kind `{}`",
-                line_index + 2,
+                line_index + 1,
                 columns[0]
             )
         })?;
@@ -781,7 +820,7 @@ fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
             Some(columns[2].parse::<usize>().map_err(|err| {
                 format!(
                     "benchmark trend tsv line {} has invalid input size `{}`: {err}",
-                    line_index + 2,
+                    line_index + 1,
                     columns[2]
                 )
             })?)
@@ -789,14 +828,14 @@ fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
         let rgx_ns_per_iter = columns[3].parse::<f64>().map_err(|err| {
             format!(
                 "benchmark trend tsv line {} has invalid rgx ns/iter `{}`: {err}",
-                line_index + 2,
+                line_index + 1,
                 columns[3]
             )
         })?;
         let pcre2_ns_per_iter = columns[4].parse::<f64>().map_err(|err| {
             format!(
                 "benchmark trend tsv line {} has invalid pcre2 ns/iter `{}`: {err}",
-                line_index + 2,
+                line_index + 1,
                 columns[4]
             )
         })?;
@@ -809,14 +848,31 @@ fn parse_tsv(raw: &str) -> Result<Vec<TrendSample>, String> {
             pcre2_ns_per_iter,
         });
     }
+    Ok((metadata, samples))
+}
 
-    Ok(samples)
+fn parse_tsv_metadata_line(line: &str, metadata: &mut CaptureMetadata) -> Result<(), String> {
+    let Some((key, value)) = line.split_once(':') else {
+        return Err(format!("invalid benchmark trend metadata line `{line}`"));
+    };
+
+    if key.trim() == "label" {
+        let label = value.trim();
+        metadata.label = if label.is_empty() {
+            None
+        } else {
+            Some(label.to_string())
+        };
+    }
+
+    Ok(())
 }
 
 fn render_markdown(
     samples: &[TrendSample],
     mode: CaptureMode,
     generated_at_unix: u64,
+    label: Option<&str>,
     comparison_baseline: &ComparisonBaseline,
 ) -> String {
     let mut out = String::new();
@@ -824,6 +880,9 @@ fn render_markdown(
     writeln!(&mut out).ok();
     writeln!(&mut out, "- Mode: `{}`", mode.as_str()).ok();
     writeln!(&mut out, "- Generated at (unix): `{generated_at_unix}`").ok();
+    if let Some(label) = label {
+        writeln!(&mut out, "- Label: `{label}`").ok();
+    }
     writeln!(&mut out, "- Samples: `{}`", samples.len()).ok();
     writeln!(
         &mut out,
@@ -935,6 +994,7 @@ fn build_history_summary_rows(captures: &[HistoricalCapture]) -> Vec<HistorySumm
             let previous = index.checked_sub(1).and_then(|prior| captures.get(prior));
             HistorySummaryRow {
                 generated_at_unix: capture.generated_at_unix,
+                label: capture.label.clone(),
                 compile_ratio: aggregate_ratio_median(&capture.samples, BenchmarkKind::Compile),
                 find_first_ratio: aggregate_ratio_median(
                     &capture.samples,
@@ -990,16 +1050,21 @@ fn render_history_summary_markdown(captures: &[HistoricalCapture], mode: Capture
 
     writeln!(
         &mut out,
-        "| Generated at | Compile median | Find First median | Find All median | Compile delta vs previous | Find First delta vs previous | Find All delta vs previous |"
+        "| Generated at | Label | Compile median | Find First median | Find All median | Compile delta vs previous | Find First delta vs previous | Find All delta vs previous |"
     )
     .ok();
-    writeln!(&mut out, "| ---: | --- | --- | --- | --- | --- | --- |").ok();
+    writeln!(
+        &mut out,
+        "| ---: | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .ok();
 
     for row in build_history_summary_rows(captures).into_iter().rev() {
         writeln!(
             &mut out,
-            "| {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
             row.generated_at_unix,
+            row.label.unwrap_or_else(|| "-".to_string()),
             row.compile_ratio
                 .map(format_ratio_summary)
                 .unwrap_or_else(|| "-".to_string()),
@@ -1029,16 +1094,17 @@ fn render_history_summary_tsv(captures: &[HistoricalCapture], mode: CaptureMode)
     let mut out = String::new();
     writeln!(
         &mut out,
-        "generated_at_unix\tmode\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction"
+        "generated_at_unix\tmode\tlabel\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction"
     )
     .ok();
 
     for row in build_history_summary_rows(captures) {
         writeln!(
             &mut out,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             row.generated_at_unix,
             mode.as_str(),
+            row.label.unwrap_or_else(|| "-".to_string()),
             format_optional_tsv_number(row.compile_ratio),
             format_optional_tsv_number(row.find_first_ratio),
             format_optional_tsv_number(row.find_all_ratio),
@@ -1052,8 +1118,11 @@ fn render_history_summary_tsv(captures: &[HistoricalCapture], mode: CaptureMode)
     out
 }
 
-fn render_tsv(samples: &[TrendSample]) -> String {
+fn render_tsv(samples: &[TrendSample], label: Option<&str>) -> String {
     let mut out = String::new();
+    if let Some(label) = label {
+        writeln!(&mut out, "# label: {label}").ok();
+    }
     writeln!(
         &mut out,
         "kind\tpattern\tinput_size\trgx_ns_per_iter\tpcre2_ns_per_iter\trgx_over_pcre2\tdescription"
@@ -1296,6 +1365,7 @@ mod tests {
         history_root: &Path,
         mode: Option<CaptureMode>,
         generated_at_unix: u64,
+        label: Option<&str>,
         samples: &[TrendSample],
     ) {
         let history_dir = match mode {
@@ -1304,7 +1374,7 @@ mod tests {
         };
         fs::create_dir_all(&history_dir).expect("history directory should be creatable");
         let path = history_dir.join(format!("{generated_at_unix}.tsv"));
-        fs::write(&path, render_tsv(samples)).expect("history capture should be writable");
+        fs::write(&path, render_tsv(samples, label)).expect("history capture should be writable");
     }
 
     fn sample(
@@ -1331,6 +1401,8 @@ mod tests {
             "full".to_string(),
             "--compare-against".to_string(),
             "1700000000".to_string(),
+            "--label".to_string(),
+            "release-candidate".to_string(),
             "--output-dir".to_string(),
             "/tmp/bench-trends".to_string(),
         ])
@@ -1342,6 +1414,7 @@ mod tests {
             options.compare_against,
             ComparisonBaselineSelection::Timestamp(1700000000)
         );
+        assert_eq!(options.label.as_deref(), Some("release-candidate"));
     }
 
     #[test]
@@ -1367,7 +1440,8 @@ mod tests {
             ),
         ];
 
-        let parsed = parse_tsv(&render_tsv(&samples)).expect("rendered tsv should parse");
+        let parsed =
+            parse_tsv(&render_tsv(&samples, Some("abc1234"))).expect("rendered tsv should parse");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].kind, BenchmarkKind::Compile);
         assert_eq!(parsed[0].pattern_name, "literal_simple");
@@ -1401,6 +1475,7 @@ mod tests {
         let previous = HistoricalCapture {
             generated_at_unix: 1700000000,
             mode: CaptureMode::Quick,
+            label: Some("base-1700000000".to_string()),
             samples: vec![
                 sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
                 sample(
@@ -1429,9 +1504,11 @@ mod tests {
             &current,
             CaptureMode::Quick,
             1800000000,
+            Some("head-1800000000"),
             &comparison_baseline,
         );
         assert!(markdown.contains("## Delta vs Comparison Baseline"));
+        assert!(markdown.contains("Label: `head-1800000000`"));
         assert!(markdown.contains("Compare against request: `auto`"));
         assert!(markdown.contains("Resolved comparison baseline: `1700000000 (quick)`"));
         assert!(markdown.contains("Comparing against archived `quick` capture `1700000000`."));
@@ -1469,6 +1546,7 @@ mod tests {
             &current,
             CaptureMode::Quick,
             1800000000,
+            None,
             &comparison_baseline,
         );
 
@@ -1505,6 +1583,7 @@ mod tests {
             &current,
             CaptureMode::Quick,
             1800000000,
+            None,
             &comparison_baseline,
         );
 
@@ -1519,6 +1598,7 @@ mod tests {
             HistoricalCapture {
                 generated_at_unix: 1700000000,
                 mode: CaptureMode::Quick,
+                label: Some("old-quick".to_string()),
                 samples: vec![
                     sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
                     sample(
@@ -1540,6 +1620,7 @@ mod tests {
             HistoricalCapture {
                 generated_at_unix: 1800000000,
                 mode: CaptureMode::Quick,
+                label: Some("new-quick".to_string()),
                 samples: vec![
                     sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
                     sample(
@@ -1563,7 +1644,7 @@ mod tests {
         let markdown = render_history_summary_markdown(&captures, CaptureMode::Quick);
         assert!(markdown.contains("# Benchmark Trend History"));
         assert!(markdown.contains("Entries: `2`"));
-        assert!(markdown.contains("| 1800000000 |"));
+        assert!(markdown.contains("| 1800000000 | new-quick |"));
         assert!(markdown.contains("2.00x slower median"));
         assert!(markdown.contains("10.00% regression"));
         assert!(markdown.contains("10.00% improvement"));
@@ -1575,6 +1656,7 @@ mod tests {
             HistoricalCapture {
                 generated_at_unix: 1700000000,
                 mode: CaptureMode::Full,
+                label: Some("base-full".to_string()),
                 samples: vec![
                     sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
                     sample(
@@ -1596,6 +1678,7 @@ mod tests {
             HistoricalCapture {
                 generated_at_unix: 1800000000,
                 mode: CaptureMode::Full,
+                label: Some("head-full".to_string()),
                 samples: vec![
                     sample(BenchmarkKind::Compile, "literal_simple", None, 11.0, 5.0),
                     sample(
@@ -1617,11 +1700,39 @@ mod tests {
         ];
 
         let tsv = render_history_summary_tsv(&captures, CaptureMode::Full);
-        assert!(tsv.contains("generated_at_unix\tmode\tcompile_ratio"));
-        assert!(tsv.contains("1700000000\tfull\t2.000000\t2.000000\t3.000000\t-\t-\t-"));
+        assert!(tsv.contains("generated_at_unix\tmode\tlabel\tcompile_ratio"));
+        assert!(tsv.contains("1700000000\tfull\tbase-full\t2.000000\t2.000000\t3.000000\t-\t-\t-"));
         assert!(tsv.contains(
-            "1800000000\tfull\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"
+            "1800000000\tfull\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"
         ));
+    }
+
+    #[test]
+    fn load_historical_capture_preserves_label_metadata() {
+        let temp_dir = TempTestDir::new("labelled-history");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(
+            &history_root,
+            Some(CaptureMode::Quick),
+            1700000000,
+            Some("abc1234-dirty"),
+            &samples,
+        );
+
+        let capture =
+            load_historical_capture_by_timestamp(&history_root, CaptureMode::Quick, 1700000000)
+                .expect("labelled capture lookup should succeed")
+                .expect("labelled capture should exist");
+
+        assert_eq!(capture.label.as_deref(), Some("abc1234-dirty"));
     }
 
     #[test]
@@ -1636,11 +1747,12 @@ mod tests {
             6.0,
         )];
 
-        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(&history_root, None, 1700000000, None, &samples);
         write_history_capture(
             &history_root,
             Some(CaptureMode::Quick),
             1800000000,
+            None,
             &samples,
         );
 
@@ -1667,11 +1779,12 @@ mod tests {
             6.0,
         )];
 
-        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(&history_root, None, 1700000000, None, &samples);
         write_history_capture(
             &history_root,
             Some(CaptureMode::Quick),
             1800000000,
+            None,
             &samples,
         );
 
@@ -1699,7 +1812,7 @@ mod tests {
             6.0,
         )];
 
-        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(&history_root, None, 1700000000, None, &samples);
 
         let baseline = load_comparison_baseline(
             &history_root,
@@ -1723,7 +1836,13 @@ mod tests {
             6.0,
         )];
 
-        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(
+            &history_root,
+            None,
+            1700000000,
+            Some("legacy-quick"),
+            &samples,
+        );
 
         let baseline = load_comparison_baseline(
             &history_root,
@@ -1737,5 +1856,6 @@ mod tests {
             .expect("quick legacy baseline should resolve");
         assert_eq!(capture.generated_at_unix, 1700000000);
         assert_eq!(capture.mode, CaptureMode::Quick);
+        assert_eq!(capture.label.as_deref(), Some("legacy-quick"));
     }
 }

@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add benchmark capture labels to longitudinal history
+- Scope: benchmark trend identity tracking, revision-aware longitudinal reporting, wrapper defaults, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so captures now accept an optional `--label`, persist it in archived TSV snapshots, surface it in `latest.md`, and include it in the rolling `history-quick.*` / `history-full.*` summaries.
+  - Taught historical TSV loading to preserve those labels while remaining backward-compatible with older unlabeled history files, and added focused unit coverage for labeled history loading plus label-bearing summary rendering.
+  - Updated `scripts/capture-benchmark-trends.sh` so the wrapper now forwards `RGX_BENCHMARK_TREND_LABEL` or, by default, derives a label from the current git revision (`<short-sha>` or `<short-sha>-dirty`) before invoking `trend_capture`.
+  - Refreshed `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the benchmark validation story now includes revision-aware capture labels alongside the existing history/delta flow.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `./scripts/capture-benchmark-trends.sh`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This makes the local benchmark-history trail more useful for release profiling because archived captures and rolling summaries can now be tied back to a concrete checkout instead of only a timestamp.
+
 ### 2026-03-31 - Add rolling benchmark history summaries
 - Scope: benchmark trend-capture longitudinal reporting, wrapper output alignment, and validation/doc refreshes.
 - Changes:

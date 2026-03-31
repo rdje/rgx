@@ -77,6 +77,7 @@ Live forward-looking tracker for rgx.
   - keep the default local validation loop emitting a low-overhead quick trend summary under `target/benchmark-trends/`
   - preserve mode-scoped latest snapshots plus timestamped local history and surface delta summaries against the most recent prior archived capture from the same benchmark mode
   - keep mode-scoped rolling history summaries so the recent longitudinal ratio story is visible without manually opening individual archived captures
+  - keep archived captures revision-aware with optional labels so longitudinal reports can be tied back to specific RGX commits or release candidates
   - preserve a higher-fidelity `full` mode for slower bench-profile captures when deeper measurement is needed
   - prioritize optimizations with measurable impact
 
@@ -109,6 +110,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Deepened benchmark trend capture again so each archived quick/full run can now carry an explicit label, the wrapper defaults that label from the current git revision, and the rolling history summaries surface those labels alongside timestamped ratio/delta rows.
 - Extended benchmark trend capture again so each quick/full run now also writes mode-scoped rolling history summaries (`history-quick.*` / `history-full.*`) with aggregate median ratios and delta-vs-previous columns, not just one latest snapshot plus one comparison baseline.
 - Shipped current recursion-condition conditionals on the default regex path by teaching both parser backends plus the compiler/VM to preserve `(?(R)...)` / `(?(Rn)...)`, honor PCRE2's `R` / `Rn` named-group ambiguity rule, and execute those conditionals against the active recursion level with explicit missing-group validation.
 - Tightened the shipped inline-language result contract again by adding explicit emitted-result helpers to Lua/JavaScript/Rhai statement bodies, so Lua/JavaScript now expose `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, Rhai exposes `emit_numeric(...)` / `emit_replacement(...)`, and winning-path richer-result emission no longer depends only on direct return values.
