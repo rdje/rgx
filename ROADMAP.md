@@ -79,6 +79,7 @@ Live forward-looking tracker for rgx.
   - keep mode-scoped rolling history summaries so the recent longitudinal ratio story is visible without manually opening individual archived captures
   - keep archived captures revision-aware with optional labels so longitudinal reports can be tied back to specific RGX commits or release candidates
   - keep label-paired quick/full summaries so the same RGX revision can be compared across low-overhead and bench-profile captures without manual report stitching
+  - keep rolling label-pair history so shared-label quick/full comparisons can also be tracked across successive revisions without manual report stitching
   - preserve a higher-fidelity `full` mode for slower bench-profile captures when deeper measurement is needed
   - prioritize optimizations with measurable impact
 
@@ -111,6 +112,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Deepened benchmark trend capture again so shared-label quick/full pairs now also produce rolling `profile-history.*` summaries, making pair-over-pair revision deltas visible alongside the existing latest-pair snapshot.
 - Deepened benchmark trend capture again so shared labels now also produce `profile-pairs.*` summaries pairing the latest quick/full captures for the same revision, including aggregate medians plus full-vs-quick deltas per benchmark kind.
 - Deepened benchmark trend capture again so every run now also rewrites a compact cross-mode `overview.*` artifact summarizing the latest quick/full history state in one place, including latest labels, aggregate medians, and delta-vs-previous for each mode.
 - Deepened benchmark trend capture again so explicit same-mode baseline selection can now target either a unix timestamp or a capture label via `label:<text>`, with newest-match resolution when multiple archived captures reuse the same label.

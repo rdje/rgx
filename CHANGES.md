@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add rolling label-pair benchmark history
+- Scope: benchmark release-profile longitudinal visibility, wrapper output clarity, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so it now writes `profile-history.md` / `profile-history.tsv`, turning the existing shared-label quick/full pair snapshots into a rolling pair-over-pair history across revisions.
+  - Reused the existing `profile-pairs.*` aggregation path so rolling history rows stay anchored to the latest quick/full capture per shared label while also surfacing delta-vs-previous-pair values for compile, first-match, and find-all medians.
+  - Added focused `trend_capture` coverage for markdown/TSV rendering of those rolling shared-label quick/full histories, including pair-over-pair delta reporting.
+  - Updated `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark workflow now documents the new rolling paired-label artifact.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This gives RGX one stable report for “same revision pair, then next revision pair” comparisons instead of requiring manual cross-reading of `profile-pairs.*` and per-mode history files.
+
 ### 2026-03-31 - Add label-paired quick/full benchmark summaries
 - Scope: benchmark release-profile longitudinal visibility, wrapper output clarity, and validation/doc refreshes.
 - Changes:

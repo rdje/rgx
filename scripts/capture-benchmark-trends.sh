@@ -32,4 +32,5 @@ echo "[capture-benchmark-trends.sh] Benchmark trend summary available at ${outpu
 echo "[capture-benchmark-trends.sh] Rolling ${mode} history summary available at ${output_dir}/history-${mode}.md and ${output_dir}/history-${mode}.tsv"
 echo "[capture-benchmark-trends.sh] Cross-mode overview available at ${output_dir}/overview.md and ${output_dir}/overview.tsv"
 echo "[capture-benchmark-trends.sh] Label-paired quick/full summary available at ${output_dir}/profile-pairs.md and ${output_dir}/profile-pairs.tsv"
+echo "[capture-benchmark-trends.sh] Rolling label-pair history available at ${output_dir}/profile-history.md and ${output_dir}/profile-history.tsv"
 echo "[capture-benchmark-trends.sh] Archived ${mode} history available under ${output_dir}/history/${mode}/"

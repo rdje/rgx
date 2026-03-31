@@ -240,6 +240,18 @@ struct ProfilePairRow {
     find_all_full_vs_quick: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct ProfileHistoryRow {
+    pair: ProfilePairRow,
+    latest_generated_at_unix: u64,
+    quick_compile_delta_vs_previous_pair: Option<f64>,
+    full_compile_delta_vs_previous_pair: Option<f64>,
+    quick_find_first_delta_vs_previous_pair: Option<f64>,
+    full_find_first_delta_vs_previous_pair: Option<f64>,
+    quick_find_all_delta_vs_previous_pair: Option<f64>,
+    full_find_all_delta_vs_previous_pair: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CaptureMetadata {
     label: Option<String>,
@@ -355,6 +367,9 @@ fn main() -> Result<(), String> {
     let profile_pairs = build_profile_pair_rows(&quick_captures, &full_captures);
     let profile_pairs_markdown = render_profile_pairs_markdown(&profile_pairs);
     let profile_pairs_tsv = render_profile_pairs_tsv(&profile_pairs);
+    let profile_history_rows = build_profile_history_rows(&profile_pairs);
+    let profile_history_markdown = render_profile_history_markdown(&profile_history_rows);
+    let profile_history_tsv = render_profile_history_tsv(&profile_history_rows);
 
     let history_summary_markdown_path = options
         .output_dir
@@ -416,6 +431,26 @@ fn main() -> Result<(), String> {
         )
     })?;
 
+    let profile_history_markdown_path = options.output_dir.join("profile-history.md");
+    fs::write(
+        &profile_history_markdown_path,
+        profile_history_markdown.as_bytes(),
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write benchmark profile-history markdown summary {}: {err}",
+            profile_history_markdown_path.display()
+        )
+    })?;
+
+    let profile_history_tsv_path = options.output_dir.join("profile-history.tsv");
+    fs::write(&profile_history_tsv_path, profile_history_tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write benchmark profile-history tabular summary {}: {err}",
+            profile_history_tsv_path.display()
+        )
+    })?;
+
     println!(
         "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
         markdown_path.display(),
@@ -442,6 +477,11 @@ fn main() -> Result<(), String> {
         "[trend_capture] Wrote label-paired quick/full summary to {} and {}",
         profile_pairs_markdown_path.display(),
         profile_pairs_tsv_path.display()
+    );
+    println!(
+        "[trend_capture] Wrote rolling label-pair history to {} and {}",
+        profile_history_markdown_path.display(),
+        profile_history_tsv_path.display()
     );
     println!();
     println!("{markdown}");
@@ -1329,6 +1369,53 @@ fn build_profile_pair_rows(
     rows
 }
 
+fn pair_latest_generated_at_unix(row: &ProfilePairRow) -> u64 {
+    row.quick_generated_at_unix.max(row.full_generated_at_unix)
+}
+
+fn build_profile_history_rows(pairs: &[ProfilePairRow]) -> Vec<ProfileHistoryRow> {
+    let mut ordered_pairs = pairs.to_vec();
+    ordered_pairs.sort_by(|left, right| {
+        pair_latest_generated_at_unix(left)
+            .cmp(&pair_latest_generated_at_unix(right))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+
+    ordered_pairs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, pair)| {
+            let previous = index
+                .checked_sub(1)
+                .and_then(|prior| ordered_pairs.get(prior));
+
+            ProfileHistoryRow {
+                latest_generated_at_unix: pair_latest_generated_at_unix(&pair),
+                quick_compile_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.quick_compile_ratio, prior.quick_compile_ratio)
+                }),
+                full_compile_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.full_compile_ratio, prior.full_compile_ratio)
+                }),
+                quick_find_first_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.quick_find_first_ratio, prior.quick_find_first_ratio)
+                }),
+                full_find_first_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.full_find_first_ratio, prior.full_find_first_ratio)
+                }),
+                quick_find_all_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.quick_find_all_ratio, prior.quick_find_all_ratio)
+                }),
+                full_find_all_delta_vs_previous_pair: previous.and_then(|prior| {
+                    ratio_delta(pair.full_find_all_ratio, prior.full_find_all_ratio)
+                }),
+                pair,
+            }
+        })
+        .collect()
+}
+
 fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
     let mut out = String::new();
     writeln!(&mut out, "# Benchmark Trend Overview").ok();
@@ -1523,6 +1610,178 @@ fn render_profile_pairs_tsv(rows: &[ProfilePairRow]) -> String {
             format_optional_tsv_number(row.quick_find_all_ratio),
             format_optional_tsv_number(row.full_find_all_ratio),
             format_optional_tsv_number(row.find_all_full_vs_quick),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_profile_history_markdown(rows: &[ProfileHistoryRow]) -> String {
+    let mut out = String::new();
+    writeln!(&mut out, "# Benchmark Profile History").ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "- Shared quick/full label pairs: `{}`",
+        rows.len()
+    )
+    .ok();
+    if let Some(oldest) = rows.first() {
+        writeln!(
+            &mut out,
+            "- Oldest paired label: `{}` at `{}`",
+            oldest.pair.label, oldest.latest_generated_at_unix
+        )
+        .ok();
+    }
+    if let Some(latest) = rows.last() {
+        writeln!(
+            &mut out,
+            "- Latest paired label: `{}` at `{}`",
+            latest.pair.label, latest.latest_generated_at_unix
+        )
+        .ok();
+    }
+    writeln!(&mut out).ok();
+
+    if rows.is_empty() {
+        writeln!(
+            &mut out,
+            "- No rolling quick/full label history is archived yet."
+        )
+        .ok();
+        return out;
+    }
+
+    writeln!(&mut out, "## Current Pair Summary").ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "| Label | Latest pair unix | Quick capture | Full capture | Quick compile median | Full compile median | Full compile vs quick | Quick find-first median | Full find-first median | Full find-first vs quick | Quick find-all median | Full find-all median | Full find-all vs quick |"
+    )
+    .ok();
+    writeln!(
+        &mut out,
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .ok();
+    for row in rows.iter().rev() {
+        let pair = &row.pair;
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            pair.label,
+            row.latest_generated_at_unix,
+            pair.quick_generated_at_unix,
+            pair.full_generated_at_unix,
+            pair.quick_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.compile_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.quick_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.find_first_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.quick_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.full_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            pair.find_all_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    }
+
+    writeln!(&mut out).ok();
+    writeln!(&mut out, "## Pair-Over-Pair Delta").ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "| Label | Latest pair unix | Quick compile delta vs previous pair | Full compile delta vs previous pair | Quick find-first delta vs previous pair | Full find-first delta vs previous pair | Quick find-all delta vs previous pair | Full find-all delta vs previous pair |"
+    )
+    .ok();
+    writeln!(
+        &mut out,
+        "| --- | ---: | --- | --- | --- | --- | --- | --- |"
+    )
+    .ok();
+    for row in rows.iter().rev() {
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            row.pair.label,
+            row.latest_generated_at_unix,
+            row.quick_compile_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_compile_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.quick_find_first_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_find_first_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.quick_find_all_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_find_all_delta_vs_previous_pair
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_profile_history_tsv(rows: &[ProfileHistoryRow]) -> String {
+    let mut out = String::new();
+    writeln!(
+        &mut out,
+        "label\tlatest_generated_at_unix\tquick_generated_at_unix\tfull_generated_at_unix\tquick_compile_ratio\tfull_compile_ratio\tcompile_full_vs_quick_fraction\tquick_find_first_ratio\tfull_find_first_ratio\tfind_first_full_vs_quick_fraction\tquick_find_all_ratio\tfull_find_all_ratio\tfind_all_full_vs_quick_fraction\tquick_compile_delta_vs_previous_pair_fraction\tfull_compile_delta_vs_previous_pair_fraction\tquick_find_first_delta_vs_previous_pair_fraction\tfull_find_first_delta_vs_previous_pair_fraction\tquick_find_all_delta_vs_previous_pair_fraction\tfull_find_all_delta_vs_previous_pair_fraction"
+    )
+    .ok();
+
+    for row in rows {
+        let pair = &row.pair;
+        writeln!(
+            &mut out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            pair.label,
+            row.latest_generated_at_unix,
+            pair.quick_generated_at_unix,
+            pair.full_generated_at_unix,
+            format_optional_tsv_number(pair.quick_compile_ratio),
+            format_optional_tsv_number(pair.full_compile_ratio),
+            format_optional_tsv_number(pair.compile_full_vs_quick),
+            format_optional_tsv_number(pair.quick_find_first_ratio),
+            format_optional_tsv_number(pair.full_find_first_ratio),
+            format_optional_tsv_number(pair.find_first_full_vs_quick),
+            format_optional_tsv_number(pair.quick_find_all_ratio),
+            format_optional_tsv_number(pair.full_find_all_ratio),
+            format_optional_tsv_number(pair.find_all_full_vs_quick),
+            format_optional_tsv_number(row.quick_compile_delta_vs_previous_pair),
+            format_optional_tsv_number(row.full_compile_delta_vs_previous_pair),
+            format_optional_tsv_number(row.quick_find_first_delta_vs_previous_pair),
+            format_optional_tsv_number(row.full_find_first_delta_vs_previous_pair),
+            format_optional_tsv_number(row.quick_find_all_delta_vs_previous_pair),
+            format_optional_tsv_number(row.full_find_all_delta_vs_previous_pair),
         )
         .ok();
     }
@@ -2455,6 +2714,223 @@ mod tests {
             "rev-a\t1700000000\t1800000000\t2.000000\t2.000000\t0.000000\t2.200000\t1.800000\t-0.181818\t3.600000\t3.300000\t-0.083333"
         ));
         assert!(!tsv.contains("quick-only"));
+    }
+
+    #[test]
+    fn render_profile_history_markdown_reports_pair_over_pair_deltas() {
+        let pair_rows = build_profile_pair_rows(
+            &[
+                HistoricalCapture {
+                    generated_at_unix: 1700000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            20.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            30.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 1900000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-b".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 18.0, 10.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            15.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            27.0,
+                            10.0,
+                        ),
+                    ],
+                },
+            ],
+            &[
+                HistoricalCapture {
+                    generated_at_unix: 1800000000,
+                    mode: CaptureMode::Full,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 15.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            30.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            40.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 2000000000,
+                    mode: CaptureMode::Full,
+                    label: Some("rev-b".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 20.0, 10.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            24.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            36.0,
+                            10.0,
+                        ),
+                    ],
+                },
+            ],
+        );
+
+        let history_rows = build_profile_history_rows(&pair_rows);
+        let markdown = render_profile_history_markdown(&history_rows);
+        assert!(markdown.contains("# Benchmark Profile History"));
+        assert!(markdown.contains("Shared quick/full label pairs: `2`"));
+        assert!(markdown.contains("## Current Pair Summary"));
+        assert!(markdown.contains("## Pair-Over-Pair Delta"));
+        assert!(markdown.contains("| rev-b | 2000000000 | 1900000000 | 2000000000 |"));
+        assert!(markdown.contains("| rev-b | 2000000000 | 10.00% improvement | 20.00% improvement | 25.00% improvement | 20.00% improvement | 10.00% improvement | 10.00% improvement |"));
+    }
+
+    #[test]
+    fn render_profile_history_tsv_tracks_rows_in_latest_pair_order() {
+        let pair_rows = build_profile_pair_rows(
+            &[
+                HistoricalCapture {
+                    generated_at_unix: 1700000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            20.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            30.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 1900000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-b".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 18.0, 10.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            15.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            27.0,
+                            10.0,
+                        ),
+                    ],
+                },
+            ],
+            &[
+                HistoricalCapture {
+                    generated_at_unix: 1800000000,
+                    mode: CaptureMode::Full,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 15.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            30.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            40.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 2000000000,
+                    mode: CaptureMode::Full,
+                    label: Some("rev-b".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 20.0, 10.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            24.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            36.0,
+                            10.0,
+                        ),
+                    ],
+                },
+            ],
+        );
+
+        let history_rows = build_profile_history_rows(&pair_rows);
+        let tsv = render_profile_history_tsv(&history_rows);
+        assert!(tsv.contains(
+            "label\tlatest_generated_at_unix\tquick_generated_at_unix\tfull_generated_at_unix"
+        ));
+        assert!(tsv.contains(
+            "rev-a\t1800000000\t1700000000\t1800000000\t2.000000\t2.500000\t0.250000\t2.000000\t3.000000\t0.500000\t3.000000\t4.000000\t0.333333\t-\t-\t-\t-\t-\t-"
+        ));
+        assert!(tsv.contains(
+            "rev-b\t2000000000\t1900000000\t2000000000\t1.800000\t2.000000\t0.111111\t1.500000\t2.400000\t0.600000\t2.700000\t3.600000\t0.333333\t-0.100000\t-0.200000\t-0.250000\t-0.200000\t-0.100000\t-0.100000"
+        ));
     }
 
     #[test]
