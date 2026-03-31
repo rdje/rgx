@@ -162,6 +162,8 @@ Requirements:
   - Lua supports either a bare expression body or explicit `return ...`
   - JavaScript supports either a bare expression body or explicit `return ...`
   - Rhai supports either a final expression value or explicit `return ...`
+  - Lua and JavaScript also expose `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)` for statement-style richer-result emission
+  - Rhai also exposes top-level `emit_numeric(...)` / `emit_replacement(...)` for the same purpose
 
 Lua example:
 
@@ -183,6 +185,32 @@ use rgx_core::{ExecutionMode, Regex};
 let re = Regex::with_mode(r#"(?{js:return vars.env === "prod";})"#, ExecutionMode::Safe)?;
 re.set_variable("env", "prod")?;
 assert!(re.is_match(""));
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Lua emitted-result example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"cat(?{lua:rgx.emit_replacement("CAT"); return true})"#,
+    ExecutionMode::Safe,
+)?;
+assert_eq!(re.replace_first_with_code("cat dog"), "CAT dog");
+# Ok::<(), rgx_core::RgxError>(())
+```
+
+Rhai emitted-result example:
+
+```rust
+use rgx_core::{ExecutionMode, Regex};
+
+let re = Regex::with_mode(
+    r#"(?{rhai: emit_numeric(7); return true;})"#,
+    ExecutionMode::Safe,
+)?;
+assert_eq!(re.find_first_numeric_with_code(""), Some(7.0));
 # Ok::<(), rgx_core::RgxError>(())
 ```
 
@@ -321,14 +349,16 @@ What the execution context exposes today:
 - `branch_number` is intentionally aligned with `MatchResult.matched_branch_number`: it is 1-based when available and absent / `-1` when the current path is not inside a top-level alternation arm.
 
 Current limits for this slice:
-- The CLI does not yet expose native or wasm registration.
+- The CLI does not yet expose native registration.
 - The CLI now does expose host-provided code-block variables through repeated `--var NAME=VALUE`.
+- The CLI now also exposes file-backed wasm module registration through repeated `--wasm-module NAME=PATH`.
 - The CLI can optionally show top-level branch and winning-path `code_result` details through `--show-details`, but the default output remains plain `start..end` spans for scripting stability.
 - The current wasm ABI still uses `module:function` with an exported `() -> i32` predicate; richer results are emitted indirectly through `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`.
 - Host-provided variables are read-only snapshots for each code-block evaluation.
 - Unknown native callback names and malformed/unresolved wasm call specs fail the current match path at runtime.
 - Malformed wasm context reads, missing exported memory, invalid guest-memory reads/writes, and invalid UTF-8 replacement payloads also fail the current match path at runtime.
 - Lua/JavaScript/Rhai/native/wasm numeric and replacement return values are surfaced through `MatchResult.code_result`; numeric values can also be collected through `find_first_numeric_with_code` / `find_all_numeric_with_code`, and replacement values are consumed by `replace_first_with_code` / `replace_all_with_code`.
+- Lua and JavaScript can also emit winning-path numeric/replacement payloads from statement bodies through `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, and Rhai can do the same through `emit_numeric(...)` / `emit_replacement(...)`.
 - Code blocks may execute multiple times during backtracking or scanning, so they should be treated as side-effect-free predicates.
 ### Current advanced syntax status
 Unicode property classes are now part of the shipped runtime path. Patterns such as `\p{L}+`, `\P{L}+`, and `\p{Greek}+` compile and execute on the default path, and invalid property names fail explicitly at compile time.
@@ -356,7 +386,9 @@ In AST-first mode, parser steps are bypassed and AST goes directly to compiler/V
 - They can fail the current path and allow normal regex backtracking to continue.
 - Boolean-style success/failure still drives path control.
 - Lua/JavaScript/Rhai/native numeric or string results also keep the current path successful and store the last winning-path non-boolean value in `MatchResult.code_result`.
+- Lua/JavaScript statement bodies may also call `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, and Rhai may call `emit_numeric(...)` / `emit_replacement(...)`; emitted payloads are used only when the code block ultimately succeeds.
 - Wasm keeps the exported `() -> i32` predicate contract, and may additionally call `rgx.emit_numeric(...)` or `rgx.emit_replacement(...)` before returning non-zero to surface a winning-path payload.
+- If an inline-language code block emits more than one helper payload during one successful execution, the last emitted payload wins.
 - `replace_first_with_code` / `replace_all_with_code` consume only winning-path `Replacement(String)` values; numeric-only matches continue to round-trip unchanged in replacement mode.
 - If a wasm module emits more than one non-boolean payload during one code-block execution, the last emitted payload wins.
 ### Branch reporting semantics

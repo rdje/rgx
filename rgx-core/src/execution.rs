@@ -36,7 +36,7 @@
 use crate::error::{Result, RgxError};
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 // ============================================================================
 // EXECUTION CONTEXT
@@ -277,6 +277,25 @@ fn exec_result_kind(result: &ExecResult) -> &'static str {
     }
 }
 
+fn emitted_result_to_exec_result(result: CodeBlockValue) -> ExecResult {
+    match result {
+        CodeBlockValue::Replacement(text) => ExecResult::Replacement(text),
+        CodeBlockValue::Numeric(value) => ExecResult::Numeric(value),
+    }
+}
+
+fn finish_exec_result(
+    base_result: ExecResult,
+    emitted_result: &Arc<Mutex<Option<CodeBlockValue>>>,
+) -> ExecResult {
+    let emitted = emitted_result.lock().unwrap().take();
+    match base_result {
+        ExecResult::Success => emitted.map_or(base_result, emitted_result_to_exec_result),
+        ExecResult::Numeric(_) | ExecResult::Replacement(_) => base_result,
+        ExecResult::Failure | ExecResult::Error(_) => base_result,
+    }
+}
+
 // ============================================================================
 // EXECUTION ENGINE TRAIT
 // ============================================================================
@@ -327,10 +346,23 @@ pub mod rhai {
             Ok(Self)
         }
 
-        fn new_engine(&self) -> RhaiRuntime {
+        fn new_engine(&self, emitted_result: Arc<Mutex<Option<CodeBlockValue>>>) -> RhaiRuntime {
             let mut engine = RhaiRuntime::new();
             engine.on_print(|_| {});
             engine.on_debug(|_, _, _| {});
+            let emitted_numeric = emitted_result.clone();
+            engine.register_fn("emit_numeric", move |value: i64| {
+                *emitted_numeric.lock().unwrap() = Some(CodeBlockValue::Numeric(value as f64));
+            });
+            let emitted_numeric = emitted_result.clone();
+            engine.register_fn("emit_numeric", move |value: f64| {
+                *emitted_numeric.lock().unwrap() = Some(CodeBlockValue::Numeric(value));
+            });
+            let emitted_replacement = emitted_result;
+            engine.register_fn("emit_replacement", move |value: ImmutableString| {
+                *emitted_replacement.lock().unwrap() =
+                    Some(CodeBlockValue::Replacement(value.to_string()));
+            });
             engine
         }
 
@@ -414,10 +446,11 @@ pub mod rhai {
 
     impl ExecutionEngine for RhaiEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
-            let engine = self.new_engine();
+            let emitted_result = Arc::new(Mutex::new(None));
+            let engine = self.new_engine(emitted_result.clone());
             let mut scope = self.build_scope(context);
             match engine.eval_with_scope::<Dynamic>(&mut scope, code) {
-                Ok(value) => Self::into_exec_result(value),
+                Ok(value) => finish_exec_result(Self::into_exec_result(value), &emitted_result),
                 Err(err) => ExecResult::Error(format!("Rhai error: {}", err)),
             }
         }
@@ -483,7 +516,12 @@ pub mod lua {
         }
 
         /// Set up the execution context in Lua globals
-        fn setup_context(&self, lua: &Lua, context: &ExecContext) -> mlua::Result<()> {
+        fn setup_context(
+            &self,
+            lua: &Lua,
+            context: &ExecContext,
+            emitted_result: Arc<Mutex<Option<CodeBlockValue>>>,
+        ) -> mlua::Result<()> {
             let globals = lua.globals();
 
             // Create arg table with captures
@@ -522,6 +560,25 @@ pub mod lua {
             }
             globals.set("vars", vars_table)?;
 
+            let rgx_table = lua.create_table()?;
+            let emitted_numeric = emitted_result.clone();
+            rgx_table.set(
+                "emit_numeric",
+                lua.create_function(move |_, value: f64| {
+                    *emitted_numeric.lock().unwrap() = Some(CodeBlockValue::Numeric(value));
+                    Ok(())
+                })?,
+            )?;
+            let emitted_replacement = emitted_result;
+            rgx_table.set(
+                "emit_replacement",
+                lua.create_function(move |_, value: String| {
+                    *emitted_replacement.lock().unwrap() = Some(CodeBlockValue::Replacement(value));
+                    Ok(())
+                })?,
+            )?;
+            globals.set("rgx", rgx_table)?;
+
             Ok(())
         }
 
@@ -542,13 +599,14 @@ pub mod lua {
     impl ExecutionEngine for LuaEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             let lua = self.new_sandboxed_lua();
+            let emitted_result = Arc::new(Mutex::new(None));
             // Set up context
-            if let Err(e) = self.setup_context(&lua, context) {
+            if let Err(e) = self.setup_context(&lua, context, emitted_result.clone()) {
                 return ExecResult::Error(format!("Context setup failed: {}", e));
             }
 
             let result = self.eval_user_code(&lua, code);
-            match result {
+            let base_result = match result {
                 Ok(Value::Boolean(b)) => {
                     if b {
                         ExecResult::Success
@@ -562,7 +620,8 @@ pub mod lua {
                 Ok(Value::Nil) => ExecResult::Success,
                 Ok(_) => ExecResult::Success,
                 Err(e) => ExecResult::Error(format!("Lua error: {}", e)),
-            }
+            };
+            finish_exec_result(base_result, &emitted_result)
         }
 
         fn language(&self) -> &str {
@@ -592,7 +651,7 @@ pub mod lua {
 #[cfg(feature = "javascript")]
 pub mod javascript {
     use super::*;
-    use rquickjs::{Array, Context, Ctx, Object, Runtime, Undefined, Value};
+    use rquickjs::{Array, Context, Ctx, Function, Object, Runtime, Undefined, Value};
 
     /// JavaScript execution engine using QuickJS.
     ///
@@ -678,6 +737,7 @@ pub mod javascript {
                 Err(err) => return ExecResult::Error(err.to_string()),
             };
             let ctx_result = Context::full(&runtime);
+            let emitted_result = Arc::new(Mutex::new(None));
 
             let ctx = match ctx_result {
                 Ok(ctx) => ctx,
@@ -745,6 +805,25 @@ pub mod javascript {
                     globals.set("vars", vars_obj).ok();
                 }
 
+                if let Ok(rgx_obj) = Object::new(ctx.clone()) {
+                    let emitted_numeric = emitted_result.clone();
+                    if let Ok(emit_numeric) = Function::new(ctx.clone(), move |value: f64| {
+                        *emitted_numeric.lock().unwrap() = Some(CodeBlockValue::Numeric(value));
+                    }) {
+                        rgx_obj.set("emit_numeric", emit_numeric).ok();
+                    }
+                    let emitted_replacement = emitted_result.clone();
+                    if let Ok(emit_replacement) =
+                        Function::new(ctx.clone(), move |value: String| {
+                            *emitted_replacement.lock().unwrap() =
+                                Some(CodeBlockValue::Replacement(value));
+                        })
+                    {
+                        rgx_obj.set("emit_replacement", emit_replacement).ok();
+                    }
+                    globals.set("rgx", rgx_obj).ok();
+                }
+
                 // Remove dangerous functions
                 globals.set("eval", Undefined).ok();
                 globals.set("Function", Undefined).ok();
@@ -752,7 +831,7 @@ pub mod javascript {
                 globals.set("XMLHttpRequest", Undefined).ok();
 
                 match self.eval_user_code(ctx.clone(), code) {
-                    Ok(val) => Self::into_exec_result(val),
+                    Ok(val) => finish_exec_result(Self::into_exec_result(val), &emitted_result),
                     Err(e) => ExecResult::Error(format!("JS error: {}", e)),
                 }
             })

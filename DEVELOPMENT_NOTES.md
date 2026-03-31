@@ -41,6 +41,7 @@ Pipeline in `rgx-core`:
 - Wasm predicates can now read current position, full input text, numbered captures, named captures, and host-provided variables through `rgx` host imports while keeping the exported `() -> i32` predicate entrypoint stable
 - Code-block execution contexts now also expose current match start/end/length metadata plus top-level branch number when available across native/Lua/JavaScript/Rhai, with matching wasm host imports for the same metadata
 - Wasm modules can now also emit winning-path numeric and replacement payloads through `rgx.emit_numeric(...)` and `rgx.emit_replacement(...)` while still using the exported `() -> i32` predicate to decide success/failure
+- Lua and JavaScript source bodies now also expose `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, while Rhai source bodies expose top-level `emit_numeric(...)` / `emit_replacement(...)`, so statement-style inline code can emit winning-path numeric or replacement payloads without depending only on direct return values
 - Code-block execution contexts now expose current overall match text, numbered captures, named captures, and host-provided variables to the execution layer
 - Code blocks now participate in normal VM backtracking and can be used inside the supported regex pipeline rather than being parser-only scaffolding
 - Public match results now expose `code_result`, which preserves the last winning-path numeric or replacement value from Lua/JavaScript/Rhai/native/wasm code blocks
@@ -186,7 +187,7 @@ Pipeline in `rgx-core`:
 - Native registration is still Rust-API-only, while wasm registration now also has a file-backed CLI path through `--wasm-module NAME=PATH`
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open
-- The shipped inline-language lane is now tighter: Lua, JavaScript, and Rhai all accept either bare expression bodies or explicit `return ...` bodies, and Lua/JavaScript/Rhai helper-API behavior is covered explicitly in `rgx-core` regression tests
+- The shipped inline-language lane is now tighter: Lua, JavaScript, and Rhai all accept either bare expression bodies or explicit `return ...` bodies, and statement-style helper emission is now covered explicitly in `rgx-core` regression tests through Lua/JavaScript `rgx.emit_*` plus Rhai `emit_*`
 - The CLI no longer does a boolean pre-check before collecting matches, which matters for code-block patterns because it avoids one extra round of callback/script execution on successful runs
 - The current product direction is to avoid using wasm as the benchmark for everyday inline code-block ergonomics; it remains supported, but future inline-language prioritization should compare against the shipped Lua/JavaScript/Rhai lane first
 - VM/compiler contain declared advanced features/opcodes that are only partial or placeholder

@@ -2672,6 +2672,39 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_rgx_helpers_can_emit_results_from_statement_bodies() {
+        let numeric = Regex::with_mode(
+            r#"(?{lua:rgx.emit_numeric(7); return true})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua emitted-numeric pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(7.0));
+
+        let replacement = Regex::with_mode(
+            r#"cat(?{lua:rgx.emit_replacement("CAT"); return true})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua emitted-replacement pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+    }
+
+    #[cfg(feature = "lua")]
+    #[test]
+    fn safe_mode_lua_emitted_result_is_ignored_on_failure() {
+        let regex = Regex::with_mode(
+            r#"(?{lua:rgx.emit_numeric(7); return false})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Lua emitted-failure pattern");
+        assert!(!regex.is_match(""));
+        assert_eq!(regex.find_first_numeric_with_code(""), None);
+    }
+
     #[cfg(feature = "javascript")]
     #[test]
     fn safe_mode_javascript_code_block_can_access_variables() {
@@ -2767,6 +2800,38 @@ mod tests {
             replacement.replace_all_with_code("cat dog cat"),
             "CAT dog CAT"
         );
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_rgx_helpers_can_emit_results_from_statement_bodies() {
+        let numeric = Regex::with_mode(
+            r#"(?{js:rgx.emit_numeric(7); return true;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript emitted-numeric pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(7.0));
+
+        let replacement = Regex::with_mode(
+            r#"cat(?{js:rgx.emit_replacement("CAT"); return true;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript emitted-replacement pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+    }
+
+    #[cfg(feature = "javascript")]
+    #[test]
+    fn safe_mode_javascript_rgx_helper_last_emitted_value_wins() {
+        let regex = Regex::with_mode(
+            r#"(?{js:rgx.emit_numeric(1); rgx.emit_numeric(2); return true;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile JavaScript repeated-emission pattern");
+        assert_eq!(regex.find_first_numeric_with_code(""), Some(2.0));
     }
 
     #[cfg(feature = "rhai")]
@@ -2883,6 +2948,39 @@ mod tests {
             replacement.replace_all_with_code("cat dog cat"),
             "CAT dog CAT"
         );
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_helpers_can_emit_results_from_statement_bodies() {
+        let numeric = Regex::with_mode(
+            r#"(?{rhai: emit_numeric(7); return true;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai emitted-numeric pattern");
+        assert_eq!(numeric.find_first_numeric_with_code(""), Some(7.0));
+
+        let replacement = Regex::with_mode(
+            r#"cat(?{rhai: emit_replacement("CAT"); return true;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai emitted-replacement pattern");
+        assert_eq!(
+            replacement.replace_first_with_code("cat dog cat"),
+            "CAT dog cat"
+        );
+    }
+
+    #[cfg(feature = "rhai")]
+    #[test]
+    fn safe_mode_rhai_emitted_result_is_ignored_on_failure() {
+        let regex = Regex::with_mode(
+            r#"(?{rhai: emit_numeric(7); return false;})"#,
+            ExecutionMode::Safe,
+        )
+        .expect("Failed to compile Rhai emitted-failure pattern");
+        assert!(!regex.is_match(""));
+        assert_eq!(regex.find_first_numeric_with_code(""), None);
     }
 
     #[test]

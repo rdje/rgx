@@ -78,11 +78,16 @@ Current behavior contract for the shipped slice:
   - unknown native callback names fail the current match path at runtime
 - Code blocks are predicate checkpoints in the VM match path.
 - Current overall match text (`arg[0]`), current match start/end/length metadata, top-level branch number when available, numbered captures, named captures, and host-provided variables are exposed to the Lua/JavaScript/Rhai/native execution layer via `ExecContext`, script globals, and `ExecContext` helper methods.
+- Lua and JavaScript source bodies now also expose `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, while Rhai source bodies expose top-level `emit_numeric(...)` / `emit_replacement(...)`, so statement-style code can surface winning-path numeric or replacement payloads without relying only on direct non-boolean returns.
 - The shipped CLI now exposes host-provided variables for code-block-enabled patterns through repeated `--var NAME=VALUE` and file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`, while native registration still remains Rust-API-only.
 - Current inline/source-body authoring expectations:
   - Lua supports both bare expression bodies and explicit `return ...` bodies
   - JavaScript supports both bare expression bodies and explicit `return ...` bodies
   - Rhai supports both final expression values and explicit `return ...` bodies
+- Emitted inline-language payloads follow the same winning-path rule as direct inline-language richer results:
+  - emitted payloads are used only when the code block ultimately succeeds
+  - repeated emits within one successful code block use last-emitted-wins behavior
+  - explicit numeric/string return values still remain the simplest shorthand when a statement body is not needed
 - `find_first` / `find_all` now expose `MatchResult.code_result`, which preserves the last winning-path `Numeric` or `Replacement` value from Lua/JavaScript/Rhai/native/wasm code blocks.
 - `Regex::find_first_numeric_with_code(...)` / `Regex::find_all_numeric_with_code(...)` now collect winning-path `Numeric(f64)` values in match order and skip non-numeric matches.
 - `Regex::replace_first_with_code(...)` / `Regex::replace_all_with_code(...)` now consume winning-path `Replacement(String)` values and copy non-replacement matches through unchanged.

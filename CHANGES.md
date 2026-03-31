@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Tightened inline-language emitted-result helpers
+- Scope: Lua/JavaScript/Rhai inline-language result-contract hardening, regression coverage, and shipped-surface documentation alignment.
+- Changes:
+  - Updated `rgx-core/src/execution.rs` so successful Lua and JavaScript statement bodies can now emit winning-path numeric/replacement payloads through `rgx.emit_numeric(...)` / `rgx.emit_replacement(...)`, and successful Rhai statement bodies can do the same through top-level `emit_numeric(...)` / `emit_replacement(...)`.
+  - Kept direct numeric/string returns as the simplest shorthand, but added explicit helper emission for statement-style bodies that otherwise need to return `true` / `false`.
+  - Added `rgx-core/src/lib.rs` regressions covering emitted numeric/replacement payloads, failure-path suppression of emitted values, and repeated-emission last-wins behavior across the shipped inline-language backends.
+  - Refreshed `README.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped inline-language contract describes the new helper surface truthfully.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_rgx_helpers_can_emit_results_from_statement_bodies -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features javascript safe_mode_javascript_rgx_helpers_can_emit_results_from_statement_bodies -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features rhai safe_mode_rhai_helpers_can_emit_results_from_statement_bodies -- --nocapture`
+- Notes/impact:
+  - This keeps the preferred Lua/JavaScript/Rhai inline-language lane closer to one coherent result contract while still treating wasm as the more advanced import-based backend.
+
 ### 2026-03-31 - Ship branch-reset runtime support
 - Scope: branch-reset capture-numbering semantics, compiler/VM integration, parser-contract alignment, and PCRE2 differential coverage.
 - Changes:
