@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Consolidate benchmark trend artifact writing internals
+- Scope: benchmark-tooling internal cleanup, validation hardening, and continuity doc refreshes.
+- Changes:
+  - Refactored `rgx-bench/src/bin/trend_capture.rs` around a planned artifact-path bundle plus shared artifact-group writing/reporting helpers instead of repeating path assembly, `fs::write(...)`, and log formatting at each output site.
+  - Added focused unit coverage for the artifact layout plan and the multi-path report-line shape so future benchmark-report additions can extend the centralized path without silently drifting output locations or summary logs.
+  - Kept the external artifact set unchanged: `latest.*`, mode-scoped `latest-*.{md,tsv}`, archived history snapshots, `history-*.{md,tsv}`, `overview.*`, `profile-pairs.*`, and `profile-history.*` are still written with the same filenames and semantics.
+  - Updated `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` to record this as a consolidation pass on the benchmark validation loop rather than a new feature addition.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This makes the benchmark capture code materially less fragile for future report additions because path planning, write errors, and summary logging now share one internal contract.
+
 ### 2026-03-31 - Surface latest shared pair in benchmark overview
 - Scope: benchmark landing-artifact ergonomics, release-profile visibility, and validation/doc refreshes.
 - Changes:

@@ -266,6 +266,98 @@ struct CaptureMetadata {
     label: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedArtifactPaths {
+    history_root: PathBuf,
+    mode_history_dir: PathBuf,
+    latest_markdown: PathBuf,
+    latest_tsv: PathBuf,
+    latest_mode_markdown: PathBuf,
+    latest_mode_tsv: PathBuf,
+    history_markdown: PathBuf,
+    history_tsv: PathBuf,
+    history_summary_markdown: PathBuf,
+    history_summary_tsv: PathBuf,
+    overview_markdown: PathBuf,
+    overview_tsv: PathBuf,
+    profile_pairs_markdown: PathBuf,
+    profile_pairs_tsv: PathBuf,
+    profile_history_markdown: PathBuf,
+    profile_history_tsv: PathBuf,
+}
+
+impl PlannedArtifactPaths {
+    fn new(output_dir: &Path, mode: CaptureMode, generated_at_unix: u64) -> Self {
+        let history_root = output_dir.join("history");
+        let mode_history_dir = history_dir_for_mode(&history_root, mode);
+
+        Self {
+            history_root,
+            mode_history_dir: mode_history_dir.clone(),
+            latest_markdown: output_dir.join("latest.md"),
+            latest_tsv: output_dir.join("latest.tsv"),
+            latest_mode_markdown: output_dir.join(format!("latest-{}.md", mode.as_str())),
+            latest_mode_tsv: output_dir.join(format!("latest-{}.tsv", mode.as_str())),
+            history_markdown: mode_history_dir.join(format!("{generated_at_unix}.md")),
+            history_tsv: mode_history_dir.join(format!("{generated_at_unix}.tsv")),
+            history_summary_markdown: output_dir.join(format!("history-{}.md", mode.as_str())),
+            history_summary_tsv: output_dir.join(format!("history-{}.tsv", mode.as_str())),
+            overview_markdown: output_dir.join("overview.md"),
+            overview_tsv: output_dir.join("overview.tsv"),
+            profile_pairs_markdown: output_dir.join("profile-pairs.md"),
+            profile_pairs_tsv: output_dir.join("profile-pairs.tsv"),
+            profile_history_markdown: output_dir.join("profile-history.md"),
+            profile_history_tsv: output_dir.join("profile-history.tsv"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TextArtifact<'a> {
+    path: PathBuf,
+    contents: &'a str,
+    description: &'static str,
+}
+
+impl<'a> TextArtifact<'a> {
+    fn new(path: PathBuf, contents: &'a str, description: &'static str) -> Self {
+        Self {
+            path,
+            contents,
+            description,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ArtifactGroup<'a> {
+    report_prefix: &'static str,
+    artifacts: Vec<TextArtifact<'a>>,
+}
+
+impl ArtifactGroup<'_> {
+    fn write(&self) -> Result<(), String> {
+        for artifact in &self.artifacts {
+            write_text_artifact(artifact)?;
+        }
+        Ok(())
+    }
+
+    fn report_line(&self) -> String {
+        let paths = self
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.path.display().to_string())
+            .collect::<Vec<_>>();
+
+        format!(
+            "[trend_capture] {} {}",
+            self.report_prefix,
+            format_display_list(&paths)
+        )
+    }
+}
+
 fn main() -> Result<(), String> {
     let options = parse_args()?;
     let generated_at_unix = SystemTime::now()
@@ -273,30 +365,15 @@ fn main() -> Result<(), String> {
         .map_err(|err| format!("system clock error: {err}"))?
         .as_secs();
     let samples = collect_samples(options.mode)?;
+    let artifact_paths =
+        PlannedArtifactPaths::new(&options.output_dir, options.mode, generated_at_unix);
+    ensure_output_directories(&options.output_dir, &artifact_paths)?;
 
-    fs::create_dir_all(&options.output_dir).map_err(|err| {
-        format!(
-            "failed to create benchmark trend output directory {}: {err}",
-            options.output_dir.display()
-        )
-    })?;
-    let history_root = options.output_dir.join("history");
-    fs::create_dir_all(&history_root).map_err(|err| {
-        format!(
-            "failed to create benchmark trend history directory {}: {err}",
-            history_root.display()
-        )
-    })?;
-    let mode_history_dir = history_dir_for_mode(&history_root, options.mode);
-    fs::create_dir_all(&mode_history_dir).map_err(|err| {
-        format!(
-            "failed to create mode-scoped benchmark trend history directory {}: {err}",
-            mode_history_dir.display()
-        )
-    })?;
-
-    let comparison_baseline =
-        load_comparison_baseline(&history_root, options.mode, options.compare_against)?;
+    let comparison_baseline = load_comparison_baseline(
+        &artifact_paths.history_root,
+        options.mode,
+        options.compare_against,
+    )?;
 
     let markdown = render_markdown(
         &samples,
@@ -307,60 +384,9 @@ fn main() -> Result<(), String> {
     );
     let tsv = render_tsv(&samples, options.label.as_deref());
 
-    let markdown_path = options.output_dir.join("latest.md");
-    fs::write(&markdown_path, markdown.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write markdown benchmark summary {}: {err}",
-            markdown_path.display()
-        )
-    })?;
-
-    let tsv_path = options.output_dir.join("latest.tsv");
-    fs::write(&tsv_path, tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write tabular benchmark summary {}: {err}",
-            tsv_path.display()
-        )
-    })?;
-
-    let mode_markdown_path = options
-        .output_dir
-        .join(format!("latest-{}.md", options.mode.as_str()));
-    fs::write(&mode_markdown_path, markdown.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write mode-scoped markdown benchmark summary {}: {err}",
-            mode_markdown_path.display()
-        )
-    })?;
-
-    let mode_tsv_path = options
-        .output_dir
-        .join(format!("latest-{}.tsv", options.mode.as_str()));
-    fs::write(&mode_tsv_path, tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write mode-scoped tabular benchmark summary {}: {err}",
-            mode_tsv_path.display()
-        )
-    })?;
-
-    let history_markdown_path = mode_history_dir.join(format!("{generated_at_unix}.md"));
-    fs::write(&history_markdown_path, markdown.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write archived markdown benchmark summary {}: {err}",
-            history_markdown_path.display()
-        )
-    })?;
-
-    let history_tsv_path = mode_history_dir.join(format!("{generated_at_unix}.tsv"));
-    fs::write(&history_tsv_path, tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write archived tabular benchmark summary {}: {err}",
-            history_tsv_path.display()
-        )
-    })?;
-
-    let quick_captures = load_historical_captures(&history_root, CaptureMode::Quick)?;
-    let full_captures = load_historical_captures(&history_root, CaptureMode::Full)?;
+    let quick_captures =
+        load_historical_captures(&artifact_paths.history_root, CaptureMode::Quick)?;
+    let full_captures = load_historical_captures(&artifact_paths.history_root, CaptureMode::Full)?;
     let history_captures = match options.mode {
         CaptureMode::Quick => &quick_captures,
         CaptureMode::Full => &full_captures,
@@ -380,122 +406,171 @@ fn main() -> Result<(), String> {
     let profile_history_markdown = render_profile_history_markdown(&profile_history_rows);
     let profile_history_tsv = render_profile_history_tsv(&profile_history_rows);
 
-    let history_summary_markdown_path = options
-        .output_dir
-        .join(format!("history-{}.md", options.mode.as_str()));
-    fs::write(
-        &history_summary_markdown_path,
-        history_summary_markdown.as_bytes(),
-    )
-    .map_err(|err| {
-        format!(
-            "failed to write rolling history markdown summary {}: {err}",
-            history_summary_markdown_path.display()
-        )
-    })?;
+    let artifact_groups = vec![
+        ArtifactGroup {
+            report_prefix: "Wrote benchmark trend summary to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.latest_markdown.clone(),
+                    &markdown,
+                    "markdown benchmark summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.latest_tsv.clone(),
+                    &tsv,
+                    "tabular benchmark summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.latest_mode_markdown.clone(),
+                    &markdown,
+                    "mode-scoped markdown benchmark summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.latest_mode_tsv.clone(),
+                    &tsv,
+                    "mode-scoped tabular benchmark summary",
+                ),
+            ],
+        },
+        ArtifactGroup {
+            report_prefix: "Archived benchmark snapshot to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.history_markdown.clone(),
+                    &markdown,
+                    "archived markdown benchmark summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.history_tsv.clone(),
+                    &tsv,
+                    "archived tabular benchmark summary",
+                ),
+            ],
+        },
+        ArtifactGroup {
+            report_prefix: "Wrote rolling history summary to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.history_summary_markdown.clone(),
+                    &history_summary_markdown,
+                    "rolling history markdown summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.history_summary_tsv.clone(),
+                    &history_summary_tsv,
+                    "rolling history tabular summary",
+                ),
+            ],
+        },
+        ArtifactGroup {
+            report_prefix: "Wrote cross-mode benchmark overview to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.overview_markdown.clone(),
+                    &overview_markdown,
+                    "benchmark overview markdown",
+                ),
+                TextArtifact::new(
+                    artifact_paths.overview_tsv.clone(),
+                    &overview_tsv,
+                    "benchmark overview tabular summary",
+                ),
+            ],
+        },
+        ArtifactGroup {
+            report_prefix: "Wrote label-paired quick/full summary to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.profile_pairs_markdown.clone(),
+                    &profile_pairs_markdown,
+                    "benchmark profile-pair markdown summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.profile_pairs_tsv.clone(),
+                    &profile_pairs_tsv,
+                    "benchmark profile-pair tabular summary",
+                ),
+            ],
+        },
+        ArtifactGroup {
+            report_prefix: "Wrote rolling label-pair history to",
+            artifacts: vec![
+                TextArtifact::new(
+                    artifact_paths.profile_history_markdown.clone(),
+                    &profile_history_markdown,
+                    "benchmark profile-history markdown summary",
+                ),
+                TextArtifact::new(
+                    artifact_paths.profile_history_tsv.clone(),
+                    &profile_history_tsv,
+                    "benchmark profile-history tabular summary",
+                ),
+            ],
+        },
+    ];
 
-    let history_summary_tsv_path = options
-        .output_dir
-        .join(format!("history-{}.tsv", options.mode.as_str()));
-    fs::write(&history_summary_tsv_path, history_summary_tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write rolling history tabular summary {}: {err}",
-            history_summary_tsv_path.display()
-        )
-    })?;
+    for group in &artifact_groups {
+        group.write()?;
+    }
 
-    let overview_markdown_path = options.output_dir.join("overview.md");
-    fs::write(&overview_markdown_path, overview_markdown.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write benchmark overview markdown {}: {err}",
-            overview_markdown_path.display()
-        )
-    })?;
-
-    let overview_tsv_path = options.output_dir.join("overview.tsv");
-    fs::write(&overview_tsv_path, overview_tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write benchmark overview tabular summary {}: {err}",
-            overview_tsv_path.display()
-        )
-    })?;
-
-    let profile_pairs_markdown_path = options.output_dir.join("profile-pairs.md");
-    fs::write(
-        &profile_pairs_markdown_path,
-        profile_pairs_markdown.as_bytes(),
-    )
-    .map_err(|err| {
-        format!(
-            "failed to write benchmark profile-pair markdown summary {}: {err}",
-            profile_pairs_markdown_path.display()
-        )
-    })?;
-
-    let profile_pairs_tsv_path = options.output_dir.join("profile-pairs.tsv");
-    fs::write(&profile_pairs_tsv_path, profile_pairs_tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write benchmark profile-pair tabular summary {}: {err}",
-            profile_pairs_tsv_path.display()
-        )
-    })?;
-
-    let profile_history_markdown_path = options.output_dir.join("profile-history.md");
-    fs::write(
-        &profile_history_markdown_path,
-        profile_history_markdown.as_bytes(),
-    )
-    .map_err(|err| {
-        format!(
-            "failed to write benchmark profile-history markdown summary {}: {err}",
-            profile_history_markdown_path.display()
-        )
-    })?;
-
-    let profile_history_tsv_path = options.output_dir.join("profile-history.tsv");
-    fs::write(&profile_history_tsv_path, profile_history_tsv.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write benchmark profile-history tabular summary {}: {err}",
-            profile_history_tsv_path.display()
-        )
-    })?;
-
-    println!(
-        "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
-        markdown_path.display(),
-        tsv_path.display(),
-        mode_markdown_path.display(),
-        mode_tsv_path.display()
-    );
-    println!(
-        "[trend_capture] Archived benchmark snapshot to {} and {}",
-        history_markdown_path.display(),
-        history_tsv_path.display()
-    );
-    println!(
-        "[trend_capture] Wrote rolling history summary to {} and {}",
-        history_summary_markdown_path.display(),
-        history_summary_tsv_path.display()
-    );
-    println!(
-        "[trend_capture] Wrote cross-mode benchmark overview to {} and {}",
-        overview_markdown_path.display(),
-        overview_tsv_path.display()
-    );
-    println!(
-        "[trend_capture] Wrote label-paired quick/full summary to {} and {}",
-        profile_pairs_markdown_path.display(),
-        profile_pairs_tsv_path.display()
-    );
-    println!(
-        "[trend_capture] Wrote rolling label-pair history to {} and {}",
-        profile_history_markdown_path.display(),
-        profile_history_tsv_path.display()
-    );
+    for group in &artifact_groups {
+        println!("{}", group.report_line());
+    }
     println!();
     println!("{markdown}");
 
     Ok(())
+}
+
+fn ensure_output_directories(
+    output_dir: &Path,
+    artifact_paths: &PlannedArtifactPaths,
+) -> Result<(), String> {
+    fs::create_dir_all(output_dir).map_err(|err| {
+        format!(
+            "failed to create benchmark trend output directory {}: {err}",
+            output_dir.display()
+        )
+    })?;
+    fs::create_dir_all(&artifact_paths.history_root).map_err(|err| {
+        format!(
+            "failed to create benchmark trend history directory {}: {err}",
+            artifact_paths.history_root.display()
+        )
+    })?;
+    fs::create_dir_all(&artifact_paths.mode_history_dir).map_err(|err| {
+        format!(
+            "failed to create mode-scoped benchmark trend history directory {}: {err}",
+            artifact_paths.mode_history_dir.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+fn write_text_artifact(artifact: &TextArtifact<'_>) -> Result<(), String> {
+    fs::write(&artifact.path, artifact.contents.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write {} {}: {err}",
+            artifact.description,
+            artifact.path.display()
+        )
+    })
+}
+
+fn format_display_list(values: &[String]) -> String {
+    match values {
+        [] => String::new(),
+        [only] => only.clone(),
+        [left, right] => format!("{left} and {right}"),
+        _ => {
+            let mut out = values[..values.len() - 1].join(", ");
+            let last = values.last().expect("non-empty list has last item");
+            out.push_str(", and ");
+            out.push_str(last);
+            out
+        }
+    }
 }
 
 fn parse_args() -> Result<CliOptions, String> {
@@ -2728,6 +2803,55 @@ mod tests {
         assert!(tsv.contains(
             "1800000000\tfull\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"
         ));
+    }
+
+    #[test]
+    fn planned_artifact_paths_use_shared_and_mode_scoped_layout() {
+        let paths =
+            PlannedArtifactPaths::new(Path::new("/tmp/rgx-benchmark"), CaptureMode::Full, 42);
+
+        assert_eq!(
+            paths.history_root,
+            PathBuf::from("/tmp/rgx-benchmark/history")
+        );
+        assert_eq!(
+            paths.mode_history_dir,
+            PathBuf::from("/tmp/rgx-benchmark/history/full")
+        );
+        assert_eq!(
+            paths.latest_markdown,
+            PathBuf::from("/tmp/rgx-benchmark/latest.md")
+        );
+        assert_eq!(
+            paths.latest_mode_tsv,
+            PathBuf::from("/tmp/rgx-benchmark/latest-full.tsv")
+        );
+        assert_eq!(
+            paths.history_markdown,
+            PathBuf::from("/tmp/rgx-benchmark/history/full/42.md")
+        );
+        assert_eq!(
+            paths.profile_history_tsv,
+            PathBuf::from("/tmp/rgx-benchmark/profile-history.tsv")
+        );
+    }
+
+    #[test]
+    fn artifact_group_report_line_formats_multiple_paths() {
+        let group = ArtifactGroup {
+            report_prefix: "Wrote benchmark trend summary to",
+            artifacts: vec![
+                TextArtifact::new(PathBuf::from("latest.md"), "", "latest markdown"),
+                TextArtifact::new(PathBuf::from("latest.tsv"), "", "latest tsv"),
+                TextArtifact::new(PathBuf::from("latest-quick.md"), "", "mode markdown"),
+                TextArtifact::new(PathBuf::from("latest-quick.tsv"), "", "mode tsv"),
+            ],
+        };
+
+        assert_eq!(
+            group.report_line(),
+            "[trend_capture] Wrote benchmark trend summary to latest.md, latest.tsv, latest-quick.md, and latest-quick.tsv"
+        );
     }
 
     #[test]
