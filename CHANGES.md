@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add latest-pair callouts to rolling benchmark history
+- Scope: benchmark release-profile readability, benchmark-report ergonomics, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so `profile-history.md` now summarizes the latest shared-label quick/full pair against the previous pair before the full rolling tables, including lane-specific delta bullets plus biggest improvement/regression callouts.
+  - Kept the existing `profile-history.tsv` and raw pair-over-pair table intact so machine-readable consumers and full longitudinal scans still work as before.
+  - Added focused `trend_capture` coverage for the new latest-pair callout section, including the single-pair fallback where no previous pair exists yet.
+  - Updated `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark workflow now describes the richer `profile-history.*` report shape.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This makes the rolling quick/full longitudinal report actionable at a glance instead of requiring manual scanning of the pair-over-pair history table for the newest revision pair.
+
 ### 2026-03-31 - Add rolling label-pair benchmark history
 - Scope: benchmark release-profile longitudinal visibility, wrapper output clarity, and validation/doc refreshes.
 - Changes:

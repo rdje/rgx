@@ -252,6 +252,15 @@ struct ProfileHistoryRow {
     full_find_all_delta_vs_previous_pair: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct ProfilePairDeltaEntry {
+    profile: &'static str,
+    kind: BenchmarkKind,
+    current_ratio: f64,
+    previous_ratio: f64,
+    change_fraction: f64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CaptureMetadata {
     label: Option<String>,
@@ -1416,6 +1425,62 @@ fn build_profile_history_rows(pairs: &[ProfilePairRow]) -> Vec<ProfileHistoryRow
         .collect()
 }
 
+fn build_profile_pair_delta_entries(
+    current: &ProfileHistoryRow,
+    previous: &ProfileHistoryRow,
+) -> Vec<ProfilePairDeltaEntry> {
+    [
+        (
+            "quick",
+            BenchmarkKind::Compile,
+            current.pair.quick_compile_ratio,
+            previous.pair.quick_compile_ratio,
+        ),
+        (
+            "full",
+            BenchmarkKind::Compile,
+            current.pair.full_compile_ratio,
+            previous.pair.full_compile_ratio,
+        ),
+        (
+            "quick",
+            BenchmarkKind::FindFirst,
+            current.pair.quick_find_first_ratio,
+            previous.pair.quick_find_first_ratio,
+        ),
+        (
+            "full",
+            BenchmarkKind::FindFirst,
+            current.pair.full_find_first_ratio,
+            previous.pair.full_find_first_ratio,
+        ),
+        (
+            "quick",
+            BenchmarkKind::FindAll,
+            current.pair.quick_find_all_ratio,
+            previous.pair.quick_find_all_ratio,
+        ),
+        (
+            "full",
+            BenchmarkKind::FindAll,
+            current.pair.full_find_all_ratio,
+            previous.pair.full_find_all_ratio,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(profile, kind, current_ratio, previous_ratio)| {
+        let change_fraction = ratio_delta(current_ratio, previous_ratio)?;
+        Some(ProfilePairDeltaEntry {
+            profile,
+            kind,
+            current_ratio: current_ratio?,
+            previous_ratio: previous_ratio?,
+            change_fraction,
+        })
+    })
+    .collect()
+}
+
 fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
     let mut out = String::new();
     writeln!(&mut out, "# Benchmark Trend Overview").ok();
@@ -1652,6 +1717,111 @@ fn render_profile_history_markdown(rows: &[ProfileHistoryRow]) -> String {
         )
         .ok();
         return out;
+    }
+
+    writeln!(&mut out, "## Latest Pair Delta Summary").ok();
+    writeln!(&mut out).ok();
+    if let Some(latest) = rows.last() {
+        writeln!(
+            &mut out,
+            "- Current pair: `{}` at `{}`",
+            latest.pair.label, latest.latest_generated_at_unix
+        )
+        .ok();
+
+        if let Some(previous) = rows.iter().rev().nth(1) {
+            writeln!(
+                &mut out,
+                "- Previous pair: `{}` at `{}`",
+                previous.pair.label, previous.latest_generated_at_unix
+            )
+            .ok();
+            writeln!(&mut out).ok();
+
+            let delta_entries = build_profile_pair_delta_entries(latest, previous);
+            if delta_entries.is_empty() {
+                writeln!(
+                    &mut out,
+                    "- No comparable quick/full aggregate medians are available yet."
+                )
+                .ok();
+                writeln!(&mut out).ok();
+            } else {
+                writeln!(&mut out, "### Pair Delta By Lane").ok();
+                for entry in &delta_entries {
+                    writeln!(
+                        &mut out,
+                        "- `{}` / `{}`: {} ({} -> {})",
+                        entry.profile,
+                        entry.kind.as_str(),
+                        format_change_label(entry.change_fraction),
+                        format_ratio_summary(entry.previous_ratio),
+                        format_ratio_summary(entry.current_ratio)
+                    )
+                    .ok();
+                }
+                writeln!(&mut out).ok();
+
+                let mut regressions = delta_entries
+                    .iter()
+                    .filter(|entry| entry.change_fraction > 0.0)
+                    .collect::<Vec<_>>();
+                regressions
+                    .sort_by(|left, right| right.change_fraction.total_cmp(&left.change_fraction));
+
+                let mut improvements = delta_entries
+                    .iter()
+                    .filter(|entry| entry.change_fraction < 0.0)
+                    .collect::<Vec<_>>();
+                improvements
+                    .sort_by(|left, right| left.change_fraction.total_cmp(&right.change_fraction));
+
+                writeln!(&mut out, "### Biggest Regressions").ok();
+                if regressions.is_empty() {
+                    writeln!(&mut out, "- None").ok();
+                } else {
+                    for entry in regressions.into_iter().take(3) {
+                        writeln!(
+                            &mut out,
+                            "- `{}` / `{}`: {} ({} -> {})",
+                            entry.profile,
+                            entry.kind.as_str(),
+                            format_change_label(entry.change_fraction),
+                            format_ratio_summary(entry.previous_ratio),
+                            format_ratio_summary(entry.current_ratio)
+                        )
+                        .ok();
+                    }
+                }
+                writeln!(&mut out).ok();
+
+                writeln!(&mut out, "### Biggest Improvements").ok();
+                if improvements.is_empty() {
+                    writeln!(&mut out, "- None").ok();
+                } else {
+                    for entry in improvements.into_iter().take(3) {
+                        writeln!(
+                            &mut out,
+                            "- `{}` / `{}`: {} ({} -> {})",
+                            entry.profile,
+                            entry.kind.as_str(),
+                            format_change_label(entry.change_fraction),
+                            format_ratio_summary(entry.previous_ratio),
+                            format_ratio_summary(entry.current_ratio)
+                        )
+                        .ok();
+                    }
+                }
+                writeln!(&mut out).ok();
+            }
+        } else {
+            writeln!(
+                &mut out,
+                "- Need at least two shared quick/full label pairs before pair-over-pair summaries become meaningful."
+            )
+            .ok();
+            writeln!(&mut out).ok();
+        }
     }
 
     writeln!(&mut out, "## Current Pair Summary").ok();
@@ -2817,10 +2987,57 @@ mod tests {
         let markdown = render_profile_history_markdown(&history_rows);
         assert!(markdown.contains("# Benchmark Profile History"));
         assert!(markdown.contains("Shared quick/full label pairs: `2`"));
+        assert!(markdown.contains("## Latest Pair Delta Summary"));
+        assert!(markdown.contains("- Current pair: `rev-b` at `2000000000`"));
+        assert!(markdown.contains("- Previous pair: `rev-a` at `1800000000`"));
+        assert!(markdown.contains("### Pair Delta By Lane"));
+        assert!(markdown.contains("- `quick` / `compile`: 10.00% improvement (2.00x slower median -> 1.80x slower median)"));
+        assert!(markdown.contains("### Biggest Regressions"));
+        assert!(markdown.contains("- None"));
+        assert!(markdown.contains("### Biggest Improvements"));
+        assert!(markdown.contains("- `quick` / `find_first`: 25.00% improvement (2.00x slower median -> 1.50x slower median)"));
         assert!(markdown.contains("## Current Pair Summary"));
         assert!(markdown.contains("## Pair-Over-Pair Delta"));
         assert!(markdown.contains("| rev-b | 2000000000 | 1900000000 | 2000000000 |"));
         assert!(markdown.contains("| rev-b | 2000000000 | 10.00% improvement | 20.00% improvement | 25.00% improvement | 20.00% improvement | 10.00% improvement | 10.00% improvement |"));
+    }
+
+    #[test]
+    fn render_profile_history_markdown_reports_when_only_one_pair_exists() {
+        let pair_rows = build_profile_pair_rows(
+            &[HistoricalCapture {
+                generated_at_unix: 1700000000,
+                mode: CaptureMode::Quick,
+                label: Some("rev-a".to_string()),
+                samples: vec![sample(
+                    BenchmarkKind::Compile,
+                    "literal_simple",
+                    None,
+                    12.0,
+                    6.0,
+                )],
+            }],
+            &[HistoricalCapture {
+                generated_at_unix: 1800000000,
+                mode: CaptureMode::Full,
+                label: Some("rev-a".to_string()),
+                samples: vec![sample(
+                    BenchmarkKind::Compile,
+                    "literal_simple",
+                    None,
+                    15.0,
+                    6.0,
+                )],
+            }],
+        );
+
+        let history_rows = build_profile_history_rows(&pair_rows);
+        let markdown = render_profile_history_markdown(&history_rows);
+        assert!(markdown.contains("## Latest Pair Delta Summary"));
+        assert!(markdown.contains("- Current pair: `rev-a` at `1800000000`"));
+        assert!(markdown.contains(
+            "- Need at least two shared quick/full label pairs before pair-over-pair summaries become meaningful."
+        ));
     }
 
     #[test]
