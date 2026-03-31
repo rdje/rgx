@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add rolling benchmark history summaries
+- Scope: benchmark trend-capture longitudinal reporting, wrapper output alignment, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so each quick/full capture now also emits `history-quick.*` or `history-full.*` summaries with aggregate median ratios and delta-vs-previous columns across archived same-mode captures.
+  - Kept quick-mode legacy-history fallback intact while adding explicit mode-scoped history loading for the new longitudinal summaries, plus unit coverage for history rendering and merged quick-history loading.
+  - Updated `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the benchmark validation loop now documents the rolling history artifacts alongside the existing latest snapshots and archived baseline comparison flow.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-history-smoke --compare-against none`
+  - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-history-smoke ./scripts/capture-benchmark-trends.sh`
+- Notes/impact:
+  - This moves the benchmark loop a step closer to the roadmap’s fuller longitudinal/perf-story goal without changing the default quick-mode local CI footprint.
+
 ### 2026-03-31 - Ship current recursion-condition conditionals
 - Scope: conditional parser/runtime parity, PCRE2 ambiguity handling, and parser-contract/differential coverage refreshes.
 - Changes:

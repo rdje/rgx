@@ -185,6 +185,17 @@ impl ComparisonSample {
     }
 }
 
+#[derive(Debug, Clone)]
+struct HistorySummaryRow {
+    generated_at_unix: u64,
+    compile_ratio: Option<f64>,
+    find_first_ratio: Option<f64>,
+    find_all_ratio: Option<f64>,
+    compile_delta: Option<f64>,
+    find_first_delta: Option<f64>,
+    find_all_delta: Option<f64>,
+}
+
 fn main() -> Result<(), String> {
     let options = parse_args()?;
     let generated_at_unix = SystemTime::now()
@@ -277,6 +288,34 @@ fn main() -> Result<(), String> {
         )
     })?;
 
+    let history_captures = load_historical_captures(&history_root, options.mode)?;
+    let history_summary_markdown = render_history_summary_markdown(&history_captures, options.mode);
+    let history_summary_tsv = render_history_summary_tsv(&history_captures, options.mode);
+
+    let history_summary_markdown_path = options
+        .output_dir
+        .join(format!("history-{}.md", options.mode.as_str()));
+    fs::write(
+        &history_summary_markdown_path,
+        history_summary_markdown.as_bytes(),
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write rolling history markdown summary {}: {err}",
+            history_summary_markdown_path.display()
+        )
+    })?;
+
+    let history_summary_tsv_path = options
+        .output_dir
+        .join(format!("history-{}.tsv", options.mode.as_str()));
+    fs::write(&history_summary_tsv_path, history_summary_tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write rolling history tabular summary {}: {err}",
+            history_summary_tsv_path.display()
+        )
+    })?;
+
     println!(
         "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
         markdown_path.display(),
@@ -288,6 +327,11 @@ fn main() -> Result<(), String> {
         "[trend_capture] Archived benchmark snapshot to {} and {}",
         history_markdown_path.display(),
         history_tsv_path.display()
+    );
+    println!(
+        "[trend_capture] Wrote rolling history summary to {} and {}",
+        history_summary_markdown_path.display(),
+        history_summary_tsv_path.display()
     );
     println!();
     println!("{markdown}");
@@ -538,31 +582,36 @@ fn history_dir_for_mode(history_root: &Path, mode: CaptureMode) -> PathBuf {
     history_root.join(mode.as_str())
 }
 
-fn load_most_recent_historical_capture(
+fn load_historical_captures(
     history_root: &Path,
     mode: CaptureMode,
-) -> Result<Option<HistoricalCapture>, String> {
-    if let Some(capture) = load_most_recent_historical_capture_from_dir(
-        &history_dir_for_mode(history_root, mode),
-        mode,
-    )? {
-        return Ok(Some(capture));
+) -> Result<Vec<HistoricalCapture>, String> {
+    let mut captures_by_timestamp = std::collections::BTreeMap::new();
+
+    for capture in
+        load_historical_captures_from_dir(&history_dir_for_mode(history_root, mode), mode)?
+    {
+        captures_by_timestamp.insert(capture.generated_at_unix, capture);
     }
 
     // Legacy unscoped history entries were effectively quick-mode captures.
     if mode == CaptureMode::Quick {
-        return load_most_recent_historical_capture_from_dir(history_root, CaptureMode::Quick);
+        for capture in load_historical_captures_from_dir(history_root, CaptureMode::Quick)? {
+            captures_by_timestamp
+                .entry(capture.generated_at_unix)
+                .or_insert(capture);
+        }
     }
 
-    Ok(None)
+    Ok(captures_by_timestamp.into_values().collect())
 }
 
-fn load_most_recent_historical_capture_from_dir(
+fn load_historical_captures_from_dir(
     history_dir: &Path,
     mode: CaptureMode,
-) -> Result<Option<HistoricalCapture>, String> {
+) -> Result<Vec<HistoricalCapture>, String> {
     if !history_dir.exists() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let entries = fs::read_dir(history_dir).map_err(|err| {
@@ -572,7 +621,7 @@ fn load_most_recent_historical_capture_from_dir(
         )
     })?;
 
-    let mut latest_capture = None;
+    let mut captures = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|err| {
             format!(
@@ -581,19 +630,19 @@ fn load_most_recent_historical_capture_from_dir(
             )
         })?;
         if let Some(candidate) = parse_history_entry(entry, mode)? {
-            if latest_capture
-                .as_ref()
-                .map(|capture: &HistoricalCapture| {
-                    capture.generated_at_unix < candidate.generated_at_unix
-                })
-                .unwrap_or(true)
-            {
-                latest_capture = Some(candidate);
-            }
+            captures.push(candidate);
         }
     }
 
-    Ok(latest_capture)
+    captures.sort_by_key(|capture| capture.generated_at_unix);
+    Ok(captures)
+}
+
+fn load_most_recent_historical_capture(
+    history_root: &Path,
+    mode: CaptureMode,
+) -> Result<Option<HistoricalCapture>, String> {
+    Ok(load_historical_captures(history_root, mode)?.pop())
 }
 
 fn load_comparison_baseline(
@@ -843,6 +892,166 @@ fn render_markdown(
     out
 }
 
+fn aggregate_ratio_median(samples: &[TrendSample], kind: BenchmarkKind) -> Option<f64> {
+    let mut ratios = samples
+        .iter()
+        .filter(|sample| sample.kind == kind)
+        .map(TrendSample::ratio_rgx_over_pcre2)
+        .collect::<Vec<_>>();
+    if ratios.is_empty() {
+        None
+    } else {
+        Some(median(&mut ratios))
+    }
+}
+
+fn aggregate_ratio_delta(
+    current_samples: &[TrendSample],
+    previous_samples: &[TrendSample],
+    kind: BenchmarkKind,
+) -> Option<f64> {
+    let current = aggregate_ratio_median(current_samples, kind)?;
+    let previous = aggregate_ratio_median(previous_samples, kind)?;
+    if previous == 0.0 {
+        None
+    } else {
+        Some((current / previous) - 1.0)
+    }
+}
+
+fn format_ratio_summary(ratio: f64) -> String {
+    if ratio < 1.0 {
+        format!("{:.2}x faster median", 1.0 / ratio)
+    } else {
+        format!("{ratio:.2}x slower median")
+    }
+}
+
+fn build_history_summary_rows(captures: &[HistoricalCapture]) -> Vec<HistorySummaryRow> {
+    captures
+        .iter()
+        .enumerate()
+        .map(|(index, capture)| {
+            let previous = index.checked_sub(1).and_then(|prior| captures.get(prior));
+            HistorySummaryRow {
+                generated_at_unix: capture.generated_at_unix,
+                compile_ratio: aggregate_ratio_median(&capture.samples, BenchmarkKind::Compile),
+                find_first_ratio: aggregate_ratio_median(
+                    &capture.samples,
+                    BenchmarkKind::FindFirst,
+                ),
+                find_all_ratio: aggregate_ratio_median(&capture.samples, BenchmarkKind::FindAll),
+                compile_delta: previous.and_then(|prior| {
+                    aggregate_ratio_delta(&capture.samples, &prior.samples, BenchmarkKind::Compile)
+                }),
+                find_first_delta: previous.and_then(|prior| {
+                    aggregate_ratio_delta(
+                        &capture.samples,
+                        &prior.samples,
+                        BenchmarkKind::FindFirst,
+                    )
+                }),
+                find_all_delta: previous.and_then(|prior| {
+                    aggregate_ratio_delta(&capture.samples, &prior.samples, BenchmarkKind::FindAll)
+                }),
+            }
+        })
+        .collect()
+}
+
+fn render_history_summary_markdown(captures: &[HistoricalCapture], mode: CaptureMode) -> String {
+    let mut out = String::new();
+    writeln!(&mut out, "# Benchmark Trend History").ok();
+    writeln!(&mut out).ok();
+    writeln!(&mut out, "- Mode: `{}`", mode.as_str()).ok();
+    writeln!(&mut out, "- Entries: `{}`", captures.len()).ok();
+    if let Some(oldest) = captures.first() {
+        writeln!(
+            &mut out,
+            "- Oldest capture (unix): `{}`",
+            oldest.generated_at_unix
+        )
+        .ok();
+    }
+    if let Some(latest) = captures.last() {
+        writeln!(
+            &mut out,
+            "- Latest capture (unix): `{}`",
+            latest.generated_at_unix
+        )
+        .ok();
+    }
+    writeln!(&mut out).ok();
+
+    if captures.is_empty() {
+        writeln!(&mut out, "- No archived captures yet.").ok();
+        return out;
+    }
+
+    writeln!(
+        &mut out,
+        "| Generated at | Compile median | Find First median | Find All median | Compile delta vs previous | Find First delta vs previous | Find All delta vs previous |"
+    )
+    .ok();
+    writeln!(&mut out, "| ---: | --- | --- | --- | --- | --- | --- |").ok();
+
+    for row in build_history_summary_rows(captures).into_iter().rev() {
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            row.generated_at_unix,
+            row.compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.compile_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_first_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_all_delta
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_history_summary_tsv(captures: &[HistoricalCapture], mode: CaptureMode) -> String {
+    let mut out = String::new();
+    writeln!(
+        &mut out,
+        "generated_at_unix\tmode\tcompile_ratio\tfind_first_ratio\tfind_all_ratio\tcompile_delta_fraction\tfind_first_delta_fraction\tfind_all_delta_fraction"
+    )
+    .ok();
+
+    for row in build_history_summary_rows(captures) {
+        writeln!(
+            &mut out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.generated_at_unix,
+            mode.as_str(),
+            format_optional_tsv_number(row.compile_ratio),
+            format_optional_tsv_number(row.find_first_ratio),
+            format_optional_tsv_number(row.find_all_ratio),
+            format_optional_tsv_number(row.compile_delta),
+            format_optional_tsv_number(row.find_first_delta),
+            format_optional_tsv_number(row.find_all_delta),
+        )
+        .ok();
+    }
+
+    out
+}
+
 fn render_tsv(samples: &[TrendSample]) -> String {
     let mut out = String::new();
     writeln!(
@@ -1041,6 +1250,12 @@ fn format_change_label(change_fraction: f64) -> String {
     } else {
         format!("{:.2}% regression", change_fraction * 100.0)
     }
+}
+
+fn format_optional_tsv_number(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.6}"))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 #[cfg(test)]
@@ -1296,6 +1511,148 @@ mod tests {
         assert!(markdown.contains("Compare against request: `1700000000`"));
         assert!(markdown.contains("Resolved comparison baseline: `none`"));
         assert!(markdown.contains("Requested archived `quick` capture `1700000000` was not found."));
+    }
+
+    #[test]
+    fn render_history_summary_markdown_reports_longitudinal_rows() {
+        let captures = vec![
+            HistoricalCapture {
+                generated_at_unix: 1700000000,
+                mode: CaptureMode::Quick,
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        20.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        30.0,
+                        10.0,
+                    ),
+                ],
+            },
+            HistoricalCapture {
+                generated_at_unix: 1800000000,
+                mode: CaptureMode::Quick,
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        18.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        33.0,
+                        10.0,
+                    ),
+                ],
+            },
+        ];
+
+        let markdown = render_history_summary_markdown(&captures, CaptureMode::Quick);
+        assert!(markdown.contains("# Benchmark Trend History"));
+        assert!(markdown.contains("Entries: `2`"));
+        assert!(markdown.contains("| 1800000000 |"));
+        assert!(markdown.contains("2.00x slower median"));
+        assert!(markdown.contains("10.00% regression"));
+        assert!(markdown.contains("10.00% improvement"));
+    }
+
+    #[test]
+    fn render_history_summary_tsv_includes_delta_columns() {
+        let captures = vec![
+            HistoricalCapture {
+                generated_at_unix: 1700000000,
+                mode: CaptureMode::Full,
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        20.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        30.0,
+                        10.0,
+                    ),
+                ],
+            },
+            HistoricalCapture {
+                generated_at_unix: 1800000000,
+                mode: CaptureMode::Full,
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 11.0, 5.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        18.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        33.0,
+                        10.0,
+                    ),
+                ],
+            },
+        ];
+
+        let tsv = render_history_summary_tsv(&captures, CaptureMode::Full);
+        assert!(tsv.contains("generated_at_unix\tmode\tcompile_ratio"));
+        assert!(tsv.contains("1700000000\tfull\t2.000000\t2.000000\t3.000000\t-\t-\t-"));
+        assert!(tsv.contains(
+            "1800000000\tfull\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"
+        ));
+    }
+
+    #[test]
+    fn load_historical_captures_merges_legacy_and_mode_scoped_quick_history() {
+        let temp_dir = TempTestDir::new("quick-history-merge");
+        let history_root = temp_dir.path().join("history");
+        let samples = vec![sample(
+            BenchmarkKind::Compile,
+            "literal_simple",
+            None,
+            12.0,
+            6.0,
+        )];
+
+        write_history_capture(&history_root, None, 1700000000, &samples);
+        write_history_capture(
+            &history_root,
+            Some(CaptureMode::Quick),
+            1800000000,
+            &samples,
+        );
+
+        let captures = load_historical_captures(&history_root, CaptureMode::Quick)
+            .expect("quick history should load");
+
+        assert_eq!(captures.len(), 2);
+        assert_eq!(captures[0].generated_at_unix, 1700000000);
+        assert_eq!(captures[1].generated_at_unix, 1800000000);
+        assert!(captures
+            .iter()
+            .all(|capture| capture.mode == CaptureMode::Quick));
     }
 
     #[test]

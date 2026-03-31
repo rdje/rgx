@@ -27,6 +27,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
   - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass (confirmed previous-run delta reporting)
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-explicit-smoke --compare-against none` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench render_history_summary -- --nocapture` => pass
   - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-explicit-smoke RGX_BENCHMARK_COMPARE_AGAINST=1774884688 ./scripts/capture-benchmark-trends.sh` => pass (confirmed explicit archived-baseline comparison via wrapper)
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-mode-smoke.JSCCE6 --compare-against none` => pass
   - `RGX_BENCHMARK_TREND_DIR=/tmp/rgx-benchmark-trends-mode-smoke.JSCCE6 RGX_BENCHMARK_TREND_MODE=full ./scripts/capture-benchmark-trends.sh` => pass (confirmed `full` mode does not auto-compare against existing quick history in the same output tree)
@@ -159,7 +160,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure now has two tiers:
   - criterion throughput benches in `rgx-bench/benches/throughput.rs`
-  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode, writing both `latest.*` summaries and timestamped history snapshots with previous-run delta sections
+  - a lightweight trend-capture binary in `rgx-bench/src/bin/trend_capture.rs` that the default local CI path runs in quick mode, writing both `latest.*` summaries, rolling `history-*.{md,tsv}` summaries, and timestamped history snapshots with previous-run delta sections
 
 ## Roadmap alignment
 ### Now
@@ -176,7 +177,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Embedded inline-language hardening improved again because Lua, JavaScript, and Rhai are now all documented/tested as supporting both bare-expression and explicit-`return` source bodies on the shipped path.
 - Embedded inline-language hardening improved again because statement-style Lua/JavaScript/Rhai code blocks can now emit winning-path numeric/replacement payloads explicitly instead of depending only on direct non-boolean returns.
 - Embedded inline-language hardening improved again because the CLI now exposes host-variable injection and richer optional match-detail rendering without pre-executing code blocks twice on the successful path.
-- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, preserves shared plus mode-scoped latest snapshots, archives each capture locally under the matching benchmark mode, and can report delta against either the most recent same-mode archived run or a requested archived baseline instead of leaving all benchmark capture to manual ad hoc runs.
+- Performance validation improved again because the default local CI path now emits a reproducible quick benchmark trend summary, preserves shared plus mode-scoped latest snapshots, writes mode-scoped rolling history summaries, archives each capture locally under the matching benchmark mode, and can report delta against either the most recent same-mode archived run or a requested archived baseline instead of leaving all benchmark capture to manual ad hoc runs.
 
 ### Next
 - Tighten the now-shipped inline-language slice around Lua/JavaScript/Rhai ergonomics before widening wasm-specific ABI work again.
