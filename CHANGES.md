@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Add label-paired quick/full benchmark summaries
+- Scope: benchmark release-profile longitudinal visibility, wrapper output clarity, and validation/doc refreshes.
+- Changes:
+  - Extended `rgx-bench/src/bin/trend_capture.rs` so it now writes `profile-pairs.md` / `profile-pairs.tsv`, pairing the latest quick/full archived captures for each shared label and surfacing aggregate median ratios plus full-vs-quick deltas for compile, first-match, and find-all measurements.
+  - Reused the existing revision-label history metadata so paired summaries naturally prefer the most recent capture per mode for a given label and ignore one-sided labels that do not yet have both quick and full captures.
+  - Added focused `trend_capture` coverage for markdown/TSV rendering of those quick/full label pairs, including latest-per-mode selection for repeated labels.
+  - Updated `scripts/capture-benchmark-trends.sh`, `README.md`, `ROADMAP.md`, `DEVELOPMENT_NOTES.md`, `RUST_CODEBASE_ANALYSIS.md`, and `MEMORY.md` so the benchmark workflow now documents the new label-paired quick/full artifact.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture`
+- Notes/impact:
+  - This gives RGX one stable report for “same revision, quick vs full” comparisons instead of requiring manual cross-reading of separate mode histories.
+
 ### 2026-03-31 - Add cross-mode benchmark overview artifacts
 - Scope: benchmark longitudinal visibility, quick/full release-profile ergonomics, and validation/doc refreshes.
 - Changes:

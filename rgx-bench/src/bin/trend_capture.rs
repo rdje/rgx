@@ -1,6 +1,7 @@
 use pcre2::bytes::Regex as PcreRegex;
 use rgx_bench::{generate_test_data, BenchmarkPattern, PATTERNS};
 use rgx_core::Regex;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::hint::black_box;
@@ -223,6 +224,22 @@ struct ModeOverviewRow {
     find_all_delta: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct ProfilePairRow {
+    label: String,
+    quick_generated_at_unix: u64,
+    full_generated_at_unix: u64,
+    quick_compile_ratio: Option<f64>,
+    full_compile_ratio: Option<f64>,
+    compile_full_vs_quick: Option<f64>,
+    quick_find_first_ratio: Option<f64>,
+    full_find_first_ratio: Option<f64>,
+    find_first_full_vs_quick: Option<f64>,
+    quick_find_all_ratio: Option<f64>,
+    full_find_all_ratio: Option<f64>,
+    find_all_full_vs_quick: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CaptureMetadata {
     label: Option<String>,
@@ -321,21 +338,23 @@ fn main() -> Result<(), String> {
         )
     })?;
 
-    let history_captures = load_historical_captures(&history_root, options.mode)?;
-    let history_summary_markdown = render_history_summary_markdown(&history_captures, options.mode);
-    let history_summary_tsv = render_history_summary_tsv(&history_captures, options.mode);
+    let quick_captures = load_historical_captures(&history_root, CaptureMode::Quick)?;
+    let full_captures = load_historical_captures(&history_root, CaptureMode::Full)?;
+    let history_captures = match options.mode {
+        CaptureMode::Quick => &quick_captures,
+        CaptureMode::Full => &full_captures,
+    };
+    let history_summary_markdown = render_history_summary_markdown(history_captures, options.mode);
+    let history_summary_tsv = render_history_summary_tsv(history_captures, options.mode);
     let overview_rows = [
-        build_mode_overview_row(
-            &load_historical_captures(&history_root, CaptureMode::Quick)?,
-            CaptureMode::Quick,
-        ),
-        build_mode_overview_row(
-            &load_historical_captures(&history_root, CaptureMode::Full)?,
-            CaptureMode::Full,
-        ),
+        build_mode_overview_row(&quick_captures, CaptureMode::Quick),
+        build_mode_overview_row(&full_captures, CaptureMode::Full),
     ];
     let overview_markdown = render_overview_markdown(&overview_rows);
     let overview_tsv = render_overview_tsv(&overview_rows);
+    let profile_pairs = build_profile_pair_rows(&quick_captures, &full_captures);
+    let profile_pairs_markdown = render_profile_pairs_markdown(&profile_pairs);
+    let profile_pairs_tsv = render_profile_pairs_tsv(&profile_pairs);
 
     let history_summary_markdown_path = options
         .output_dir
@@ -377,6 +396,26 @@ fn main() -> Result<(), String> {
         )
     })?;
 
+    let profile_pairs_markdown_path = options.output_dir.join("profile-pairs.md");
+    fs::write(
+        &profile_pairs_markdown_path,
+        profile_pairs_markdown.as_bytes(),
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write benchmark profile-pair markdown summary {}: {err}",
+            profile_pairs_markdown_path.display()
+        )
+    })?;
+
+    let profile_pairs_tsv_path = options.output_dir.join("profile-pairs.tsv");
+    fs::write(&profile_pairs_tsv_path, profile_pairs_tsv.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write benchmark profile-pair tabular summary {}: {err}",
+            profile_pairs_tsv_path.display()
+        )
+    })?;
+
     println!(
         "[trend_capture] Wrote benchmark trend summary to {}, {}, {}, and {}",
         markdown_path.display(),
@@ -398,6 +437,11 @@ fn main() -> Result<(), String> {
         "[trend_capture] Wrote cross-mode benchmark overview to {} and {}",
         overview_markdown_path.display(),
         overview_tsv_path.display()
+    );
+    println!(
+        "[trend_capture] Wrote label-paired quick/full summary to {} and {}",
+        profile_pairs_markdown_path.display(),
+        profile_pairs_tsv_path.display()
     );
     println!();
     println!("{markdown}");
@@ -1041,8 +1085,15 @@ fn aggregate_ratio_delta(
     previous_samples: &[TrendSample],
     kind: BenchmarkKind,
 ) -> Option<f64> {
-    let current = aggregate_ratio_median(current_samples, kind)?;
-    let previous = aggregate_ratio_median(previous_samples, kind)?;
+    ratio_delta(
+        aggregate_ratio_median(current_samples, kind),
+        aggregate_ratio_median(previous_samples, kind),
+    )
+}
+
+fn ratio_delta(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
+    let current = current?;
+    let previous = previous?;
     if previous == 0.0 {
         None
     } else {
@@ -1209,6 +1260,75 @@ fn build_mode_overview_row(captures: &[HistoricalCapture], mode: CaptureMode) ->
     }
 }
 
+fn build_profile_pair_rows(
+    quick_captures: &[HistoricalCapture],
+    full_captures: &[HistoricalCapture],
+) -> Vec<ProfilePairRow> {
+    let mut quick_by_label = BTreeMap::new();
+    for capture in quick_captures {
+        if let Some(label) = capture.label.as_ref() {
+            quick_by_label.insert(label.clone(), capture);
+        }
+    }
+
+    let mut full_by_label = BTreeMap::new();
+    for capture in full_captures {
+        if let Some(label) = capture.label.as_ref() {
+            full_by_label.insert(label.clone(), capture);
+        }
+    }
+
+    let mut rows = quick_by_label
+        .into_iter()
+        .filter_map(|(label, quick_capture)| {
+            let full_capture = full_by_label.get(&label)?;
+            let quick_compile_ratio =
+                aggregate_ratio_median(&quick_capture.samples, BenchmarkKind::Compile);
+            let full_compile_ratio =
+                aggregate_ratio_median(&full_capture.samples, BenchmarkKind::Compile);
+            let quick_find_first_ratio =
+                aggregate_ratio_median(&quick_capture.samples, BenchmarkKind::FindFirst);
+            let full_find_first_ratio =
+                aggregate_ratio_median(&full_capture.samples, BenchmarkKind::FindFirst);
+            let quick_find_all_ratio =
+                aggregate_ratio_median(&quick_capture.samples, BenchmarkKind::FindAll);
+            let full_find_all_ratio =
+                aggregate_ratio_median(&full_capture.samples, BenchmarkKind::FindAll);
+
+            Some(ProfilePairRow {
+                label,
+                quick_generated_at_unix: quick_capture.generated_at_unix,
+                full_generated_at_unix: full_capture.generated_at_unix,
+                quick_compile_ratio,
+                full_compile_ratio,
+                compile_full_vs_quick: ratio_delta(full_compile_ratio, quick_compile_ratio),
+                quick_find_first_ratio,
+                full_find_first_ratio,
+                find_first_full_vs_quick: ratio_delta(
+                    full_find_first_ratio,
+                    quick_find_first_ratio,
+                ),
+                quick_find_all_ratio,
+                full_find_all_ratio,
+                find_all_full_vs_quick: ratio_delta(full_find_all_ratio, quick_find_all_ratio),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    rows.sort_by(|left, right| {
+        let left_latest = left
+            .quick_generated_at_unix
+            .max(left.full_generated_at_unix);
+        let right_latest = right
+            .quick_generated_at_unix
+            .max(right.full_generated_at_unix);
+        right_latest
+            .cmp(&left_latest)
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    rows
+}
+
 fn render_overview_markdown(rows: &[ModeOverviewRow]) -> String {
     let mut out = String::new();
     writeln!(&mut out, "# Benchmark Trend Overview").ok();
@@ -1299,6 +1419,110 @@ fn render_overview_tsv(rows: &[ModeOverviewRow]) -> String {
             format_optional_tsv_number(row.compile_delta),
             format_optional_tsv_number(row.find_first_delta),
             format_optional_tsv_number(row.find_all_delta),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_profile_pairs_markdown(rows: &[ProfilePairRow]) -> String {
+    let mut out = String::new();
+    writeln!(&mut out, "# Benchmark Profile Pairs").ok();
+    writeln!(&mut out).ok();
+    writeln!(
+        &mut out,
+        "- Shared labels with both quick and full captures: `{}`",
+        rows.len()
+    )
+    .ok();
+    writeln!(&mut out).ok();
+
+    if rows.is_empty() {
+        writeln!(
+            &mut out,
+            "- No shared quick/full capture labels are archived yet."
+        )
+        .ok();
+        return out;
+    }
+
+    writeln!(
+        &mut out,
+        "| Label | Quick capture | Full capture | Quick compile median | Full compile median | Full compile vs quick | Quick find-first median | Full find-first median | Full find-first vs quick | Quick find-all median | Full find-all median | Full find-all vs quick |"
+    )
+    .ok();
+    writeln!(
+        &mut out,
+        "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .ok();
+
+    for row in rows {
+        writeln!(
+            &mut out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            row.label,
+            row.quick_generated_at_unix,
+            row.full_generated_at_unix,
+            row.quick_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_compile_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.compile_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.quick_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_find_first_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_first_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+            row.quick_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.full_find_all_ratio
+                .map(format_ratio_summary)
+                .unwrap_or_else(|| "-".to_string()),
+            row.find_all_full_vs_quick
+                .map(format_change_label)
+                .unwrap_or_else(|| "-".to_string()),
+        )
+        .ok();
+    }
+
+    out
+}
+
+fn render_profile_pairs_tsv(rows: &[ProfilePairRow]) -> String {
+    let mut out = String::new();
+    writeln!(
+        &mut out,
+        "label\tquick_generated_at_unix\tfull_generated_at_unix\tquick_compile_ratio\tfull_compile_ratio\tcompile_full_vs_quick_fraction\tquick_find_first_ratio\tfull_find_first_ratio\tfind_first_full_vs_quick_fraction\tquick_find_all_ratio\tfull_find_all_ratio\tfind_all_full_vs_quick_fraction"
+    )
+    .ok();
+
+    for row in rows {
+        writeln!(
+            &mut out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.label,
+            row.quick_generated_at_unix,
+            row.full_generated_at_unix,
+            format_optional_tsv_number(row.quick_compile_ratio),
+            format_optional_tsv_number(row.full_compile_ratio),
+            format_optional_tsv_number(row.compile_full_vs_quick),
+            format_optional_tsv_number(row.quick_find_first_ratio),
+            format_optional_tsv_number(row.full_find_first_ratio),
+            format_optional_tsv_number(row.find_first_full_vs_quick),
+            format_optional_tsv_number(row.quick_find_all_ratio),
+            format_optional_tsv_number(row.full_find_all_ratio),
+            format_optional_tsv_number(row.find_all_full_vs_quick),
         )
         .ok();
     }
@@ -2079,6 +2303,158 @@ mod tests {
             .contains("mode\tentries\toldest_generated_at_unix\tlatest_generated_at_unix\tlabel"));
         assert!(tsv.contains("full\t2\t1700000000\t1800000000\thead-full\t2.200000\t1.800000\t3.300000\t0.100000\t-0.100000\t0.100000"));
         assert!(tsv.contains("quick\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-"));
+    }
+
+    #[test]
+    fn render_profile_pairs_markdown_reports_shared_label_quick_full_deltas() {
+        let rows = build_profile_pair_rows(
+            &[HistoricalCapture {
+                generated_at_unix: 1700000000,
+                mode: CaptureMode::Quick,
+                label: Some("rev-a".to_string()),
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        22.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        36.0,
+                        10.0,
+                    ),
+                ],
+            }],
+            &[HistoricalCapture {
+                generated_at_unix: 1800000000,
+                mode: CaptureMode::Full,
+                label: Some("rev-a".to_string()),
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        18.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        33.0,
+                        10.0,
+                    ),
+                ],
+            }],
+        );
+
+        let markdown = render_profile_pairs_markdown(&rows);
+        assert!(markdown.contains("# Benchmark Profile Pairs"));
+        assert!(markdown.contains("Shared labels with both quick and full captures: `1`"));
+        assert!(markdown.contains("| rev-a | 1700000000 | 1800000000 |"));
+        assert!(markdown.contains("2.00x slower median"));
+        assert!(markdown.contains("flat"));
+        assert!(markdown.contains("18.18% improvement"));
+        assert!(markdown.contains("8.33% improvement"));
+    }
+
+    #[test]
+    fn render_profile_pairs_tsv_prefers_latest_capture_per_mode_for_shared_label() {
+        let rows = build_profile_pair_rows(
+            &[
+                HistoricalCapture {
+                    generated_at_unix: 1600000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 15.0, 5.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            25.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            40.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 1700000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("rev-a".to_string()),
+                    samples: vec![
+                        sample(BenchmarkKind::Compile, "literal_simple", None, 12.0, 6.0),
+                        sample(
+                            BenchmarkKind::FindFirst,
+                            "email_basic",
+                            Some(1000),
+                            22.0,
+                            10.0,
+                        ),
+                        sample(
+                            BenchmarkKind::FindAll,
+                            "capture_groups",
+                            Some(1000),
+                            36.0,
+                            10.0,
+                        ),
+                    ],
+                },
+                HistoricalCapture {
+                    generated_at_unix: 1750000000,
+                    mode: CaptureMode::Quick,
+                    label: Some("quick-only".to_string()),
+                    samples: vec![sample(
+                        BenchmarkKind::Compile,
+                        "literal_simple",
+                        None,
+                        12.0,
+                        6.0,
+                    )],
+                },
+            ],
+            &[HistoricalCapture {
+                generated_at_unix: 1800000000,
+                mode: CaptureMode::Full,
+                label: Some("rev-a".to_string()),
+                samples: vec![
+                    sample(BenchmarkKind::Compile, "literal_simple", None, 10.0, 5.0),
+                    sample(
+                        BenchmarkKind::FindFirst,
+                        "email_basic",
+                        Some(1000),
+                        18.0,
+                        10.0,
+                    ),
+                    sample(
+                        BenchmarkKind::FindAll,
+                        "capture_groups",
+                        Some(1000),
+                        33.0,
+                        10.0,
+                    ),
+                ],
+            }],
+        );
+
+        let tsv = render_profile_pairs_tsv(&rows);
+        assert!(tsv.contains("label\tquick_generated_at_unix\tfull_generated_at_unix"));
+        assert!(tsv.contains(
+            "rev-a\t1700000000\t1800000000\t2.000000\t2.000000\t0.000000\t2.200000\t1.800000\t-0.181818\t3.600000\t3.300000\t-0.083333"
+        ));
+        assert!(!tsv.contains("quick-only"));
     }
 
     #[test]
