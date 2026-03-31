@@ -1047,6 +1047,8 @@ impl<'a> Lexer<'a> {
     /// - (?(-1)...)
     /// - (?(<name>)...)
     /// - (?(name)...)
+    /// - (?(R)...)
+    /// - (?(R1)...)
     /// - (?(?=expr)...)
     /// - (?(?!expr)...)
     /// - (?(?<=expr)...)
@@ -1157,7 +1159,27 @@ impl<'a> Lexer<'a> {
                         position: start_pos,
                     });
                 }
-                if name == "DEFINE" {
+                if let Some(group_text) = name.strip_prefix('R') {
+                    if group_text.is_empty() {
+                        ConditionalTest::RecursionAny
+                    } else if group_text.chars().all(|ch| ch.is_ascii_digit()) {
+                        let group = group_text.parse::<u32>().map_err(|_| {
+                            LexError::InvalidGroupSyntax {
+                                position: start_pos,
+                            }
+                        })?;
+                        if group == 0 {
+                            return Err(LexError::InvalidGroupSyntax {
+                                position: start_pos,
+                            });
+                        }
+                        ConditionalTest::RecursionGroup(group)
+                    } else if name == "DEFINE" {
+                        ConditionalTest::Define
+                    } else {
+                        ConditionalTest::NamedGroupExists(name)
+                    }
+                } else if name == "DEFINE" {
                     ConditionalTest::Define
                 } else {
                     ConditionalTest::NamedGroupExists(name)
@@ -1868,6 +1890,40 @@ mod tests {
                     condition: ConditionalTest::Define,
                 },
                 Token::Char('a'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_recursion_any() {
+        let tokens = tokenize_all("(?(R)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::RecursionAny,
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_recursion_group() {
+        let tokens = tokenize_all("(?(R1)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::RecursionGroup(1),
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
                 Token::GroupEnd,
             ]
         );

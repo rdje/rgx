@@ -213,6 +213,10 @@ pub enum ConditionalTest {
     RelativeGroupExists(i32),
     /// Test if named group exists (?(<name>)...)  
     NamedGroupExists(String),
+    /// Test whether the current match path is executing inside any recursion level (?(R)...)
+    RecursionAny,
+    /// Test whether the current recursion level is a specific numbered subroutine (?(R1)...)
+    RecursionGroup(u32),
     /// DEFINE conditional (?(DEFINE)...)
     Define,
     /// Lookahead test (?(?=...)...) or (?(?!...)...)

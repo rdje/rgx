@@ -869,6 +869,24 @@ impl<'a> PgenAstAdapter<'a> {
         {
             return Ok(ConditionalTest::NamedGroupExists(inner.to_string()));
         }
+        if text == "R" {
+            return Ok(ConditionalTest::RecursionAny);
+        }
+        if let Some(value) = text.strip_prefix('R') {
+            if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
+                let group = value.parse::<u32>().map_err(|_| {
+                    self.contract_error(&format!(
+                        "invalid recursion conditional group reference '{text}'"
+                    ))
+                })?;
+                if group == 0 {
+                    return Err(self.contract_error(&format!(
+                        "invalid recursion conditional group reference '{text}'"
+                    )));
+                }
+                return Ok(ConditionalTest::RecursionGroup(group));
+            }
+        }
         if text == "DEFINE" {
             return Ok(ConditionalTest::Define);
         }
@@ -1175,6 +1193,8 @@ mod tests {
             "(?(<word>)a)",
             "(?(<word>)a|b)",
             "(?(word)a|b)",
+            "(?(R)a|b)",
+            "(?(R1)a|b)",
             "(?(DEFINE)a)",
             "(?(?=ab)x|y)",
             "(?(?!ab)x|y)",
@@ -1329,6 +1349,10 @@ mod tests {
             (
                 "(?(-1)a|b)",
                 "conditional '(?(-1)...)' refers to missing capture group",
+            ),
+            (
+                "(?(R2)a|b)",
+                "conditional '(?(R2)...)' refers to missing capture group",
             ),
             (
                 "(?[a-z])",

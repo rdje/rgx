@@ -55,6 +55,8 @@ Required invariants:
     - `(?(-1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(-1), ... }`
     - `(?(<name>)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
     - `(?(name)yes|no)` -> `Regex::Conditional { condition: NamedGroupExists(name), ... }`
+    - `(?(R)yes|no)` -> `Regex::Conditional { condition: RecursionAny, ... }`
+    - `(?(R1)yes|no)` -> `Regex::Conditional { condition: RecursionGroup(1), ... }`
     - `(?(DEFINE)yes)` -> `Regex::Conditional { condition: Define, ... }`
     - `(?(?=expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: true }, ... }`
     - `(?(?!expr)yes|no)` -> `Regex::Conditional { condition: Lookahead { expr, positive: false }, ... }`
@@ -75,10 +77,10 @@ Current contract:
   - recursion
   - backreferences
   - Perl extended character classes `(?[...])`
-  - conditionals, including current group/named-group/lookaround forms, relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`, and single-branch `DEFINE` blocks
+  - conditionals, including current group/named-group/lookaround forms, relative group-exists forms such as `(?(+1)...)` and `(?(-1)...)`, current recursion-condition forms such as `(?(R)...)` and `(?(R1)...)`, and single-branch `DEFINE` blocks
   - branch-reset groups `(?|...)`
 - Compiler/runtime status for those parser-recognized forms is:
-  - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals and single-branch `DEFINE` definition blocks, are integrated on the default regex path
+  - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
   - Perl extended character classes are parser-recognized but compile-rejected explicitly until RGX defines downstream set-algebra/runtime policy
@@ -100,7 +102,7 @@ The conformance harness checks:
 - Error mapping invariants (`RgxError::Compile` path).
 - Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, Perl extended character classes, and missing capture-target references.
 
-When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, Perl extended character classes, code-block tags, recursion, backreferences, current conditional families (including relative group-exists transport), and Unicode property classes.
+When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, Perl extended character classes, code-block tags, recursion, backreferences, current conditional families (including relative group-exists and recursion-condition transport), and Unicode property classes.
 
 Current rollout note:
 - The default `rgx-core` build now includes `pgen-parser`, so `parse_pattern(...)` uses the real PGEN AST-dump adapter unless default features are explicitly disabled.

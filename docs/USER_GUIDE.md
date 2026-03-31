@@ -364,7 +364,7 @@ Current limits for this slice:
 Unicode property classes are now part of the shipped runtime path. Patterns such as `\p{L}+`, `\P{L}+`, and `\p{Greek}+` compile and execute on the default path, and invalid property names fail explicitly at compile time.
 Recursion / subroutine calls are also part of the shipped runtime path for the current supported forms `(?R)`, `(?1)`, and `(?&name)`. Missing numbered or named recursion targets fail explicitly at compile time.
 Numeric backreferences (`\1`, `\2`, ...) are now part of the shipped runtime path. They match the exact bytes captured by the referenced numbered group, and compilation fails explicitly if the referenced group does not exist.
-Conditionals are also part of the shipped runtime path for group-exists, named-group-exists, and lookaround conditions. Missing conditional group/name references fail explicitly at compile time.
+Conditionals are also part of the shipped runtime path for group-exists, relative-group-exists, current recursion conditions `(?(R)...)` / `(?(Rn)...)`, named-group-exists, `DEFINE`, and lookaround conditions. Missing conditional group/name references still fail explicitly at compile time.
 Possessive quantifiers are also part of the shipped runtime path. Forms such as `a*+`, `a++`, `a?+`, and `a{2,3}+` behave like their greedy equivalents wrapped in an atomic group, so they do not backtrack once that quantified piece has matched.
 ## Level 3 - Gory details
 ### Execution model

@@ -80,6 +80,11 @@ Live continuity memory for `rgx` sessions.
   - `DEFINE` is treated as always false at runtime, so its one branch acts as a definition-only block and matching falls through as an empty else
   - numbered and named subroutine definitions inside `DEFINE` blocks are now usable later in the same pattern
   - invalid two-branch `DEFINE` forms still compile-reject explicitly to stay aligned with PCRE2
+- Current recursion-condition conditionals are now shipped on the default regex path:
+  - `(?(R)...)` is true when the current path is inside any active recursion/subroutine level
+  - `(?(Rn)...)` is true only when the most recent active recursion level targets group `n`
+  - PCRE2's ambiguity rule is now honored, so groups named `R` or `Rn` still force named-group-exists semantics instead of recursion-condition semantics
+  - missing recursion-condition group references such as `(?(R2)...)` now fail explicitly at compile time
 - `(?|...)` branch-reset groups are now shipped on the default regex path:
   - the compiler assigns shared capture indices across the branch-reset group's top-level alternatives instead of numbering each branch independently
   - later backreferences and conditionals now see the resulting PCRE2-style max-branch-arity numbering after the branch-reset group

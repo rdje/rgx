@@ -891,6 +891,16 @@ fn pcre2_parity_supported_conditionals() {
             input: "ab c ac cab",
         },
         ParityCase {
+            name: "conditional_recursion_any",
+            pattern: "a(?(R)b|c)(?R)?d",
+            input: "acd xx acabdd yy abd",
+        },
+        ParityCase {
+            name: "conditional_recursion_group",
+            pattern: "(a(?(R1)b|c)(?1)?d)",
+            input: "acd xx acabdd yy abd",
+        },
+        ParityCase {
             name: "conditional_define_named_subroutine",
             pattern: r"\A(?(DEFINE)(?<word>a+))(?&word)\z",
             input: "aaa",

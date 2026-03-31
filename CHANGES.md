@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-03-31 - Ship current recursion-condition conditionals
+- Scope: conditional parser/runtime parity, PCRE2 ambiguity handling, and parser-contract/differential coverage refreshes.
+- Changes:
+  - Extended both parser paths so `(?(R)...)` and `(?(Rn)...)` now preserve dedicated conditional intent instead of being misread as bare named-group tests.
+  - Added compiler-side resolution for PCRE2's `R` / `Rn` ambiguity, so existing named groups `R` or `Rn` still behave as named-group conditions while unambiguous recursion-condition forms validate missing groups explicitly.
+  - Taught the VM to execute current recursion-condition operands against the active recursion level, added API regressions for whole-pattern/group-recursion behavior plus named-group ambiguity, and promoted representative cases into the PCRE2 conditional parity suite.
+  - Refreshed `README.md`, `docs/USER_GUIDE.md`, `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `docs/PARSER_CONTRACT.md`, `ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `DEVELOPMENT_NOTES.md`, and `MEMORY.md` so the shipped parser/runtime contract reflects the new conditional slice accurately.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_conditional_recursion -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+- Notes/impact:
+  - This closes the current `R` / `Rn` conditional slice that PGEN already transports today and narrows the remaining PCRE2 conditional follow-up work to newer forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`.
+
 ### 2026-03-31 - Tightened inline-language emitted-result helpers
 - Scope: Lua/JavaScript/Rhai inline-language result-contract hardening, regression coverage, and shipped-surface documentation alignment.
 - Changes:

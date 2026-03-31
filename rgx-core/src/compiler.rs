@@ -133,6 +133,7 @@ impl Compiler {
         let total_groups = Self::max_capture_group(&ast);
         let named_groups = Self::collect_named_groups(&ast);
         let ast = Self::resolve_relative_conditionals(ast, total_groups)?;
+        let ast = Self::resolve_recursion_conditionals(ast, total_groups, &named_groups)?;
 
         if let Some(msg) = Self::backreference_validation_message(&ast) {
             trace_exit!(
@@ -416,6 +417,13 @@ impl Compiler {
                 crate::ast::ConditionalTest::NamedGroupExists(name),
                 next_group,
             ),
+            crate::ast::ConditionalTest::RecursionAny => {
+                (crate::ast::ConditionalTest::RecursionAny, next_group)
+            }
+            crate::ast::ConditionalTest::RecursionGroup(group) => (
+                crate::ast::ConditionalTest::RecursionGroup(group),
+                next_group,
+            ),
             crate::ast::ConditionalTest::Define => {
                 (crate::ast::ConditionalTest::Define, next_group)
             }
@@ -620,6 +628,8 @@ impl Compiler {
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::RecursionAny
+                    | crate::ast::ConditionalTest::RecursionGroup(_)
                     | crate::ast::ConditionalTest::Define => None,
                 };
                 condition_message
@@ -690,9 +700,156 @@ impl Compiler {
                 crate::ast::ConditionalTest::NamedGroupExists(name),
                 opened_groups,
             )),
+            crate::ast::ConditionalTest::RecursionAny => {
+                Ok((crate::ast::ConditionalTest::RecursionAny, opened_groups))
+            }
+            crate::ast::ConditionalTest::RecursionGroup(group) => Ok((
+                crate::ast::ConditionalTest::RecursionGroup(group),
+                opened_groups,
+            )),
             crate::ast::ConditionalTest::Define => {
                 Ok((crate::ast::ConditionalTest::Define, opened_groups))
             }
+        }
+    }
+
+    fn resolve_recursion_conditionals(
+        ast: RegexAst,
+        total_groups: u32,
+        named_groups: &std::collections::HashMap<String, u32>,
+    ) -> Result<RegexAst> {
+        match ast {
+            RegexAst::Sequence(items) => Ok(RegexAst::Sequence(
+                items
+                    .into_iter()
+                    .map(|item| {
+                        Self::resolve_recursion_conditionals(item, total_groups, named_groups)
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            RegexAst::Alternation(items) => Ok(RegexAst::Alternation(
+                items
+                    .into_iter()
+                    .map(|item| {
+                        Self::resolve_recursion_conditionals(item, total_groups, named_groups)
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            RegexAst::Quantified { expr, quantifier } => Ok(RegexAst::Quantified {
+                expr: Box::new(Self::resolve_recursion_conditionals(
+                    *expr,
+                    total_groups,
+                    named_groups,
+                )?),
+                quantifier,
+            }),
+            RegexAst::Lookahead { expr, positive } => Ok(RegexAst::Lookahead {
+                expr: Box::new(Self::resolve_recursion_conditionals(
+                    *expr,
+                    total_groups,
+                    named_groups,
+                )?),
+                positive,
+            }),
+            RegexAst::Lookbehind { expr, positive } => Ok(RegexAst::Lookbehind {
+                expr: Box::new(Self::resolve_recursion_conditionals(
+                    *expr,
+                    total_groups,
+                    named_groups,
+                )?),
+                positive,
+            }),
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => Ok(RegexAst::Group {
+                expr: Box::new(Self::resolve_recursion_conditionals(
+                    *expr,
+                    total_groups,
+                    named_groups,
+                )?),
+                kind,
+                index,
+                name,
+            }),
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => Ok(RegexAst::Conditional {
+                condition: Self::resolve_recursion_conditional_test(
+                    condition,
+                    total_groups,
+                    named_groups,
+                )?,
+                true_branch: Box::new(Self::resolve_recursion_conditionals(
+                    *true_branch,
+                    total_groups,
+                    named_groups,
+                )?),
+                false_branch: false_branch
+                    .map(|branch| {
+                        Self::resolve_recursion_conditionals(*branch, total_groups, named_groups)
+                            .map(Box::new)
+                    })
+                    .transpose()?,
+            }),
+            other => Ok(other),
+        }
+    }
+
+    fn resolve_recursion_conditional_test(
+        condition: crate::ast::ConditionalTest,
+        total_groups: u32,
+        named_groups: &std::collections::HashMap<String, u32>,
+    ) -> Result<crate::ast::ConditionalTest> {
+        match condition {
+            crate::ast::ConditionalTest::RecursionAny => {
+                if named_groups.contains_key("R") {
+                    Ok(crate::ast::ConditionalTest::NamedGroupExists(
+                        "R".to_string(),
+                    ))
+                } else {
+                    Ok(crate::ast::ConditionalTest::RecursionAny)
+                }
+            }
+            crate::ast::ConditionalTest::RecursionGroup(group) => {
+                let named_override = format!("R{group}");
+                if named_groups.contains_key(&named_override) {
+                    Ok(crate::ast::ConditionalTest::NamedGroupExists(
+                        named_override,
+                    ))
+                } else if group == 0 || group > total_groups {
+                    Err(RgxError::Compile(format!(
+                        "conditional '(?(R{group})...)' refers to missing capture group"
+                    )))
+                } else {
+                    Ok(crate::ast::ConditionalTest::RecursionGroup(group))
+                }
+            }
+            crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                Ok(crate::ast::ConditionalTest::Lookahead {
+                    expr: Box::new(Self::resolve_recursion_conditionals(
+                        *expr,
+                        total_groups,
+                        named_groups,
+                    )?),
+                    positive,
+                })
+            }
+            crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                Ok(crate::ast::ConditionalTest::Lookbehind {
+                    expr: Box::new(Self::resolve_recursion_conditionals(
+                        *expr,
+                        total_groups,
+                        named_groups,
+                    )?),
+                    positive,
+                })
+            }
+            other => Ok(other),
         }
     }
 
@@ -801,6 +958,16 @@ impl Compiler {
                             ))
                         }
                     }
+                    crate::ast::ConditionalTest::RecursionAny => None,
+                    crate::ast::ConditionalTest::RecursionGroup(group) => {
+                        if *group > total_groups {
+                            Some(format!(
+                                "conditional '(?(R{group})...)' refers to missing capture group"
+                            ))
+                        } else {
+                            None
+                        }
+                    }
                     crate::ast::ConditionalTest::Define => {
                         if false_branch.is_some() {
                             Some(
@@ -867,6 +1034,8 @@ impl Compiler {
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::RecursionAny
+                    | crate::ast::ConditionalTest::RecursionGroup(_)
                     | crate::ast::ConditionalTest::Define => None,
                 };
                 condition_message
@@ -1012,6 +1181,8 @@ impl Compiler {
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::RecursionAny
+                    | crate::ast::ConditionalTest::RecursionGroup(_)
                     | crate::ast::ConditionalTest::Define => 0,
                 };
                 let true_max = Self::max_capture_group(true_branch);
@@ -1084,6 +1255,8 @@ impl Compiler {
                     crate::ast::ConditionalTest::GroupExists(_)
                     | crate::ast::ConditionalTest::RelativeGroupExists(_)
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::RecursionAny
+                    | crate::ast::ConditionalTest::RecursionGroup(_)
                     | crate::ast::ConditionalTest::Define => {}
                 }
                 Self::collect_named_groups_inner(true_branch, named_groups);

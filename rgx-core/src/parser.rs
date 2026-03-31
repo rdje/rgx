@@ -1258,6 +1258,32 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_conditional_recursion_any() {
+        let mut parser = Parser::new("(?(R)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional { condition, .. } => {
+                assert_eq!(condition, crate::ast::ConditionalTest::RecursionAny);
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_conditional_recursion_group() {
+        let mut parser = Parser::new("(?(R1)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional { condition, .. } => {
+                assert_eq!(condition, crate::ast::ConditionalTest::RecursionGroup(1));
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
     fn test_parse_conditional_lookahead_condition() {
         let mut parser = Parser::new("(?(?=ab)x|y)").unwrap();
         let ast = parser.parse().unwrap();

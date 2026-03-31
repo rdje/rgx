@@ -16,6 +16,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_relative_group_exists -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_conditional_recursion -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture` => pass
@@ -58,7 +59,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals and branch-reset groups now execute on the default path, while `(?[...])` reaches `Regex::ExtendedCharClass` and still fails with a clear compile-time policy error instead of being misread or silently dropped.
+- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals, current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)`, and branch-reset groups now execute on the default path, while `(?[...])` reaches `Regex::ExtendedCharClass` and still fails with a clear compile-time policy error instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -167,6 +168,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Capability hardening improved again because recursion moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
 - Capability hardening improved again because branch-reset groups moved from a parser-only boundary into real compiler/VM/runtime support with API and PCRE2 differential coverage.
 - Capability hardening improved again because conditionals moved from parsed-only status to shipped default-path behavior with API and parity coverage.
+- Capability hardening improved again because current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)` now round-trip through both parser backends, resolve PCRE2's `R` / `Rn` ambiguity against named groups, and execute on the default path with parity coverage.
 - Capability hardening improved again because relative conditional group references now execute on the default path instead of stopping at parser-only transport and compile-boundary guardrails.
 - Capability hardening improved again because numeric backreferences moved from parsed-only status to shipped default-path behavior with explicit parity coverage.
 - Capability hardening improved again because possessive quantifiers moved from a parser-adapter gap to shipped default-path behavior with API and parity coverage.

@@ -106,9 +106,10 @@ Behavior contract:
 - Backreferences match the exact bytes captured by the referenced numbered group on the current winning path.
 - Unicode property classes resolve through maintained Unicode property/script tables on the default runtime path.
 - Conditionals evaluate their test on the current match path and execute only the selected branch.
+  - current recursion-condition forms `(?(R)...)` and `(?(Rn)...)` test the active recursion level only, and named groups `R` / `Rn` still win the PCRE2 ambiguity if they exist in the pattern
   - `DEFINE` is treated as always false, so its single branch acts as a definition-only block and runtime behavior falls through as an empty else.
 - Branch-reset groups share capture numbers across their top-level alternatives instead of allocating fresh numbers per branch, and later references resolve against the maximum capture arity contributed by any branch.
-- Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named/relative-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
+- Compilation fails explicitly when a recursion target, numeric backreference, or conditional numbered/named/relative-group/recursion-group reference refers to a capture group that does not exist in the pattern, or when a Unicode property name is invalid.
 Representative test anchors:
 - `rgx-core/src/lib.rs` recursion, numeric backreference, Unicode property, branch-reset, and conditional runtime/compile-boundary tests
 - `rgx-bench/tests/pcre2_parity.rs` differential parity cases for recursion, numeric backreferences, branch-reset semantics, Unicode property classes, and conditionals
@@ -116,6 +117,10 @@ Representative test anchors:
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)
+- Recursion conditions: `(?(R)yes|no)`, `(?(R1)yes|no)` (`shipped`)
+  - `(?(R)...)` is true whenever the current path is executing inside any active recursion/subroutine level
+  - `(?(Rn)...)` is true only when the most recent active recursion level targets group `n`
+  - if a capture group named `R` or `Rn` exists, PCRE2-style named-group semantics win over the recursion-condition interpretation
 - `DEFINE` conditionals: `(?(DEFINE)yes)` (`shipped`)
   - the `DEFINE` test is treated as always false on the current match path
   - the single branch remains available for numbered and named subroutine definitions while runtime behavior falls through as an empty else

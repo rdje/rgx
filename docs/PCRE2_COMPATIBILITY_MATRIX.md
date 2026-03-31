@@ -70,6 +70,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - group-exists
   - relative-group-exists
   - named-group-exists
+  - current recursion conditions `(?(R)...)` and `(?(Rn)...)`
   - single-branch `DEFINE` definition blocks
   - lookaround conditions
 - Positive and negative lookahead/lookbehind

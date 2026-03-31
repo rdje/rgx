@@ -202,6 +202,8 @@ const CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE: u8 = 2;
 const CONDITIONAL_KIND_LOOKBEHIND_POSITIVE: u8 = 3;
 const CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE: u8 = 4;
 const CONDITIONAL_KIND_DEFINE_FALSE: u8 = 5;
+const CONDITIONAL_KIND_RECURSION_ANY: u8 = 6;
+const CONDITIONAL_KIND_RECURSION_GROUP: u8 = 7;
 const MAX_RECURSION_DEPTH: usize = 1024;
 
 /// Bytecode instruction with operands
@@ -2794,6 +2796,20 @@ impl RegexVM {
                 *ip += 1;
                 Some(self.capture_group_exists(ctx, group_id))
             }
+            CONDITIONAL_KIND_RECURSION_ANY => Some(!ctx.recursion_stack.is_empty()),
+            CONDITIONAL_KIND_RECURSION_GROUP => {
+                if *ip >= code.len() {
+                    return None;
+                }
+                let group_id = code[*ip] as usize;
+                *ip += 1;
+                Some(
+                    ctx.recursion_stack
+                        .last()
+                        .map(|(target, _)| *target == group_id)
+                        .unwrap_or(false),
+                )
+            }
             CONDITIONAL_KIND_LOOKAHEAD_POSITIVE | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE => {
                 if *ip >= code.len() {
                     return None;
@@ -3426,6 +3442,8 @@ impl OptimizingCompiler {
                     ConditionalTest::GroupExists(_)
                     | ConditionalTest::RelativeGroupExists(_)
                     | ConditionalTest::NamedGroupExists(_)
+                    | ConditionalTest::RecursionAny
+                    | ConditionalTest::RecursionGroup(_)
                     | ConditionalTest::Define => {}
                 }
                 self.analyze_pass(true_branch);
@@ -3885,6 +3903,13 @@ impl OptimizingCompiler {
                 self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
                 self.code.push(group_id as u8);
             }
+            ConditionalTest::RecursionAny => {
+                self.code.push(CONDITIONAL_KIND_RECURSION_ANY);
+            }
+            ConditionalTest::RecursionGroup(group_id) => {
+                self.code.push(CONDITIONAL_KIND_RECURSION_GROUP);
+                self.code.push(*group_id as u8);
+            }
             ConditionalTest::Define => {
                 self.code.push(CONDITIONAL_KIND_DEFINE_FALSE);
             }
@@ -4030,6 +4055,8 @@ impl OptimizingCompiler {
                     ConditionalTest::GroupExists(_)
                     | ConditionalTest::RelativeGroupExists(_)
                     | ConditionalTest::NamedGroupExists(_)
+                    | ConditionalTest::RecursionAny
+                    | ConditionalTest::RecursionGroup(_)
                     | ConditionalTest::Define => {}
                 }
                 Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);
@@ -4142,6 +4169,8 @@ impl OptimizingCompiler {
                     ip += 1;
                     match kind {
                         CONDITIONAL_KIND_GROUP_EXISTS => ip += 1,
+                        CONDITIONAL_KIND_RECURSION_ANY => {}
+                        CONDITIONAL_KIND_RECURSION_GROUP => ip += 1,
                         CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
                         | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
                         | CONDITIONAL_KIND_LOOKBEHIND_POSITIVE

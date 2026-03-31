@@ -52,9 +52,10 @@ Pipeline in `rgx-core`:
 - Parser-path support for conditional syntax tokenization/parsing:
   - group-exists forms (`(?(1)...)`)
   - relative-group-exists forms (`(?(+1)...)`, `(?(-1)...)`)
+  - current recursion-condition forms (`(?(R)...)`, `(?(R1)...)`)
   - named-group-exists forms (`(?(<name>)...)`, `(?(name)...)`)
   - lookaround condition forms (`(?(?=...)...)`, `(?(?!...)...)`, `(?(?<=...)...)`, `(?(?<!...)...)`)
-- Conditional runtime semantics are now integrated through the compiler/VM path, including missing-group and missing-name compile-time validation plus API/parity coverage
+- Conditional runtime semantics are now integrated through the compiler/VM path, including missing-group and missing-name compile-time validation, current recursion-condition support, PCRE2-style `R` / `Rn` ambiguity resolution against named groups, and API/parity coverage
 - Relative conditional group references now parse into dedicated AST nodes on both parser backends and resolve to shipped runtime behavior through compile-time rewriting to absolute group-exists checks
 - Recursion / subroutine runtime semantics are now integrated through the compiler/VM path for `(?R)`, `(?1)`, and `(?&name)`, including explicit compile-time validation for missing numbered and named recursion targets plus API/parity coverage
 - API/conformance guardrails explicitly verify compile-boundary errors for invalid Unicode property classes and disallowed code-block modes/languages
