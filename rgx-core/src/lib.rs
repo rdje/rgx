@@ -1370,7 +1370,9 @@ mod tests {
             .expect("Failed to compile native backtracking numeric pattern");
         regex
             .register_native("emit_len", |ctx| {
-                ExecResult::Numeric(ctx.current_match().unwrap_or_default().len() as f64)
+                let match_len = u32::try_from(ctx.current_match().unwrap_or_default().len())
+                    .expect("test match length fits in u32");
+                ExecResult::Numeric(f64::from(match_len))
             })
             .expect("Failed to register native callback");
 
@@ -3524,11 +3526,8 @@ mod tests {
         ];
 
         for (pattern, expected_msg) in cases {
-            let err = match Regex::compile(pattern) {
-                Ok(_) => panic!(
-                    "expected pattern to be rejected at explicit compile boundary: {pattern}"
-                ),
-                Err(err) => err,
+            let Err(err) = Regex::compile(pattern) else {
+                panic!("expected pattern to be rejected at explicit compile boundary: {pattern}");
             };
             assert!(
                 err.to_string().contains(expected_msg),

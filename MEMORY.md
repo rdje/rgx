@@ -153,6 +153,12 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-04-01
+- Reduced a small RGX-owned `clippy` warning slice after the named recursion-condition landing:
+  - cleaned the remaining debug-print format warning in `rgx-core/src/vm.rs`
+  - removed unnecessary `format!` calls from the debug examples
+  - simplified one compile-boundary test to `let ... else`
+  - changed one native numeric test helper to avoid a direct `usize -> f64` precision-loss cast
+  - this was a consolidation-only pass; no regex/runtime behavior changed
 - Shipped named recursion-condition syntax on the default RGX path:
   - bumped `subs/pgen` from `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` to `f97e0fe31750885f4fc48a67ed7660110cd20271`, bringing the default parser pin onto the verified standalone PGEN `1.1.2` fix for local issue `PGEN-RGX-0005`
   - extended both parser paths to preserve `(?(R&name)...)` as `ConditionalTest::RecursionNamed(name)` and resolved that form at compile time onto the existing recursion-target runtime check

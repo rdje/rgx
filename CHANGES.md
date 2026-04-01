@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Reduce RGX-owned clippy warning noise
+- Scope: internal cleanup, warning-debt reduction, and continuity refresh.
+- Changes:
+  - Replaced a handful of RGX-owned style issues that were adding avoidable `clippy` noise during the normal workspace sweep.
+  - Swapped the remaining debug-print formatting in `rgx-core/src/vm.rs` over to inline-format-arg style.
+  - Removed unnecessary `format!` calls from the `rgx-core` debug examples and simplified one compile-boundary test in `rgx-core/src/lib.rs` to `let ... else`.
+  - Reworked the native test helper that emitted a match length as `f64` so it converts through `u32::try_from(...)` and `f64::from(...)` instead of using a direct precision-loss cast.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This does not change shipped regex behavior; it is a consolidation pass to keep RGX-owned validation output cleaner as the default PGEN-backed path grows.
+
 ### 2026-04-01 - Ship named recursion-condition support on the default path
 - Scope: PGEN dependency bump, conditional-runtime feature delivery, parity coverage, and continuity/doc refresh.
 - Changes:

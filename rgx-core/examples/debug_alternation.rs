@@ -20,9 +20,9 @@ fn main() {
             byte,
             byte,
             if let Ok(op) = OpCode::try_from(*byte) {
-                format!("{:?}", op)
+                format!("{op:?}")
             } else {
-                format!("Data")
+                "Data".to_string()
             }
         );
     }

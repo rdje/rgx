@@ -4545,7 +4545,7 @@ mod tests {
 
         // Test matching and capture groups
         if let Some(m) = vm.find_first("ab") {
-            println!("Debug: match = {:?}", m);
+            println!("Debug: match = {m:?}");
             println!("Debug: vm.program.num_groups = {}", vm.program.num_groups);
             assert_eq!(m.start, 0);
             assert_eq!(m.end, 2);
