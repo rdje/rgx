@@ -230,6 +230,10 @@ impl Compiler {
             .to_string()
     }
 
+    fn extended_char_class_subset_error() -> RgxError {
+        RgxError::Compile(Self::extended_char_class_subset_message())
+    }
+
     fn lower_extended_char_classes(ast: RegexAst) -> Result<RegexAst> {
         match ast {
             RegexAst::Sequence(items) => Ok(RegexAst::Sequence(
@@ -325,18 +329,18 @@ impl Compiler {
 
     fn lower_extended_char_class_content(content: String) -> Result<RegexAst> {
         let body = Self::extract_simple_extended_char_class_body(&content)
-            .ok_or_else(|| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+            .ok_or_else(Self::extended_char_class_subset_error)?;
         Self::validate_simple_char_class_body(body)?;
 
-        let mut parser = ReferenceParser::new(&content)
-            .map_err(|_| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+        let mut parser =
+            ReferenceParser::new(&content).map_err(|_| Self::extended_char_class_subset_error())?;
         let lowered = parser
             .parse()
-            .map_err(|_| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+            .map_err(|_| Self::extended_char_class_subset_error())?;
 
         match lowered {
             RegexAst::CharClass(char_class) => Ok(RegexAst::CharClass(char_class)),
-            _ => Err(RgxError::Compile(Self::extended_char_class_subset_message())),
+            _ => Err(Self::extended_char_class_subset_error()),
         }
     }
 
@@ -378,7 +382,7 @@ impl Compiler {
 
     fn validate_simple_char_class_body(content: &str) -> Result<()> {
         if content.is_empty() {
-            return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+            return Err(Self::extended_char_class_subset_error());
         }
 
         let mut index = 0usize;
@@ -386,17 +390,17 @@ impl Compiler {
 
         while let Some(ch) = chars.next() {
             if ch.is_whitespace() {
-                return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                return Err(Self::extended_char_class_subset_error());
             }
 
             if ch == '\\' {
                 let Some(escaped) = chars.next() else {
-                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                    return Err(Self::extended_char_class_subset_error());
                 };
 
                 match escaped {
                     'n' | 't' | 'r' | '\\' | ']' | '-' | '^' => {}
-                    _ => return Err(RgxError::Compile(Self::extended_char_class_subset_message())),
+                    _ => return Err(Self::extended_char_class_subset_error()),
                 }
 
                 index += 2;
@@ -405,10 +409,10 @@ impl Compiler {
 
             match ch {
                 '[' | ']' | '&' | '+' | '|' | '!' => {
-                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                    return Err(Self::extended_char_class_subset_error());
                 }
                 '^' if index != 0 => {
-                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                    return Err(Self::extended_char_class_subset_error());
                 }
                 _ => {}
             }
@@ -1504,5 +1508,76 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{CharClass, CharRange};
+
+    #[test]
+    fn extract_simple_extended_char_class_body_accepts_single_nested_class() {
+        assert_eq!(
+            Compiler::extract_simple_extended_char_class_body("[a-z]"),
+            Some("a-z")
+        );
+        assert_eq!(
+            Compiler::extract_simple_extended_char_class_body("[^0-9]"),
+            Some("^0-9")
+        );
+    }
+
+    #[test]
+    fn extract_simple_extended_char_class_body_rejects_trailing_content() {
+        assert_eq!(
+            Compiler::extract_simple_extended_char_class_body("[a-z][0-9]"),
+            None
+        );
+        assert_eq!(
+            Compiler::extract_simple_extended_char_class_body("a-z]"),
+            None
+        );
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_simple_range_to_char_class() {
+        let lowered = Compiler::lower_extended_char_class_content("[a-z]".to_string())
+            .expect("Expected simple nested range to lower into a plain char class");
+
+        assert_eq!(
+            lowered,
+            RegexAst::CharClass(CharClass::Custom {
+                ranges: vec![CharRange::range('a', 'z')],
+                negated: false,
+            })
+        );
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_simple_negation_to_char_class() {
+        let lowered = Compiler::lower_extended_char_class_content("[^0-9]".to_string())
+            .expect("Expected simple nested negated range to lower into a plain char class");
+
+        assert_eq!(
+            lowered,
+            RegexAst::CharClass(CharClass::Custom {
+                ranges: vec![CharRange::range('0', '9')],
+                negated: true,
+            })
+        );
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_rejects_broader_set_algebra() {
+        let err = Compiler::lower_extended_char_class_content("[a-z&&[^aeiou]]".to_string())
+            .expect_err("Expected set-algebra form to stay outside the shipped subset");
+
+        match err {
+            RgxError::Compile(message) => {
+                assert_eq!(message, Compiler::extended_char_class_subset_message());
+            }
+            other => panic!("expected compile error, got {other:?}"),
+        }
     }
 }

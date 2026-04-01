@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Harden extended char class guardrails
+- Scope: internal cleanup, compiler/VM regression hardening, and continuity refresh.
+- Changes:
+  - Extracted a dedicated compiler helper for the shipped extended-char-class subset error so the `(?[...])` lowering path stops rebuilding the same compile error at each branch.
+  - Added direct compiler unit tests for nested simple-subset extraction and lowering, covering both positive range and negated-range forms plus an explicit rejection case for broader set algebra.
+  - Added a direct VM unit test for ordinary negated custom char classes so the recent double-negation fix stays locked in even outside the new extended-char-class surface.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core compiler::tests -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core vm::tests::test_negated_custom_char_class -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass: it does not widen the shipped regex syntax, but it makes the newly added `(?[[...]])` path safer to refactor.
+
 ### 2026-04-01 - Ship simple extended character class runtime support
 - Scope: regex runtime feature delivery, parser-boundary reduction, parity coverage, and current-state doc refresh.
 - Changes:

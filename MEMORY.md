@@ -96,6 +96,7 @@ Live continuity memory for `rgx` sessions.
   - later backreferences and conditionals now see the resulting PCRE2-style max-branch-arity numbering after the branch-reset group
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
 - `(?[...])` Perl extended character classes now ship a first runtime slice on the default path for simple nested bracket-equivalent literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`, while broader set-algebra forms still compile-reject explicitly.
+- That shipped `(?[...])` slice is now also guarded by direct compiler helper tests plus a direct VM regression for ordinary negated custom char classes, so the subset-lowering path and the recent double-negation fix have narrower local coverage.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.
@@ -153,6 +154,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-04-01
+- Hardened the newly shipped Perl extended-character-class slice with local guardrails:
+  - extracted a dedicated compiler helper for the subset compile error used by the `(?[...])` lowering path
+  - added direct compiler unit tests for nested simple-subset extraction/lowering and a rejection case for broader set algebra
+  - added a direct VM unit test for negated custom char classes so the recent double-negation fix stays covered outside only the end-to-end regex API tests
+  - this was a consolidation-only pass; no new regex syntax was added
 - Shipped the first Perl extended-character-class runtime slice on the default RGX path:
   - the compiler now lowers simple nested bracket-equivalent `Regex::ExtendedCharClass { content }` payloads into the existing char-class engine before VM codegen
   - the shipped subset currently covers simple literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`

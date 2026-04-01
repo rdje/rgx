@@ -4375,6 +4375,21 @@ mod tests {
     }
 
     #[test]
+    fn test_negated_custom_char_class() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::CharClass(CharClass::Custom {
+            ranges: vec![CharRange::range('0', '9')],
+            negated: true,
+        });
+        let program = compiler.compile(&ast);
+
+        let vm = RegexVM::new(program);
+        assert!(vm.is_match("a"));
+        assert!(vm.is_match("abc"));
+        assert!(!vm.is_match("5"));
+    }
+
+    #[test]
     fn test_sequence() {
         let mut compiler = OptimizingCompiler::new();
         let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Char('b')]);
