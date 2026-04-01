@@ -163,6 +163,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-04-01
+- Consolidated the shipped Perl extended-character-class operator parser without widening syntax:
+  - replaced the duplicated low-precedence/intersection parsing loops in `rgx-core/src/compiler.rs` with one precedence-climbing parser that now owns left-associativity and the shipped `&` precedence in one place
+  - moved operator lookup/precedence/application onto `ExtendedCharClassOperator`, which makes the current `(?[...])` subset easier to extend without re-splitting the parser by precedence tier
+  - added a direct compiler regression for repeated intersection chaining so the internal refactor is locked independently of the broader runtime/parser-path coverage
+  - validation passed with focused `extended_char_class` coverage, `cargo fmt`, package tests for `rgx-core` and `rgx-cli`, `cargo clippy --workspace --all-targets`, and `./scripts/run-local-ci.sh`
 - Extended the shipped Perl extended-character-class subset again on the default RGX path:
   - the `(?[...])` lowering path now supports same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over the current bracket/property term subset
   - the shipped runtime now covers precedence-sensitive examples like `(?[ [a-f] | [d-z] & [m-p] ])` and chained low-precedence examples like `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`

@@ -26,6 +26,34 @@ enum ExtendedCharClassOperator {
     SymmetricDifference,
 }
 
+impl ExtendedCharClassOperator {
+    fn from_char(ch: char) -> Option<Self> {
+        match ch {
+            '|' | '+' => Some(Self::Union),
+            '-' => Some(Self::Difference),
+            '&' => Some(Self::Intersection),
+            '^' => Some(Self::SymmetricDifference),
+            _ => None,
+        }
+    }
+
+    fn precedence(self) -> u8 {
+        match self {
+            Self::Intersection => 2,
+            Self::Union | Self::Difference | Self::SymmetricDifference => 1,
+        }
+    }
+
+    fn apply(self, lhs: ScalarRangeSet, rhs: ScalarRangeSet) -> ScalarRangeSet {
+        match self {
+            Self::Union => lhs.union(&rhs),
+            Self::Difference => lhs.difference(&rhs),
+            Self::Intersection => lhs.intersection(&rhs),
+            Self::SymmetricDifference => lhs.difference(&rhs).union(&rhs.difference(&lhs)),
+        }
+    }
+}
+
 struct ExtendedCharClassCursor<'a> {
     input: &'a str,
     offset: usize,
@@ -619,67 +647,40 @@ impl Compiler {
     fn parse_extended_char_class_expr(
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Result<ScalarRangeSet> {
-        let mut lhs = Self::parse_extended_char_class_intersection_expr(cursor)?;
-
-        loop {
-            cursor.skip_whitespace();
-            if cursor.is_eof() || matches!(cursor.peek_char(), Some(')')) {
-                return Ok(lhs);
-            }
-
-            let Some(operator) = Self::peek_extended_char_class_low_precedence_operator(cursor)
-            else {
-                return Ok(lhs);
-            };
-
-            cursor.consume_char();
-            let rhs = Self::parse_extended_char_class_intersection_expr(cursor)?;
-            lhs = Self::apply_extended_char_class_operator(lhs, operator, rhs);
-        }
+        Self::parse_extended_char_class_binary_expr(cursor, 1)
     }
 
-    fn parse_extended_char_class_intersection_expr(
+    // PCRE2 extended classes give `&` tighter binding than the other shipped
+    // same-level operators, which are otherwise left-associative.
+    fn parse_extended_char_class_binary_expr(
         cursor: &mut ExtendedCharClassCursor<'_>,
+        min_precedence: u8,
     ) -> Result<ScalarRangeSet> {
         let mut lhs = Self::parse_extended_char_class_unary(cursor)?;
 
         loop {
-            cursor.skip_whitespace();
-            if !matches!(cursor.peek_char(), Some('&')) {
+            let Some(operator) = Self::peek_extended_char_class_operator(cursor) else {
+                return Ok(lhs);
+            };
+
+            if operator.precedence() < min_precedence {
                 return Ok(lhs);
             }
 
             cursor.consume_char();
-            let rhs = Self::parse_extended_char_class_unary(cursor)?;
-            lhs = lhs.intersection(&rhs);
+            let rhs =
+                Self::parse_extended_char_class_binary_expr(cursor, operator.precedence() + 1)?;
+            lhs = operator.apply(lhs, rhs);
         }
     }
 
-    fn peek_extended_char_class_low_precedence_operator(
+    fn peek_extended_char_class_operator(
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Option<ExtendedCharClassOperator> {
         cursor.skip_whitespace();
-        match cursor.peek_char() {
-            Some('|') | Some('+') => Some(ExtendedCharClassOperator::Union),
-            Some('-') => Some(ExtendedCharClassOperator::Difference),
-            Some('^') => Some(ExtendedCharClassOperator::SymmetricDifference),
-            _ => None,
-        }
-    }
-
-    fn apply_extended_char_class_operator(
-        lhs: ScalarRangeSet,
-        operator: ExtendedCharClassOperator,
-        rhs: ScalarRangeSet,
-    ) -> ScalarRangeSet {
-        match operator {
-            ExtendedCharClassOperator::Union => lhs.union(&rhs),
-            ExtendedCharClassOperator::Difference => lhs.difference(&rhs),
-            ExtendedCharClassOperator::Intersection => lhs.intersection(&rhs),
-            ExtendedCharClassOperator::SymmetricDifference => {
-                lhs.difference(&rhs).union(&rhs.difference(&lhs))
-            }
-        }
+        cursor
+            .peek_char()
+            .and_then(ExtendedCharClassOperator::from_char)
     }
 
     fn parse_extended_char_class_unary(
@@ -2062,6 +2063,22 @@ mod tests {
         assert!(!range_contains(&ranges, 'a'));
         assert!(!range_contains(&ranges, 'e'));
         assert!(!range_contains(&ranges, '5'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_left_associative_intersection_chain() {
+        let lowered =
+            Compiler::lower_extended_char_class_content("[a-z] & [d-z] & [m-p]".to_string())
+                .expect("Expected chained intersections to lower left-associatively");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'm'));
+        assert!(range_contains(&ranges, 'p'));
+        assert!(!range_contains(&ranges, 'd'));
+        assert!(!range_contains(&ranges, 'z'));
     }
 
     #[test]

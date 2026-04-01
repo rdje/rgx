@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Consolidate extended char class operator parser
+- Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the duplicated `(?[...])` binary-operator parsing loops in `rgx-core/src/compiler.rs` with one precedence-climbing parser that owns left-associativity and `&`-before-`|`/`+`/`-`/`^` precedence in one place.
+  - Moved operator metadata and set application onto `ExtendedCharClassOperator`, which removed the now-awkward split between low-precedence helpers and the separate intersection-only path.
+  - Added a direct regression for repeated `&` chaining so the shipped precedence model stays locked independently of the broader parser-path/API tests.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior stays the same, but the remaining Perl extended-character-class follow-up work now has a cleaner parser/lowering base.
+
 ### 2026-04-01 - Extend shipped extended char class precedence
 - Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
 - Changes:
