@@ -1284,6 +1284,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_conditional_recursion_named() {
+        let mut parser = Parser::new("(?(R&word)a|b)").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Conditional { condition, .. } => {
+                assert_eq!(
+                    condition,
+                    crate::ast::ConditionalTest::RecursionNamed("word".to_string())
+                );
+            }
+            _ => panic!("Expected conditional node"),
+        }
+    }
+
+    #[test]
     fn test_parse_conditional_lookahead_condition() {
         let mut parser = Parser::new("(?(?=ab)x|y)").unwrap();
         let ast = parser.parse().unwrap();

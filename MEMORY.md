@@ -63,13 +63,13 @@ Live continuity memory for `rgx` sessions.
   - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
-- The pinned PGEN submodule commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
+- The pinned PGEN submodule commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`.
 - Local PGEN issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream`:
   - minimal repro: `(?(R&word)a|b)`
   - standalone local PGEN at commit `f97e0fe31750885f4fc48a67ed7660110cd20271` now reports `regex_parser_release_version=1.1.2` / `regex_integration_contract_version=1.1.2` and parses the repro successfully
   - the verification bundle lives at `pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2/`
   - the accepted tree now includes `recursion_condition` inside `conditional`, with separate `yes_branch` and `no_branch`
-  - RGX is still pinned to `subs/pgen` commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` (`1.1.1`), so the default RGX parser path remains on the pre-fix backend until the submodule is bumped
+  - RGX is now pinned to that same fixed `1.1.2` commit, and named recursion-condition syntax `(?(R&name)...)` is shipped on the default parser/runtime path
 - Cargo workspace state now explicitly excludes `subs/pgen/rust` so RGX and PGEN stay separate projects even though PGEN lives under the RGX tree as a submodule.
 - Local validation against the default real PGEN backend is currently green for:
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture`
@@ -145,13 +145,21 @@ Live continuity memory for `rgx` sessions.
   - `docs/PCRE2_COMPATIBILITY_MATRIX.md`
 
 ## Next likely tasks
-- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `R&name` / `VERSION[...]` conditionals, and the runtime/set-algebra policy for Perl extended character classes.
+- Plan downstream RGX handling for newer PCRE2 syntax that may arrive through PGEN next, especially returned-capture subroutine calls, `VERSION[...]` conditionals, and the runtime/set-algebra policy for Perl extended character classes.
 - Expand the wasm/runtime surface beyond the current position/text/numbered-capture/named-capture/variable import slice and initial `emit_numeric` / `emit_replacement` result layer.
 - Keep the private-submodule CI auth story smooth as `subs/pgen` moves forward.
 - Continue capturing any new suspected PGEN parser bug with the structured bundle expected by `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-01
+- Shipped named recursion-condition syntax on the default RGX path:
+  - bumped `subs/pgen` from `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` to `f97e0fe31750885f4fc48a67ed7660110cd20271`, bringing the default parser pin onto the verified standalone PGEN `1.1.2` fix for local issue `PGEN-RGX-0005`
+  - extended both parser paths to preserve `(?(R&name)...)` as `ConditionalTest::RecursionNamed(name)` and resolved that form at compile time onto the existing recursion-target runtime check
+  - added lexer/parser/runtime/parser-contract/PCRE2 parity coverage for the new conditional family, including explicit compile errors for missing named recursion targets
+  - refreshed current-state docs so `R&name` is no longer tracked as a parser blocker and the remaining newer-PCRE2 conditional follow-up narrows to forms like `VERSION[...]`
+  - full local validation passed again after the submodule bump: `cargo fmt`, package tests for `rgx-core` / `rgx-cli` / `rgx-bench` / `rgx-wasm`, `cargo clippy --workspace --all-targets`, and `./scripts/run-local-ci.sh`
+
 ### 2026-03-31
 - Shipped branch-reset groups on the default regex path:
   - compiler-side capture-index assignment now gives the branch-reset group's top-level alternatives a shared numbering window instead of allocating fresh numbers per branch

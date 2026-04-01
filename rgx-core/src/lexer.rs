@@ -1049,6 +1049,7 @@ impl<'a> Lexer<'a> {
     /// - (?(name)...)
     /// - (?(R)...)
     /// - (?(R1)...)
+    /// - (?(R&name)...)
     /// - (?(?=expr)...)
     /// - (?(?!expr)...)
     /// - (?(?<=expr)...)
@@ -1144,45 +1145,74 @@ impl<'a> Lexer<'a> {
                 ConditionalTest::NamedGroupExists(name)
             }
             Some(c) if c.is_ascii_alphabetic() || c == '_' => {
-                let mut name = String::new();
-                while let Some(ch) = self.current {
-                    if ch.is_ascii_alphanumeric() || ch == '_' {
-                        name.push(ch);
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
+                if self.current == Some('R') && self.peek() == Some('&') {
+                    self.advance(); // Skip 'R'
+                    self.advance(); // Skip '&'
 
-                if name.is_empty() {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                if let Some(group_text) = name.strip_prefix('R') {
-                    if group_text.is_empty() {
-                        ConditionalTest::RecursionAny
-                    } else if group_text.chars().all(|ch| ch.is_ascii_digit()) {
-                        let group = group_text.parse::<u32>().map_err(|_| {
-                            LexError::InvalidGroupSyntax {
-                                position: start_pos,
-                            }
-                        })?;
-                        if group == 0 {
+                    let mut name = String::new();
+                    match self.current {
+                        Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {
+                            name.push(ch);
+                            self.advance();
+                        }
+                        _ => {
                             return Err(LexError::InvalidGroupSyntax {
                                 position: start_pos,
                             });
                         }
-                        ConditionalTest::RecursionGroup(group)
+                    }
+
+                    while let Some(ch) = self.current {
+                        if ch.is_ascii_alphanumeric() || ch == '_' {
+                            name.push(ch);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    ConditionalTest::RecursionNamed(name)
+                } else {
+                    let mut name = String::new();
+                    while let Some(ch) = self.current {
+                        if ch.is_ascii_alphanumeric() || ch == '_' {
+                            name.push(ch);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if name.is_empty() {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                    if let Some(group_text) = name.strip_prefix('R') {
+                        if group_text.is_empty() {
+                            ConditionalTest::RecursionAny
+                        } else if group_text.chars().all(|ch| ch.is_ascii_digit()) {
+                            let group = group_text.parse::<u32>().map_err(|_| {
+                                LexError::InvalidGroupSyntax {
+                                    position: start_pos,
+                                }
+                            })?;
+                            if group == 0 {
+                                return Err(LexError::InvalidGroupSyntax {
+                                    position: start_pos,
+                                });
+                            }
+                            ConditionalTest::RecursionGroup(group)
+                        } else if name == "DEFINE" {
+                            ConditionalTest::Define
+                        } else {
+                            ConditionalTest::NamedGroupExists(name)
+                        }
                     } else if name == "DEFINE" {
                         ConditionalTest::Define
                     } else {
                         ConditionalTest::NamedGroupExists(name)
                     }
-                } else if name == "DEFINE" {
-                    ConditionalTest::Define
-                } else {
-                    ConditionalTest::NamedGroupExists(name)
                 }
             }
             Some('?') => {
@@ -1920,6 +1950,23 @@ mod tests {
             vec![
                 Token::ConditionalStart {
                     condition: ConditionalTest::RecursionGroup(1),
+                },
+                Token::Char('a'),
+                Token::Alternation,
+                Token::Char('b'),
+                Token::GroupEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conditional_tokens_recursion_named() {
+        let tokens = tokenize_all("(?(R&word)a|b)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ConditionalStart {
+                    condition: ConditionalTest::RecursionNamed("word".to_string()),
                 },
                 Token::Char('a'),
                 Token::Alternation,

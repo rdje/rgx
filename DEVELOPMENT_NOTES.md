@@ -172,10 +172,10 @@ Pipeline in `rgx-core`:
 - The current live PGEN regex caveats are narrower than the original complaint set:
   - the contract is now integration-ready for basic RGX rollout,
   - but AST consumers still need release pinning because the stable JSON schema does not freeze detailed `rule_name` taxonomy across upgrades,
-  - named recursion-condition syntax `(?(R&name)...)` is now verified fixed upstream in standalone PGEN `1.1.2` and closed in `pgen-issues/PGEN-RGX-0005.yaml`, but RGX's pinned `subs/pgen` submodule is still `1.1.1` and therefore still lacks that transport fix on the default path,
+  - named recursion-condition syntax `(?(R&name)...)` is now available on the default RGX path after the `subs/pgen` submodule bump to the verified standalone `1.1.2` fix commit,
   - and the current embedded code-block contract is now structurally specified for opaque generic / `lua` / `js` / `javascript` payloads, while RGX now also ships a local `rhai` backend on top of generic tag transport pending explicit upstream marker publication; the published contract still excludes `native` / `wasm` support.
 - The current PGEN-backed integration now depends on the committed `subs/pgen` submodule:
-  - the pinned fix commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`
+  - the pinned fix commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`
   - fresh clones must initialize submodules before building (`git submodule update --init --recursive`)
   - hosted CI for the private submodule may need an explicit token such as `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
 - The current forwardable recommendation for PGEN lives in `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`:
@@ -186,7 +186,7 @@ Pipeline in `rgx-core`:
 
 ## Known engineering gaps
 - Parser/VM support for advanced regex syntax still has meaningful remaining gaps in newer PCRE families beyond the currently covered recursion, conditional condition forms, Unicode property classes, lookaround syntax, and possessive quantifiers
-- The next named recursion-condition slice `(?(R&name)...)` is no longer blocked upstream, but it is still blocked on RGX's current dependency pin: standalone PGEN `1.1.2` now parses `(?(R&word)a|b)` and closes `pgen-issues/PGEN-RGX-0005.yaml`, while the still-pinned `subs/pgen` `1.1.1` backend in RGX continues to reject that minimal sample until the submodule is updated
+- Named recursion-condition syntax `(?(R&name)...)` is now shipped on the default RGX path after the `subs/pgen` bump plus compiler/runtime alignment; the next broader conditional follow-up is `VERSION[...]`
 - Native registration is still Rust-API-only, while wasm registration now also has a file-backed CLI path through `--wasm-module NAME=PATH`
 - The wasm ABI now exposes position/match-metadata/text/numbered-capture/named-capture/variable imports plus first richer-result emission imports (`emit_numeric`, `emit_replacement`)
 - The first richer non-boolean result slice now includes match metadata (`MatchResult.code_result`) plus dedicated numeric-result and replacement-oriented Rust APIs across Lua/JavaScript/Rhai/native/wasm, but richer wasm ABI work beyond this initial emission slice remains open

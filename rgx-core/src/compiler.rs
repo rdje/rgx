@@ -424,6 +424,10 @@ impl Compiler {
                 crate::ast::ConditionalTest::RecursionGroup(group),
                 next_group,
             ),
+            crate::ast::ConditionalTest::RecursionNamed(name) => (
+                crate::ast::ConditionalTest::RecursionNamed(name),
+                next_group,
+            ),
             crate::ast::ConditionalTest::Define => {
                 (crate::ast::ConditionalTest::Define, next_group)
             }
@@ -630,6 +634,7 @@ impl Compiler {
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::RecursionAny
                     | crate::ast::ConditionalTest::RecursionGroup(_)
+                    | crate::ast::ConditionalTest::RecursionNamed(_)
                     | crate::ast::ConditionalTest::Define => None,
                 };
                 condition_message
@@ -705,6 +710,10 @@ impl Compiler {
             }
             crate::ast::ConditionalTest::RecursionGroup(group) => Ok((
                 crate::ast::ConditionalTest::RecursionGroup(group),
+                opened_groups,
+            )),
+            crate::ast::ConditionalTest::RecursionNamed(name) => Ok((
+                crate::ast::ConditionalTest::RecursionNamed(name),
                 opened_groups,
             )),
             crate::ast::ConditionalTest::Define => {
@@ -828,6 +837,14 @@ impl Compiler {
                 } else {
                     Ok(crate::ast::ConditionalTest::RecursionGroup(group))
                 }
+            }
+            crate::ast::ConditionalTest::RecursionNamed(name) => {
+                let group = named_groups.get(&name).copied().ok_or_else(|| {
+                    RgxError::Compile(format!(
+                        "conditional '(?(R&{name})...)' refers to missing named capture group"
+                    ))
+                })?;
+                Ok(crate::ast::ConditionalTest::RecursionGroup(group))
             }
             crate::ast::ConditionalTest::Lookahead { expr, positive } => {
                 Ok(crate::ast::ConditionalTest::Lookahead {
@@ -968,6 +985,15 @@ impl Compiler {
                             None
                         }
                     }
+                    crate::ast::ConditionalTest::RecursionNamed(name) => {
+                        if named_groups.contains_key(name) {
+                            None
+                        } else {
+                            Some(format!(
+                                "conditional '(?(R&{name})...)' refers to missing named capture group"
+                            ))
+                        }
+                    }
                     crate::ast::ConditionalTest::Define => {
                         if false_branch.is_some() {
                             Some(
@@ -1036,6 +1062,7 @@ impl Compiler {
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::RecursionAny
                     | crate::ast::ConditionalTest::RecursionGroup(_)
+                    | crate::ast::ConditionalTest::RecursionNamed(_)
                     | crate::ast::ConditionalTest::Define => None,
                 };
                 condition_message
@@ -1183,6 +1210,7 @@ impl Compiler {
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::RecursionAny
                     | crate::ast::ConditionalTest::RecursionGroup(_)
+                    | crate::ast::ConditionalTest::RecursionNamed(_)
                     | crate::ast::ConditionalTest::Define => 0,
                 };
                 let true_max = Self::max_capture_group(true_branch);
@@ -1257,6 +1285,7 @@ impl Compiler {
                     | crate::ast::ConditionalTest::NamedGroupExists(_)
                     | crate::ast::ConditionalTest::RecursionAny
                     | crate::ast::ConditionalTest::RecursionGroup(_)
+                    | crate::ast::ConditionalTest::RecursionNamed(_)
                     | crate::ast::ConditionalTest::Define => {}
                 }
                 Self::collect_named_groups_inner(true_branch, named_groups);

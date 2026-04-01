@@ -872,6 +872,18 @@ impl<'a> PgenAstAdapter<'a> {
         if text == "R" {
             return Ok(ConditionalTest::RecursionAny);
         }
+        if let Some(name) = text.strip_prefix("R&") {
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            {
+                return Ok(ConditionalTest::RecursionNamed(name.to_string()));
+            }
+            return Err(self.contract_error(&format!(
+                "invalid recursion conditional name reference '{text}'"
+            )));
+        }
         if let Some(value) = text.strip_prefix('R') {
             if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
                 let group = value.parse::<u32>().map_err(|_| {
@@ -1195,6 +1207,7 @@ mod tests {
             "(?(word)a|b)",
             "(?(R)a|b)",
             "(?(R1)a|b)",
+            "(?(R&word)a|b)",
             "(?(DEFINE)a)",
             "(?(?=ab)x|y)",
             "(?(?!ab)x|y)",
@@ -1353,6 +1366,10 @@ mod tests {
             (
                 "(?(R2)a|b)",
                 "conditional '(?(R2)...)' refers to missing capture group",
+            ),
+            (
+                "(?(R&missing)a|b)",
+                "conditional '(?(R&missing)...)' refers to missing named capture group",
             ),
             (
                 "(?[a-z])",

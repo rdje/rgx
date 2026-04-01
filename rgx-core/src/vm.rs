@@ -3444,6 +3444,7 @@ impl OptimizingCompiler {
                     | ConditionalTest::NamedGroupExists(_)
                     | ConditionalTest::RecursionAny
                     | ConditionalTest::RecursionGroup(_)
+                    | ConditionalTest::RecursionNamed(_)
                     | ConditionalTest::Define => {}
                 }
                 self.analyze_pass(true_branch);
@@ -3910,6 +3911,15 @@ impl OptimizingCompiler {
                 self.code.push(CONDITIONAL_KIND_RECURSION_GROUP);
                 self.code.push(*group_id as u8);
             }
+            ConditionalTest::RecursionNamed(name) => {
+                let group_id = self
+                    .named_groups
+                    .get(name)
+                    .copied()
+                    .expect("named recursion condition should be validated before codegen");
+                self.code.push(CONDITIONAL_KIND_RECURSION_GROUP);
+                self.code.push(group_id as u8);
+            }
             ConditionalTest::Define => {
                 self.code.push(CONDITIONAL_KIND_DEFINE_FALSE);
             }
@@ -4057,6 +4067,7 @@ impl OptimizingCompiler {
                     | ConditionalTest::NamedGroupExists(_)
                     | ConditionalTest::RecursionAny
                     | ConditionalTest::RecursionGroup(_)
+                    | ConditionalTest::RecursionNamed(_)
                     | ConditionalTest::Define => {}
                 }
                 Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);

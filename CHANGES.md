@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Ship named recursion-condition support on the default path
+- Scope: PGEN dependency bump, conditional-runtime feature delivery, parity coverage, and continuity/doc refresh.
+- Changes:
+  - Updated the pinned `subs/pgen` submodule from `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` to `f97e0fe31750885f4fc48a67ed7660110cd20271`, bringing RGX's default parser path onto the verified standalone PGEN `1.1.2` fix level.
+  - Extended RGX's conditional AST/parser boundary to recognize named recursion conditions `(?(R&name)...)` on both the handwritten lexer/parser path and the default PGEN-backed path.
+  - Resolved named recursion conditions at compile time onto the existing recursion-target runtime model, so `(?(R&name)...)` now executes through the same active-recursion check as `(?(Rn)...)` while still failing explicitly when the named capture does not exist.
+  - Added parser, runtime, parser-contract, and PCRE2 differential coverage for named recursion conditions, and refreshed the user-facing status/roadmap docs so `R&name` is no longer described as a parser blocker.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core recursion_named -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_conditionals -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes the parser/runtime gap for the `R&name` conditional family on the default RGX path and narrows the remaining newer-PCRE2 conditional follow-up work to forms such as `VERSION[...]`.
+
 ### 2026-04-01 - Verify upstream PGEN fix for named recursion conditions
 - Scope: PGEN upstream verification, local issue closure, and continuity-doc correction.
 - Changes:
@@ -29,7 +50,7 @@ This is the living progress ledger for rgx.
   - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_external/Cargo.toml --target-dir /tmp/pgen-issue-bundle-external-target -- /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2`
 - Notes/impact:
   - The upstream PGEN parser bug is verified fixed.
-  - RGX’s default parser path is still on the older pinned submodule revision, so shipping `(?(R&name)...)` in RGX still requires a dependency bump before implementation work can land on the default path.
+  - At the time of this verification record, RGX’s default parser path was still on the older pinned submodule revision; the later follow-up entry in this file records the dependency bump plus shipped `R&name` support.
 
 ### 2026-03-31 - Log named recursion-condition parser gap in PGEN
 - Scope: PGEN integration bug triage, issue-bundle capture, and roadmap/continuity refresh.

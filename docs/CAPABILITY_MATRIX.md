@@ -117,9 +117,10 @@ Representative test anchors:
 - Group-exists: `(?(1)yes|no)` (`shipped`)
 - Relative-group-exists: `(?(+1)yes|no)`, `(?(-1)yes|no)` (`shipped`)
 - Named-group-exists: `(?(<name>)yes|no)`, `(?(name)yes|no)` (`shipped`)
-- Recursion conditions: `(?(R)yes|no)`, `(?(R1)yes|no)` (`shipped`)
+- Recursion conditions: `(?(R)yes|no)`, `(?(R1)yes|no)`, `(?(R&name)yes|no)` (`shipped`)
   - `(?(R)...)` is true whenever the current path is executing inside any active recursion/subroutine level
   - `(?(Rn)...)` is true only when the most recent active recursion level targets group `n`
+  - `(?(R&name)...)` is true only when the most recent active recursion level targets the named subroutine `name`
   - if a capture group named `R` or `Rn` exists, PCRE2-style named-group semantics win over the recursion-condition interpretation
 - `DEFINE` conditionals: `(?(DEFINE)yes)` (`shipped`)
   - the `DEFINE` test is treated as always false on the current match path

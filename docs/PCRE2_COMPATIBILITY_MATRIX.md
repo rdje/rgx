@@ -12,9 +12,9 @@ Live compatibility tracker for `rgx` against PCRE2.
 - `out-of-scope`: behavior is not a parity target for PCRE2 comparison.
 
 ## Rough progress estimate
-- Tracked parity estimate: about `97%`
-  - Rationale: the major regex feature families tracked explicitly in this matrix are now almost entirely in the `parity-verified` bucket, including recursion, relative conditional-group references, and branch-reset numbering semantics, while some uncovered differential edge space and newer advanced families still remain.
-- Broader PCRE2 regex estimate: about `77%`
+- Tracked parity estimate: about `98%`
+  - Rationale: the major regex feature families tracked explicitly in this matrix are now almost entirely in the `parity-verified` bucket, including recursion, named recursion conditions, relative conditional-group references, and branch-reset numbering semantics, while some uncovered differential edge space and newer advanced families still remain.
+- Broader PCRE2 regex estimate: about `78%`
   - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including recursion, possessive quantifiers, branch-reset groups, conditionals, and Unicode properties, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or intentionally outside the current shipped target surface.
 - These percentages are intentionally rough and hand-maintained.
   - They are not derived from a formal PCRE2 feature census.
@@ -44,7 +44,7 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Branch-reset groups (`(?|...)`): `parity-verified`
   - differential coverage includes shared capture-slot backreferences plus max-branch-arity conditional numbering after the branch-reset group
 - Conditionals (`(?(...)yes|no)` current supported parser forms): `parity-verified`
-  - differential coverage includes group-exists, named-group-exists, single-branch `DEFINE` definition blocks, and lookaround conditions for both first-match and all-match span parity
+  - differential coverage includes group-exists, named-group-exists, recursion conditions including `(?(R&name)...)`, single-branch `DEFINE` definition blocks, and lookaround conditions for both first-match and all-match span parity
 - Lookarounds:
   - positive/negative lookahead: `parity-verified`
   - positive/negative lookbehind: `parity-verified`
@@ -70,16 +70,14 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - group-exists
   - relative-group-exists
   - named-group-exists
-  - current recursion conditions `(?(R)...)` and `(?(Rn)...)`
+  - current recursion conditions `(?(R)...)`, `(?(Rn)...)`, and `(?(R&name)...)`
   - single-branch `DEFINE` definition blocks
   - lookaround conditions
 - Positive and negative lookahead/lookbehind
 
 ### Explicitly unsupported or still open
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
-- Newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`
-  - current default-RGX blocker: pinned `subs/pgen` `1.1.1` still rejects `(?(R&word)a|b)` at byte 0 on the default generated backend
-  - upstream parser status: `pgen-issues/PGEN-RGX-0005.yaml` is closed as `verified-fixed-upstream` after standalone PGEN `1.1.2` accepted the same repro and transported it through `recursion_condition`
+- Newer conditional forms such as `(?(VERSION[...])...)`
 - Perl extended character classes `(?[...])`
   - current RGX boundary is parser-recognized but compile-rejected explicitly; downstream set-algebra/runtime behavior is still open
 

@@ -65,9 +65,7 @@ Live forward-looking tracker for rgx.
 - Goal: prepare RGX for newer PCRE2 syntax that may arrive through the default PGEN parser path.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
-  - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(R&name)...)` and `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` are shipped
-    - current default-RGX blocker: the pinned `subs/pgen` backend is still `1.1.1` and rejects the minimal `R&name` reproducer `(?(R&word)a|b)` at byte 0
-    - upstream parser status: `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream` against standalone PGEN `1.1.2`; RGX needs a submodule bump before the feature slice can move from planning into implementation on the default path
+  - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)` are shipped
   - decide explicit compile-boundary versus runtime/set-algebra behavior for Perl extended character classes `(?[...])` now that parser transport and compile-boundary guardrails are in place on both parser backends
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 

@@ -217,6 +217,8 @@ pub enum ConditionalTest {
     RecursionAny,
     /// Test whether the current recursion level is a specific numbered subroutine (?(R1)...)
     RecursionGroup(u32),
+    /// Test whether the current recursion level is a specific named subroutine (?(R&name)...)
+    RecursionNamed(String),
     /// DEFINE conditional (?(DEFINE)...)
     Define,
     /// Lookahead test (?(?=...)...) or (?(?!...)...)

@@ -3164,6 +3164,15 @@ mod tests {
     }
 
     #[test]
+    fn parser_conditional_recursion_named_selects_runtime_branch() {
+        let regex = Regex::compile(r"\A(?<word>a(?(R&word)b|c)(?&word)?d)\z")
+            .expect("Failed to compile recursion-named conditional syntax");
+        assert!(regex.is_match("acd"));
+        assert!(regex.is_match("acabdd"));
+        assert!(!regex.is_match("abd"));
+    }
+
+    #[test]
     fn parser_conditional_recursion_name_ambiguity_prefers_named_group_exists() {
         let regex = Regex::compile(r"\A(?<R>a)?(?(R)b|c)\z")
             .expect("Failed to compile ambiguous R conditional syntax");
@@ -3258,6 +3267,19 @@ mod tests {
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(msg.contains("conditional '(?(R2)...)' refers to missing capture group"));
+    }
+
+    #[test]
+    fn parser_conditional_missing_named_recursion_group_reports_compile_error() {
+        let result = Regex::compile("(?(R&missing)a|b)");
+        assert!(
+            result.is_err(),
+            "Conditional missing named recursion-group reference should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains("conditional '(?(R&missing)...)' refers to missing named capture group")
+        );
     }
 
     #[test]
