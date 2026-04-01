@@ -100,6 +100,7 @@ Live continuity memory for `rgx` sessions.
   - RGX now also executes exactly one explicit operator (`|`, `+`, `-`, `&`) over bracket terms or Unicode property terms, such as `(?[[a-z] - [aeiou]])` and `(?[\p{L} & \p{Lu}])`
   - broader grouped algebra, complement operators, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly
 - That shipped `(?[...])` slice is now guarded by direct compiler helper tests, parser-contract/runtime tests, PCRE2 differential parity cases for the widened one-operator subset, and the earlier direct VM regression for ordinary negated custom char classes.
+- The internal range algebra behind that shipped `(?[...])` subset is now centralized in one private `ScalarRangeSet` helper inside `rgx-core/src/compiler.rs`, with direct unit tests locking adjacent-range normalization and split-difference behavior before we widen the syntax further.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.

@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Consolidate extended char class range algebra internals
+- Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the loose scalar-range helper cluster in `rgx-core/src/compiler.rs` with one private `ScalarRangeSet` abstraction that owns normalization, union, difference, intersection, complement, and char-range conversion for the shipped `(?[...])` subset.
+  - Simplified the extended-char-class lowering path so bracket terms and Unicode-property terms both resolve through the same normalized range-set flow instead of manually re-normalizing slices at each branch.
+  - Added direct unit tests for adjacent-range normalization and split difference behavior so future `(?[...])` widening has a tighter internal algebra baseline.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core compiler::tests::lower_extended_char_class_content -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core scalar_range_set -- --nocapture`
+- Notes/impact:
+  - This is a consolidation-only pass; the shipped regex surface stays the same, but the current one-operator extended-class subset is now built on a cleaner internal range-algebra layer.
+
 ### 2026-04-01 - Extend Perl extended character class algebra subset
 - Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
 - Changes:

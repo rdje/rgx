@@ -60,6 +60,150 @@ impl<'a> ExtendedCharClassCursor<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ScalarRangeSet {
+    ranges: Vec<ScalarRange>,
+}
+
+impl ScalarRangeSet {
+    fn new(ranges: Vec<ScalarRange>) -> Self {
+        Self {
+            ranges: Self::normalize(ranges),
+        }
+    }
+
+    fn from_char_ranges(ranges: &[CharRange]) -> Self {
+        Self::new(
+            ranges
+                .iter()
+                .map(|range| (range.start as u32, range.end as u32))
+                .collect(),
+        )
+    }
+
+    fn from_unicode_property(name: &str, negated: bool) -> Result<Self> {
+        let ranges = resolve_unicode_property_class(name, negated).map_err(RgxError::Compile)?;
+        Ok(Self::from_char_ranges(&ranges))
+    }
+
+    fn from_char_class(char_class: &crate::ast::CharClass) -> Result<Self> {
+        match char_class {
+            crate::ast::CharClass::Custom { ranges, negated } => {
+                let set = Self::from_char_ranges(ranges);
+                if *negated {
+                    Ok(set.complement())
+                } else {
+                    Ok(set)
+                }
+            }
+            crate::ast::CharClass::UnicodeClass { name, negated } => {
+                Self::from_unicode_property(name, *negated)
+            }
+            _ => Err(Compiler::extended_char_class_subset_error()),
+        }
+    }
+
+    fn union(&self, other: &Self) -> Self {
+        let mut combined = self.ranges.clone();
+        combined.extend_from_slice(&other.ranges);
+        Self::new(combined)
+    }
+
+    fn intersection(&self, other: &Self) -> Self {
+        let mut result = Vec::new();
+        let mut lhs_index = 0usize;
+        let mut rhs_index = 0usize;
+
+        while lhs_index < self.ranges.len() && rhs_index < other.ranges.len() {
+            let (lhs_start, lhs_end) = self.ranges[lhs_index];
+            let (rhs_start, rhs_end) = other.ranges[rhs_index];
+            let start = lhs_start.max(rhs_start);
+            let end = lhs_end.min(rhs_end);
+
+            if start <= end {
+                result.push((start, end));
+            }
+
+            if lhs_end < rhs_end {
+                lhs_index += 1;
+            } else {
+                rhs_index += 1;
+            }
+        }
+
+        Self::new(result)
+    }
+
+    fn difference(&self, other: &Self) -> Self {
+        let mut result = Vec::new();
+        let mut rhs_index = 0usize;
+
+        for (lhs_start, lhs_end) in &self.ranges {
+            let mut cursor = *lhs_start;
+
+            while rhs_index < other.ranges.len() && other.ranges[rhs_index].1 < cursor {
+                rhs_index += 1;
+            }
+
+            let mut scan_index = rhs_index;
+            while scan_index < other.ranges.len() && other.ranges[scan_index].0 <= *lhs_end {
+                let (rhs_start, rhs_end) = other.ranges[scan_index];
+                if rhs_start > cursor {
+                    result.push((cursor, rhs_start.saturating_sub(1)));
+                }
+
+                cursor = rhs_end.saturating_add(1);
+                if cursor > *lhs_end {
+                    break;
+                }
+                scan_index += 1;
+            }
+
+            if cursor <= *lhs_end {
+                result.push((cursor, *lhs_end));
+            }
+        }
+
+        Self::new(result)
+    }
+
+    fn complement(&self) -> Self {
+        Self::new(UNICODE_SCALAR_UNIVERSE.to_vec()).difference(self)
+    }
+
+    fn to_char_ranges(&self) -> Result<Vec<CharRange>> {
+        self.ranges
+            .iter()
+            .map(|(start, end)| {
+                let start = char::from_u32(*start)
+                    .ok_or_else(Compiler::extended_char_class_subset_error)?;
+                let end =
+                    char::from_u32(*end).ok_or_else(Compiler::extended_char_class_subset_error)?;
+                Ok(CharRange::range(start, end))
+            })
+            .collect()
+    }
+
+    fn normalize(mut ranges: Vec<ScalarRange>) -> Vec<ScalarRange> {
+        ranges.sort_by_key(|range| range.0);
+
+        let mut merged: Vec<ScalarRange> = Vec::new();
+        for (start, end) in ranges {
+            if let Some(last) = merged.last_mut() {
+                if start <= last.1.saturating_add(1) {
+                    last.1 = last.1.max(end);
+                } else {
+                    merged.push((start, end));
+                }
+            } else {
+                merged.push((start, end));
+            }
+        }
+
+        merged
+    }
+}
+
 impl Compiler {
     /// Create new compiler with pure execution mode (maximum performance)
     pub fn new() -> Self {
@@ -476,15 +620,13 @@ impl Compiler {
             }
 
             match operator {
-                ExtendedCharClassOperator::Union => Self::union_scalar_ranges(&lhs, &rhs),
-                ExtendedCharClassOperator::Difference => Self::subtract_scalar_ranges(&lhs, &rhs),
-                ExtendedCharClassOperator::Intersection => {
-                    Self::intersect_scalar_ranges(&lhs, &rhs)
-                }
+                ExtendedCharClassOperator::Union => lhs.union(&rhs),
+                ExtendedCharClassOperator::Difference => lhs.difference(&rhs),
+                ExtendedCharClassOperator::Intersection => lhs.intersection(&rhs),
             }
         };
 
-        Self::scalar_ranges_to_char_ranges(&resolved)
+        resolved.to_char_ranges()
     }
 
     fn parse_extended_char_class_operator(
@@ -501,7 +643,7 @@ impl Compiler {
 
     fn parse_extended_char_class_term(
         cursor: &mut ExtendedCharClassCursor<'_>,
-    ) -> Result<Vec<ScalarRange>> {
+    ) -> Result<ScalarRangeSet> {
         cursor.skip_whitespace();
         match cursor.peek_char() {
             Some('[') => {
@@ -544,7 +686,7 @@ impl Compiler {
         Err(Self::extended_char_class_subset_error())
     }
 
-    fn resolve_extended_bracket_term_ranges(term: &str) -> Result<Vec<ScalarRange>> {
+    fn resolve_extended_bracket_term_ranges(term: &str) -> Result<ScalarRangeSet> {
         let body = Self::extract_simple_extended_char_class_body(term)
             .ok_or_else(Self::extended_char_class_subset_error)?;
         Self::validate_simple_char_class_body(body)?;
@@ -563,7 +705,7 @@ impl Compiler {
 
     fn resolve_extended_unicode_property_term(
         cursor: &mut ExtendedCharClassCursor<'_>,
-    ) -> Result<Vec<ScalarRange>> {
+    ) -> Result<ScalarRangeSet> {
         let slash = cursor.consume_char();
         let kind = cursor.consume_char();
         if slash != Some('\\')
@@ -579,11 +721,7 @@ impl Compiler {
                 if name.is_empty() {
                     return Err(Self::extended_char_class_subset_error());
                 }
-                let ranges = resolve_unicode_property_class(&name, kind == Some('P'))
-                    .map_err(RgxError::Compile)?;
-                return Ok(Self::normalize_scalar_ranges(
-                    &Self::char_ranges_to_scalar_ranges(&ranges),
-                ));
+                return ScalarRangeSet::from_unicode_property(&name, kind == Some('P'));
             }
             name.push(ch);
         }
@@ -593,138 +731,8 @@ impl Compiler {
 
     fn resolve_char_class_scalar_ranges(
         char_class: &crate::ast::CharClass,
-    ) -> Result<Vec<ScalarRange>> {
-        match char_class {
-            crate::ast::CharClass::Custom { ranges, negated } => {
-                let normalized =
-                    Self::normalize_scalar_ranges(&Self::char_ranges_to_scalar_ranges(ranges));
-                if *negated {
-                    Ok(Self::complement_scalar_ranges(&normalized))
-                } else {
-                    Ok(normalized)
-                }
-            }
-            crate::ast::CharClass::UnicodeClass { name, negated } => {
-                let ranges =
-                    resolve_unicode_property_class(name, *negated).map_err(RgxError::Compile)?;
-                Ok(Self::normalize_scalar_ranges(
-                    &Self::char_ranges_to_scalar_ranges(&ranges),
-                ))
-            }
-            _ => Err(Self::extended_char_class_subset_error()),
-        }
-    }
-
-    fn char_ranges_to_scalar_ranges(ranges: &[CharRange]) -> Vec<ScalarRange> {
-        ranges
-            .iter()
-            .map(|range| (range.start as u32, range.end as u32))
-            .collect()
-    }
-
-    fn scalar_ranges_to_char_ranges(ranges: &[ScalarRange]) -> Result<Vec<CharRange>> {
-        ranges
-            .iter()
-            .map(|(start, end)| {
-                let start =
-                    char::from_u32(*start).ok_or_else(Self::extended_char_class_subset_error)?;
-                let end =
-                    char::from_u32(*end).ok_or_else(Self::extended_char_class_subset_error)?;
-                Ok(CharRange::range(start, end))
-            })
-            .collect()
-    }
-
-    fn normalize_scalar_ranges(ranges: &[ScalarRange]) -> Vec<ScalarRange> {
-        let mut normalized = ranges.to_vec();
-        normalized.sort_by_key(|range| range.0);
-
-        let mut merged: Vec<ScalarRange> = Vec::new();
-        for (start, end) in normalized {
-            if let Some(last) = merged.last_mut() {
-                if start <= last.1.saturating_add(1) {
-                    last.1 = last.1.max(end);
-                } else {
-                    merged.push((start, end));
-                }
-            } else {
-                merged.push((start, end));
-            }
-        }
-
-        merged
-    }
-
-    fn union_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
-        let mut combined = lhs.to_vec();
-        combined.extend_from_slice(rhs);
-        Self::normalize_scalar_ranges(&combined)
-    }
-
-    fn intersect_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
-        let lhs = Self::normalize_scalar_ranges(lhs);
-        let rhs = Self::normalize_scalar_ranges(rhs);
-        let mut result = Vec::new();
-        let mut lhs_index = 0usize;
-        let mut rhs_index = 0usize;
-
-        while lhs_index < lhs.len() && rhs_index < rhs.len() {
-            let (lhs_start, lhs_end) = lhs[lhs_index];
-            let (rhs_start, rhs_end) = rhs[rhs_index];
-            let start = lhs_start.max(rhs_start);
-            let end = lhs_end.min(rhs_end);
-
-            if start <= end {
-                result.push((start, end));
-            }
-
-            if lhs_end < rhs_end {
-                lhs_index += 1;
-            } else {
-                rhs_index += 1;
-            }
-        }
-
-        result
-    }
-
-    fn subtract_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
-        let lhs = Self::normalize_scalar_ranges(lhs);
-        let rhs = Self::normalize_scalar_ranges(rhs);
-        let mut result = Vec::new();
-        let mut rhs_index = 0usize;
-
-        for (lhs_start, lhs_end) in lhs {
-            let mut cursor = lhs_start;
-
-            while rhs_index < rhs.len() && rhs[rhs_index].1 < cursor {
-                rhs_index += 1;
-            }
-
-            let mut scan_index = rhs_index;
-            while scan_index < rhs.len() && rhs[scan_index].0 <= lhs_end {
-                let (rhs_start, rhs_end) = rhs[scan_index];
-                if rhs_start > cursor {
-                    result.push((cursor, rhs_start.saturating_sub(1)));
-                }
-
-                cursor = rhs_end.saturating_add(1);
-                if cursor > lhs_end {
-                    break;
-                }
-                scan_index += 1;
-            }
-
-            if cursor <= lhs_end {
-                result.push((cursor, lhs_end));
-            }
-        }
-
-        result
-    }
-
-    fn complement_scalar_ranges(ranges: &[ScalarRange]) -> Vec<ScalarRange> {
-        Self::subtract_scalar_ranges(&UNICODE_SCALAR_UNIVERSE, ranges)
+    ) -> Result<ScalarRangeSet> {
+        ScalarRangeSet::from_char_class(char_class)
     }
 
     fn assign_capture_indices(ast: RegexAst) -> RegexAst {
@@ -1922,5 +1930,33 @@ mod tests {
             }
             other => panic!("expected compile error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn scalar_range_set_normalizes_and_merges_adjacent_ranges() {
+        let set = ScalarRangeSet::new(vec![
+            ('d' as u32, 'f' as u32),
+            ('a' as u32, 'c' as u32),
+            ('g' as u32, 'g' as u32),
+        ]);
+
+        assert_eq!(set.ranges, vec![('a' as u32, 'g' as u32)]);
+    }
+
+    #[test]
+    fn scalar_range_set_difference_splits_overlapping_ranges() {
+        let lhs = ScalarRangeSet::new(vec![('a' as u32, 'z' as u32)]);
+        let rhs = ScalarRangeSet::new(vec![('d' as u32, 'f' as u32), ('m' as u32, 'p' as u32)]);
+
+        let difference = lhs.difference(&rhs);
+
+        assert_eq!(
+            difference.ranges,
+            vec![
+                ('a' as u32, 'c' as u32),
+                ('g' as u32, 'l' as u32),
+                ('q' as u32, 'z' as u32),
+            ]
+        );
     }
 }
