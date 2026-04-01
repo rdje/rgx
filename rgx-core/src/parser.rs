@@ -1037,12 +1037,12 @@ mod tests {
 
     #[test]
     fn test_parse_extended_char_class() {
-        let mut parser = Parser::new("(?[a-z])").unwrap();
+        let mut parser = Parser::new("(?[[a-z]])").unwrap();
         let ast = parser.parse().unwrap();
 
         match ast {
             Regex::ExtendedCharClass { content } => {
-                assert_eq!(content, "a-z");
+                assert_eq!(content, "[a-z]");
             }
             other => panic!("Expected extended character class, got: {other:?}"),
         }

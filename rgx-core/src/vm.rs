@@ -258,8 +258,6 @@ pub struct CompiledCharClass {
     pub ascii_bitmap: [u16; 8], // 128 bits packed into u16s for SIMD
     /// Non-ASCII ranges for Unicode support
     pub unicode_ranges: Vec<(u32, u32)>,
-    /// Whether this class is negated
-    pub negated: bool,
 }
 
 /// High-performance compiled regex program
@@ -1982,13 +1980,7 @@ impl RegexVM {
     /// Test if a character matches a compiled character class
     fn test_char_class(&self, ch: char, char_class: &CompiledCharClass) -> bool {
         let ch_code = ch as u32;
-        trace_log!(
-            "vm",
-            "    test_char_class: ch='{}' (U+{:04X}), negated={}",
-            ch,
-            ch_code,
-            char_class.negated
-        );
+        trace_log!("vm", "    test_char_class: ch='{}' (U+{:04X})", ch, ch_code);
 
         // First check ASCII bitmap for fast path
         if ch_code <= 127 {
@@ -2008,14 +2000,12 @@ impl RegexVM {
                 matches_bitmap
             );
 
-            // Apply negation if needed
-            let result = matches_bitmap != char_class.negated;
+            let result = matches_bitmap;
             trace_log!(
                 "vm",
-                "    ASCII result: {} (matches_bitmap={}, negated={})",
+                "    ASCII result: {} (matches_bitmap={})",
                 result,
-                matches_bitmap,
-                char_class.negated
+                matches_bitmap
             );
             return result;
         }
@@ -2041,13 +2031,12 @@ impl RegexVM {
         }
 
         // Apply negation if needed
-        let result = in_range != char_class.negated;
+        let result = in_range;
         trace_log!(
             "vm",
-            "    Unicode result: {} (in_range={}, negated={})",
+            "    Unicode result: {} (in_range={})",
             result,
-            in_range,
-            char_class.negated
+            in_range
         );
         result
     }
@@ -3506,7 +3495,7 @@ impl OptimizingCompiler {
                     CharClass::Custom { ranges, negated } => {
                         // Compile custom character class into optimized bytecode
                         // Store the class definition and emit CharClass opcode with index
-                        let class_id = self.compile_char_class(ranges, *negated);
+                        let class_id = self.compile_char_class(ranges);
 
                         if *negated {
                             self.emit_op(OpCode::CharClassNeg);
@@ -3518,7 +3507,7 @@ impl OptimizingCompiler {
                     CharClass::UnicodeClass { name, negated } => {
                         let ranges = resolve_unicode_property_class(name, *negated)
                             .expect("unicode property class should be validated before codegen");
-                        let class_id = self.compile_char_class(&ranges, false);
+                        let class_id = self.compile_char_class(&ranges);
                         self.emit_op(OpCode::CharClass);
                         self.code.push(class_id as u8);
                     }
@@ -3528,14 +3517,14 @@ impl OptimizingCompiler {
             Regex::UnicodeClass { name, negated } => {
                 let ranges = resolve_unicode_property_class(name, *negated)
                     .expect("unicode property class should be validated before codegen");
-                let class_id = self.compile_char_class(&ranges, false);
+                let class_id = self.compile_char_class(&ranges);
                 self.emit_op(OpCode::CharClass);
                 self.code.push(class_id as u8);
             }
 
             Regex::ExtendedCharClass { .. } => {
                 panic!(
-                    "Perl extended character classes '(?[...])' should be rejected during compiler validation before codegen"
+                    "Perl extended character classes '(?[...])' should be lowered or rejected during compiler validation before codegen"
                 );
             }
 
@@ -4244,7 +4233,7 @@ impl OptimizingCompiler {
     }
 
     /// Compile a custom character class and return its ID
-    fn compile_char_class(&mut self, ranges: &[CharRange], negated: bool) -> usize {
+    fn compile_char_class(&mut self, ranges: &[CharRange]) -> usize {
         // Build an optimized character class representation
         let mut ascii_bitmap = [0u16; 8]; // 128 bits for ASCII
         let mut unicode_ranges = Vec::new();
@@ -4286,7 +4275,6 @@ impl OptimizingCompiler {
         let char_class = CompiledCharClass {
             ascii_bitmap,
             unicode_ranges: merged,
-            negated,
         };
 
         // Store the character class and return its index

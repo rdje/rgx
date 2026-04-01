@@ -37,6 +37,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
 - Unicode property classes (`\p{...}`, `\P{...}`) in current covered forms: `parity-verified`
+- Simple nested bracket-equivalent Perl extended character classes (`(?[[a-z]])`, `(?[[^0-9]])`): `parity-verified`
+  - differential coverage currently locks the default shipped subset, not the full PCRE2 extended-class algebra surface
 - Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `parity-verified`
   - differential coverage includes whole-pattern recursion plus numbered-group and named-group subroutine recursion forms
 - Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
@@ -74,12 +76,14 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - single-branch `DEFINE` definition blocks
   - lookaround conditions
 - Positive and negative lookahead/lookbehind
+- Simple nested bracket-equivalent Perl extended character classes without broader algebraic operators or property escapes
 
 ### Explicitly unsupported or still open
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(VERSION[...])...)`
 - Perl extended character classes `(?[...])`
-  - current RGX boundary is parser-recognized but compile-rejected explicitly; downstream set-algebra/runtime behavior is still open
+  - RGX now ships only the simple nested bracket-equivalent subset
+  - broader algebraic forms with set operators, nested classes, property escapes, and whitespace-separated set expressions remain open
 
 ### Planned next or broader PCRE2 follow-up
 - Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion and conditional forms.

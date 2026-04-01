@@ -95,7 +95,7 @@ Live continuity memory for `rgx` sessions.
   - the compiler assigns shared capture indices across the branch-reset group's top-level alternatives instead of numbering each branch independently
   - later backreferences and conditionals now see the resulting PCRE2-style max-branch-arity numbering after the branch-reset group
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
-- `(?[...])` Perl extended character classes now also have an explicit parser/AST boundary on both parser backends and compile-reject cleanly until RGX defines downstream set-algebra/runtime behavior.
+- `(?[...])` Perl extended character classes now ship a first runtime slice on the default path for simple nested bracket-equivalent literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`, while broader set-algebra forms still compile-reject explicitly.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.
@@ -153,6 +153,11 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-04-01
+- Shipped the first Perl extended-character-class runtime slice on the default RGX path:
+  - the compiler now lowers simple nested bracket-equivalent `Regex::ExtendedCharClass { content }` payloads into the existing char-class engine before VM codegen
+  - the shipped subset currently covers simple literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`
+  - broader algebraic forms with set operators, nested classes, property escapes, or whitespace-separated set expressions still fail explicitly with a narrower compile-time policy message
+  - added default-path API regressions, parser-contract coverage, and PCRE2 differential cases for the shipped subset
 - Reduced a small RGX-owned `clippy` warning slice after the named recursion-condition landing:
   - cleaned the remaining debug-print format warning in `rgx-core/src/vm.rs`
   - removed unnecessary `format!` calls from the debug examples

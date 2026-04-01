@@ -1194,7 +1194,7 @@ mod tests {
             "(abc)",
             "(?:a)(?<word>b)(?>c)",
             "(?|a|b)",
-            "(?[a-z])",
+            "(?[[a-z]])",
             "(?=ab)c",
             "(?!ab)c",
             "(?<=z)a",
@@ -1372,8 +1372,8 @@ mod tests {
                 "conditional '(?(R&missing)...)' refers to missing named capture group",
             ),
             (
-                "(?[a-z])",
-                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx",
+                r"(?[a-z])",
+                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx",
             ),
         ];
 
@@ -1401,5 +1401,13 @@ mod tests {
         assert!(regex.is_match("aa"));
         assert!(regex.is_match("bb"));
         assert!(!regex.is_match("ab"));
+    }
+
+    #[test]
+    fn parser_contract_simple_extended_char_class_executes_on_default_path() {
+        let regex = crate::Regex::compile(r"\A(?[[a-z]])+\z")
+            .expect("simple extended character class fixture should compile on the default path");
+        assert!(regex.is_match("abcxyz"));
+        assert!(!regex.is_match("abc123"));
     }
 }

@@ -48,7 +48,7 @@ Required invariants:
   - recursion `(?R)`, `(?1)`, `(?&name)` -> `Regex::Recursion { target }`
   - backreferences like `\1` -> `Regex::Backreference(..)`
   - Unicode property classes like `\p{L}` / `\P{Greek}` -> `Regex::UnicodeClass { name, negated }`
-  - Perl extended character classes like `(?[a-z])` -> `Regex::ExtendedCharClass { content }`
+  - Perl extended character classes like `(?[[a-z]])` -> `Regex::ExtendedCharClass { content }`
   - conditional (currently supported parser tests):
     - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
     - `(?(+1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(1), ... }`
@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-  - Perl extended character classes are parser-recognized but compile-rejected explicitly until RGX defines downstream set-algebra/runtime policy
+  - Perl extended character classes now execute on the default path only for the current simple nested bracket-equivalent literal/range subset, while broader set operators, nested classes, property escapes, and whitespace-separated algebra still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
@@ -100,7 +100,7 @@ The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
-- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, Perl extended character classes, and missing capture-target references.
+- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, unsupported algebraic Perl extended character classes, and missing capture-target references.
 
 When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, Perl extended character classes, code-block tags, recursion, backreferences, current conditional families (including relative group-exists and recursion-condition transport), and Unicode property classes.
 

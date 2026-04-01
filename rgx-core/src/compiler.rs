@@ -1,6 +1,7 @@
 use crate::ast::Regex as RegexAst;
 use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
+use crate::parser::Parser as ReferenceParser;
 use crate::parsing;
 use crate::pattern::CompiledPattern;
 use crate::unicode_support::resolve_unicode_property_class;
@@ -120,6 +121,7 @@ impl Compiler {
             self.mode
         );
         let ast = Self::assign_capture_indices(ast);
+        let ast = Self::lower_extended_char_classes(ast)?;
         debug_log!("compiler", "AST: {:?}", ast);
         if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
             trace_exit!(
@@ -221,6 +223,200 @@ impl Compiler {
             Self::resolve_relative_conditionals_inner(ast, 0, total_groups)?;
         debug_assert_eq!(resolved_groups, total_groups);
         Ok(ast)
+    }
+
+    fn extended_char_class_subset_message() -> String {
+        "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx, such as '(?[[a-z]])'; set operators, property escapes, and broader algebra remain unsupported"
+            .to_string()
+    }
+
+    fn lower_extended_char_classes(ast: RegexAst) -> Result<RegexAst> {
+        match ast {
+            RegexAst::Sequence(items) => Ok(RegexAst::Sequence(
+                items
+                    .into_iter()
+                    .map(Self::lower_extended_char_classes)
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            RegexAst::Alternation(items) => Ok(RegexAst::Alternation(
+                items
+                    .into_iter()
+                    .map(Self::lower_extended_char_classes)
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            RegexAst::Quantified { expr, quantifier } => Ok(RegexAst::Quantified {
+                expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                quantifier,
+            }),
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => Ok(RegexAst::Group {
+                expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                kind,
+                index,
+                name,
+            }),
+            RegexAst::Lookahead { expr, positive } => Ok(RegexAst::Lookahead {
+                expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                positive,
+            }),
+            RegexAst::Lookbehind { expr, positive } => Ok(RegexAst::Lookbehind {
+                expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                positive,
+            }),
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => Ok(RegexAst::Conditional {
+                condition: Self::lower_extended_char_class_condition(condition)?,
+                true_branch: Box::new(Self::lower_extended_char_classes(*true_branch)?),
+                false_branch: false_branch
+                    .map(|branch| Self::lower_extended_char_classes(*branch).map(Box::new))
+                    .transpose()?,
+            }),
+            RegexAst::ExtendedCharClass { content } => {
+                Self::lower_extended_char_class_content(content)
+            }
+            other => Ok(other),
+        }
+    }
+
+    fn lower_extended_char_class_condition(
+        condition: crate::ast::ConditionalTest,
+    ) -> Result<crate::ast::ConditionalTest> {
+        match condition {
+            crate::ast::ConditionalTest::Lookahead { expr, positive } => {
+                Ok(crate::ast::ConditionalTest::Lookahead {
+                    expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                    positive,
+                })
+            }
+            crate::ast::ConditionalTest::Lookbehind { expr, positive } => {
+                Ok(crate::ast::ConditionalTest::Lookbehind {
+                    expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+                    positive,
+                })
+            }
+            crate::ast::ConditionalTest::GroupExists(group) => {
+                Ok(crate::ast::ConditionalTest::GroupExists(group))
+            }
+            crate::ast::ConditionalTest::RelativeGroupExists(offset) => {
+                Ok(crate::ast::ConditionalTest::RelativeGroupExists(offset))
+            }
+            crate::ast::ConditionalTest::NamedGroupExists(name) => {
+                Ok(crate::ast::ConditionalTest::NamedGroupExists(name))
+            }
+            crate::ast::ConditionalTest::RecursionAny => {
+                Ok(crate::ast::ConditionalTest::RecursionAny)
+            }
+            crate::ast::ConditionalTest::RecursionGroup(group) => {
+                Ok(crate::ast::ConditionalTest::RecursionGroup(group))
+            }
+            crate::ast::ConditionalTest::RecursionNamed(name) => {
+                Ok(crate::ast::ConditionalTest::RecursionNamed(name))
+            }
+            crate::ast::ConditionalTest::Define => Ok(crate::ast::ConditionalTest::Define),
+        }
+    }
+
+    fn lower_extended_char_class_content(content: String) -> Result<RegexAst> {
+        let body = Self::extract_simple_extended_char_class_body(&content)
+            .ok_or_else(|| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+        Self::validate_simple_char_class_body(body)?;
+
+        let mut parser = ReferenceParser::new(&content)
+            .map_err(|_| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+        let lowered = parser
+            .parse()
+            .map_err(|_| RgxError::Compile(Self::extended_char_class_subset_message()))?;
+
+        match lowered {
+            RegexAst::CharClass(char_class) => Ok(RegexAst::CharClass(char_class)),
+            _ => Err(RgxError::Compile(Self::extended_char_class_subset_message())),
+        }
+    }
+
+    fn extract_simple_extended_char_class_body(content: &str) -> Option<&str> {
+        if !content.starts_with('[') {
+            return None;
+        }
+
+        let mut depth = 0usize;
+        let mut escaped = false;
+        let mut closed_at = None;
+
+        for (idx, ch) in content.char_indices() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => escaped = true,
+                '[' => depth = depth.saturating_add(1),
+                ']' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        closed_at = Some(idx + ch.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if depth != 0 || closed_at != Some(content.len()) || content.len() < 2 {
+            return None;
+        }
+
+        Some(&content[1..content.len() - 1])
+    }
+
+    fn validate_simple_char_class_body(content: &str) -> Result<()> {
+        if content.is_empty() {
+            return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+        }
+
+        let mut index = 0usize;
+        let mut chars = content.chars();
+
+        while let Some(ch) = chars.next() {
+            if ch.is_whitespace() {
+                return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+            }
+
+            if ch == '\\' {
+                let Some(escaped) = chars.next() else {
+                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                };
+
+                match escaped {
+                    'n' | 't' | 'r' | '\\' | ']' | '-' | '^' => {}
+                    _ => return Err(RgxError::Compile(Self::extended_char_class_subset_message())),
+                }
+
+                index += 2;
+                continue;
+            }
+
+            match ch {
+                '[' | ']' | '&' | '+' | '|' | '!' => {
+                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                }
+                '^' if index != 0 => {
+                    return Err(RgxError::Compile(Self::extended_char_class_subset_message()));
+                }
+                _ => {}
+            }
+
+            index += 1;
+        }
+
+        Ok(())
     }
 
     fn assign_capture_indices(ast: RegexAst) -> RegexAst {
@@ -615,10 +811,6 @@ impl Compiler {
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. } => Self::parser_boundary_validation_message(expr),
             RegexAst::Group { expr, .. } => Self::parser_boundary_validation_message(expr),
-            RegexAst::ExtendedCharClass { .. } => Some(
-                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
-                    .to_string(),
-            ),
             RegexAst::Conditional {
                 condition,
                 true_branch,
@@ -652,6 +844,7 @@ impl Compiler {
             | RegexAst::Word { .. }
             | RegexAst::Space { .. }
             | RegexAst::UnicodeClass { .. }
+            | RegexAst::ExtendedCharClass { .. }
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
@@ -912,10 +1105,7 @@ impl Compiler {
             RegexAst::UnicodeClass { name, negated } => {
                 resolve_unicode_property_class(name, *negated).err()
             }
-            RegexAst::ExtendedCharClass { .. } => Some(
-                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
-                    .to_string(),
-            ),
+            RegexAst::ExtendedCharClass { .. } => Some(Self::extended_char_class_subset_message()),
             RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
                 resolve_unicode_property_class(name, *negated).err()
             }

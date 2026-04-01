@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Ship simple extended character class runtime support
+- Scope: regex runtime feature delivery, parser-boundary reduction, parity coverage, and current-state doc refresh.
+- Changes:
+  - Lowered the current simple nested bracket-equivalent `(?[...])` subset into RGX's existing char-class runtime path before VM codegen, so forms like `(?[[a-z]])` and `(?[[^0-9]])` now execute on the default path instead of failing at the compiler boundary.
+  - Kept broader algebraic extended-class forms explicitly gated with a narrower compile-time policy message rather than pretending to implement the full PCRE2 set-algebra surface.
+  - Added API regressions, parser-contract coverage, and PCRE2 differential tests for the shipped subset, and updated the capability/parity/roadmap analysis docs to reflect the new partial support level.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_simple_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This intentionally ships only the simple nested bracket-equivalent slice; broader set operators, nested classes, property escapes, and whitespace-separated set expressions remain open follow-up work.
+
 ### 2026-04-01 - Reduce RGX-owned clippy warning noise
 - Scope: internal cleanup, warning-debt reduction, and continuity refresh.
 - Changes:

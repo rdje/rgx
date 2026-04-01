@@ -41,6 +41,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "  ab\tcd  ",
         },
         ParityCase {
+            name: "extended_class_simple_range_all",
+            pattern: r"(?[[a-z]])+",
+            input: "abc 123 xy",
+        },
+        ParityCase {
+            name: "extended_class_simple_negated_all",
+            pattern: r"(?[[^0-9]])+",
+            input: "123abc45!!",
+        },
+        ParityCase {
             name: "word_boundary_all",
             pattern: r"\bcat\b",
             input: "cat scat cat",
@@ -217,6 +227,11 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             name: "no_match_space_class_neg",
             pattern: r"\S+",
             input: " \t\n",
+        },
+        ParityCase {
+            name: "no_match_extended_class_negated",
+            pattern: r"(?[[^0-9]])+",
+            input: "12345",
         },
         ParityCase {
             name: "no_match_backreference",

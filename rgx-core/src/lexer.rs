@@ -1787,11 +1787,11 @@ mod tests {
 
     #[test]
     fn test_extended_char_class_tokens() {
-        let tokens = tokenize_all("(?[a-z])").unwrap();
+        let tokens = tokenize_all("(?[[a-z]])").unwrap();
         assert_eq!(
             tokens,
             vec![Token::ExtendedCharClass {
-                content: "a-z".to_string(),
+                content: "[a-z]".to_string(),
             }]
         );
     }

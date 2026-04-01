@@ -3370,16 +3370,32 @@ mod tests {
     }
 
     #[test]
-    fn parser_extended_char_class_reports_explicit_compile_boundary() {
-        let result = Regex::compile("(?[a-z])");
+    fn parser_extended_char_class_simple_ranges_execute_on_default_path() {
+        let regex = Regex::compile(r"\A(?[[a-z]])+\z")
+            .expect("Failed to compile simple extended character class range pattern");
+        assert!(regex.is_match("abcxyz"));
+        assert!(!regex.is_match("abc123"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_simple_negation_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[[^0-9]])+\z")
+            .expect("Failed to compile negated extended character class pattern");
+        assert!(regex.is_match("abcXYZ"));
+        assert!(!regex.is_match("abc123"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_requires_nested_simple_syntax() {
+        let result = Regex::compile(r"(?[a-z])");
         assert!(
             result.is_err(),
-            "extended character class should not silently compile"
+            "unsupported extended character class should fail"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' are parser-recognized but not yet executed by rgx"
+                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
@@ -3449,6 +3465,10 @@ mod tests {
             (r"\p{L}+", "123", false),
             (r"\P{L}+", "123!", true),
             (r"\P{L}+", "β", false),
+            (r"\A(?[[a-z]])+\z", "abcxyz", true),
+            (r"\A(?[[a-z]])+\z", "abc123", false),
+            (r"\A(?[[^0-9]])+\z", "abcXYZ", true),
+            (r"\A(?[[^0-9]])+\z", "abc123", false),
             (r"\A(a)?(?(1)b|c)\z", "ab", true),
             (r"\A(a)?(?(1)b|c)\z", "c", true),
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
@@ -3522,6 +3542,10 @@ mod tests {
             (
                 "(?(R2)a|b)",
                 "conditional '(?(R2)...)' refers to missing capture group",
+            ),
+            (
+                r"(?[a-z])",
+                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx",
             ),
         ];
 
