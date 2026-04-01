@@ -45,10 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
-- Latest extended-character-class feature pass widened the shipped subset again:
-  - bare horizontal/vertical whitespace shorthand terms `\h`, `\H`, `\v`, and `\V` now execute on the default path inside `(?[...])`
-  - compiler/unit, parser-path, parser-contract, and PCRE2 differential coverage now lock those h/v-space shorthand cases in
-  - the new differential parity cases intentionally use ASCII-only whitespace examples because the current `pcre2::bytes::Regex` harness is still byte-oriented, while richer Unicode coverage for `\h` remains in RGX-owned unit tests
+- Latest cleanup was a consolidation-only pass over the parser-path capability matrix regression in `rgx-core/src/lib.rs`:
+  - the large `capability_matrix_supported_parser_path_cases` data set now lives in one shared constant instead of inside a monolithic test body
+  - the assertions now flow through one helper, so future feature turns can append parser-path cases without recreating the old `clippy::too_many_lines` warning
+  - shipped regex behavior did not widen; this was strictly a maintainability and warning-noise cleanup
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.

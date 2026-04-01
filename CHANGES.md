@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Consolidate parser-path capability matrix test
+- Scope: internal test cleanup, warning-noise reduction, and continuity refresh.
+- Changes:
+  - Moved the large parser-path capability case table in `rgx-core/src/lib.rs` out of the `capability_matrix_supported_parser_path_cases` test body and into one shared constant, then routed the assertions through a small helper.
+  - Kept the supported-pattern coverage identical while making the parser-path capability matrix easier to extend without turning one test function into a monolith.
+  - Removed the RGX-owned `clippy::too_many_lines` warning for that parser-path capability test; the remaining visible `too_many_lines` warnings in the standard loop are still the older wasm-heavy tests.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --tests -- --no-deps`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not widen, but one of the biggest RGX-owned parser-path regression tests is now data-driven and cheaper to maintain.
+
 ### 2026-04-01 - Extend shipped extended char class h/v-space shorthand subset
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:
