@@ -37,8 +37,8 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
 - Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
 - Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
 - Unicode property classes (`\p{...}`, `\P{...}`) in current covered forms: `parity-verified`
-- Current shipped Perl extended character class subset (`(?[[a-z]])`, `(?[[^0-9]])`, `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[ ([a-z] - [aeiou]) & [b-d] ])`, `(?[ [a-f] | [d-z] & [m-p] ])`, `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`): `parity-verified`
-  - differential coverage currently locks the default shipped grouped/complement bracket/property/shorthand subset plus same-level multi-operator precedence, not the full PCRE2 extended-class algebra surface
+- Current shipped Perl extended character class subset (`(?[[a-z]])`, `(?[[^0-9]])`, `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[\x{41} - [B]])`, `(?[\n | \t])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[ ([a-z] - [aeiou]) & [b-d] ])`, `(?[ [a-f] | [d-z] & [m-p] ])`, `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`): `parity-verified`
+  - differential coverage currently locks the default shipped grouped/complement bracket/property/shorthand/escaped-term subset plus same-level multi-operator precedence, not the full PCRE2 extended-class algebra surface
 - Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `parity-verified`
   - differential coverage includes whole-pattern recursion plus numbered-group and named-group subroutine recursion forms
 - Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
@@ -76,14 +76,14 @@ Backed by `rgx-bench/tests/pcre2_parity.rs`.
   - single-branch `DEFINE` definition blocks
   - lookaround conditions
 - Positive and negative lookahead/lookbehind
-- Current shipped Perl extended character class subset: bracket/property terms, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`), unary complement, grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|` / `+` / `-` / `^`
+- Current shipped Perl extended character class subset: bracket/property terms, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement, grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|` / `+` / `-` / `^`
 
 ### Explicitly unsupported or still open
 - Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
 - Newer conditional forms such as `(?(VERSION[...])...)`
 - Perl extended character classes `(?[...])`
-  - RGX now ships a grouped bracket/property/shorthand subset with unary complement and same-level multi-operator precedence
-  - wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset remain open
+  - RGX now ships a grouped bracket/property/shorthand/escaped-term subset with unary complement and same-level multi-operator precedence
+  - wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset remain open
 
 ### Planned next or broader PCRE2 follow-up
 - Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion and conditional forms.

@@ -3453,6 +3453,22 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_bare_hex_escape_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\x{41} - [B]])+\z")
+            .expect("Failed to compile hex-escape extended character class pattern");
+        assert!(regex.is_match("AAAA"));
+        assert!(!regex.is_match("AAB"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_bare_control_escapes_execute_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\n | \t])+\z")
+            .expect("Failed to compile control-escape extended character class pattern");
+        assert!(regex.is_match("\n\t\n"));
+        assert!(!regex.is_match(" \n"));
+    }
+
+    #[test]
     fn parser_extended_char_class_requires_nested_simple_syntax() {
         let result = Regex::compile(r"(?[a-z])");
         assert!(

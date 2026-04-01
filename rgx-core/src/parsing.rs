@@ -1429,6 +1429,18 @@ mod tests {
         assert!(negated_digit_regex.is_match("FACE"));
         assert!(!negated_digit_regex.is_match("FA3E"));
 
+        let hex_regex = crate::Regex::compile(r"\A(?[\x{41} - [B]])+\z").expect(
+            "hex-escape extended character class fixture should compile on the default path",
+        );
+        assert!(hex_regex.is_match("AAAA"));
+        assert!(!hex_regex.is_match("AAB"));
+
+        let control_regex = crate::Regex::compile(r"\A(?[\n | \t])+\z").expect(
+            "control-escape extended character class fixture should compile on the default path",
+        );
+        assert!(control_regex.is_match("\n\t\n"));
+        assert!(!control_regex.is_match(" \n"));
+
         let complement_regex = crate::Regex::compile(r"\A(?[ ![0-9] ])+\z").expect(
             "complement extended character class fixture should compile on the default path",
         );

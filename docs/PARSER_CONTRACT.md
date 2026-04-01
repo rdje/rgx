@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.16`
+- Version: `v0.1.17`
 - Last updated: `2026-04-01`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-- Perl extended character classes now execute on the default path for the current grouped bracket/property/shorthand subset: bracket/property terms, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`), unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
+- Perl extended character classes now execute on the default path for the current grouped bracket/property/shorthand/escaped-term subset: bracket/property terms, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

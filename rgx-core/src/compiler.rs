@@ -102,13 +102,17 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\d - [3] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\x{41} - [B] ])', '(?[ \\n | \\t ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
         Self {
             ranges: Self::normalize(ranges),
         }
+    }
+
+    fn from_char(ch: char) -> Self {
+        Self::new(vec![(ch as u32, ch as u32)])
     }
 
     fn from_char_ranges(ranges: &[CharRange]) -> Self {
@@ -814,7 +818,18 @@ impl Compiler {
             Some('S') => {
                 Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: true })
             }
-            Some('p') | Some('P') => {
+            Some('n') => Ok(ScalarRangeSet::from_char('\n')),
+            Some('t') => Ok(ScalarRangeSet::from_char('\t')),
+            Some('r') => Ok(ScalarRangeSet::from_char('\r')),
+            Some('f') => Ok(ScalarRangeSet::from_char('\u{0C}')),
+            Some('a') => Ok(ScalarRangeSet::from_char('\u{07}')),
+            Some('e') => Ok(ScalarRangeSet::from_char('\u{1B}')),
+            Some(
+                escaped @ ('.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
+                | '|' | '\\' | '-'),
+            ) => Ok(ScalarRangeSet::from_char(escaped)),
+            Some('x') => Self::resolve_extended_hex_escape_term(cursor),
+            Some('p' | 'P') => {
                 if cursor.consume_char() != Some('{') {
                     return Err(Self::extended_char_class_subset_error());
                 }
@@ -834,6 +849,51 @@ impl Compiler {
             }
             _ => Err(Self::extended_char_class_subset_error()),
         }
+    }
+
+    fn resolve_extended_hex_escape_term(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        let mut hex_digits = String::new();
+
+        if cursor.peek_char() == Some('{') {
+            cursor.consume_char();
+            let mut closed = false;
+            while let Some(ch) = cursor.consume_char() {
+                if ch == '}' {
+                    closed = true;
+                    break;
+                }
+                if !ch.is_ascii_hexdigit() {
+                    return Err(Self::extended_char_class_subset_error());
+                }
+                hex_digits.push(ch);
+            }
+
+            if hex_digits.is_empty() || !closed {
+                return Err(Self::extended_char_class_subset_error());
+            }
+        } else {
+            while hex_digits.len() < 2 {
+                let Some(ch) = cursor.peek_char() else {
+                    break;
+                };
+                if !ch.is_ascii_hexdigit() {
+                    break;
+                }
+                hex_digits.push(ch);
+                cursor.consume_char();
+            }
+
+            if hex_digits.is_empty() {
+                return Err(Self::extended_char_class_subset_error());
+            }
+        }
+
+        let code_point = u32::from_str_radix(&hex_digits, 16)
+            .map_err(|_| Self::extended_char_class_subset_error())?;
+        let ch = char::from_u32(code_point).ok_or_else(Self::extended_char_class_subset_error)?;
+        Ok(ScalarRangeSet::from_char(ch))
     }
 
     fn resolve_char_class_scalar_ranges(
@@ -2155,6 +2215,35 @@ mod tests {
         assert!(range_contains(&ranges, 'F'));
         assert!(!range_contains(&ranges, '3'));
         assert!(!range_contains(&ranges, 'Z'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_hex_escape_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\x{41} - [B]".to_string())
+            .expect("Expected bare hex-escape set term to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'B'));
+        assert!(!range_contains(&ranges, 'C'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_control_escape_terms() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\n | \t".to_string())
+            .expect("Expected bare control-escape set terms to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\n'));
+        assert!(range_contains(&ranges, '\t'));
+        assert!(!range_contains(&ranges, ' '));
+        assert!(!range_contains(&ranges, 'A'));
     }
 
     #[test]

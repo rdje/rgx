@@ -66,6 +66,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "ABC facet_ xyz 123",
         },
         ParityCase {
+            name: "extended_class_hex_escape_difference_all",
+            pattern: r"(?[\x{41} - [B]])+",
+            input: "B AA C A",
+        },
+        ParityCase {
+            name: "extended_class_control_escape_union_all",
+            pattern: "(?[\\n | \\t])+",
+            input: "x\n\t\n y\t",
+        },
+        ParityCase {
             name: "extended_class_property_intersection_all",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc XYZ q M",
@@ -294,6 +304,16 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "1237",
         },
         ParityCase {
+            name: "no_match_extended_class_hex_escape_difference",
+            pattern: r"(?[\x{41} - [B]])+",
+            input: "BBBB",
+        },
+        ParityCase {
+            name: "no_match_extended_class_control_escape_union",
+            pattern: "(?[\\n | \\t])+",
+            input: "    ",
+        },
+        ParityCase {
             name: "no_match_extended_class_property_intersection",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc xyz",
@@ -466,6 +486,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_negated_shorthand_intersection",
             pattern: r"(?[\D & [A-F]])+",
             input: "99FACE77",
+        },
+        ParityCase {
+            name: "extended_class_hex_escape_difference",
+            pattern: r"(?[\x{41} - [B]])+",
+            input: "zzAAByy",
+        },
+        ParityCase {
+            name: "extended_class_control_escape_union",
+            pattern: "(?[\\n | \\t])+",
+            input: "xx\n\tzz",
         },
         ParityCase {
             name: "extended_class_property_intersection",

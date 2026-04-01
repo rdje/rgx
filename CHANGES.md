@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend shipped extended char class escaped-term subset
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\f`, `\a`, `\e`, escaped operators like `\-`, and hexadecimal codepoint escapes like `\x{41}` / `\x41` inside the current extended-character-class subset instead of compile-rejecting them.
+  - Added compiler/unit coverage for bare hex-escape and control-escape lowering, parser-path and parser-contract regressions for hex/control runtime behavior, and PCRE2 differential parity cases for the newly shipped escaped-term slice.
+  - Kept the boundary disciplined by still rejecting wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset instead of over-claiming the full PCRE2 extended-character-class grammar.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path without pretending the broader remaining extended-class grammar is finished.
+
 ### 2026-04-01 - Consolidate extended char class boundary message
 - Scope: internal cleanup, compile-boundary contract hardening, and continuity refresh.
 - Changes:

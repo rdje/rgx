@@ -73,6 +73,10 @@ Live continuity memory for `rgx` sessions.
   - `rgx-core/src/compiler.rs` now owns the single source of truth for the current boundary message
   - `rgx-core/src/lib.rs` and `rgx-core/src/parsing.rs` now assert against that constant instead of drifting hard-coded copies
   - this keeps future extended-character-class widening work aligned with the existing explicit-boundary policy
+- Latest extended-character-class feature pass widened the shipped subset again:
+  - bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\f`, `\a`, `\e`, escaped operators like `\-`, and hex escapes like `\x{41}` / `\x41` now execute on the default path inside `(?[...])`
+  - parser-path, parser-contract, compiler/unit, and PCRE2 differential coverage now lock those escaped-term cases in
+  - the explicit compile boundary now narrows to wider set-expression forms and any further bare-term families beyond the current bracket/property/shorthand/escaped-term subset
 - Local PGEN issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream`:
   - minimal repro: `(?(R&word)a|b)`
   - standalone local PGEN at commit `f97e0fe31750885f4fc48a67ed7660110cd20271` now reports `regex_parser_release_version=1.1.2` / `regex_integration_contract_version=1.1.2` and parses the repro successfully
