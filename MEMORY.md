@@ -68,6 +68,10 @@ Live continuity memory for `rgx` sessions.
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
 - The pinned PGEN submodule commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`.
+- Latest extended-character-class cleanup did not widen syntax, but it hardened the new bare POSIX-term path:
+  - `rgx-core/src/compiler.rs` now uses a typed internal ASCII POSIX registry plus `ExtendedPosixClassSpec` instead of ad hoc string matching for the current `(?[...])` POSIX-term subset
+  - invalid POSIX names now fail through one narrower helper path, while non-POSIX bodies still fall back cleanly to the ordinary bracket/escape-term lowering logic
+  - direct compiler-unit coverage now locks valid POSIX spec parsing, unknown-name rejection, and non-POSIX-body passthrough before the later regex lowering step
 - Latest extended-character-class feature pass widened the shipped subset again:
   - bare ASCII POSIX class terms such as `[:alpha:]`, `[:graph:]`, `[:digit:]`, `[:space:]`, and `[:word:]` now execute on the default path inside `(?[...])`
   - parser-path, parser-contract, compiler/unit, and PCRE2 differential coverage now lock representative forms like `(?[ [:graph:] ])`, `(?[ ![:alpha:] ])`, and `(?[ [:alpha:] & [a-z\t] ])`

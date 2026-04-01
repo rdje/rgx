@@ -94,6 +94,71 @@ impl ExtendedCharClassOperator {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AsciiPosixClass {
+    Alnum,
+    Alpha,
+    Ascii,
+    Blank,
+    Cntrl,
+    Digit,
+    Graph,
+    Lower,
+    Print,
+    Punct,
+    Space,
+    Upper,
+    Word,
+    Xdigit,
+}
+
+impl AsciiPosixClass {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "alnum" => Some(Self::Alnum),
+            "alpha" => Some(Self::Alpha),
+            "ascii" => Some(Self::Ascii),
+            "blank" => Some(Self::Blank),
+            "cntrl" => Some(Self::Cntrl),
+            "digit" => Some(Self::Digit),
+            "graph" => Some(Self::Graph),
+            "lower" => Some(Self::Lower),
+            "print" => Some(Self::Print),
+            "punct" => Some(Self::Punct),
+            "space" => Some(Self::Space),
+            "upper" => Some(Self::Upper),
+            "word" => Some(Self::Word),
+            "xdigit" => Some(Self::Xdigit),
+            _ => None,
+        }
+    }
+
+    fn ranges(self) -> &'static [ScalarRange] {
+        match self {
+            Self::Alnum => &ASCII_ALNUM_RANGES,
+            Self::Alpha => &ASCII_ALPHA_RANGES,
+            Self::Ascii => &ASCII_ASCII_RANGES,
+            Self::Blank => &ASCII_BLANK_RANGES,
+            Self::Cntrl => &ASCII_CNTRL_RANGES,
+            Self::Digit => &ASCII_DIGIT_RANGES,
+            Self::Graph => &ASCII_GRAPH_RANGES,
+            Self::Lower => &ASCII_LOWER_RANGES,
+            Self::Print => &ASCII_PRINT_RANGES,
+            Self::Punct => &ASCII_PUNCT_RANGES,
+            Self::Space => &ASCII_SPACE_RANGES,
+            Self::Upper => &ASCII_UPPER_RANGES,
+            Self::Word => &ASCII_WORD_RANGES,
+            Self::Xdigit => &ASCII_XDIGIT_RANGES,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExtendedPosixClassSpec {
+    class: AsciiPosixClass,
+    negated: bool,
+}
+
 struct ExtendedCharClassCursor<'a> {
     input: &'a str,
     offset: usize,
@@ -833,6 +898,17 @@ impl Compiler {
             return Ok(None);
         };
 
+        let Some(spec) = Self::parse_extended_posix_class_spec(body)? else {
+            return Ok(None);
+        };
+
+        Ok(Some(ScalarRangeSet::from_builtin_ranges(
+            spec.class.ranges(),
+            spec.negated,
+        )))
+    }
+
+    fn parse_extended_posix_class_spec(body: &str) -> Result<Option<ExtendedPosixClassSpec>> {
         let Some(spec) = Self::extract_extended_posix_class_spec(body) else {
             return Ok(None);
         };
@@ -840,43 +916,25 @@ impl Compiler {
         let (negated, name) = spec
             .strip_prefix('^')
             .map_or((false, spec), |stripped| (true, stripped));
-        let Some(ranges) = Self::resolve_posix_class_ranges(name) else {
+        let Some(class) = AsciiPosixClass::from_name(name) else {
             return Err(Self::extended_char_class_subset_error());
         };
 
-        Ok(Some(ScalarRangeSet::from_builtin_ranges(ranges, negated)))
+        Ok(Some(ExtendedPosixClassSpec { class, negated }))
     }
 
     fn extract_extended_posix_class_spec(body: &str) -> Option<&str> {
-        if let Some(spec) = body
-            .strip_prefix(':')
+        body.strip_prefix(':')
             .and_then(|inner| inner.strip_suffix(':'))
-        {
-            return Some(spec);
-        }
-
-        body.strip_prefix("[:")
-            .and_then(|inner| inner.strip_suffix(":]"))
+            .or_else(|| {
+                body.strip_prefix("[:")
+                    .and_then(|inner| inner.strip_suffix(":]"))
+            })
     }
 
+    #[cfg(test)]
     fn resolve_posix_class_ranges(name: &str) -> Option<&'static [ScalarRange]> {
-        match name {
-            "alnum" => Some(&ASCII_ALNUM_RANGES),
-            "alpha" => Some(&ASCII_ALPHA_RANGES),
-            "ascii" => Some(&ASCII_ASCII_RANGES),
-            "blank" => Some(&ASCII_BLANK_RANGES),
-            "cntrl" => Some(&ASCII_CNTRL_RANGES),
-            "digit" => Some(&ASCII_DIGIT_RANGES),
-            "graph" => Some(&ASCII_GRAPH_RANGES),
-            "lower" => Some(&ASCII_LOWER_RANGES),
-            "print" => Some(&ASCII_PRINT_RANGES),
-            "punct" => Some(&ASCII_PUNCT_RANGES),
-            "space" => Some(&ASCII_SPACE_RANGES),
-            "upper" => Some(&ASCII_UPPER_RANGES),
-            "word" => Some(&ASCII_WORD_RANGES),
-            "xdigit" => Some(&ASCII_XDIGIT_RANGES),
-            _ => None,
-        }
+        AsciiPosixClass::from_name(name).map(AsciiPosixClass::ranges)
     }
 
     fn resolve_extended_escape_term(
@@ -2494,6 +2552,73 @@ mod tests {
         assert!(range_contains(&ranges, '!'));
         assert!(!range_contains(&ranges, 'A'));
         assert!(!range_contains(&ranges, 'z'));
+    }
+
+    #[test]
+    fn parse_extended_posix_class_spec_accepts_current_ascii_forms() {
+        assert_eq!(
+            Compiler::parse_extended_posix_class_spec(":alpha:")
+                .expect("Expected bare ASCII POSIX alpha body to parse"),
+            Some(ExtendedPosixClassSpec {
+                class: AsciiPosixClass::Alpha,
+                negated: false,
+            })
+        );
+        assert_eq!(
+            Compiler::parse_extended_posix_class_spec(":^graph:")
+                .expect("Expected negated bare ASCII POSIX graph body to parse"),
+            Some(ExtendedPosixClassSpec {
+                class: AsciiPosixClass::Graph,
+                negated: true,
+            })
+        );
+        assert_eq!(
+            Compiler::parse_extended_posix_class_spec("[:word:]")
+                .expect("Expected nested bare ASCII POSIX word body to parse"),
+            Some(ExtendedPosixClassSpec {
+                class: AsciiPosixClass::Word,
+                negated: false,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_extended_posix_class_spec_rejects_unknown_ascii_class_names() {
+        let err = Compiler::parse_extended_posix_class_spec(":emoji:")
+            .expect_err("Expected unknown POSIX class names to stay behind the subset boundary");
+        assert!(
+            err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
+            "unexpected POSIX-spec boundary message: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_extended_posix_class_spec_ignores_non_posix_bodies() {
+        assert_eq!(
+            Compiler::parse_extended_posix_class_spec("a-z").expect(
+                "Expected non-POSIX simple bodies to stay available for ordinary class lowering"
+            ),
+            None
+        );
+        assert_eq!(
+            Compiler::parse_extended_posix_class_spec(r"\d").expect(
+                "Expected escape bodies to stay available for ordinary escape-term lowering"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_posix_class_ranges_matches_ascii_posix_registry() {
+        assert_eq!(
+            Compiler::resolve_posix_class_ranges("graph"),
+            Some(&ASCII_GRAPH_RANGES[..])
+        );
+        assert_eq!(
+            Compiler::resolve_posix_class_ranges("word"),
+            Some(&ASCII_WORD_RANGES[..])
+        );
+        assert_eq!(Compiler::resolve_posix_class_ranges("emoji"), None);
     }
 
     #[test]

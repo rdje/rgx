@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Consolidate extended char class POSIX spec parsing
+- Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the new bare POSIX-term string matching path in `rgx-core/src/compiler.rs` with a typed internal ASCII POSIX registry (`AsciiPosixClass`) plus an `ExtendedPosixClassSpec` helper so parsing, negation, and range lookup now flow through one explicit contract.
+  - Kept shipped regex behavior unchanged while making invalid POSIX names fail through one narrower helper path instead of ad hoc string splitting plus a later range lookup.
+  - Added direct compiler-unit coverage for valid POSIX spec parsing, unknown POSIX-name rejection, and non-POSIX bodies staying available to the ordinary extended-char-class lowering path.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; the shipped `(?[...])` subset did not widen, but the new bare POSIX-term slice is now less stringly-typed and easier to extend safely.
+
 ### 2026-04-01 - Extend shipped extended char class POSIX-term subset
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:
