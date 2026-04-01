@@ -1357,11 +1357,11 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
             ),
             (
-                r"(?[[a-z] - [aeiou] & [^x]])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
+                r"(?[\d - [3]])",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
             ),
         ];
 
@@ -1428,5 +1428,15 @@ mod tests {
             .expect("symmetric-difference extended character class fixture should compile on the default path");
         assert!(xor_regex.is_match("ABBA"));
         assert!(!xor_regex.is_match("AC"));
+
+        let precedence_regex = crate::Regex::compile(r"\A(?[ [a-f] | [d-z] & [m-p] ])+\z")
+            .expect("same-level precedence extended character class fixture should compile on the default path");
+        assert!(precedence_regex.is_match("abcmnop"));
+        assert!(!precedence_regex.is_match("xyz"));
+
+        let chained_regex = crate::Regex::compile(r"\A(?[ [a-z] - [aeiou] + [0-9] - [5] ])+\z")
+            .expect("chained low-precedence extended character class fixture should compile on the default path");
+        assert!(chained_regex.is_match("bcdf0249xyz"));
+        assert!(!chained_regex.is_match("face5"));
     }
 }

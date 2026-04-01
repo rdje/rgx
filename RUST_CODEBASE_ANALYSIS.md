@@ -68,7 +68,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the default RGX parser pin now includes the standalone PGEN `1.1.2` transport fix from local issue `pgen-issues/PGEN-RGX-0005.yaml`
   - the handwritten parser path, PGEN-backed path, compiler, and runtime now all agree on `R&name`
   - PCRE2 differential coverage now treats named recursion conditions as part of the supported conditional surface
-- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)`, single-branch `DEFINE` conditionals, branch-reset groups, and the current grouped/complement bracket/property `(?[...])` subset now execute on the default path, while broader extended-class algebra still fails with a clear compile-time policy error instead of being misread or silently dropped.
+- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)`, single-branch `DEFINE` conditionals, branch-reset groups, and the current grouped/complement bracket/property `(?[...])` subset now execute on the default path, including same-level multi-operator precedence, while additional bare-term families and wider extended-class forms still fail with a clear compile-time policy error instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -155,7 +155,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The CLI still has no native-registration surface, but it now exposes file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
-- Perl extended character classes now execute for the current grouped bracket/property subset: plain nested bracket terms, unary complement, grouped subexpressions, symmetric difference, and one explicit operator per expression level over bracket terms or Unicode property terms; broader same-level multi-operator expressions and wider nested/set-expression forms still compile-reject explicitly.
+- Perl extended character classes now execute for the current grouped bracket/property subset: plain nested bracket terms, unary complement, grouped subexpressions, symmetric difference, and same-level left-associative set algebra with `&` binding tighter than `|` / `+` / `-` / `^` over bracket terms or Unicode property terms; additional bare-term families and wider nested/set-expression forms still compile-reject explicitly.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.

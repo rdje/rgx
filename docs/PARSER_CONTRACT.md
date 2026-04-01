@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-  - Perl extended character classes now execute on the default path for the current grouped bracket/property subset: bracket/property terms, unary complement (`!`), grouped subexpressions, and one explicit operator per expression level (`|`, `+`, `-`, `&`, `^`) are shipped, while broader same-level multi-operator expressions and wider set-expression forms still compile-reject explicitly
+- Perl extended character classes now execute on the default path for the current grouped bracket/property subset: bracket/property terms, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while additional bare-term families and wider set-expression forms still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

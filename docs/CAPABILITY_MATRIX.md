@@ -15,8 +15,8 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
 - Perl extended character classes `(?[...])`: `shipped`
-  - current shipped subset executes bracket/property terms, unary complement, grouped subexpressions, and one explicit operator per expression level, such as `(?[[a-z]])`, `(?[[a-z] - [aeiou]])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, and `(?[ ([a-z] - [aeiou]) & [b-d] ])`
-  - broader same-level multi-operator expressions and wider set-expression forms still compile-reject explicitly
+  - current shipped subset executes bracket/property terms, unary complement, grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^`, such as `(?[[a-z]])`, `(?[[a-z] - [aeiou]])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[ ([a-z] - [aeiou]) & [b-d] ])`, `(?[ [a-f] | [d-z] & [m-p] ])`, and `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`
+  - additional bare-term families and wider set-expression forms still compile-reject explicitly
 - Quantifiers (greedy/lazy/possessive `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`

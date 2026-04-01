@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend shipped extended char class precedence
+- Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over the current bracket/property subset.
+  - Added precedence-sensitive and chained algebra coverage in compiler/unit tests, parser-contract/API regressions, and PCRE2 differential parity cases.
+  - Kept the boundary disciplined by still rejecting additional bare-term families and wider set-expression forms instead of over-claiming the full PCRE2 extended-character-class grammar.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another meaningful PCRE2 `(?[...])` slice on the default path without pretending the full extended-class grammar is finished.
+
 ### 2026-04-01 - Reduce RGX-owned warning scaffolding noise
 - Scope: internal cleanup, warning-debt reduction, and continuity refresh.
 - Changes:

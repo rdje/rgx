@@ -66,7 +66,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
   - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)` are shipped
-  - extend Perl extended character classes `(?[...])` beyond the newly shipped grouped bracket/property subset, with explicit runtime policy for broader same-level multi-operator expressions, additional bare-term families, and wider set-expression forms
+  - extend Perl extended character classes `(?[...])` beyond the newly shipped grouped bracket/property subset, with explicit runtime policy for additional bare-term families and wider set-expression forms
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 
 ### Performance validation loop
@@ -112,8 +112,9 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Extended Perl extended character classes again so the default path now also supports same-level multi-operator algebra with `&` binding tighter than `|`, `+`, `-`, and `^`, while still keeping additional bare-term families and wider set-expression forms behind an explicit compile boundary.
 - Consolidated the benchmark trend capture internals so artifact path planning, file writes, and summary logging now run through one shared path in `trend_capture.rs`, reducing duplication without changing the external report set.
-- Extended Perl extended character classes again so the default path now also supports unary complement, symmetric difference, and grouped subexpressions over the existing bracket/property subset, while still keeping broader same-level multi-operator forms behind an explicit compile boundary.
+- Extended Perl extended character classes again so the default path now also supports unary complement, symmetric difference, and grouped subexpressions over the existing bracket/property subset, laying the groundwork for the later same-level multi-operator precedence widening.
 - Tightened benchmark trend capture again so `overview.*` now surfaces the newest shared-label quick/full pair alongside the latest per-mode quick/full state, making the cross-mode landing artifact more release-oriented.
 - Tightened benchmark trend capture again so rolling `profile-history.*` summaries now call out the latest shared-label quick/full pair's biggest improvements and regressions instead of only exposing the raw pair-over-pair table.
 - Deepened benchmark trend capture again so shared-label quick/full pairs now also produce rolling `profile-history.*` summaries, making pair-over-pair revision deltas visible alongside the existing latest-pair snapshot.

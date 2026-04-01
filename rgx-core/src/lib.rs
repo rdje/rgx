@@ -3413,6 +3413,38 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_same_level_precedence_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [a-f] | [d-z] & [m-p] ])+\z")
+            .expect("Failed to compile same-level precedence extended character class pattern");
+        assert!(regex.is_match("abcmnop"));
+        assert!(!regex.is_match("xyz"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_multi_operator_chain_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [a-z] - [aeiou] + [0-9] - [5] ])+\z")
+            .expect("Failed to compile multi-operator chain extended character class pattern");
+        assert!(regex.is_match("bcdf0249xyz"));
+        assert!(!regex.is_match("face5"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_rejects_bare_shorthand_term() {
+        let result = Regex::compile(r"(?[\d - [3]])");
+        assert!(
+            result.is_err(),
+            "unsupported extended character class should fail"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains(
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
+            ),
+            "unexpected extended-char-class compile-boundary message: {msg}"
+        );
+    }
+
+    #[test]
     fn parser_extended_char_class_requires_nested_simple_syntax() {
         let result = Regex::compile(r"(?[a-z])");
         assert!(
@@ -3422,23 +3454,7 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level"
-            ),
-            "unexpected extended-char-class compile-boundary message: {msg}"
-        );
-    }
-
-    #[test]
-    fn parser_extended_char_class_rejects_same_level_multi_operator_algebra() {
-        let result = Regex::compile(r"(?[[a-z] - [aeiou] & [^x]])");
-        assert!(
-            result.is_err(),
-            "multi-operator extended character class should fail"
-        );
-        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains(
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level"
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
@@ -3598,11 +3614,11 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
             ),
             (
-                r"(?[[a-z] - [aeiou] & [^x]])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
+                r"(?[\d - [3]])",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
             ),
         ];
 

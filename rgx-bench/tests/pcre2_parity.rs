@@ -76,6 +76,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "CCABBAAC",
         },
         ParityCase {
+            name: "extended_class_same_level_precedence_all",
+            pattern: r"(?[ [a-f] | [d-z] & [m-p] ])+",
+            input: "abc mnop xyz def",
+        },
+        ParityCase {
+            name: "extended_class_low_precedence_chain_all",
+            pattern: r"(?[ [a-z] - [aeiou] + [0-9] - [5] ])+",
+            input: "aei bcdf0249 555 xyz",
+        },
+        ParityCase {
             name: "word_boundary_all",
             pattern: r"\bcat\b",
             input: "cat scat cat",
@@ -284,6 +294,16 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "CCCC",
         },
         ParityCase {
+            name: "no_match_extended_class_same_level_precedence",
+            pattern: r"(?[ [a-f] | [d-z] & [m-p] ])+",
+            input: "xyz",
+        },
+        ParityCase {
+            name: "no_match_extended_class_low_precedence_chain",
+            pattern: r"(?[ [a-z] - [aeiou] + [0-9] - [5] ])+",
+            input: "aeiou5",
+        },
+        ParityCase {
             name: "no_match_backreference",
             pattern: r"(a)\1",
             input: "ab",
@@ -436,6 +456,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_symmetric_difference",
             pattern: r"(?[ [AC] ^ [BC] ])+",
             input: "xxABCC",
+        },
+        ParityCase {
+            name: "extended_class_same_level_precedence",
+            pattern: r"(?[ [a-f] | [d-z] & [m-p] ])+",
+            input: "xxabcmnop",
+        },
+        ParityCase {
+            name: "extended_class_low_precedence_chain",
+            pattern: r"(?[ [a-z] - [aeiou] + [0-9] - [5] ])+",
+            input: "xxbcdf0249",
         },
         ParityCase {
             name: "backreference",
