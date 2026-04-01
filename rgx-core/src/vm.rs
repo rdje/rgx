@@ -1892,27 +1892,6 @@ impl RegexVM {
                 && ctx.text.get(ctx.pos + 1) == Some(&b'\n'))
     }
 
-    /// Extract capture groups from context
-    fn extract_captures(&self, ctx: &ExecContext) -> Vec<Option<(usize, usize)>> {
-        let mut groups = Vec::new();
-
-        for i in 0..=self.program.num_groups {
-            let start_idx = (i * 2) as usize;
-            let end_idx = start_idx + 1;
-
-            if let (Some(start), Some(end)) = (
-                ctx.captures.get(start_idx).and_then(|&x| x),
-                ctx.captures.get(end_idx).and_then(|&x| x),
-            ) {
-                groups.push(Some((start, end)));
-            } else {
-                groups.push(None);
-            }
-        }
-
-        groups
-    }
-
     /// Extract capture groups with explicit overall match (group 0)
     fn extract_captures_with_match(
         &self,

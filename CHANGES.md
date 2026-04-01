@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Reduce RGX-owned warning scaffolding noise
+- Scope: internal cleanup, warning-debt reduction, and continuity refresh.
+- Changes:
+  - Removed several dead or purely carried-over private scaffolding pieces from the core parser/runtime path, including the unused `Regex.pattern` field, the unused `Lexer.input` field, the stale `PatternAnalysis` parser helper, and an unused VM capture-extraction helper.
+  - Tightened feature gating around embedded-language helper plumbing so base builds no longer warn on dormant Lua/JavaScript/Rhai-only result-merging utilities or their `Mutex` import.
+  - Folded in a couple of remaining small RGX-owned lint cleanups, including the parser-contract `let ... else` simplification and a `clone_on_copy` fix in token tests.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not change, but the RGX-owned `rgx-core` warning floor visible during routine validation dropped from 101 to 93 and the Rust-state docs now match the cleaned code more closely.
+
 ### 2026-04-01 - Extend grouped extended char class subset
 - Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
 - Changes:

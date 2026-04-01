@@ -64,6 +64,11 @@ Live continuity memory for `rgx` sessions.
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
 - The pinned PGEN submodule commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`.
+- Latest RGX-owned warning-debt cleanup removed dead private scaffolding from the hot parser/runtime path:
+  - removed the unused `Regex.pattern` and `Lexer.input` fields
+  - removed the stale `PatternAnalysis` helper and an unused VM capture extractor
+  - feature-gated dormant Lua/JavaScript/Rhai-only execution helpers so base builds stop warning on them
+  - brought the visible RGX-owned `rgx-core` warning count in the standard validation loop down from 101 to 93
 - Local PGEN issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream`:
   - minimal repro: `(?(R&word)a|b)`
   - standalone local PGEN at commit `f97e0fe31750885f4fc48a67ed7660110cd20271` now reports `regex_parser_release_version=1.1.2` / `regex_integration_contract_version=1.1.2` and parses the repro successfully
@@ -158,6 +163,12 @@ Live continuity memory for `rgx` sessions.
 
 ## Session memory entries (newest first)
 ### 2026-04-01
+- Reduced another RGX-owned warning/dead-scaffolding slice without changing shipped behavior:
+  - removed the unused `Regex.pattern` and `Lexer.input` fields from the base regex/lexer path
+  - removed the stale `PatternAnalysis` helper from `rgx-core/src/parsing.rs` and an unused VM capture-extraction helper
+  - tightened feature gating around dormant Lua/JavaScript/Rhai-only emitted-result helpers in `rgx-core/src/execution.rs`
+  - cleaned the remaining `manual_let_else` / `clone_on_copy` nits in parser/token tests
+  - the visible RGX-owned `rgx-core` warning count in the normal validation loop dropped from 101 to 93
 - Hardened the newly shipped Perl extended-character-class slice with local guardrails:
   - extracted a dedicated compiler helper for the subset compile error used by the `(?[...])` lowering path
   - added direct compiler unit tests for nested simple-subset extraction/lowering and a rejection case for broader set algebra

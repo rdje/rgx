@@ -93,7 +93,6 @@ pub use pattern::{CompiledPattern, Pattern};
 /// a familiar interface similar to other regex libraries while offering
 /// unprecedented performance and multi-language code execution.
 pub struct Regex {
-    pattern: CompiledPattern,
     engine: Engine,
 }
 
@@ -130,10 +129,7 @@ impl Regex {
             }
         };
 
-        let regex = Self {
-            pattern: compiled,
-            engine,
-        };
+        let regex = Self { engine };
         trace_exit!("api", "Regex::compile", "ok=true");
         Ok(regex)
     }
@@ -167,10 +163,7 @@ impl Regex {
             }
         };
 
-        let regex = Self {
-            pattern: compiled,
-            engine,
-        };
+        let regex = Self { engine };
         trace_exit!("api", "Regex::with_mode", "ok=true");
         Ok(regex)
     }
@@ -196,10 +189,7 @@ impl Regex {
             }
         };
 
-        let regex = Self {
-            pattern: compiled,
-            engine,
-        };
+        let regex = Self { engine };
         trace_exit!("api", "Regex::from_ast", "ok=true");
         Ok(regex)
     }
@@ -222,10 +212,7 @@ impl Regex {
             }
         };
 
-        let regex = Self {
-            pattern: compiled,
-            engine,
-        };
+        let regex = Self { engine };
         trace_exit!("api", "Regex::from_ast_with_mode", "ok=true");
         Ok(regex)
     }

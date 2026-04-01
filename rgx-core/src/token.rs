@@ -388,7 +388,7 @@ mod tests {
     fn test_token_with_pos() {
         let token = Token::Char('a');
         let pos = Position::new(5, 1, 6);
-        let token_pos = TokenWithPos::new(token.clone(), pos.clone());
+        let token_pos = TokenWithPos::new(token.clone(), pos);
 
         assert_eq!(token_pos.token, token);
         assert_eq!(token_pos.position, pos);

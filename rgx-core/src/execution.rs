@@ -36,7 +36,9 @@
 use crate::error::{Result, RgxError};
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+#[cfg(any(feature = "javascript", feature = "lua", feature = "rhai"))]
+use std::sync::Mutex;
+use std::sync::{Arc, RwLock};
 
 // ============================================================================
 // EXECUTION CONTEXT
@@ -277,6 +279,7 @@ fn exec_result_kind(result: &ExecResult) -> &'static str {
     }
 }
 
+#[cfg(any(feature = "javascript", feature = "lua", feature = "rhai"))]
 fn emitted_result_to_exec_result(result: CodeBlockValue) -> ExecResult {
     match result {
         CodeBlockValue::Replacement(text) => ExecResult::Replacement(text),
@@ -284,6 +287,7 @@ fn emitted_result_to_exec_result(result: CodeBlockValue) -> ExecResult {
     }
 }
 
+#[cfg(any(feature = "javascript", feature = "lua", feature = "rhai"))]
 fn finish_exec_result(
     base_result: ExecResult,
     emitted_result: &Arc<Mutex<Option<CodeBlockValue>>>,

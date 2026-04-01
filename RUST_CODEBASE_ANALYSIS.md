@@ -59,6 +59,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `rgx-core/src/cache.rs`
   - `rgx-core/src/simd.rs`
   - `rgx-wasm/src/lib.rs`
+- Latest RGX-owned warning-debt cleanup trimmed dead private scaffolding in the base parser/runtime path and brought the visible `rgx-core` warning count in the standard validation loop down from 101 to 93.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
@@ -159,7 +160,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
 - The declared opcode surface in `rgx-core/src/vm.rs` still exceeds the emitted/decoded/runtime-used surface; several opcode families remain aspirational or only partially wired.
-- `PatternAnalysis` and `ParserConfig` remain unused scaffolding even after the real PGEN backend rollout.
+- `ParserConfig` still remains unused scaffolding even after the real PGEN backend rollout, but the older dead `PatternAnalysis` helper has now been removed.
 - The default local CI path now validates the default PGEN-backed RGX-scoped `fmt`, explicit package tests for `rgx-core`, `rgx-cli`, `rgx-bench`, and `rgx-wasm`, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`), combined-language build coverage (`all-languages`), `clippy`, and a quick benchmark-trend capture summary under `target/benchmark-trends/`.
 - The explicit package matrix is intentional because `cargo test --workspace` has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent RGX package coverage remains stable.
 - The PGEN dependency is now pinned as `subs/pgen` at commit `f97e0fe31750885f4fc48a67ed7660110cd20271`.
@@ -213,4 +214,4 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 1. Decide whether native registration should stay Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 3. Deepen the quick benchmark history/delta capture beyond the shipped same-label quick/full pairing plus rolling paired-label history into a fuller release-profile longitudinal story.
-4. Reduce warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`.
+4. Continue reducing warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`, with the next wins likely in long test/doc-noise and public-item documentation rather than dead private scaffolding.

@@ -265,28 +265,6 @@ pub fn parser_capabilities() -> ParserCapabilities {
     capabilities
 }
 
-/// Analysis of pattern complexity and features for parser selection
-struct PatternAnalysis {
-    has_code_blocks: bool,
-    has_complex_groups: bool,
-    has_recursion: bool,
-    complexity_score: u32,
-}
-
-impl PatternAnalysis {
-    fn analyze(pattern: &str) -> Self {
-        // Simple heuristic analysis
-        // A full implementation would use proper tokenization
-        Self {
-            has_code_blocks: pattern.contains("(?{"),
-            has_complex_groups: pattern.contains("(?") && !pattern.contains("(?:"),
-            has_recursion: pattern.contains("(?R") || pattern.contains("(?&"),
-            complexity_score: pattern.len() as u32
-                + pattern.matches(['(', '[', '{', '*', '+', '?']).count() as u32,
-        }
-    }
-}
-
 /// Wrapper for the current recursive descent parser
 ///
 /// This implements the RegexParser trait for our existing parser,
@@ -544,6 +522,7 @@ impl RegexParser for PgenParser {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PgenFeatureBackend {
     Pgen,
+    #[allow(dead_code)] // Kept so flipping `PGEN_FEATURE_BACKEND` stays a one-line local switch.
     RecursiveDescent,
 }
 
@@ -1390,11 +1369,10 @@ mod tests {
             parse_pattern(pattern).unwrap_or_else(|e| {
                 panic!("parser should accept contract fixture '{pattern}': {e}")
             });
-            let err = match compiler.compile(pattern) {
-                Ok(_) => panic!(
+            let Err(err) = compiler.compile(pattern) else {
+                panic!(
                     "pattern should fail with an explicit compile-time boundary/validation error: {pattern}"
-                ),
-                Err(err) => err,
+                )
             };
             assert!(
                 err.to_string().contains(expected_msg),

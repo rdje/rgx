@@ -11,8 +11,6 @@ use std::str::Chars;
 
 /// Regex lexer that converts pattern strings to tokens
 pub struct Lexer<'a> {
-    /// Original input string
-    input: &'a str,
     /// Character iterator
     chars: Chars<'a>,
     /// Current character being processed
@@ -26,7 +24,6 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         trace_enter!("lexer", "Lexer::new", "input_len={}", input.len());
         let mut lexer = Self {
-            input,
             chars: input.chars(),
             current: None,
             position: Position::start(),
