@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend Perl extended character class algebra subset
+- Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path beyond plain nested bracket terms so RGX now executes the current one-operator bracket/property subset on the default path.
+  - Added compiler support for exactly one explicit operator (`|`, `+`, `-`, `&`) over bracket terms or Unicode property terms, including examples like `(?[[a-z] - [aeiou]])` and `(?[\p{L} & \p{Lu}])`.
+  - Kept broader grouped algebra, complement operators, multi-operator expressions, and wider nested/set-expression forms behind the explicit compile boundary instead of over-claiming the full PCRE2 extended-class surface.
+  - Added direct compiler tests, parser-contract/runtime tests, and PCRE2 differential parity cases for the widened shipped subset.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported -- --nocapture`
+- Notes/impact:
+  - This intentionally does not ship full PCRE2 extended-class algebra; it closes one disciplined middle slice so RGX can exercise real operator/property behavior without losing a clear boundary for the remaining grammar.
+
 ### 2026-04-01 - Harden extended char class guardrails
 - Scope: internal cleanup, compiler/VM regression hardening, and continuity refresh.
 - Changes:

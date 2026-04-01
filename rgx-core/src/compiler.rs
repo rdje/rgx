@@ -1,3 +1,4 @@
+use crate::ast::CharRange;
 use crate::ast::Regex as RegexAst;
 use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
@@ -11,6 +12,52 @@ use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_l
 /// Compiler that transforms regex patterns into optimized execution programs
 pub struct Compiler {
     mode: ExecutionMode,
+}
+
+type ScalarRange = (u32, u32);
+
+const UNICODE_SCALAR_UNIVERSE: [ScalarRange; 2] = [(0x0000, 0xD7FF), (0xE000, 0x10FFFF)];
+
+#[derive(Clone, Copy)]
+enum ExtendedCharClassOperator {
+    Union,
+    Difference,
+    Intersection,
+}
+
+struct ExtendedCharClassCursor<'a> {
+    input: &'a str,
+    offset: usize,
+}
+
+impl<'a> ExtendedCharClassCursor<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input, offset: 0 }
+    }
+
+    fn is_eof(&self) -> bool {
+        self.offset >= self.input.len()
+    }
+
+    fn remaining(&self) -> &'a str {
+        &self.input[self.offset..]
+    }
+
+    fn peek_char(&self) -> Option<char> {
+        self.remaining().chars().next()
+    }
+
+    fn consume_char(&mut self) -> Option<char> {
+        let ch = self.peek_char()?;
+        self.offset += ch.len_utf8();
+        Some(ch)
+    }
+
+    fn skip_whitespace(&mut self) {
+        while matches!(self.peek_char(), Some(ch) if ch.is_whitespace()) {
+            self.consume_char();
+        }
+    }
 }
 
 impl Compiler {
@@ -226,7 +273,7 @@ impl Compiler {
     }
 
     fn extended_char_class_subset_message() -> String {
-        "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx, such as '(?[[a-z]])'; set operators, property escapes, and broader algebra remain unsupported"
+        "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator ('|', '+', '-', '&') over bracket terms and Unicode property terms in rgx, such as '(?[[a-z] - [aeiou]])' or '(?[\\p{L} & \\p{Lu}])'; broader algebra, grouped subexpressions, complement, and multi-operator expressions remain unsupported"
             .to_string()
     }
 
@@ -328,20 +375,10 @@ impl Compiler {
     }
 
     fn lower_extended_char_class_content(content: String) -> Result<RegexAst> {
-        let body = Self::extract_simple_extended_char_class_body(&content)
-            .ok_or_else(Self::extended_char_class_subset_error)?;
-        Self::validate_simple_char_class_body(body)?;
-
-        let mut parser =
-            ReferenceParser::new(&content).map_err(|_| Self::extended_char_class_subset_error())?;
-        let lowered = parser
-            .parse()
-            .map_err(|_| Self::extended_char_class_subset_error())?;
-
-        match lowered {
-            RegexAst::CharClass(char_class) => Ok(RegexAst::CharClass(char_class)),
-            _ => Err(Self::extended_char_class_subset_error()),
-        }
+        Ok(RegexAst::CharClass(crate::ast::CharClass::Custom {
+            ranges: Self::resolve_extended_char_class_ranges(&content)?,
+            negated: false,
+        }))
     }
 
     fn extract_simple_extended_char_class_body(content: &str) -> Option<&str> {
@@ -421,6 +458,273 @@ impl Compiler {
         }
 
         Ok(())
+    }
+
+    fn resolve_extended_char_class_ranges(content: &str) -> Result<Vec<CharRange>> {
+        let mut cursor = ExtendedCharClassCursor::new(content);
+        let lhs = Self::parse_extended_char_class_term(&mut cursor)?;
+        cursor.skip_whitespace();
+
+        let resolved = if cursor.is_eof() {
+            lhs
+        } else {
+            let operator = Self::parse_extended_char_class_operator(&mut cursor)?;
+            let rhs = Self::parse_extended_char_class_term(&mut cursor)?;
+            cursor.skip_whitespace();
+            if !cursor.is_eof() {
+                return Err(Self::extended_char_class_subset_error());
+            }
+
+            match operator {
+                ExtendedCharClassOperator::Union => Self::union_scalar_ranges(&lhs, &rhs),
+                ExtendedCharClassOperator::Difference => Self::subtract_scalar_ranges(&lhs, &rhs),
+                ExtendedCharClassOperator::Intersection => {
+                    Self::intersect_scalar_ranges(&lhs, &rhs)
+                }
+            }
+        };
+
+        Self::scalar_ranges_to_char_ranges(&resolved)
+    }
+
+    fn parse_extended_char_class_operator(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ExtendedCharClassOperator> {
+        cursor.skip_whitespace();
+        match cursor.consume_char() {
+            Some('|') | Some('+') => Ok(ExtendedCharClassOperator::Union),
+            Some('-') => Ok(ExtendedCharClassOperator::Difference),
+            Some('&') => Ok(ExtendedCharClassOperator::Intersection),
+            _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn parse_extended_char_class_term(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<Vec<ScalarRange>> {
+        cursor.skip_whitespace();
+        match cursor.peek_char() {
+            Some('[') => {
+                let term = Self::consume_extended_char_class_bracket_term(cursor)?;
+                Self::resolve_extended_bracket_term_ranges(term)
+            }
+            Some('\\') => Self::resolve_extended_unicode_property_term(cursor),
+            _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn consume_extended_char_class_bracket_term<'a>(
+        cursor: &mut ExtendedCharClassCursor<'a>,
+    ) -> Result<&'a str> {
+        let start = cursor.offset;
+        let mut depth = 0usize;
+        let mut escaped = false;
+
+        while let Some(ch) = cursor.consume_char() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => escaped = true,
+                '[' => depth = depth.saturating_add(1),
+                ']' => {
+                    depth = depth
+                        .checked_sub(1)
+                        .ok_or_else(Self::extended_char_class_subset_error)?;
+                    if depth == 0 {
+                        return Ok(&cursor.input[start..cursor.offset]);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Err(Self::extended_char_class_subset_error())
+    }
+
+    fn resolve_extended_bracket_term_ranges(term: &str) -> Result<Vec<ScalarRange>> {
+        let body = Self::extract_simple_extended_char_class_body(term)
+            .ok_or_else(Self::extended_char_class_subset_error)?;
+        Self::validate_simple_char_class_body(body)?;
+
+        let mut parser =
+            ReferenceParser::new(term).map_err(|_| Self::extended_char_class_subset_error())?;
+        let lowered = parser
+            .parse()
+            .map_err(|_| Self::extended_char_class_subset_error())?;
+
+        match lowered {
+            RegexAst::CharClass(char_class) => Self::resolve_char_class_scalar_ranges(&char_class),
+            _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn resolve_extended_unicode_property_term(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<Vec<ScalarRange>> {
+        let slash = cursor.consume_char();
+        let kind = cursor.consume_char();
+        if slash != Some('\\')
+            || !matches!(kind, Some('p') | Some('P'))
+            || cursor.consume_char() != Some('{')
+        {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        let mut name = String::new();
+        while let Some(ch) = cursor.consume_char() {
+            if ch == '}' {
+                if name.is_empty() {
+                    return Err(Self::extended_char_class_subset_error());
+                }
+                let ranges = resolve_unicode_property_class(&name, kind == Some('P'))
+                    .map_err(RgxError::Compile)?;
+                return Ok(Self::normalize_scalar_ranges(
+                    &Self::char_ranges_to_scalar_ranges(&ranges),
+                ));
+            }
+            name.push(ch);
+        }
+
+        Err(Self::extended_char_class_subset_error())
+    }
+
+    fn resolve_char_class_scalar_ranges(
+        char_class: &crate::ast::CharClass,
+    ) -> Result<Vec<ScalarRange>> {
+        match char_class {
+            crate::ast::CharClass::Custom { ranges, negated } => {
+                let normalized =
+                    Self::normalize_scalar_ranges(&Self::char_ranges_to_scalar_ranges(ranges));
+                if *negated {
+                    Ok(Self::complement_scalar_ranges(&normalized))
+                } else {
+                    Ok(normalized)
+                }
+            }
+            crate::ast::CharClass::UnicodeClass { name, negated } => {
+                let ranges =
+                    resolve_unicode_property_class(name, *negated).map_err(RgxError::Compile)?;
+                Ok(Self::normalize_scalar_ranges(
+                    &Self::char_ranges_to_scalar_ranges(&ranges),
+                ))
+            }
+            _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn char_ranges_to_scalar_ranges(ranges: &[CharRange]) -> Vec<ScalarRange> {
+        ranges
+            .iter()
+            .map(|range| (range.start as u32, range.end as u32))
+            .collect()
+    }
+
+    fn scalar_ranges_to_char_ranges(ranges: &[ScalarRange]) -> Result<Vec<CharRange>> {
+        ranges
+            .iter()
+            .map(|(start, end)| {
+                let start =
+                    char::from_u32(*start).ok_or_else(Self::extended_char_class_subset_error)?;
+                let end =
+                    char::from_u32(*end).ok_or_else(Self::extended_char_class_subset_error)?;
+                Ok(CharRange::range(start, end))
+            })
+            .collect()
+    }
+
+    fn normalize_scalar_ranges(ranges: &[ScalarRange]) -> Vec<ScalarRange> {
+        let mut normalized = ranges.to_vec();
+        normalized.sort_by_key(|range| range.0);
+
+        let mut merged: Vec<ScalarRange> = Vec::new();
+        for (start, end) in normalized {
+            if let Some(last) = merged.last_mut() {
+                if start <= last.1.saturating_add(1) {
+                    last.1 = last.1.max(end);
+                } else {
+                    merged.push((start, end));
+                }
+            } else {
+                merged.push((start, end));
+            }
+        }
+
+        merged
+    }
+
+    fn union_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
+        let mut combined = lhs.to_vec();
+        combined.extend_from_slice(rhs);
+        Self::normalize_scalar_ranges(&combined)
+    }
+
+    fn intersect_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
+        let lhs = Self::normalize_scalar_ranges(lhs);
+        let rhs = Self::normalize_scalar_ranges(rhs);
+        let mut result = Vec::new();
+        let mut lhs_index = 0usize;
+        let mut rhs_index = 0usize;
+
+        while lhs_index < lhs.len() && rhs_index < rhs.len() {
+            let (lhs_start, lhs_end) = lhs[lhs_index];
+            let (rhs_start, rhs_end) = rhs[rhs_index];
+            let start = lhs_start.max(rhs_start);
+            let end = lhs_end.min(rhs_end);
+
+            if start <= end {
+                result.push((start, end));
+            }
+
+            if lhs_end < rhs_end {
+                lhs_index += 1;
+            } else {
+                rhs_index += 1;
+            }
+        }
+
+        result
+    }
+
+    fn subtract_scalar_ranges(lhs: &[ScalarRange], rhs: &[ScalarRange]) -> Vec<ScalarRange> {
+        let lhs = Self::normalize_scalar_ranges(lhs);
+        let rhs = Self::normalize_scalar_ranges(rhs);
+        let mut result = Vec::new();
+        let mut rhs_index = 0usize;
+
+        for (lhs_start, lhs_end) in lhs {
+            let mut cursor = lhs_start;
+
+            while rhs_index < rhs.len() && rhs[rhs_index].1 < cursor {
+                rhs_index += 1;
+            }
+
+            let mut scan_index = rhs_index;
+            while scan_index < rhs.len() && rhs[scan_index].0 <= lhs_end {
+                let (rhs_start, rhs_end) = rhs[scan_index];
+                if rhs_start > cursor {
+                    result.push((cursor, rhs_start.saturating_sub(1)));
+                }
+
+                cursor = rhs_end.saturating_add(1);
+                if cursor > lhs_end {
+                    break;
+                }
+                scan_index += 1;
+            }
+
+            if cursor <= lhs_end {
+                result.push((cursor, lhs_end));
+            }
+        }
+
+        result
+    }
+
+    fn complement_scalar_ranges(ranges: &[ScalarRange]) -> Vec<ScalarRange> {
+        Self::subtract_scalar_ranges(&UNICODE_SCALAR_UNIVERSE, ranges)
     }
 
     fn assign_capture_indices(ast: RegexAst) -> RegexAst {
@@ -1516,6 +1820,12 @@ mod tests {
     use super::*;
     use crate::ast::{CharClass, CharRange};
 
+    fn range_contains(ranges: &[CharRange], target: char) -> bool {
+        ranges
+            .iter()
+            .any(|range| target >= range.start && target <= range.end)
+    }
+
     #[test]
     fn extract_simple_extended_char_class_body_accepts_single_nested_class() {
         assert_eq!(
@@ -1559,18 +1869,51 @@ mod tests {
         let lowered = Compiler::lower_extended_char_class_content("[^0-9]".to_string())
             .expect("Expected simple nested negated range to lower into a plain char class");
 
-        assert_eq!(
-            lowered,
-            RegexAst::CharClass(CharClass::Custom {
-                ranges: vec![CharRange::range('0', '9')],
-                negated: true,
-            })
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(
+            !negated,
+            "negated subset should lower into explicit complement ranges"
         );
+        assert!(range_contains(&ranges, 'a'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, '5'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_single_difference_operator() {
+        let lowered = Compiler::lower_extended_char_class_content("[a-z] - [aeiou]".to_string())
+            .expect("Expected single-operator difference to lower into a plain char class");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'b'));
+        assert!(range_contains(&ranges, 'z'));
+        assert!(!range_contains(&ranges, 'a'));
+        assert!(!range_contains(&ranges, 'e'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_property_intersection() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\p{L} & \p{Lu}".to_string())
+            .expect("Expected property intersection to lower into a plain char class");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, 'Z'));
+        assert!(!range_contains(&ranges, 'a'));
+        assert!(!range_contains(&ranges, '7'));
     }
 
     #[test]
     fn lower_extended_char_class_content_rejects_broader_set_algebra() {
-        let err = Compiler::lower_extended_char_class_content("[a-z&&[^aeiou]]".to_string())
+        let err = Compiler::lower_extended_char_class_content("[a-z] - [aeiou] & [^x]".to_string())
             .expect_err("Expected set-algebra form to stay outside the shipped subset");
 
         match err {

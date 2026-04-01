@@ -1195,6 +1195,8 @@ mod tests {
             "(?:a)(?<word>b)(?>c)",
             "(?|a|b)",
             "(?[[a-z]])",
+            "(?[[a-z] - [aeiou]])",
+            r"(?[\p{L} & \p{Lu}])",
             "(?=ab)c",
             "(?!ab)c",
             "(?<=z)a",
@@ -1373,7 +1375,11 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx",
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
+            ),
+            (
+                r"(?[[a-z] - [aeiou] & [^x]])",
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
             ),
         ];
 
@@ -1409,5 +1415,20 @@ mod tests {
             .expect("simple extended character class fixture should compile on the default path");
         assert!(regex.is_match("abcxyz"));
         assert!(!regex.is_match("abc123"));
+    }
+
+    #[test]
+    fn parser_contract_algebraic_extended_char_class_executes_on_default_path() {
+        let regex = crate::Regex::compile(r"\A(?[[a-z] - [aeiou]])+\z").expect(
+            "algebraic extended character class fixture should compile on the default path",
+        );
+        assert!(regex.is_match("bcdfxyz"));
+        assert!(!regex.is_match("facet"));
+
+        let property_regex = crate::Regex::compile(r"\A(?[\p{L} & \p{Lu}])+\z").expect(
+            "property algebra extended character class fixture should compile on the default path",
+        );
+        assert!(property_regex.is_match("ABCXYZ"));
+        assert!(!property_regex.is_match("ABcXYZ"));
     }
 }

@@ -3386,6 +3386,22 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_single_difference_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[[a-z] - [aeiou]])+\z")
+            .expect("Failed to compile difference-style extended character class pattern");
+        assert!(regex.is_match("bcdfxyz"));
+        assert!(!regex.is_match("facet"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_property_intersection_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\p{L} & \p{Lu}])+\z")
+            .expect("Failed to compile property-intersection extended character class pattern");
+        assert!(regex.is_match("ABCXYZ"));
+        assert!(!regex.is_match("ABcXYZ"));
+    }
+
+    #[test]
     fn parser_extended_char_class_requires_nested_simple_syntax() {
         let result = Regex::compile(r"(?[a-z])");
         assert!(
@@ -3395,7 +3411,23 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx"
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator"
+            ),
+            "unexpected extended-char-class compile-boundary message: {msg}"
+        );
+    }
+
+    #[test]
+    fn parser_extended_char_class_rejects_multi_operator_algebra() {
+        let result = Regex::compile(r"(?[[a-z] - [aeiou] & [^x]])");
+        assert!(
+            result.is_err(),
+            "multi-operator extended character class should fail"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains(
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
@@ -3469,6 +3501,10 @@ mod tests {
             (r"\A(?[[a-z]])+\z", "abc123", false),
             (r"\A(?[[^0-9]])+\z", "abcXYZ", true),
             (r"\A(?[[^0-9]])+\z", "abc123", false),
+            (r"\A(?[[a-z] - [aeiou]])+\z", "bcdfxyz", true),
+            (r"\A(?[[a-z] - [aeiou]])+\z", "facet", false),
+            (r"\A(?[\p{L} & \p{Lu}])+\z", "ABCXYZ", true),
+            (r"\A(?[\p{L} & \p{Lu}])+\z", "ABcXYZ", false),
             (r"\A(a)?(?(1)b|c)\z", "ab", true),
             (r"\A(a)?(?(1)b|c)\z", "c", true),
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
@@ -3545,7 +3581,11 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support only simple nested bracket-equivalent literal/range content in rgx",
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
+            ),
+            (
+                r"(?[[a-z] - [aeiou] & [^x]])",
+                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
             ),
         ];
 

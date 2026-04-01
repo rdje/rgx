@@ -51,6 +51,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "123abc45!!",
         },
         ParityCase {
+            name: "extended_class_difference_all",
+            pattern: r"(?[[a-z] - [aeiou]])+",
+            input: "aei bcdf xyz ou",
+        },
+        ParityCase {
+            name: "extended_class_property_intersection_all",
+            pattern: r"(?[\p{L} & \p{Lu}])+",
+            input: "abc XYZ q M",
+        },
+        ParityCase {
             name: "word_boundary_all",
             pattern: r"\bcat\b",
             input: "cat scat cat",
@@ -234,6 +244,16 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "12345",
         },
         ParityCase {
+            name: "no_match_extended_class_difference",
+            pattern: r"(?[[a-z] - [aeiou]])+",
+            input: "aeiou",
+        },
+        ParityCase {
+            name: "no_match_extended_class_property_intersection",
+            pattern: r"(?[\p{L} & \p{Lu}])+",
+            input: "abc xyz",
+        },
+        ParityCase {
             name: "no_match_backreference",
             pattern: r"(a)\1",
             input: "ab",
@@ -361,6 +381,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "word_boundary",
             pattern: r"\bcat\b",
             input: "a cat nap",
+        },
+        ParityCase {
+            name: "extended_class_difference",
+            pattern: r"(?[[a-z] - [aeiou]])+",
+            input: "aei bcdf xyz",
+        },
+        ParityCase {
+            name: "extended_class_property_intersection",
+            pattern: r"(?[\p{L} & \p{Lu}])+",
+            input: "abc XYZ q",
         },
         ParityCase {
             name: "backreference",

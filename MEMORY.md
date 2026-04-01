@@ -95,8 +95,11 @@ Live continuity memory for `rgx` sessions.
   - the compiler assigns shared capture indices across the branch-reset group's top-level alternatives instead of numbering each branch independently
   - later backreferences and conditionals now see the resulting PCRE2-style max-branch-arity numbering after the branch-reset group
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
-- `(?[...])` Perl extended character classes now ship a first runtime slice on the default path for simple nested bracket-equivalent literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`, while broader set-algebra forms still compile-reject explicitly.
-- That shipped `(?[...])` slice is now also guarded by direct compiler helper tests plus a direct VM regression for ordinary negated custom char classes, so the subset-lowering path and the recent double-negation fix have narrower local coverage.
+- `(?[...])` Perl extended character classes now ship a wider but still disciplined runtime slice on the default path:
+  - simple nested bracket terms like `(?[[a-z]])` and `(?[[^0-9]])` still work
+  - RGX now also executes exactly one explicit operator (`|`, `+`, `-`, `&`) over bracket terms or Unicode property terms, such as `(?[[a-z] - [aeiou]])` and `(?[\p{L} & \p{Lu}])`
+  - broader grouped algebra, complement operators, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly
+- That shipped `(?[...])` slice is now guarded by direct compiler helper tests, parser-contract/runtime tests, PCRE2 differential parity cases for the widened one-operator subset, and the earlier direct VM regression for ordinary negated custom char classes.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.
 - Lua source bodies now accept either bare expression bodies or explicit `return ...` bodies, which keeps the shipped inline-language ergonomics closer to JavaScript and Rhai.
 - Lua, JavaScript, and Rhai are now all intentionally documented/tested as supporting either bare expressions or explicit `return ...` bodies on the shipped inline-language path.

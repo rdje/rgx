@@ -3,8 +3,8 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.13`
-- Last updated: `2026-03-31`
+- Version: `v0.1.14`
+- Last updated: `2026-04-01`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-  - Perl extended character classes now execute on the default path only for the current simple nested bracket-equivalent literal/range subset, while broader set operators, nested classes, property escapes, and whitespace-separated algebra still compile-reject explicitly
+  - Perl extended character classes now execute on the default path for the current simple bracket/property subset: single bracket terms plus exactly one explicit operator (`|`, `+`, `-`, `&`) over bracket terms or Unicode property terms, while broader grouped algebra, complement, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

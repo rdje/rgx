@@ -66,7 +66,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
   - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)` are shipped
-  - extend Perl extended character classes `(?[...])` beyond the newly shipped simple nested bracket-equivalent literal/range subset, with explicit set-algebra/runtime policy for operators, nested classes, property escapes, and whitespace-separated set expressions
+  - extend Perl extended character classes `(?[...])` beyond the newly shipped simple bracket/property subset, with explicit runtime policy for grouped algebra, complement, multi-operator expressions, and wider nested/set-expression forms
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 
 ### Performance validation loop

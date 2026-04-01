@@ -15,8 +15,8 @@ Live shipped-vs-scaffolded feature status for `rgx`.
 - Character classes (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, custom classes): `shipped`
 - Unicode property classes (`\p{...}`, `\P{...}`): `shipped`
 - Perl extended character classes `(?[...])`: `shipped`
-  - current shipped subset executes simple nested bracket-equivalent literal/range content such as `(?[[a-z]])` and `(?[[^0-9]])`
-  - broader set operators, nested classes, property escapes, and whitespace-separated algebra still compile-reject explicitly
+  - current shipped subset executes simple nested bracket terms and single-operator algebra over bracket/property terms, such as `(?[[a-z]])`, `(?[[^0-9]])`, `(?[[a-z] - [aeiou]])`, and `(?[\p{L} & \p{Lu}])`
+  - broader grouped algebra, complement operators, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly
 - Quantifiers (greedy/lazy/possessive `?`, `*`, `+`, counted ranges): `shipped`
 - Groups:
   - capturing/non-capturing/named groups: `shipped`

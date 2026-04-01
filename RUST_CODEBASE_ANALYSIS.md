@@ -20,6 +20,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli --features wasm` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture` => pass
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_define_conditional_reports_explicit_compile_boundary -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_define_condition -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
@@ -65,7 +66,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the default RGX parser pin now includes the standalone PGEN `1.1.2` transport fix from local issue `pgen-issues/PGEN-RGX-0005.yaml`
   - the handwritten parser path, PGEN-backed path, compiler, and runtime now all agree on `R&name`
   - PCRE2 differential coverage now treats named recursion conditions as part of the supported conditional surface
-- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)`, single-branch `DEFINE` conditionals, branch-reset groups, and the simple nested bracket-equivalent `(?[...])` subset now execute on the default path, while broader extended-class algebra still fails with a clear compile-time policy error instead of being misread or silently dropped.
+- Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)`, single-branch `DEFINE` conditionals, branch-reset groups, and the current one-operator bracket/property `(?[...])` subset now execute on the default path, while broader extended-class algebra still fails with a clear compile-time policy error instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
   - invalid property names now fail explicitly at compile time
@@ -152,7 +153,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - The CLI still has no native-registration surface, but it now exposes file-backed wasm module registration through repeatable `--wasm-module NAME=PATH`.
 - The current wasm ABI is intentionally smaller than the Lua/JavaScript/native context surface and still limits richer-result transport to host-emitted numeric and UTF-8 replacement payloads.
 - Current recursion / subroutine calls are runtime-integrated on the default path, while newer returned-capture subroutine forms remain future work.
-- Perl extended character classes now execute only for the simple nested bracket-equivalent literal/range subset; broader set operators, nested classes, property escapes, and whitespace-separated algebra still compile-reject explicitly.
+- Perl extended character classes now execute for the current simple bracket/property subset: plain nested bracket terms plus exactly one explicit operator over bracket terms or Unicode property terms; broader grouped algebra, complement, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
