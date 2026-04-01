@@ -24,9 +24,12 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core conditional_tokens_define_condition -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_unsupported_compile_boundary_cases -- --nocapture` => pass
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` => pass
-  - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_current/Cargo.toml -- pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0005` => pass (captured structured PGEN contract/outcome evidence for `(?(R&word)a|b)`)
-  - `PGEN_TRACE_VERBOSITY=debug subs/pgen/rust/target/debug/parseability_probe --parse regex pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0005/pgen_trace.log` => fail as expected with `Parser did not consume full input at position 0`
-  - `subs/pgen/rust/target/debug/parseability_probe --parse regex /tmp/pgen-rgx-0005-control.txt --profile regex_default` => pass (control sample `(?(R1)a|b)`)
+  - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_current/Cargo.toml -- pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0005` => pass (captured the original pinned-submodule `1.1.1` evidence bundle for `(?(R&word)a|b)`)
+  - `PGEN_TRACE_VERBOSITY=debug subs/pgen/rust/target/debug/parseability_probe --parse regex pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0005/pgen_trace.log` => fail as expected on the still-pinned `subs/pgen` `1.1.1` backend with `Parser did not consume full input at position 0`
+  - `subs/pgen/rust/target/debug/parseability_probe --parse regex /tmp/pgen-rgx-0005-control.txt --profile regex_default` => pass (control sample `(?(R1)a|b)` on the same pinned `1.1.1` backend)
+  - `cargo run --offline --manifest-path /Users/richarddje/Documents/github/pgen/rust/Cargo.toml --target-dir /tmp/pgen-verify-target --features generated_parsers --bin parseability_probe -- --parse regex /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default` => pass (standalone local PGEN `1.1.2` now accepts the minimal repro)
+  - `cargo run --offline --manifest-path /Users/richarddje/Documents/github/pgen/rust/Cargo.toml --target-dir /tmp/pgen-verify-target --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt /tmp/pgen-rgx-0005-verify-ast.json --profile regex_default` => pass (standalone local PGEN `1.1.2` emits an AST dump containing `recursion_condition`)
+  - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_external/Cargo.toml --target-dir /tmp/pgen-issue-bundle-external-target -- /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2` => pass (captured the current standalone PGEN `1.1.2` verification bundle)
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass
   - repeated `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-smoke` => pass (confirmed previous-run delta reporting)
   - `cargo run --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench --bin trend_capture -- --mode quick --output-dir /tmp/rgx-benchmark-trends-explicit-smoke --compare-against none` => pass
@@ -63,10 +66,10 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
 - The strongest shipped path is still `lexer/parser -> AST -> compiler -> VM -> engine/API`, and the default local build now routes that parser stage through the real submodule-backed PGEN backend.
-- One attempted next-step PCRE2 feature slice is currently parser-blocked rather than compiler-blocked:
-  - named recursion-condition syntax `(?(R&name)...)` is still roadmap work
-  - the default pinned PGEN backend rejects the minimal sample `(?(R&word)a|b)` at byte 0, so RGX cannot yet land a real shipped implementation on the default path
-  - the exact blocker is tracked in `pgen-issues/PGEN-RGX-0005.yaml`
+- One attempted next-step PCRE2 feature slice is now split between an upstream-fixed parser bug and RGX’s still-older dependency pin:
+  - named recursion-condition syntax `(?(R&name)...)` is still roadmap work in RGX
+  - local issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream` against standalone PGEN `1.1.2`
+  - RGX still pins `subs/pgen` to `1.1.1` / `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`, so the default RGX parser path remains pre-fix until the submodule is bumped
 - Newer PCRE2 syntax is now split more cleanly between shipped and boundary-only forms: single-branch `DEFINE` conditionals, current recursion-condition conditionals `(?(R)...)` / `(?(Rn)...)`, and branch-reset groups now execute on the default path, while `(?[...])` reaches `Regex::ExtendedCharClass` and still fails with a clear compile-time policy error instead of being misread or silently dropped.
 - Unicode property classes are now part of that shipped default path:
   - parser-path and AST-first compilation resolve `\p{...}` / `\P{...}` through Unicode property tables instead of treating them as a compile boundary
@@ -193,7 +196,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection, revision-aware capture labels, same-mode history separation, same-label quick/full pairing, and rolling paired-label history all exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `VERSION[...]`, and eventually `R&name` once the current PGEN parser blocker in `PGEN-RGX-0005` is fixed) plus real runtime semantics for parser-boundary forms like Perl extended character classes, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms (returned-capture subroutines, `VERSION[...]`, and `R&name` once RGX updates its pinned PGEN submodule past the now-verified upstream fix in `PGEN-RGX-0005`) plus real runtime semantics for parser-boundary forms like Perl extended character classes, and the still-declared-but-unwired opcode families.
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.

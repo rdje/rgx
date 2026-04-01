@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Verify upstream PGEN fix for named recursion conditions
+- Scope: PGEN upstream verification, local issue closure, and continuity-doc correction.
+- Changes:
+  - Re-ran the exact `PGEN-RGX-0005` reproducer `(?(R&word)a|b)` against the standalone local PGEN checkout at commit `f97e0fe31750885f4fc48a67ed7660110cd20271`.
+  - Verified that the standalone PGEN contract now reports `regex_parser_release_version=1.1.2` and `regex_integration_contract_version=1.1.2`, and that the minimal repro now parses successfully.
+  - Verified the accepted-tree transport shape through a fresh AST dump: the pattern now reaches `recursion_condition` inside `conditional`, with separate `yes_branch` and `no_branch` spans.
+  - Added a durable verification bundle under `pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2/` and closed `pgen-issues/PGEN-RGX-0005.yaml` as `verified-fixed-upstream`.
+  - Updated continuity docs so they distinguish between “fixed upstream in standalone PGEN 1.1.2” and “still blocked on the current RGX-pinned submodule at `1.1.1` / `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`”.
+- Validation:
+  - `cargo run --offline --manifest-path /Users/richarddje/Documents/github/pgen/rust/Cargo.toml --target-dir /tmp/pgen-verify-target --features generated_parsers --bin parseability_probe -- --parse regex /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default`
+  - `cargo run --offline --manifest-path /Users/richarddje/Documents/github/pgen/rust/Cargo.toml --target-dir /tmp/pgen-verify-target --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt /tmp/pgen-rgx-0005-verify-ast.json --profile regex_default`
+  - `PGEN_TRACE_VERBOSITY=debug cargo run --offline --manifest-path /Users/richarddje/Documents/github/pgen/rust/Cargo.toml --target-dir /tmp/pgen-verify-target --features generated_parsers --bin parseability_probe -- --parse regex /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt --profile regex_default --trace --trace-log-file /tmp/pgen-rgx-0005-verify.trace.log`
+  - `cargo run --offline --manifest-path /tmp/pgen_issue_bundle_external/Cargo.toml --target-dir /tmp/pgen-issue-bundle-external-target -- /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/repro_input.txt /Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2`
+- Notes/impact:
+  - The upstream PGEN parser bug is verified fixed.
+  - RGX’s default parser path is still on the older pinned submodule revision, so shipping `(?(R&name)...)` in RGX still requires a dependency bump before implementation work can land on the default path.
+
 ### 2026-03-31 - Log named recursion-condition parser gap in PGEN
 - Scope: PGEN integration bug triage, issue-bundle capture, and roadmap/continuity refresh.
 - Changes:

@@ -1,10 +1,10 @@
 id: PGEN-RGX-0005
 summary: |
   Regex parser rejects named recursion-condition syntax (?(R&name)...) instead of transporting it as a conditional recursion test
-status: open
+status: closed
 opened_at: 2026-03-31T17:43:19Z
 first_seen_at: 2026-03-31T17:43:19Z
-last_updated_at: 2026-03-31T17:43:19Z
+last_updated_at: 2026-04-01T00:31:22Z
 parser_backend: pgen
 parser_backend_version: 1.1.1
 rgx_commit: 4dbc1fc016d85232c71ee806e0f13f64bf977b50
@@ -71,8 +71,11 @@ impact: |
 
   This also leaves the current PCRE2 10.47+ follow-up roadmap partially blocked on the parser side: newer conditional forms cannot be evaluated end-to-end if the transport layer fails at byte 0.
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-04-01T00:31:22Z
   verification_notes: |
-    Pending upstream PGEN fix and downstream re-verification against the same local repro bundle.
+    Re-verified against the local PGEN checkout at commit f97e0fe31750885f4fc48a67ed7660110cd20271.
+    The verification bundle is recorded under pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2/.
+    pgen_contract.json now reports regex_parser_release_version=1.1.2 and regex_integration_contract_version=1.1.2.
+    The same minimal repro now parses successfully, and the AST dump contains recursion_condition plus the enclosing conditional with separate yes_branch and no_branch spans.

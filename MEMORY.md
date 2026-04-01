@@ -64,12 +64,12 @@ Live continuity memory for `rgx` sessions.
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
 - The pinned PGEN submodule commit is `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77`.
-- A new local PGEN parser issue is now tracked in `pgen-issues/PGEN-RGX-0005.yaml`:
+- Local PGEN issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream`:
   - minimal repro: `(?(R&word)a|b)`
-  - current pinned PGEN `1.1.1` generated regex backend rejects it with `E_PARSE_FAILURE` at byte 0 / line 1 / column 1
-  - control sample `(?(R1)a|b)` still parses on the same backend
-  - this currently blocks RGX from shipping named recursion-condition support `(?(R&name)...)` on the default PGEN-backed path
-  - speculative RGX parser/compiler/runtime edits for that feature were intentionally reverted after the issue bundle was captured
+  - standalone local PGEN at commit `f97e0fe31750885f4fc48a67ed7660110cd20271` now reports `regex_parser_release_version=1.1.2` / `regex_integration_contract_version=1.1.2` and parses the repro successfully
+  - the verification bundle lives at `pgen-issues/artifacts/PGEN-RGX-0005/verified-fix-1.1.2/`
+  - the accepted tree now includes `recursion_condition` inside `conditional`, with separate `yes_branch` and `no_branch`
+  - RGX is still pinned to `subs/pgen` commit `bd110c9c374f0bc1c5c8f8d5d508f5eb0f90cf77` (`1.1.1`), so the default RGX parser path remains on the pre-fix backend until the submodule is bumped
 - Cargo workspace state now explicitly excludes `subs/pgen/rust` so RGX and PGEN stay separate projects even though PGEN lives under the RGX tree as a submodule.
 - Local validation against the default real PGEN backend is currently green for:
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core test_parser_name -- --nocapture`
