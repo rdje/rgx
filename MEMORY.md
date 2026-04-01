@@ -45,10 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
-- Latest extended-character-class cleanup was a consolidation-only pass over the newly shipped escaped-term slice:
-  - `rgx-core/src/compiler.rs` now resolves extended-char-class escapes through smaller helpers for literal escapes, Unicode-property escapes, and braced-name consumption
-  - direct unit coverage now locks escaped operator literals like `\-` and malformed unclosed hex escapes behind explicit tests
-  - shipped `(?[...])` behavior did not widen; this was strictly an internal maintainability/guardrail pass
+- Latest extended-character-class feature pass widened the shipped subset again:
+  - bare horizontal/vertical whitespace shorthand terms `\h`, `\H`, `\v`, and `\V` now execute on the default path inside `(?[...])`
+  - compiler/unit, parser-path, parser-contract, and PCRE2 differential coverage now lock those h/v-space shorthand cases in
+  - the new differential parity cases intentionally use ASCII-only whitespace examples because the current `pcre2::bytes::Regex` harness is still byte-oriented, while richer Unicode coverage for `\h` remains in RGX-owned unit tests
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.
@@ -114,8 +114,8 @@ Live continuity memory for `rgx` sessions.
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
 - `(?[...])` Perl extended character classes now ship a wider but still disciplined runtime slice on the default path:
   - simple nested bracket terms like `(?[[a-z]])` and `(?[[^0-9]])` still work
-  - RGX now also executes bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`), unary complement (`!`), grouped subexpressions, symmetric difference (`^`), and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over bracket terms, shorthand terms, or Unicode property terms, such as `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ [a-f] | [d-z] & [m-p] ])`, and `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`
-  - wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset still compile-reject explicitly
+  - RGX now also executes bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, symmetric difference (`^`), and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over bracket terms, shorthand terms, escaped terms, or Unicode property terms, such as `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[\h])`, `(?[\H])`, `(?[\v])`, `(?[\V])`, `(?[\n | \t])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ [a-f] | [d-z] & [m-p] ])`, and `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`
+  - wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset still compile-reject explicitly
 - That shipped `(?[...])` slice is now guarded by direct compiler helper tests, parser-contract/runtime tests, PCRE2 differential parity cases for the widened runtime subset, and the earlier direct VM regression for ordinary negated custom char classes.
 - The internal range algebra behind that shipped `(?[...])` subset is now centralized in one private `ScalarRangeSet` helper inside `rgx-core/src/compiler.rs`, with direct unit tests locking adjacent-range normalization and split-difference behavior before we widen the syntax further.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.

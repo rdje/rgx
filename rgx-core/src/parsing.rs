@@ -1178,6 +1178,10 @@ mod tests {
             r"(?[\d - [3]])",
             r"(?[\w & [a-z]])",
             r"(?[\D & [A-F]])",
+            r"(?[\h])",
+            r"(?[\H])",
+            r"(?[\v])",
+            r"(?[\V])",
             r"(?[\p{L} & \p{Lu}])",
             r"(?[ ![0-9] ])",
             r"(?[ ([a-z] - [aeiou]) & [b-d] ])",
@@ -1428,6 +1432,28 @@ mod tests {
         );
         assert!(negated_digit_regex.is_match("FACE"));
         assert!(!negated_digit_regex.is_match("FA3E"));
+
+        let hspace_regex = crate::Regex::compile(r"\A(?[\h])+\z")
+            .expect("horizontal-whitespace extended character class fixture should compile on the default path");
+        assert!(hspace_regex.is_match(" \t\u{00A0}\u{1680}\u{202F}\u{3000}"));
+        assert!(!hspace_regex.is_match("\n \t"));
+
+        let non_hspace_regex = crate::Regex::compile(r"\A(?[\H])+\z").expect(
+            "negated horizontal-whitespace extended character class fixture should compile on the default path",
+        );
+        assert!(non_hspace_regex.is_match("A\nB"));
+        assert!(!non_hspace_regex.is_match(" \t\u{00A0}"));
+
+        let vspace_regex = crate::Regex::compile(r"\A(?[\v])+\z")
+            .expect("vertical-whitespace extended character class fixture should compile on the default path");
+        assert!(vspace_regex.is_match("\n\u{000B}\u{0085}\u{2028}\u{2029}"));
+        assert!(!vspace_regex.is_match(" \n"));
+
+        let non_vspace_regex = crate::Regex::compile(r"\A(?[\V])+\z").expect(
+            "negated vertical-whitespace extended character class fixture should compile on the default path",
+        );
+        assert!(non_vspace_regex.is_match("A \u{00A0}\t"));
+        assert!(!non_vspace_regex.is_match("\n\u{0085}\u{2028}"));
 
         let hex_regex = crate::Regex::compile(r"\A(?[\x{41} - [B]])+\z").expect(
             "hex-escape extended character class fixture should compile on the default path",

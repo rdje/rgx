@@ -66,6 +66,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "ABC facet_ xyz 123",
         },
         ParityCase {
+            name: "extended_class_horizontal_shorthand_all",
+            pattern: r"(?[\h])+",
+            input: "A \tB\n",
+        },
+        ParityCase {
+            name: "extended_class_vertical_shorthand_all",
+            pattern: r"(?[\v])+",
+            input: "A\n\u{000B}\u{000C}\rB \t",
+        },
+        ParityCase {
             name: "extended_class_hex_escape_difference_all",
             pattern: r"(?[\x{41} - [B]])+",
             input: "B AA C A",
@@ -304,6 +314,26 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "1237",
         },
         ParityCase {
+            name: "no_match_extended_class_horizontal_shorthand",
+            pattern: r"(?[\h])+",
+            input: "\n\r",
+        },
+        ParityCase {
+            name: "no_match_extended_class_vertical_shorthand",
+            pattern: r"(?[\v])+",
+            input: " \t",
+        },
+        ParityCase {
+            name: "no_match_extended_class_negated_horizontal_shorthand",
+            pattern: r"(?[\H])+",
+            input: " \t",
+        },
+        ParityCase {
+            name: "no_match_extended_class_negated_vertical_shorthand",
+            pattern: r"(?[\V])+",
+            input: "\n\u{000B}\u{000C}\r",
+        },
+        ParityCase {
             name: "no_match_extended_class_hex_escape_difference",
             pattern: r"(?[\x{41} - [B]])+",
             input: "BBBB",
@@ -486,6 +516,26 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_negated_shorthand_intersection",
             pattern: r"(?[\D & [A-F]])+",
             input: "99FACE77",
+        },
+        ParityCase {
+            name: "extended_class_horizontal_shorthand",
+            pattern: r"(?[\h])+",
+            input: "xx \tyy",
+        },
+        ParityCase {
+            name: "extended_class_negated_horizontal_shorthand",
+            pattern: r"(?[\H])+",
+            input: " \nAZ\t",
+        },
+        ParityCase {
+            name: "extended_class_vertical_shorthand",
+            pattern: r"(?[\v])+",
+            input: "xx\n\u{000B}\u{000C}yy",
+        },
+        ParityCase {
+            name: "extended_class_negated_vertical_shorthand",
+            pattern: r"(?[\V])+",
+            input: "\nA \t\r",
         },
         ParityCase {
             name: "extended_class_hex_escape_difference",

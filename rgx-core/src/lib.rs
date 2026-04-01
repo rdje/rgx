@@ -3469,6 +3469,40 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_bare_horizontal_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\h])+\z")
+            .expect("Failed to compile horizontal-whitespace extended character class pattern");
+        assert!(regex.is_match(" \t\u{00A0}\u{1680}\u{202F}\u{3000}"));
+        assert!(!regex.is_match("\n \t"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_negated_horizontal_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\H])+\z").expect(
+            "Failed to compile negated horizontal-whitespace extended character class pattern",
+        );
+        assert!(regex.is_match("A\nB"));
+        assert!(!regex.is_match(" \t\u{00A0}"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_bare_vertical_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\v])+\z")
+            .expect("Failed to compile vertical-whitespace extended character class pattern");
+        assert!(regex.is_match("\n\u{000B}\u{0085}\u{2028}\u{2029}"));
+        assert!(!regex.is_match(" \n"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_negated_vertical_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\V])+\z").expect(
+            "Failed to compile negated vertical-whitespace extended character class pattern",
+        );
+        assert!(regex.is_match("A \u{00A0}\t"));
+        assert!(!regex.is_match("\n\u{0085}\u{2028}"));
+    }
+
+    #[test]
     fn parser_extended_char_class_requires_nested_simple_syntax() {
         let result = Regex::compile(r"(?[a-z])");
         assert!(
@@ -3560,6 +3594,14 @@ mod tests {
             (r"\A(?[\w & [a-z]])+\z", "face_", false),
             (r"\A(?[\D & [A-F]])+\z", "FACE", true),
             (r"\A(?[\D & [A-F]])+\z", "FA3E", false),
+            (r"\A(?[\h])+\z", " \t\u{00A0}\u{1680}\u{202F}\u{3000}", true),
+            (r"\A(?[\h])+\z", "\n \t", false),
+            (r"\A(?[\H])+\z", "A\nB", true),
+            (r"\A(?[\H])+\z", " \t\u{00A0}", false),
+            (r"\A(?[\v])+\z", "\n\u{000B}\u{0085}\u{2028}\u{2029}", true),
+            (r"\A(?[\v])+\z", " \n", false),
+            (r"\A(?[\V])+\z", "A \u{00A0}\t", true),
+            (r"\A(?[\V])+\z", "\n\u{0085}\u{2028}", false),
             (r"\A(?[ ![0-9] ])+\z", "abcXYZ!", true),
             (r"\A(?[ ![0-9] ])+\z", "abc123", false),
             (r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z", "bcdb", true),

@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend shipped extended char class h/v-space shorthand subset
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes bare horizontal/vertical whitespace shorthand terms (`\h`, `\H`, `\v`, `\V`) inside the current extended-character-class subset instead of compile-rejecting them.
+  - Added compiler/unit coverage for positive and negated horizontal/vertical shorthand lowering, plus parser-path and parser-contract regressions that lock those cases onto the default PGEN-backed path.
+  - Expanded PCRE2 differential parity coverage for the new shorthand slice while keeping the new parity inputs ASCII-only so they stay aligned with the current `pcre2::bytes::Regex` harness instead of over-claiming UTF-mode behavior there.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path without pretending the broader remaining extended-character-class grammar is finished.
+
 ### 2026-04-01 - Consolidate extended char class escape parsing
 - Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
 - Changes:

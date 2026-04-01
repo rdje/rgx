@@ -25,6 +25,18 @@ const ASCII_WORD_RANGES: [ScalarRange; 4] = [
     ('a' as u32, 'z' as u32),
 ];
 const ASCII_SPACE_RANGES: [ScalarRange; 2] = [(0x09, 0x0D), (' ' as u32, ' ' as u32)];
+const PCRE_HORIZONTAL_SPACE_RANGES: [ScalarRange; 9] = [
+    (0x09, 0x09),
+    (0x20, 0x20),
+    (0xA0, 0xA0),
+    (0x1680, 0x1680),
+    (0x180E, 0x180E),
+    (0x2000, 0x200A),
+    (0x202F, 0x202F),
+    (0x205F, 0x205F),
+    (0x3000, 0x3000),
+];
+const PCRE_VERTICAL_SPACE_RANGES: [ScalarRange; 3] = [(0x0A, 0x0D), (0x85, 0x85), (0x2028, 0x2029)];
 
 #[derive(Clone, Copy)]
 enum ExtendedCharClassOperator {
@@ -102,7 +114,7 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\x{41} - [B] ])', '(?[ \\n | \\t ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\h ])', '(?[ \\v ])', '(?[ \\x{41} - [B] ])', '(?[ \\n | \\t ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
@@ -129,7 +141,7 @@ impl ScalarRangeSet {
         Ok(Self::from_char_ranges(&ranges))
     }
 
-    fn from_ascii_ranges(ranges: &[ScalarRange], negated: bool) -> Self {
+    fn from_builtin_ranges(ranges: &[ScalarRange], negated: bool) -> Self {
         let set = Self::new(ranges.to_vec());
         if negated {
             set.complement()
@@ -141,13 +153,13 @@ impl ScalarRangeSet {
     fn from_char_class(char_class: &crate::ast::CharClass) -> Result<Self> {
         match char_class {
             crate::ast::CharClass::Digit { negated } => {
-                Ok(Self::from_ascii_ranges(&ASCII_DIGIT_RANGES, *negated))
+                Ok(Self::from_builtin_ranges(&ASCII_DIGIT_RANGES, *negated))
             }
             crate::ast::CharClass::Word { negated } => {
-                Ok(Self::from_ascii_ranges(&ASCII_WORD_RANGES, *negated))
+                Ok(Self::from_builtin_ranges(&ASCII_WORD_RANGES, *negated))
             }
             crate::ast::CharClass::Space { negated } => {
-                Ok(Self::from_ascii_ranges(&ASCII_SPACE_RANGES, *negated))
+                Ok(Self::from_builtin_ranges(&ASCII_SPACE_RANGES, *negated))
             }
             crate::ast::CharClass::Custom { ranges, negated } => {
                 let set = Self::from_char_ranges(ranges);
@@ -815,6 +827,22 @@ impl Compiler {
             'W' => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: true }),
             's' => Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: false }),
             'S' => Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: true }),
+            'h' => Ok(ScalarRangeSet::from_builtin_ranges(
+                &PCRE_HORIZONTAL_SPACE_RANGES,
+                false,
+            )),
+            'H' => Ok(ScalarRangeSet::from_builtin_ranges(
+                &PCRE_HORIZONTAL_SPACE_RANGES,
+                true,
+            )),
+            'v' => Ok(ScalarRangeSet::from_builtin_ranges(
+                &PCRE_VERTICAL_SPACE_RANGES,
+                false,
+            )),
+            'V' => Ok(ScalarRangeSet::from_builtin_ranges(
+                &PCRE_VERTICAL_SPACE_RANGES,
+                true,
+            )),
             'x' => Self::resolve_extended_hex_escape_term(cursor),
             'p' | 'P' => Self::resolve_extended_unicode_property_escape_term(kind, cursor),
             _ => Err(Self::extended_char_class_subset_error()),
@@ -2269,6 +2297,78 @@ mod tests {
         assert!(range_contains(&ranges, '-'));
         assert!(range_contains(&ranges, 'A'));
         assert!(!range_contains(&ranges, 'B'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_horizontal_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\h".to_string()).expect(
+            "Expected horizontal-whitespace shorthand to remain part of the shipped subset",
+        );
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\t'));
+        assert!(range_contains(&ranges, ' '));
+        assert!(range_contains(&ranges, '\u{00A0}'));
+        assert!(range_contains(&ranges, '\u{1680}'));
+        assert!(range_contains(&ranges, '\u{202F}'));
+        assert!(range_contains(&ranges, '\u{3000}'));
+        assert!(!range_contains(&ranges, '\n'));
+        assert!(!range_contains(&ranges, 'A'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_negated_bare_horizontal_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\H".to_string()).expect(
+            "Expected negated horizontal-whitespace shorthand to remain part of the shipped subset",
+        );
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\n'));
+        assert!(range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, '\t'));
+        assert!(!range_contains(&ranges, ' '));
+        assert!(!range_contains(&ranges, '\u{00A0}'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_vertical_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\v".to_string())
+            .expect("Expected vertical-whitespace shorthand to remain part of the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\n'));
+        assert!(range_contains(&ranges, '\u{000B}'));
+        assert!(range_contains(&ranges, '\u{0085}'));
+        assert!(range_contains(&ranges, '\u{2028}'));
+        assert!(range_contains(&ranges, '\u{2029}'));
+        assert!(!range_contains(&ranges, ' '));
+        assert!(!range_contains(&ranges, '\u{00A0}'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_negated_bare_vertical_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\V".to_string()).expect(
+            "Expected negated vertical-whitespace shorthand to remain part of the shipped subset",
+        );
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, ' '));
+        assert!(range_contains(&ranges, '\t'));
+        assert!(range_contains(&ranges, '\u{00A0}'));
+        assert!(!range_contains(&ranges, '\n'));
+        assert!(!range_contains(&ranges, '\u{2028}'));
     }
 
     #[test]
