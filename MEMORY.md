@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest extended-character-class cleanup was a consolidation-only pass over the newly shipped escaped-term slice:
+  - `rgx-core/src/compiler.rs` now resolves extended-char-class escapes through smaller helpers for literal escapes, Unicode-property escapes, and braced-name consumption
+  - direct unit coverage now locks escaped operator literals like `\-` and malformed unclosed hex escapes behind explicit tests
+  - shipped `(?[...])` behavior did not widen; this was strictly an internal maintainability/guardrail pass
 - Parity program with PCRE2 differential tests is active and operational in `rgx-bench/tests/pcre2_parity.rs`.
 - PGEN regex integration review now has a git-tracked complaint document constrained to `PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md` and the referenced upstream contract surfaces.
 - PGEN regex integration review now also has a separate git-tracked proposal document, `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`, which recommends keeping parser guarantees structural, treating `lua` / `js` / `javascript` as source-body tags, and keeping `native` / `wasm` reference-shaped.

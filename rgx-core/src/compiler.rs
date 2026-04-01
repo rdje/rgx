@@ -796,58 +796,42 @@ impl Compiler {
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Result<ScalarRangeSet> {
         let slash = cursor.consume_char();
-        let kind = cursor.consume_char();
+        let Some(kind) = cursor.consume_char() else {
+            return Err(Self::extended_char_class_subset_error());
+        };
+
         if slash != Some('\\') {
             return Err(Self::extended_char_class_subset_error());
         }
 
+        if let Some(ch) = Self::resolve_extended_literal_escape(kind) {
+            return Ok(ScalarRangeSet::from_char(ch));
+        }
+
         match kind {
-            Some('d') => {
-                Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: false })
-            }
-            Some('D') => {
-                Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: true })
-            }
-            Some('w') => {
-                Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: false })
-            }
-            Some('W') => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: true }),
-            Some('s') => {
-                Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: false })
-            }
-            Some('S') => {
-                Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: true })
-            }
-            Some('n') => Ok(ScalarRangeSet::from_char('\n')),
-            Some('t') => Ok(ScalarRangeSet::from_char('\t')),
-            Some('r') => Ok(ScalarRangeSet::from_char('\r')),
-            Some('f') => Ok(ScalarRangeSet::from_char('\u{0C}')),
-            Some('a') => Ok(ScalarRangeSet::from_char('\u{07}')),
-            Some('e') => Ok(ScalarRangeSet::from_char('\u{1B}')),
-            Some(
-                escaped @ ('.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
-                | '|' | '\\' | '-'),
-            ) => Ok(ScalarRangeSet::from_char(escaped)),
-            Some('x') => Self::resolve_extended_hex_escape_term(cursor),
-            Some('p' | 'P') => {
-                if cursor.consume_char() != Some('{') {
-                    return Err(Self::extended_char_class_subset_error());
-                }
-
-                let mut name = String::new();
-                while let Some(ch) = cursor.consume_char() {
-                    if ch == '}' {
-                        if name.is_empty() {
-                            return Err(Self::extended_char_class_subset_error());
-                        }
-                        return ScalarRangeSet::from_unicode_property(&name, kind == Some('P'));
-                    }
-                    name.push(ch);
-                }
-
-                Err(Self::extended_char_class_subset_error())
-            }
+            'd' => Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: false }),
+            'D' => Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: true }),
+            'w' => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: false }),
+            'W' => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: true }),
+            's' => Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: false }),
+            'S' => Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: true }),
+            'x' => Self::resolve_extended_hex_escape_term(cursor),
+            'p' | 'P' => Self::resolve_extended_unicode_property_escape_term(kind, cursor),
             _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn resolve_extended_literal_escape(kind: char) -> Option<char> {
+        match kind {
+            'n' => Some('\n'),
+            't' => Some('\t'),
+            'r' => Some('\r'),
+            'f' => Some('\u{0C}'),
+            'a' => Some('\u{07}'),
+            'e' => Some('\u{1B}'),
+            escaped @ ('.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
+            | '|' | '\\' | '-') => Some(escaped),
+            _ => None,
         }
     }
 
@@ -894,6 +878,33 @@ impl Compiler {
             .map_err(|_| Self::extended_char_class_subset_error())?;
         let ch = char::from_u32(code_point).ok_or_else(Self::extended_char_class_subset_error)?;
         Ok(ScalarRangeSet::from_char(ch))
+    }
+
+    fn resolve_extended_unicode_property_escape_term(
+        kind: char,
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        let name = Self::consume_extended_braced_name(cursor)?;
+        ScalarRangeSet::from_unicode_property(&name, kind == 'P')
+    }
+
+    fn consume_extended_braced_name(cursor: &mut ExtendedCharClassCursor<'_>) -> Result<String> {
+        if cursor.consume_char() != Some('{') {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        let mut name = String::new();
+        while let Some(ch) = cursor.consume_char() {
+            if ch == '}' {
+                if name.is_empty() {
+                    return Err(Self::extended_char_class_subset_error());
+                }
+                return Ok(name);
+            }
+            name.push(ch);
+        }
+
+        Err(Self::extended_char_class_subset_error())
     }
 
     fn resolve_char_class_scalar_ranges(
@@ -2244,6 +2255,30 @@ mod tests {
         assert!(range_contains(&ranges, '\t'));
         assert!(!range_contains(&ranges, ' '));
         assert!(!range_contains(&ranges, 'A'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_escaped_operator_literal_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\- | [A]".to_string())
+            .expect("Expected escaped operator literal term to remain part of the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '-'));
+        assert!(range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'B'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_rejects_unclosed_hex_escape() {
+        let err = Compiler::lower_extended_char_class_content(r"\x{41".to_string())
+            .expect_err("Expected malformed hex escape to stay behind the explicit boundary");
+        assert!(
+            err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
+            "unexpected malformed-escape boundary message: {err}"
+        );
     }
 
     #[test]

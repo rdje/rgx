@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Consolidate extended char class escape parsing
+- Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
+- Changes:
+  - Refactored the shipped `(?[...])` escaped-term lowering path in `rgx-core/src/compiler.rs` into smaller dedicated helpers for literal escapes, Unicode-property escapes, and braced-name consumption.
+  - Added direct compiler coverage for escaped operator literals like `\-` and for malformed unclosed hex escapes so the escaped-term subset stays explicit and better defended against regressions.
+  - Kept runtime and parser-contract behavior unchanged while reducing drift risk in the newest extended-character-class slice.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not widen, but escaped-term follow-up work now hangs off clearer helper boundaries and tighter guardrail tests.
+
 ### 2026-04-01 - Extend shipped extended char class escaped-term subset
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:
