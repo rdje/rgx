@@ -96,6 +96,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "x\n\t\n y\t",
         },
         ParityCase {
+            name: "extended_class_control_letter_escape_union_all",
+            pattern: r"(?[\cA | [B]])+",
+            input: "x\u{0001}BB y B",
+        },
+        ParityCase {
+            name: "extended_class_octal_escape_union_all",
+            pattern: r"(?[\040 | \011 | \o{101}])+",
+            input: "Z \tA\t Q A",
+        },
+        ParityCase {
             name: "extended_class_property_intersection_all",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc XYZ q M",
@@ -369,6 +379,16 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "    ",
         },
         ParityCase {
+            name: "no_match_extended_class_control_letter_escape_union",
+            pattern: r"(?[\cA | [B]])+",
+            input: "AAC",
+        },
+        ParityCase {
+            name: "no_match_extended_class_octal_escape_union",
+            pattern: r"(?[\040 | \011 | \o{101}])+",
+            input: "ZZ\n",
+        },
+        ParityCase {
             name: "no_match_extended_class_property_intersection",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc xyz",
@@ -586,6 +606,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_control_escape_union",
             pattern: "(?[\\n | \\t])+",
             input: "xx\n\tzz",
+        },
+        ParityCase {
+            name: "extended_class_control_letter_escape_union",
+            pattern: r"(?[\cA | [B]])+",
+            input: "xx\u{0001}BBzz",
+        },
+        ParityCase {
+            name: "extended_class_octal_escape_union",
+            pattern: r"(?[\040 | \011 | \o{101}])+",
+            input: "xx \tA\tzz",
         },
         ParityCase {
             name: "extended_class_property_intersection",

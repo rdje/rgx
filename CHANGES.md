@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Extend shipped extended char class escaped-atom subset
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes bare control escapes like `\cA` and bare octal escapes like `\040`, `\011`, and `\o{101}` inside the current extended-character-class subset instead of compile-rejecting them.
+  - Added compiler/unit coverage for the new control/octal escaped-atom forms, including explicit malformed-control and malformed-octal guardrail tests, plus parser-path and parser-contract regressions that lock representative forms like `(?[\cA | [B]])` and `(?[\040 | \011 | \o{101}])` onto the default PGEN-backed path.
+  - Expanded PCRE2 differential parity coverage for the new escaped-atom slice and deliberately backed out an exploratory `\N` variant when the focused parity probe showed that upstream PCRE2 compile-rejects `\N` inside extended classes.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_no_match_consistency -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_first_match_span -- --nocapture`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path without over-claiming `\N`, which upstream PCRE2 itself still rejects in extended classes.
+
 ### 2026-04-02 - Consolidate extended char class POSIX spec parsing
 - Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
 - Changes:

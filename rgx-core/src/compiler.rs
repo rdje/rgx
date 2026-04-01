@@ -199,7 +199,7 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\h ])', '(?[ \\x{41} - [B] ])', '(?[ [:alpha:] & [a-z] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped single-character/codepoint terms such as '\\n', '\\t', '\\cA', '\\040', '\\o{101}', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\040 | \\011 ])', '(?[ \\cA | [B] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
@@ -954,6 +954,8 @@ impl Compiler {
         }
 
         match kind {
+            '0'..='7' => Self::resolve_extended_octal_escape_term(kind, cursor),
+            'c' => Self::resolve_extended_control_escape_term(cursor),
             'd' => Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: false }),
             'D' => Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: true }),
             'w' => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: false }),
@@ -976,6 +978,7 @@ impl Compiler {
                 &PCRE_VERTICAL_SPACE_RANGES,
                 true,
             )),
+            'o' => Self::resolve_extended_braced_octal_escape_term(cursor),
             'x' => Self::resolve_extended_hex_escape_term(cursor),
             'p' | 'P' => Self::resolve_extended_unicode_property_escape_term(kind, cursor),
             _ => Err(Self::extended_char_class_subset_error()),
@@ -994,6 +997,82 @@ impl Compiler {
             | '|' | '\\' | '-') => Some(escaped),
             _ => None,
         }
+    }
+
+    fn scalar_range_set_from_code_point(code_point: u32) -> Result<ScalarRangeSet> {
+        let ch = char::from_u32(code_point).ok_or_else(Self::extended_char_class_subset_error)?;
+        Ok(ScalarRangeSet::from_char(ch))
+    }
+
+    fn scalar_range_set_from_radix_digits(digits: &str, radix: u32) -> Result<ScalarRangeSet> {
+        let code_point = u32::from_str_radix(digits, radix)
+            .map_err(|_| Self::extended_char_class_subset_error())?;
+        Self::scalar_range_set_from_code_point(code_point)
+    }
+
+    fn resolve_extended_octal_escape_term(
+        initial: char,
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        let mut octal_digits = String::from(initial);
+
+        while octal_digits.len() < 3 {
+            let Some(ch) = cursor.peek_char() else {
+                break;
+            };
+            if !matches!(ch, '0'..='7') {
+                break;
+            }
+            octal_digits.push(ch);
+            cursor.consume_char();
+        }
+
+        Self::scalar_range_set_from_radix_digits(&octal_digits, 8)
+    }
+
+    fn resolve_extended_control_escape_term(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        let Some(ch) = cursor.consume_char() else {
+            return Err(Self::extended_char_class_subset_error());
+        };
+
+        let normalized = match ch {
+            'A'..='Z' => ch,
+            'a'..='z' => ch.to_ascii_uppercase(),
+            '@' | '[' | '\\' | ']' | '^' | '_' | '?' => ch,
+            _ => return Err(Self::extended_char_class_subset_error()),
+        };
+
+        Self::scalar_range_set_from_code_point((normalized as u32) ^ 0x40)
+    }
+
+    fn resolve_extended_braced_octal_escape_term(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        if cursor.consume_char() != Some('{') {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        let mut octal_digits = String::new();
+        let mut closed = false;
+
+        while let Some(ch) = cursor.consume_char() {
+            if ch == '}' {
+                closed = true;
+                break;
+            }
+            if !matches!(ch, '0'..='7') {
+                return Err(Self::extended_char_class_subset_error());
+            }
+            octal_digits.push(ch);
+        }
+
+        if octal_digits.is_empty() || !closed {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        Self::scalar_range_set_from_radix_digits(&octal_digits, 8)
     }
 
     fn resolve_extended_hex_escape_term(
@@ -1035,10 +1114,7 @@ impl Compiler {
             }
         }
 
-        let code_point = u32::from_str_radix(&hex_digits, 16)
-            .map_err(|_| Self::extended_char_class_subset_error())?;
-        let ch = char::from_u32(code_point).ok_or_else(Self::extended_char_class_subset_error)?;
-        Ok(ScalarRangeSet::from_char(ch))
+        Self::scalar_range_set_from_radix_digits(&hex_digits, 16)
     }
 
     fn resolve_extended_unicode_property_escape_term(
@@ -2419,6 +2495,36 @@ mod tests {
     }
 
     #[test]
+    fn lower_extended_char_class_content_maps_bare_control_letter_escape_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\cA | [B]".to_string())
+            .expect("Expected bare control-letter escape to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\u{0001}'));
+        assert!(range_contains(&ranges, 'B'));
+        assert!(!range_contains(&ranges, 'A'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_octal_escape_terms() {
+        let lowered =
+            Compiler::lower_extended_char_class_content(r"\040 | \011 | \o{101}".to_string())
+                .expect("Expected bare octal escapes to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, ' '));
+        assert!(range_contains(&ranges, '\t'));
+        assert!(range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'B'));
+    }
+
+    #[test]
     fn lower_extended_char_class_content_maps_escaped_operator_literal_term() {
         let lowered = Compiler::lower_extended_char_class_content(r"\- | [A]".to_string())
             .expect("Expected escaped operator literal term to remain part of the shipped subset");
@@ -2628,6 +2734,26 @@ mod tests {
         assert!(
             err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
             "unexpected malformed-escape boundary message: {err}"
+        );
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_rejects_malformed_octal_escape() {
+        let err = Compiler::lower_extended_char_class_content(r"\o{8}".to_string())
+            .expect_err("Expected malformed octal escape to stay behind the explicit boundary");
+        assert!(
+            err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
+            "unexpected malformed-octal boundary message: {err}"
+        );
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_rejects_invalid_control_escape() {
+        let err = Compiler::lower_extended_char_class_content(r"\c1".to_string())
+            .expect_err("Expected invalid control escape to stay behind the explicit boundary");
+        assert!(
+            err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
+            "unexpected invalid-control boundary message: {err}"
         );
     }
 

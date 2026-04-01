@@ -3494,6 +3494,22 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_bare_control_letter_escape_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\cA | [B]])+\z")
+            .expect("Failed to compile control-letter extended character class pattern");
+        assert!(regex.is_match("\u{0001}B\u{0001}"));
+        assert!(!regex.is_match("ABC"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_bare_octal_escapes_execute_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\040 | \011 | \o{101}])+\z")
+            .expect("Failed to compile octal-escape extended character class pattern");
+        assert!(regex.is_match(" \tA\t "));
+        assert!(!regex.is_match("\nA"));
+    }
+
+    #[test]
     fn parser_extended_char_class_bare_horizontal_shorthand_executes_on_default_path() {
         let regex = Regex::compile(r"\A(?[\h])+\z")
             .expect("Failed to compile horizontal-whitespace extended character class pattern");
