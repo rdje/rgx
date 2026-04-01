@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Consolidate extended char class boundary message
+- Scope: internal cleanup, compile-boundary contract hardening, and continuity refresh.
+- Changes:
+  - Promoted the shipped extended-character-class compile-boundary wording in `rgx-core/src/compiler.rs` into one crate-visible constant so the compiler, capability validation, and parser-contract tests all read from the same source of truth.
+  - Replaced duplicated hard-coded message fragments in `rgx-core/src/lib.rs` and `rgx-core/src/parsing.rs` with direct references to that compiler-owned constant.
+  - Kept runtime behavior unchanged while reducing drift risk for the still-explicit non-shipped `(?[...])` grammar surface.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not widen, but future `(?[...])` follow-up work now has one stable boundary message to assert against.
+
 ### 2026-04-01 - Extend shipped extended char class shorthand subset
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:

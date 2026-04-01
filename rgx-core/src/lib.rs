@@ -3461,9 +3461,7 @@ mod tests {
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
-            msg.contains(
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
-            ),
+            msg.contains(crate::compiler::EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
     }
@@ -3628,7 +3626,7 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
+                crate::compiler::EXTENDED_CHAR_CLASS_SUBSET_MESSAGE,
             ),
         ];
 

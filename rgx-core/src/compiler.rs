@@ -102,6 +102,8 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\d - [3] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset remain unsupported";
+
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
         Self {
@@ -470,13 +472,8 @@ impl Compiler {
         Ok(ast)
     }
 
-    fn extended_char_class_subset_message() -> String {
-        "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\d - [3] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset remain unsupported"
-            .to_string()
-    }
-
     fn extended_char_class_subset_error() -> RgxError {
-        RgxError::Compile(Self::extended_char_class_subset_message())
+        RgxError::Compile(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
     }
 
     fn lower_extended_char_classes(ast: RegexAst) -> Result<RegexAst> {
@@ -1531,7 +1528,9 @@ impl Compiler {
             RegexAst::UnicodeClass { name, negated } => {
                 resolve_unicode_property_class(name, *negated).err()
             }
-            RegexAst::ExtendedCharClass { .. } => Some(Self::extended_char_class_subset_message()),
+            RegexAst::ExtendedCharClass { .. } => {
+                Some(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
+            }
             RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
                 resolve_unicode_property_class(name, *negated).err()
             }

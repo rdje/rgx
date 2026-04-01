@@ -69,6 +69,10 @@ Live continuity memory for `rgx` sessions.
   - removed the stale `PatternAnalysis` helper and an unused VM capture extractor
   - feature-gated dormant Lua/JavaScript/Rhai-only execution helpers so base builds stop warning on them
   - brought the visible RGX-owned `rgx-core` warning count in the standard validation loop down from 101 to 93
+- Latest extended-character-class cleanup did not widen syntax, but it centralized the explicit non-shipped `(?[...])` compile-boundary wording into one compiler-owned constant:
+  - `rgx-core/src/compiler.rs` now owns the single source of truth for the current boundary message
+  - `rgx-core/src/lib.rs` and `rgx-core/src/parsing.rs` now assert against that constant instead of drifting hard-coded copies
+  - this keeps future extended-character-class widening work aligned with the existing explicit-boundary policy
 - Local PGEN issue `pgen-issues/PGEN-RGX-0005.yaml` is now closed as `verified-fixed-upstream`:
   - minimal repro: `(?(R&word)a|b)`
   - standalone local PGEN at commit `f97e0fe31750885f4fc48a67ed7660110cd20271` now reports `regex_parser_release_version=1.1.2` / `regex_integration_contract_version=1.1.2` and parses the repro successfully

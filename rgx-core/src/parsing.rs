@@ -1360,7 +1360,7 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms",
+                crate::compiler::EXTENDED_CHAR_CLASS_SUBSET_MESSAGE,
             ),
         ];
 
