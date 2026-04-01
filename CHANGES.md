@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Extend shipped extended char class negated POSIX subset
+- Scope: regex runtime feature surfacing, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` subset again so RGX now explicitly supports bare negated ASCII POSIX class terms such as `[:^alpha:]` on the default path instead of leaving that capability implicit and undocumented.
+  - Added direct compiler/unit coverage for negated bare POSIX-term lowering, plus parser-path and parser-contract regressions that lock representative forms like `(?[ [:^alpha:] ])` onto the default PGEN-backed path.
+  - Expanded PCRE2 differential parity coverage for the new negated POSIX-term slice across first-match, all-match, and explicit no-match views.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_explicit_compile_boundary_and_validation_cases -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_find_all_spans -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_no_match_consistency -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_first_match_span -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path while keeping the explicit compile boundary focused on broader remaining extended-class forms rather than already-supported negated POSIX atoms.
+
 ### 2026-04-02 - Consolidate extended char class braced escape parsing
 - Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
 - Changes:

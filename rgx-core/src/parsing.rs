@@ -1179,6 +1179,7 @@ mod tests {
             r"(?[\w & [a-z]])",
             r"(?[\D & [A-F]])",
             r"(?[ [:graph:] ])",
+            r"(?[ [:^alpha:] ])",
             r"(?[ ![:alpha:] ])",
             r"(?[ [:alpha:] & [a-z\t] ])",
             r"(?[\h])",
@@ -1441,6 +1442,12 @@ mod tests {
         );
         assert!(graph_regex.is_match("AZ9!"));
         assert!(!graph_regex.is_match("AZ 9"));
+
+        let negated_alpha_regex = crate::Regex::compile(r"\A(?[ [:^alpha:] ])+\z").expect(
+            "negated POSIX alpha extended character class fixture should compile on the default path",
+        );
+        assert!(negated_alpha_regex.is_match("19?!"));
+        assert!(!negated_alpha_regex.is_match("A1"));
 
         let non_alpha_regex = crate::Regex::compile(r"\A(?[ ![:alpha:] ])+\z").expect(
             "complemented POSIX alpha extended character class fixture should compile on the default path",

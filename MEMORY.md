@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest extended-character-class feature pass widened the shipped POSIX slice again:
+  - bare negated ASCII POSIX class terms such as `[:^alpha:]` now count as an explicit shipped part of the default-path `(?[...])` subset instead of remaining merely latent in the lowering helper
+  - compiler/unit, parser-path, parser-contract, and PCRE2 differential coverage now lock representative cases like `(?[ [:^alpha:] ])`
+  - the broader explicit compile boundary is unchanged: wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset still compile-reject deliberately
 - Latest cleanup was a consolidation-only pass over the parser-path capability matrix regression in `rgx-core/src/lib.rs`:
   - the large `capability_matrix_supported_parser_path_cases` data set now lives in one shared constant instead of inside a monolithic test body
   - the assertions now flow through one helper, so future feature turns can append parser-path cases without recreating the old `clippy::too_many_lines` warning

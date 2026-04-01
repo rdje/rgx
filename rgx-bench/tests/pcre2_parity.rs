@@ -71,6 +71,11 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "\x01AZ9! \tB",
         },
         ParityCase {
+            name: "extended_class_negated_posix_alpha_all",
+            pattern: r"(?[ [:^alpha:] ])+",
+            input: "AZ 19?! \nB",
+        },
+        ParityCase {
             name: "extended_class_posix_alpha_algebra_all",
             pattern: r"(?[ [:alpha:] & [a-z\t] ])+",
             input: "ABC facet\t xyz 123",
@@ -339,6 +344,11 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: " \t\n",
         },
         ParityCase {
+            name: "no_match_extended_class_negated_posix_alpha",
+            pattern: r"(?[ [:^alpha:] ])+",
+            input: "ABCxyz",
+        },
+        ParityCase {
             name: "no_match_extended_class_complemented_posix_alpha",
             pattern: r"(?[ ![:alpha:] ])+",
             input: "ABCxyz",
@@ -566,6 +576,11 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_posix_graph",
             pattern: r"(?[ [:graph:] ])+",
             input: " \t!A9 ",
+        },
+        ParityCase {
+            name: "extended_class_negated_posix_alpha",
+            pattern: r"(?[ [:^alpha:] ])+",
+            input: "ab19?!\n",
         },
         ParityCase {
             name: "extended_class_complemented_posix_alpha",

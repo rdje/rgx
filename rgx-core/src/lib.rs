@@ -3461,6 +3461,14 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_negated_bare_posix_alpha_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [:^alpha:] ])+\z")
+            .expect("Failed to compile negated bare POSIX alpha extended character class pattern");
+        assert!(regex.is_match("19?!"));
+        assert!(!regex.is_match("A1"));
+    }
+
+    #[test]
     fn parser_extended_char_class_complemented_bare_posix_alpha_executes_on_default_path() {
         let regex = Regex::compile(r"\A(?[ ![:alpha:] ])+\z").expect(
             "Failed to compile complemented bare POSIX alpha extended character class pattern",
@@ -3635,6 +3643,8 @@ mod tests {
         (r"\A(?[\D & [A-F]])+\z", "FA3E", false),
         (r"\A(?[ [:graph:] ])+\z", "AZ9!", true),
         (r"\A(?[ [:graph:] ])+\z", "AZ 9", false),
+        (r"\A(?[ [:^alpha:] ])+\z", "19?!", true),
+        (r"\A(?[ [:^alpha:] ])+\z", "A1", false),
         (r"\A(?[ ![:alpha:] ])+\z", "19?!", true),
         (r"\A(?[ ![:alpha:] ])+\z", "A1", false),
         (r"\A(?[ [:alpha:] & [a-z\t] ])+\z", "facet", true),

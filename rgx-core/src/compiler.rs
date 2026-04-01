@@ -2629,6 +2629,21 @@ mod tests {
     }
 
     #[test]
+    fn lower_extended_char_class_content_maps_negated_bare_posix_alpha_term() {
+        let lowered = Compiler::lower_extended_char_class_content("[:^alpha:]".to_string())
+            .expect("Expected negated bare POSIX alpha term to remain part of the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '1'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'z'));
+    }
+
+    #[test]
     fn lower_extended_char_class_content_maps_bare_posix_alpha_term_inside_algebra() {
         let lowered =
             Compiler::lower_extended_char_class_content(r"[:alpha:] & [a-z\t]".to_string())
