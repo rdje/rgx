@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend shipped extended char class shorthand subset
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) inside the current extended-character-class subset instead of compile-rejecting them.
+  - Added compiler/unit coverage for positive and negated shorthand lowering, parser-contract and API regressions for digit/word/negated-shorthand runtime behavior, and PCRE2 differential parity cases for the newly shipped shorthand slice.
+  - Kept the boundary disciplined by still rejecting wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset instead of over-claiming the full PCRE2 extended-character-class grammar.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path without pretending the broader remaining extended-class grammar is finished.
+
 ### 2026-04-01 - Consolidate extended char class operator parser
 - Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
 - Changes:

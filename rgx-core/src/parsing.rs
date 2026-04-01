@@ -1175,6 +1175,9 @@ mod tests {
             "(?|a|b)",
             "(?[[a-z]])",
             "(?[[a-z] - [aeiou]])",
+            r"(?[\d - [3]])",
+            r"(?[\w & [a-z]])",
+            r"(?[\D & [A-F]])",
             r"(?[\p{L} & \p{Lu}])",
             r"(?[ ![0-9] ])",
             r"(?[ ([a-z] - [aeiou]) & [b-d] ])",
@@ -1357,11 +1360,7 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
-            ),
-            (
-                r"(?[\d - [3]])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms",
             ),
         ];
 
@@ -1411,6 +1410,24 @@ mod tests {
         );
         assert!(property_regex.is_match("ABCXYZ"));
         assert!(!property_regex.is_match("ABcXYZ"));
+
+        let digit_regex = crate::Regex::compile(r"\A(?[\d - [3]])+\z").expect(
+            "digit shorthand extended character class fixture should compile on the default path",
+        );
+        assert!(digit_regex.is_match("20479"));
+        assert!(!digit_regex.is_match("1234"));
+
+        let word_regex = crate::Regex::compile(r"\A(?[\w & [a-z]])+\z").expect(
+            "word shorthand extended character class fixture should compile on the default path",
+        );
+        assert!(word_regex.is_match("facet"));
+        assert!(!word_regex.is_match("face_"));
+
+        let negated_digit_regex = crate::Regex::compile(r"\A(?[\D & [A-F]])+\z").expect(
+            "negated shorthand extended character class fixture should compile on the default path",
+        );
+        assert!(negated_digit_regex.is_match("FACE"));
+        assert!(!negated_digit_regex.is_match("FA3E"));
 
         let complement_regex = crate::Regex::compile(r"\A(?[ ![0-9] ])+\z").expect(
             "complement extended character class fixture should compile on the default path",

@@ -1,5 +1,5 @@
-use crate::ast::CharRange;
 use crate::ast::Regex as RegexAst;
+use crate::ast::{CharClass, CharRange};
 use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
 use crate::parser::Parser as ReferenceParser;
@@ -17,6 +17,14 @@ pub struct Compiler {
 type ScalarRange = (u32, u32);
 
 const UNICODE_SCALAR_UNIVERSE: [ScalarRange; 2] = [(0x0000, 0xD7FF), (0xE000, 0x10FFFF)];
+const ASCII_DIGIT_RANGES: [ScalarRange; 1] = [('0' as u32, '9' as u32)];
+const ASCII_WORD_RANGES: [ScalarRange; 4] = [
+    ('0' as u32, '9' as u32),
+    ('A' as u32, 'Z' as u32),
+    ('_' as u32, '_' as u32),
+    ('a' as u32, 'z' as u32),
+];
+const ASCII_SPACE_RANGES: [ScalarRange; 2] = [(0x09, 0x0D), (' ' as u32, ' ' as u32)];
 
 #[derive(Clone, Copy)]
 enum ExtendedCharClassOperator {
@@ -115,8 +123,26 @@ impl ScalarRangeSet {
         Ok(Self::from_char_ranges(&ranges))
     }
 
+    fn from_ascii_ranges(ranges: &[ScalarRange], negated: bool) -> Self {
+        let set = Self::new(ranges.to_vec());
+        if negated {
+            set.complement()
+        } else {
+            set
+        }
+    }
+
     fn from_char_class(char_class: &crate::ast::CharClass) -> Result<Self> {
         match char_class {
+            crate::ast::CharClass::Digit { negated } => {
+                Ok(Self::from_ascii_ranges(&ASCII_DIGIT_RANGES, *negated))
+            }
+            crate::ast::CharClass::Word { negated } => {
+                Ok(Self::from_ascii_ranges(&ASCII_WORD_RANGES, *negated))
+            }
+            crate::ast::CharClass::Space { negated } => {
+                Ok(Self::from_ascii_ranges(&ASCII_SPACE_RANGES, *negated))
+            }
             crate::ast::CharClass::Custom { ranges, negated } => {
                 let set = Self::from_char_ranges(ranges);
                 if *negated {
@@ -128,7 +154,6 @@ impl ScalarRangeSet {
             crate::ast::CharClass::UnicodeClass { name, negated } => {
                 Self::from_unicode_property(name, *negated)
             }
-            _ => Err(Compiler::extended_char_class_subset_error()),
         }
     }
 
@@ -446,7 +471,7 @@ impl Compiler {
     }
 
     fn extended_char_class_subset_message() -> String {
-        "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [a-f] | [d-z] & [m-p] ])' or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; additional bare-term families and wider set-expression forms remain unsupported"
+        "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\d - [3] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand subset remain unsupported"
             .to_string()
     }
 
@@ -704,7 +729,7 @@ impl Compiler {
                 let term = Self::consume_extended_char_class_bracket_term(cursor)?;
                 Self::resolve_extended_bracket_term_ranges(term)
             }
-            Some('\\') => Self::resolve_extended_unicode_property_term(cursor),
+            Some('\\') => Self::resolve_extended_escape_term(cursor),
             Some('(') => {
                 cursor.consume_char();
                 let inner = Self::parse_extended_char_class_expr(cursor)?;
@@ -766,30 +791,52 @@ impl Compiler {
         }
     }
 
-    fn resolve_extended_unicode_property_term(
+    fn resolve_extended_escape_term(
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Result<ScalarRangeSet> {
         let slash = cursor.consume_char();
         let kind = cursor.consume_char();
-        if slash != Some('\\')
-            || !matches!(kind, Some('p') | Some('P'))
-            || cursor.consume_char() != Some('{')
-        {
+        if slash != Some('\\') {
             return Err(Self::extended_char_class_subset_error());
         }
 
-        let mut name = String::new();
-        while let Some(ch) = cursor.consume_char() {
-            if ch == '}' {
-                if name.is_empty() {
+        match kind {
+            Some('d') => {
+                Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: false })
+            }
+            Some('D') => {
+                Self::resolve_char_class_scalar_ranges(&CharClass::Digit { negated: true })
+            }
+            Some('w') => {
+                Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: false })
+            }
+            Some('W') => Self::resolve_char_class_scalar_ranges(&CharClass::Word { negated: true }),
+            Some('s') => {
+                Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: false })
+            }
+            Some('S') => {
+                Self::resolve_char_class_scalar_ranges(&CharClass::Space { negated: true })
+            }
+            Some('p') | Some('P') => {
+                if cursor.consume_char() != Some('{') {
                     return Err(Self::extended_char_class_subset_error());
                 }
-                return ScalarRangeSet::from_unicode_property(&name, kind == Some('P'));
-            }
-            name.push(ch);
-        }
 
-        Err(Self::extended_char_class_subset_error())
+                let mut name = String::new();
+                while let Some(ch) = cursor.consume_char() {
+                    if ch == '}' {
+                        if name.is_empty() {
+                            return Err(Self::extended_char_class_subset_error());
+                        }
+                        return ScalarRangeSet::from_unicode_property(&name, kind == Some('P'));
+                    }
+                    name.push(ch);
+                }
+
+                Err(Self::extended_char_class_subset_error())
+            }
+            _ => Err(Self::extended_char_class_subset_error()),
+        }
     }
 
     fn resolve_char_class_scalar_ranges(
@@ -2082,16 +2129,33 @@ mod tests {
     }
 
     #[test]
-    fn lower_extended_char_class_content_rejects_bare_shorthand_term() {
-        let err = Compiler::lower_extended_char_class_content(r"\d - [3]".to_string())
-            .expect_err("Expected bare shorthand set term to stay outside the shipped subset");
+    fn lower_extended_char_class_content_maps_bare_digit_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\d - [3]".to_string())
+            .expect("Expected bare digit shorthand set term to lower into the shipped subset");
 
-        match err {
-            RgxError::Compile(message) => {
-                assert_eq!(message, Compiler::extended_char_class_subset_message());
-            }
-            other => panic!("expected compile error, got {other:?}"),
-        }
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '0'));
+        assert!(range_contains(&ranges, '9'));
+        assert!(!range_contains(&ranges, '3'));
+        assert!(!range_contains(&ranges, 'a'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_negated_bare_shorthand_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\D & [A-F]".to_string())
+            .expect("Expected negated bare shorthand set term to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, 'F'));
+        assert!(!range_contains(&ranges, '3'));
+        assert!(!range_contains(&ranges, 'Z'));
     }
 
     #[test]

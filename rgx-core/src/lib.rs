@@ -3429,19 +3429,27 @@ mod tests {
     }
 
     #[test]
-    fn parser_extended_char_class_rejects_bare_shorthand_term() {
-        let result = Regex::compile(r"(?[\d - [3]])");
-        assert!(
-            result.is_err(),
-            "unsupported extended character class should fail"
-        );
-        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(
-            msg.contains(
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
-            ),
-            "unexpected extended-char-class compile-boundary message: {msg}"
-        );
+    fn parser_extended_char_class_bare_digit_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\d - [3]])+\z")
+            .expect("Failed to compile digit-shorthand extended character class pattern");
+        assert!(regex.is_match("20479"));
+        assert!(!regex.is_match("1234"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_bare_word_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\w & [a-z]])+\z")
+            .expect("Failed to compile word-shorthand extended character class pattern");
+        assert!(regex.is_match("facet"));
+        assert!(!regex.is_match("face_"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_negated_bare_shorthand_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\D & [A-F]])+\z")
+            .expect("Failed to compile negated-shorthand extended character class pattern");
+        assert!(regex.is_match("FACE"));
+        assert!(!regex.is_match("FA3E"));
     }
 
     #[test]
@@ -3454,7 +3462,7 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
@@ -3532,6 +3540,12 @@ mod tests {
             (r"\A(?[[a-z] - [aeiou]])+\z", "facet", false),
             (r"\A(?[\p{L} & \p{Lu}])+\z", "ABCXYZ", true),
             (r"\A(?[\p{L} & \p{Lu}])+\z", "ABcXYZ", false),
+            (r"\A(?[\d - [3]])+\z", "20479", true),
+            (r"\A(?[\d - [3]])+\z", "1234", false),
+            (r"\A(?[\w & [a-z]])+\z", "facet", true),
+            (r"\A(?[\w & [a-z]])+\z", "face_", false),
+            (r"\A(?[\D & [A-F]])+\z", "FACE", true),
+            (r"\A(?[\D & [A-F]])+\z", "FA3E", false),
             (r"\A(?[ ![0-9] ])+\z", "abcXYZ!", true),
             (r"\A(?[ ![0-9] ])+\z", "abc123", false),
             (r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z", "bcdb", true),
@@ -3614,11 +3628,7 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
-            ),
-            (
-                r"(?[\d - [3]])",
-                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S'), unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter",
             ),
         ];
 

@@ -56,6 +56,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "aei bcdf xyz ou",
         },
         ParityCase {
+            name: "extended_class_digit_shorthand_difference_all",
+            pattern: r"(?[\d - [3]])+",
+            input: "ab20479 333 55",
+        },
+        ParityCase {
+            name: "extended_class_word_shorthand_intersection_all",
+            pattern: r"(?[\w & [a-z]])+",
+            input: "ABC facet_ xyz 123",
+        },
+        ParityCase {
             name: "extended_class_property_intersection_all",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc XYZ q M",
@@ -274,6 +284,16 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "aeiou",
         },
         ParityCase {
+            name: "no_match_extended_class_digit_shorthand_difference",
+            pattern: r"(?[\d - [3]])+",
+            input: "3333",
+        },
+        ParityCase {
+            name: "no_match_extended_class_negated_shorthand_intersection",
+            pattern: r"(?[\D & [A-F]])+",
+            input: "1237",
+        },
+        ParityCase {
             name: "no_match_extended_class_property_intersection",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc xyz",
@@ -436,6 +456,16 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_difference",
             pattern: r"(?[[a-z] - [aeiou]])+",
             input: "aei bcdf xyz",
+        },
+        ParityCase {
+            name: "extended_class_digit_shorthand_difference",
+            pattern: r"(?[\d - [3]])+",
+            input: "id 20479",
+        },
+        ParityCase {
+            name: "extended_class_negated_shorthand_intersection",
+            pattern: r"(?[\D & [A-F]])+",
+            input: "99FACE77",
         },
         ParityCase {
             name: "extended_class_property_intersection",
