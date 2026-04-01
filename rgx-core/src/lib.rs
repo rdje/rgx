@@ -3453,6 +3453,31 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_bare_posix_graph_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [:graph:] ])+\z")
+            .expect("Failed to compile bare POSIX graph extended character class pattern");
+        assert!(regex.is_match("AZ9!"));
+        assert!(!regex.is_match("AZ 9"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_complemented_bare_posix_alpha_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ ![:alpha:] ])+\z").expect(
+            "Failed to compile complemented bare POSIX alpha extended character class pattern",
+        );
+        assert!(regex.is_match("19?!"));
+        assert!(!regex.is_match("A1"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_posix_alpha_algebra_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [:alpha:] & [a-z\t] ])+\z")
+            .expect("Failed to compile POSIX-alpha algebra extended character class pattern");
+        assert!(regex.is_match("facet"));
+        assert!(!regex.is_match("Face\t"));
+    }
+
+    #[test]
     fn parser_extended_char_class_bare_hex_escape_executes_on_default_path() {
         let regex = Regex::compile(r"\A(?[\x{41} - [B]])+\z")
             .expect("Failed to compile hex-escape extended character class pattern");
@@ -3592,6 +3617,12 @@ mod tests {
         (r"\A(?[\w & [a-z]])+\z", "face_", false),
         (r"\A(?[\D & [A-F]])+\z", "FACE", true),
         (r"\A(?[\D & [A-F]])+\z", "FA3E", false),
+        (r"\A(?[ [:graph:] ])+\z", "AZ9!", true),
+        (r"\A(?[ [:graph:] ])+\z", "AZ 9", false),
+        (r"\A(?[ ![:alpha:] ])+\z", "19?!", true),
+        (r"\A(?[ ![:alpha:] ])+\z", "A1", false),
+        (r"\A(?[ [:alpha:] & [a-z\t] ])+\z", "facet", true),
+        (r"\A(?[ [:alpha:] & [a-z\t] ])+\z", "Face\t", false),
         (r"\A(?[\h])+\z", " \t\u{00A0}\u{1680}\u{202F}\u{3000}", true),
         (r"\A(?[\h])+\z", "\n \t", false),
         (r"\A(?[\H])+\z", "A\nB", true),

@@ -3,7 +3,7 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.17`
+- Version: `v0.1.18`
 - Last updated: `2026-04-01`
 - Owners: `rgx-core` parser/compiler maintainers
 
@@ -48,7 +48,7 @@ Required invariants:
   - recursion `(?R)`, `(?1)`, `(?&name)` -> `Regex::Recursion { target }`
   - backreferences like `\1` -> `Regex::Backreference(..)`
   - Unicode property classes like `\p{L}` / `\P{Greek}` -> `Regex::UnicodeClass { name, negated }`
-  - Perl extended character classes like `(?[[a-z]])` -> `Regex::ExtendedCharClass { content }`
+  - Perl extended character classes like `(?[[a-z]])` or `(?[ [:graph:] ])` -> `Regex::ExtendedCharClass { content }`
   - conditional (currently supported parser tests):
     - `(?(1)yes|no)` -> `Regex::Conditional { condition: GroupExists(1), ... }`
     - `(?(+1)yes|no)` -> `Regex::Conditional { condition: RelativeGroupExists(1), ... }`
@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-- Perl extended character classes now execute on the default path for the current grouped bracket/property/shorthand/escaped-term subset: bracket/property terms, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
+- Perl extended character classes now execute on the default path for the current grouped bracket/property/POSIX/shorthand/escaped-term subset: bracket/property terms, bare ASCII POSIX class terms such as `[:alpha:]` and `[:graph:]`, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.

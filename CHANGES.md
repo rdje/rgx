@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend shipped extended char class POSIX-term subset
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes bare ASCII POSIX class terms such as `[:graph:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, and `[:word:]` inside the current extended-character-class subset instead of compile-rejecting them.
+  - Added compiler/unit coverage for bare POSIX-class lowering plus complemented and algebraic POSIX cases, along with parser-path and parser-contract regressions that lock representative forms like `(?[ [:graph:] ])`, `(?[ ![:alpha:] ])`, and `(?[ [:alpha:] & [a-z\t] ])` onto the default PGEN-backed path.
+  - Expanded PCRE2 differential parity coverage for the new bare POSIX-term slice while keeping the current parity inputs ASCII-only so the bytes-based harness does not over-claim broader Unicode-mode POSIX behavior.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This closes another practical PCRE2 `(?[...])` slice on the default path without pretending the broader remaining extended-character-class grammar is finished.
+
 ### 2026-04-01 - Consolidate parser-path capability matrix test
 - Scope: internal test cleanup, warning-noise reduction, and continuity refresh.
 - Changes:

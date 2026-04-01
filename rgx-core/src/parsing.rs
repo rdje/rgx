@@ -1178,6 +1178,9 @@ mod tests {
             r"(?[\d - [3]])",
             r"(?[\w & [a-z]])",
             r"(?[\D & [A-F]])",
+            r"(?[ [:graph:] ])",
+            r"(?[ ![:alpha:] ])",
+            r"(?[ [:alpha:] & [a-z\t] ])",
             r"(?[\h])",
             r"(?[\H])",
             r"(?[\v])",
@@ -1432,6 +1435,23 @@ mod tests {
         );
         assert!(negated_digit_regex.is_match("FACE"));
         assert!(!negated_digit_regex.is_match("FA3E"));
+
+        let graph_regex = crate::Regex::compile(r"\A(?[ [:graph:] ])+\z").expect(
+            "POSIX graph extended character class fixture should compile on the default path",
+        );
+        assert!(graph_regex.is_match("AZ9!"));
+        assert!(!graph_regex.is_match("AZ 9"));
+
+        let non_alpha_regex = crate::Regex::compile(r"\A(?[ ![:alpha:] ])+\z").expect(
+            "complemented POSIX alpha extended character class fixture should compile on the default path",
+        );
+        assert!(non_alpha_regex.is_match("19?!"));
+        assert!(!non_alpha_regex.is_match("A1"));
+
+        let alpha_intersection_regex = crate::Regex::compile(r"\A(?[ [:alpha:] & [a-z\t] ])+\z")
+            .expect("POSIX alpha algebra extended character class fixture should compile on the default path");
+        assert!(alpha_intersection_regex.is_match("facet"));
+        assert!(!alpha_intersection_regex.is_match("Face\t"));
 
         let hspace_regex = crate::Regex::compile(r"\A(?[\h])+\z")
             .expect("horizontal-whitespace extended character class fixture should compile on the default path");

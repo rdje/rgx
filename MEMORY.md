@@ -68,6 +68,10 @@ Live continuity memory for `rgx` sessions.
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
 - The pinned PGEN submodule commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`.
+- Latest extended-character-class feature pass widened the shipped subset again:
+  - bare ASCII POSIX class terms such as `[:alpha:]`, `[:graph:]`, `[:digit:]`, `[:space:]`, and `[:word:]` now execute on the default path inside `(?[...])`
+  - parser-path, parser-contract, compiler/unit, and PCRE2 differential coverage now lock representative forms like `(?[ [:graph:] ])`, `(?[ ![:alpha:] ])`, and `(?[ [:alpha:] & [a-z\t] ])`
+  - the explicit compile boundary now narrows to wider set-expression forms and any further bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset
 - Latest RGX-owned warning-debt cleanup removed dead private scaffolding from the hot parser/runtime path:
   - removed the unused `Regex.pattern` and `Lexer.input` fields
   - removed the stale `PatternAnalysis` helper and an unused VM capture extractor
@@ -114,8 +118,8 @@ Live continuity memory for `rgx` sessions.
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
 - `(?[...])` Perl extended character classes now ship a wider but still disciplined runtime slice on the default path:
   - simple nested bracket terms like `(?[[a-z]])` and `(?[[^0-9]])` still work
-  - RGX now also executes bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, symmetric difference (`^`), and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over bracket terms, shorthand terms, escaped terms, or Unicode property terms, such as `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[\h])`, `(?[\H])`, `(?[\v])`, `(?[\V])`, `(?[\n | \t])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ [a-f] | [d-z] & [m-p] ])`, and `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`
-  - wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset still compile-reject explicitly
+  - RGX now also executes bare ASCII POSIX class terms such as `[:alpha:]`, `[:graph:]`, `[:digit:]`, `[:space:]`, and `[:word:]`, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, symmetric difference (`^`), and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` over bracket terms, POSIX terms, shorthand terms, escaped terms, or Unicode property terms, such as `(?[ [:graph:] ])`, `(?[ ![:alpha:] ])`, `(?[ [:alpha:] & [a-z\t] ])`, `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[\h])`, `(?[\H])`, `(?[\v])`, `(?[\V])`, `(?[\n | \t])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ [a-f] | [d-z] & [m-p] ])`, and `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`
+  - wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset still compile-reject explicitly
 - That shipped `(?[...])` slice is now guarded by direct compiler helper tests, parser-contract/runtime tests, PCRE2 differential parity cases for the widened runtime subset, and the earlier direct VM regression for ordinary negated custom char classes.
 - The internal range algebra behind that shipped `(?[...])` subset is now centralized in one private `ScalarRangeSet` helper inside `rgx-core/src/compiler.rs`, with direct unit tests locking adjacent-range normalization and split-difference behavior before we widen the syntax further.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.

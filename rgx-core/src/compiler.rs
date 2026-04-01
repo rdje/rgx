@@ -24,7 +24,27 @@ const ASCII_WORD_RANGES: [ScalarRange; 4] = [
     ('_' as u32, '_' as u32),
     ('a' as u32, 'z' as u32),
 ];
+const ASCII_ALPHA_RANGES: [ScalarRange; 2] = [('A' as u32, 'Z' as u32), ('a' as u32, 'z' as u32)];
+const ASCII_ALNUM_RANGES: [ScalarRange; 3] = [
+    ('0' as u32, '9' as u32),
+    ('A' as u32, 'Z' as u32),
+    ('a' as u32, 'z' as u32),
+];
+const ASCII_BLANK_RANGES: [ScalarRange; 2] = [(0x09, 0x09), (0x20, 0x20)];
+const ASCII_CNTRL_RANGES: [ScalarRange; 2] = [(0x00, 0x1F), (0x7F, 0x7F)];
+const ASCII_GRAPH_RANGES: [ScalarRange; 1] = [(0x21, 0x7E)];
+const ASCII_LOWER_RANGES: [ScalarRange; 1] = [('a' as u32, 'z' as u32)];
+const ASCII_PRINT_RANGES: [ScalarRange; 1] = [(0x20, 0x7E)];
+const ASCII_PUNCT_RANGES: [ScalarRange; 4] =
+    [(0x21, 0x2F), (0x3A, 0x40), (0x5B, 0x60), (0x7B, 0x7E)];
 const ASCII_SPACE_RANGES: [ScalarRange; 2] = [(0x09, 0x0D), (' ' as u32, ' ' as u32)];
+const ASCII_UPPER_RANGES: [ScalarRange; 1] = [('A' as u32, 'Z' as u32)];
+const ASCII_XDIGIT_RANGES: [ScalarRange; 3] = [
+    ('0' as u32, '9' as u32),
+    ('A' as u32, 'F' as u32),
+    ('a' as u32, 'f' as u32),
+];
+const ASCII_ASCII_RANGES: [ScalarRange; 1] = [(0x00, 0x7F)];
 const PCRE_HORIZONTAL_SPACE_RANGES: [ScalarRange; 9] = [
     (0x09, 0x09),
     (0x20, 0x20),
@@ -114,7 +134,7 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ \\h ])', '(?[ \\v ])', '(?[ \\x{41} - [B] ])', '(?[ \\n | \\t ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/shorthand/escaped-term subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped literal/codepoint terms such as '\\n', '\\t', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\h ])', '(?[ \\x{41} - [B] ])', '(?[ [:alpha:] & [a-z] ])', '(?[ [a-f] | [d-z] & [m-p] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
@@ -788,6 +808,10 @@ impl Compiler {
     }
 
     fn resolve_extended_bracket_term_ranges(term: &str) -> Result<ScalarRangeSet> {
+        if let Some(posix) = Self::resolve_extended_posix_class_term(term)? {
+            return Ok(posix);
+        }
+
         let body = Self::extract_simple_extended_char_class_body(term)
             .ok_or_else(Self::extended_char_class_subset_error)?;
         Self::validate_simple_char_class_body(body)?;
@@ -801,6 +825,57 @@ impl Compiler {
         match lowered {
             RegexAst::CharClass(char_class) => Self::resolve_char_class_scalar_ranges(&char_class),
             _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn resolve_extended_posix_class_term(term: &str) -> Result<Option<ScalarRangeSet>> {
+        let Some(body) = Self::extract_simple_extended_char_class_body(term) else {
+            return Ok(None);
+        };
+
+        let Some(spec) = Self::extract_extended_posix_class_spec(body) else {
+            return Ok(None);
+        };
+
+        let (negated, name) = spec
+            .strip_prefix('^')
+            .map_or((false, spec), |stripped| (true, stripped));
+        let Some(ranges) = Self::resolve_posix_class_ranges(name) else {
+            return Err(Self::extended_char_class_subset_error());
+        };
+
+        Ok(Some(ScalarRangeSet::from_builtin_ranges(ranges, negated)))
+    }
+
+    fn extract_extended_posix_class_spec(body: &str) -> Option<&str> {
+        if let Some(spec) = body
+            .strip_prefix(':')
+            .and_then(|inner| inner.strip_suffix(':'))
+        {
+            return Some(spec);
+        }
+
+        body.strip_prefix("[:")
+            .and_then(|inner| inner.strip_suffix(":]"))
+    }
+
+    fn resolve_posix_class_ranges(name: &str) -> Option<&'static [ScalarRange]> {
+        match name {
+            "alnum" => Some(&ASCII_ALNUM_RANGES),
+            "alpha" => Some(&ASCII_ALPHA_RANGES),
+            "ascii" => Some(&ASCII_ASCII_RANGES),
+            "blank" => Some(&ASCII_BLANK_RANGES),
+            "cntrl" => Some(&ASCII_CNTRL_RANGES),
+            "digit" => Some(&ASCII_DIGIT_RANGES),
+            "graph" => Some(&ASCII_GRAPH_RANGES),
+            "lower" => Some(&ASCII_LOWER_RANGES),
+            "print" => Some(&ASCII_PRINT_RANGES),
+            "punct" => Some(&ASCII_PUNCT_RANGES),
+            "space" => Some(&ASCII_SPACE_RANGES),
+            "upper" => Some(&ASCII_UPPER_RANGES),
+            "word" => Some(&ASCII_WORD_RANGES),
+            "xdigit" => Some(&ASCII_XDIGIT_RANGES),
+            _ => None,
         }
     }
 
@@ -2369,6 +2444,56 @@ mod tests {
         assert!(range_contains(&ranges, '\u{00A0}'));
         assert!(!range_contains(&ranges, '\n'));
         assert!(!range_contains(&ranges, '\u{2028}'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_posix_graph_term() {
+        let lowered = Compiler::lower_extended_char_class_content("[:graph:]".to_string())
+            .expect("Expected bare POSIX graph term to remain part of the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, '9'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, ' '));
+        assert!(!range_contains(&ranges, '\n'));
+        assert!(!range_contains(&ranges, '\u{0001}'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_posix_alpha_term_inside_algebra() {
+        let lowered =
+            Compiler::lower_extended_char_class_content(r"[:alpha:] & [a-z\t]".to_string())
+                .expect("Expected bare POSIX alpha term to compose with shipped algebra");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'a'));
+        assert!(range_contains(&ranges, 'z'));
+        assert!(!range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, '\t'));
+        assert!(!range_contains(&ranges, '1'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_complemented_bare_posix_alpha_term() {
+        let lowered = Compiler::lower_extended_char_class_content("![:alpha:]".to_string()).expect(
+            "Expected complemented bare POSIX alpha term to remain part of the shipped subset",
+        );
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '1'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'z'));
     }
 
     #[test]

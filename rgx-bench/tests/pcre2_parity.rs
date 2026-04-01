@@ -66,6 +66,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "ABC facet_ xyz 123",
         },
         ParityCase {
+            name: "extended_class_posix_graph_all",
+            pattern: r"(?[ [:graph:] ])+",
+            input: "\x01AZ9! \tB",
+        },
+        ParityCase {
+            name: "extended_class_posix_alpha_algebra_all",
+            pattern: r"(?[ [:alpha:] & [a-z\t] ])+",
+            input: "ABC facet\t xyz 123",
+        },
+        ParityCase {
             name: "extended_class_horizontal_shorthand_all",
             pattern: r"(?[\h])+",
             input: "A \tB\n",
@@ -314,6 +324,21 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "1237",
         },
         ParityCase {
+            name: "no_match_extended_class_posix_graph",
+            pattern: r"(?[ [:graph:] ])+",
+            input: " \t\n",
+        },
+        ParityCase {
+            name: "no_match_extended_class_complemented_posix_alpha",
+            pattern: r"(?[ ![:alpha:] ])+",
+            input: "ABCxyz",
+        },
+        ParityCase {
+            name: "no_match_extended_class_posix_alpha_algebra",
+            pattern: r"(?[ [:alpha:] & [a-z\t] ])+",
+            input: "FACE\t",
+        },
+        ParityCase {
             name: "no_match_extended_class_horizontal_shorthand",
             pattern: r"(?[\h])+",
             input: "\n\r",
@@ -516,6 +541,21 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_negated_shorthand_intersection",
             pattern: r"(?[\D & [A-F]])+",
             input: "99FACE77",
+        },
+        ParityCase {
+            name: "extended_class_posix_graph",
+            pattern: r"(?[ [:graph:] ])+",
+            input: " \t!A9 ",
+        },
+        ParityCase {
+            name: "extended_class_complemented_posix_alpha",
+            pattern: r"(?[ ![:alpha:] ])+",
+            input: "AZ19!\n",
+        },
+        ParityCase {
+            name: "extended_class_posix_alpha_algebra",
+            pattern: r"(?[ [:alpha:] & [a-z\t] ])+",
+            input: "AZfacet\t",
         },
         ParityCase {
             name: "extended_class_horizontal_shorthand",
