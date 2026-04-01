@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-01 - Extend grouped extended char class subset
+- Scope: regex runtime feature delivery, parser-contract widening, parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` lowering path again so RGX now executes unary complement (`!`), grouped subexpressions, and symmetric difference (`^`) on top of the existing bracket/property subset.
+  - Kept the boundary disciplined by still rejecting broader same-level multi-operator expressions instead of over-claiming the full PCRE2 set-expression grammar.
+  - Added compiler, parser-contract, parser-path, and PCRE2 differential coverage for complemented, grouped, and symmetric-difference extended character class forms.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax_first_match_span -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This still does not ship the full PCRE2 `(?[...])` grammar, but it closes a meaningful next slice by making grouped algebra and complement real on the default path.
+
 ### 2026-04-01 - Consolidate extended char class range algebra internals
 - Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
 - Changes:

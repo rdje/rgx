@@ -61,6 +61,21 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "abc XYZ q M",
         },
         ParityCase {
+            name: "extended_class_complement_all",
+            pattern: r"(?[ ![0-9] ])+",
+            input: "123abc!!45Z",
+        },
+        ParityCase {
+            name: "extended_class_grouped_algebra_all",
+            pattern: r"(?[ ([a-z] - [aeiou]) & [b-d] ])+",
+            input: "ae bcd xyz bc",
+        },
+        ParityCase {
+            name: "extended_class_symmetric_difference_all",
+            pattern: r"(?[ [AC] ^ [BC] ])+",
+            input: "CCABBAAC",
+        },
+        ParityCase {
             name: "word_boundary_all",
             pattern: r"\bcat\b",
             input: "cat scat cat",
@@ -254,6 +269,21 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "abc xyz",
         },
         ParityCase {
+            name: "no_match_extended_class_complement",
+            pattern: r"(?[ ![0-9] ])+",
+            input: "12345",
+        },
+        ParityCase {
+            name: "no_match_extended_class_grouped_algebra",
+            pattern: r"(?[ ([a-z] - [aeiou]) & [b-d] ])+",
+            input: "aeiou",
+        },
+        ParityCase {
+            name: "no_match_extended_class_symmetric_difference",
+            pattern: r"(?[ [AC] ^ [BC] ])+",
+            input: "CCCC",
+        },
+        ParityCase {
             name: "no_match_backreference",
             pattern: r"(a)\1",
             input: "ab",
@@ -391,6 +421,21 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_property_intersection",
             pattern: r"(?[\p{L} & \p{Lu}])+",
             input: "abc XYZ q",
+        },
+        ParityCase {
+            name: "extended_class_complement",
+            pattern: r"(?[ ![0-9] ])+",
+            input: "123abc!!",
+        },
+        ParityCase {
+            name: "extended_class_grouped_algebra",
+            pattern: r"(?[ ([a-z] - [aeiou]) & [b-d] ])+",
+            input: "ae bcd xyz",
+        },
+        ParityCase {
+            name: "extended_class_symmetric_difference",
+            pattern: r"(?[ [AC] ^ [BC] ])+",
+            input: "xxABCC",
         },
         ParityCase {
             name: "backreference",

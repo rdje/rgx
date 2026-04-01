@@ -97,8 +97,8 @@ Live continuity memory for `rgx` sessions.
   - representative AST/parser-path regressions plus PCRE2 differential cases now cover the shipped behavior
 - `(?[...])` Perl extended character classes now ship a wider but still disciplined runtime slice on the default path:
   - simple nested bracket terms like `(?[[a-z]])` and `(?[[^0-9]])` still work
-  - RGX now also executes exactly one explicit operator (`|`, `+`, `-`, `&`) over bracket terms or Unicode property terms, such as `(?[[a-z] - [aeiou]])` and `(?[\p{L} & \p{Lu}])`
-  - broader grouped algebra, complement operators, multi-operator expressions, and wider nested/set-expression forms still compile-reject explicitly
+  - RGX now also executes unary complement (`!`), grouped subexpressions, symmetric difference (`^`), and one explicit operator per expression level over bracket terms or Unicode property terms, such as `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, and `(?[ ([a-z] - [aeiou]) & [b-d] ])`
+  - broader same-level multi-operator expressions and wider set-expression forms still compile-reject explicitly
 - That shipped `(?[...])` slice is now guarded by direct compiler helper tests, parser-contract/runtime tests, PCRE2 differential parity cases for the widened one-operator subset, and the earlier direct VM regression for ordinary negated custom char classes.
 - The internal range algebra behind that shipped `(?[...])` subset is now centralized in one private `ScalarRangeSet` helper inside `rgx-core/src/compiler.rs`, with direct unit tests locking adjacent-range normalization and split-difference behavior before we widen the syntax further.
 - Code-block execution is now shipped in the public path for Lua and JavaScript predicate blocks when using `ExecutionMode::Safe` / `ExecutionMode::Full` with the corresponding cargo feature enabled.

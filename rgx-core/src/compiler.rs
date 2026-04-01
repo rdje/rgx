@@ -23,6 +23,7 @@ enum ExtendedCharClassOperator {
     Union,
     Difference,
     Intersection,
+    SymmetricDifference,
 }
 
 struct ExtendedCharClassCursor<'a> {
@@ -417,7 +418,7 @@ impl Compiler {
     }
 
     fn extended_char_class_subset_message() -> String {
-        "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator ('|', '+', '-', '&') over bracket terms and Unicode property terms in rgx, such as '(?[[a-z] - [aeiou]])' or '(?[\\p{L} & \\p{Lu}])'; broader algebra, grouped subexpressions, complement, and multi-operator expressions remain unsupported"
+        "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level ('|', '+', '-', '&', '^') in rgx, such as '(?[ ![0-9] ])', '(?[ [AC] ^ [BC] ])', or '(?[ ([a-z] - [aeiou]) & [b-d] ])'; broader multi-operator expressions at the same level and wider set-expression forms remain unsupported"
             .to_string()
     }
 
@@ -606,27 +607,35 @@ impl Compiler {
 
     fn resolve_extended_char_class_ranges(content: &str) -> Result<Vec<CharRange>> {
         let mut cursor = ExtendedCharClassCursor::new(content);
-        let lhs = Self::parse_extended_char_class_term(&mut cursor)?;
+        let resolved = Self::parse_extended_char_class_expr(&mut cursor)?;
         cursor.skip_whitespace();
-
-        let resolved = if cursor.is_eof() {
-            lhs
-        } else {
-            let operator = Self::parse_extended_char_class_operator(&mut cursor)?;
-            let rhs = Self::parse_extended_char_class_term(&mut cursor)?;
-            cursor.skip_whitespace();
-            if !cursor.is_eof() {
-                return Err(Self::extended_char_class_subset_error());
-            }
-
-            match operator {
-                ExtendedCharClassOperator::Union => lhs.union(&rhs),
-                ExtendedCharClassOperator::Difference => lhs.difference(&rhs),
-                ExtendedCharClassOperator::Intersection => lhs.intersection(&rhs),
-            }
-        };
+        if !cursor.is_eof() {
+            return Err(Self::extended_char_class_subset_error());
+        }
 
         resolved.to_char_ranges()
+    }
+
+    fn parse_extended_char_class_expr(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        let lhs = Self::parse_extended_char_class_unary(cursor)?;
+        cursor.skip_whitespace();
+
+        if cursor.is_eof() || matches!(cursor.peek_char(), Some(')')) {
+            return Ok(lhs);
+        }
+
+        let operator = Self::parse_extended_char_class_operator(cursor)?;
+        let rhs = Self::parse_extended_char_class_unary(cursor)?;
+        Ok(match operator {
+            ExtendedCharClassOperator::Union => lhs.union(&rhs),
+            ExtendedCharClassOperator::Difference => lhs.difference(&rhs),
+            ExtendedCharClassOperator::Intersection => lhs.intersection(&rhs),
+            ExtendedCharClassOperator::SymmetricDifference => {
+                lhs.difference(&rhs).union(&rhs.difference(&lhs))
+            }
+        })
     }
 
     fn parse_extended_char_class_operator(
@@ -637,8 +646,21 @@ impl Compiler {
             Some('|') | Some('+') => Ok(ExtendedCharClassOperator::Union),
             Some('-') => Ok(ExtendedCharClassOperator::Difference),
             Some('&') => Ok(ExtendedCharClassOperator::Intersection),
+            Some('^') => Ok(ExtendedCharClassOperator::SymmetricDifference),
             _ => Err(Self::extended_char_class_subset_error()),
         }
+    }
+
+    fn parse_extended_char_class_unary(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ScalarRangeSet> {
+        cursor.skip_whitespace();
+        if matches!(cursor.peek_char(), Some('!')) {
+            cursor.consume_char();
+            return Ok(Self::parse_extended_char_class_unary(cursor)?.complement());
+        }
+
+        Self::parse_extended_char_class_term(cursor)
     }
 
     fn parse_extended_char_class_term(
@@ -651,6 +673,15 @@ impl Compiler {
                 Self::resolve_extended_bracket_term_ranges(term)
             }
             Some('\\') => Self::resolve_extended_unicode_property_term(cursor),
+            Some('(') => {
+                cursor.consume_char();
+                let inner = Self::parse_extended_char_class_expr(cursor)?;
+                cursor.skip_whitespace();
+                match cursor.consume_char() {
+                    Some(')') => Ok(inner),
+                    _ => Err(Self::extended_char_class_subset_error()),
+                }
+            }
             _ => Err(Self::extended_char_class_subset_error()),
         }
     }
@@ -1920,9 +1951,56 @@ mod tests {
     }
 
     #[test]
-    fn lower_extended_char_class_content_rejects_broader_set_algebra() {
+    fn lower_extended_char_class_content_maps_unary_complement() {
+        let lowered = Compiler::lower_extended_char_class_content("![0-9]".to_string())
+            .expect("Expected unary complement to lower into a plain char class");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'a'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, '5'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_grouped_algebra() {
+        let lowered =
+            Compiler::lower_extended_char_class_content("([a-z] - [aeiou]) & [b-d]".to_string())
+                .expect("Expected grouped algebra to lower into a plain char class");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'b'));
+        assert!(range_contains(&ranges, 'd'));
+        assert!(!range_contains(&ranges, 'a'));
+        assert!(!range_contains(&ranges, 'e'));
+        assert!(!range_contains(&ranges, 'f'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_symmetric_difference() {
+        let lowered = Compiler::lower_extended_char_class_content("[AC] ^ [BC]".to_string())
+            .expect("Expected symmetric difference to lower into a plain char class");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, 'B'));
+        assert!(!range_contains(&ranges, 'C'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_rejects_multi_operator_same_level() {
         let err = Compiler::lower_extended_char_class_content("[a-z] - [aeiou] & [^x]".to_string())
-            .expect_err("Expected set-algebra form to stay outside the shipped subset");
+            .expect_err(
+                "Expected same-level multi-operator form to stay outside the shipped subset",
+            );
 
         match err {
             RgxError::Compile(message) => {

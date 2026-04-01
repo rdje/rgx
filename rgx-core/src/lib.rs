@@ -3402,6 +3402,30 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_complement_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ ![0-9] ])+\z")
+            .expect("Failed to compile complemented extended character class pattern");
+        assert!(regex.is_match("abcXYZ!"));
+        assert!(!regex.is_match("abc123"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_grouped_algebra_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z")
+            .expect("Failed to compile grouped-algebra extended character class pattern");
+        assert!(regex.is_match("bcdb"));
+        assert!(!regex.is_match("bef"));
+    }
+
+    #[test]
+    fn parser_extended_char_class_symmetric_difference_executes_on_default_path() {
+        let regex = Regex::compile(r"\A(?[ [AC] ^ [BC] ])+\z")
+            .expect("Failed to compile symmetric-difference extended character class pattern");
+        assert!(regex.is_match("ABBA"));
+        assert!(!regex.is_match("AC"));
+    }
+
+    #[test]
     fn parser_extended_char_class_requires_nested_simple_syntax() {
         let result = Regex::compile(r"(?[a-z])");
         assert!(
@@ -3411,14 +3435,14 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator"
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
     }
 
     #[test]
-    fn parser_extended_char_class_rejects_multi_operator_algebra() {
+    fn parser_extended_char_class_rejects_same_level_multi_operator_algebra() {
         let result = Regex::compile(r"(?[[a-z] - [aeiou] & [^x]])");
         assert!(
             result.is_err(),
@@ -3427,7 +3451,7 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains(
-                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator"
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level"
             ),
             "unexpected extended-char-class compile-boundary message: {msg}"
         );
@@ -3505,6 +3529,12 @@ mod tests {
             (r"\A(?[[a-z] - [aeiou]])+\z", "facet", false),
             (r"\A(?[\p{L} & \p{Lu}])+\z", "ABCXYZ", true),
             (r"\A(?[\p{L} & \p{Lu}])+\z", "ABcXYZ", false),
+            (r"\A(?[ ![0-9] ])+\z", "abcXYZ!", true),
+            (r"\A(?[ ![0-9] ])+\z", "abc123", false),
+            (r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z", "bcdb", true),
+            (r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z", "bef", false),
+            (r"\A(?[ [AC] ^ [BC] ])+\z", "ABBA", true),
+            (r"\A(?[ [AC] ^ [BC] ])+\z", "AC", false),
             (r"\A(a)?(?(1)b|c)\z", "ab", true),
             (r"\A(a)?(?(1)b|c)\z", "c", true),
             (r"\A(a)?(?(1)b|c)\z", "ac", false),
@@ -3581,11 +3611,11 @@ mod tests {
             ),
             (
                 r"(?[a-z])",
-                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
             ),
             (
                 r"(?[[a-z] - [aeiou] & [^x]])",
-                "Perl extended character classes '(?[...])' currently support simple nested bracket terms plus one explicit set operator",
+                "Perl extended character classes '(?[...])' currently support bracket/property terms, unary complement ('!'), grouped subexpressions, and one explicit set operator per expression level",
             ),
         ];
 
