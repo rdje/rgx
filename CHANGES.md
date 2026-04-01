@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Consolidate extended char class braced escape parsing
+- Scope: internal cleanup, extended-char-class maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the duplicated braced-digit loops in the `(?[...])` hex and octal escape paths with one shared `consume_extended_braced_radix_digits(...)` helper in `rgx-core/src/compiler.rs`.
+  - Kept the shipped runtime subset unchanged while making the braced escape contract less repetitive and easier to extend safely the next time we widen the escaped-atom family.
+  - Added direct helper-level tests for accepted braced octal/hex bodies plus malformed empty, invalid, and unclosed braced-digit forms.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; the shipped `(?[...])` subset did not widen.
+
 ### 2026-04-02 - Extend shipped extended char class escaped-atom subset
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:

@@ -1010,6 +1010,43 @@ impl Compiler {
         Self::scalar_range_set_from_code_point(code_point)
     }
 
+    fn is_extended_radix_digit(ch: char, radix: u32) -> bool {
+        match radix {
+            8 => matches!(ch, '0'..='7'),
+            16 => ch.is_ascii_hexdigit(),
+            _ => false,
+        }
+    }
+
+    fn consume_extended_braced_radix_digits(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+        radix: u32,
+    ) -> Result<String> {
+        if cursor.consume_char() != Some('{') {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        let mut digits = String::new();
+        let mut closed = false;
+
+        while let Some(ch) = cursor.consume_char() {
+            if ch == '}' {
+                closed = true;
+                break;
+            }
+            if !Self::is_extended_radix_digit(ch, radix) {
+                return Err(Self::extended_char_class_subset_error());
+            }
+            digits.push(ch);
+        }
+
+        if digits.is_empty() || !closed {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        Ok(digits)
+    }
+
     fn resolve_extended_octal_escape_term(
         initial: char,
         cursor: &mut ExtendedCharClassCursor<'_>,
@@ -1050,69 +1087,33 @@ impl Compiler {
     fn resolve_extended_braced_octal_escape_term(
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Result<ScalarRangeSet> {
-        if cursor.consume_char() != Some('{') {
-            return Err(Self::extended_char_class_subset_error());
-        }
-
-        let mut octal_digits = String::new();
-        let mut closed = false;
-
-        while let Some(ch) = cursor.consume_char() {
-            if ch == '}' {
-                closed = true;
-                break;
-            }
-            if !matches!(ch, '0'..='7') {
-                return Err(Self::extended_char_class_subset_error());
-            }
-            octal_digits.push(ch);
-        }
-
-        if octal_digits.is_empty() || !closed {
-            return Err(Self::extended_char_class_subset_error());
-        }
-
+        let octal_digits = Self::consume_extended_braced_radix_digits(cursor, 8)?;
         Self::scalar_range_set_from_radix_digits(&octal_digits, 8)
     }
 
     fn resolve_extended_hex_escape_term(
         cursor: &mut ExtendedCharClassCursor<'_>,
     ) -> Result<ScalarRangeSet> {
-        let mut hex_digits = String::new();
-
-        if cursor.peek_char() == Some('{') {
-            cursor.consume_char();
-            let mut closed = false;
-            while let Some(ch) = cursor.consume_char() {
-                if ch == '}' {
-                    closed = true;
-                    break;
-                }
-                if !ch.is_ascii_hexdigit() {
-                    return Err(Self::extended_char_class_subset_error());
-                }
-                hex_digits.push(ch);
-            }
-
-            if hex_digits.is_empty() || !closed {
-                return Err(Self::extended_char_class_subset_error());
-            }
+        let hex_digits = if cursor.peek_char() == Some('{') {
+            Self::consume_extended_braced_radix_digits(cursor, 16)?
         } else {
-            while hex_digits.len() < 2 {
+            let mut digits = String::new();
+            while digits.len() < 2 {
                 let Some(ch) = cursor.peek_char() else {
                     break;
                 };
-                if !ch.is_ascii_hexdigit() {
+                if !Self::is_extended_radix_digit(ch, 16) {
                     break;
                 }
-                hex_digits.push(ch);
+                digits.push(ch);
                 cursor.consume_char();
             }
 
-            if hex_digits.is_empty() {
+            if digits.is_empty() {
                 return Err(Self::extended_char_class_subset_error());
             }
-        }
+            digits
+        };
 
         Self::scalar_range_set_from_radix_digits(&hex_digits, 16)
     }
@@ -2755,6 +2756,38 @@ mod tests {
             err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
             "unexpected invalid-control boundary message: {err}"
         );
+    }
+
+    #[test]
+    fn consume_extended_braced_radix_digits_accepts_current_octal_and_hex_forms() {
+        let mut octal_cursor = ExtendedCharClassCursor::new("{101}");
+        assert_eq!(
+            Compiler::consume_extended_braced_radix_digits(&mut octal_cursor, 8)
+                .expect("Expected braced octal digits to parse"),
+            "101"
+        );
+        assert!(octal_cursor.is_eof());
+
+        let mut hex_cursor = ExtendedCharClassCursor::new("{41}");
+        assert_eq!(
+            Compiler::consume_extended_braced_radix_digits(&mut hex_cursor, 16)
+                .expect("Expected braced hex digits to parse"),
+            "41"
+        );
+        assert!(hex_cursor.is_eof());
+    }
+
+    #[test]
+    fn consume_extended_braced_radix_digits_rejects_empty_invalid_or_unclosed_forms() {
+        for (body, radix) in [("{}", 8), ("{8}", 8), ("{41", 16)] {
+            let mut cursor = ExtendedCharClassCursor::new(body);
+            let err = Compiler::consume_extended_braced_radix_digits(&mut cursor, radix)
+                .expect_err("Expected malformed braced radix digits to stay behind the boundary");
+            assert!(
+                err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
+                "unexpected malformed braced-digit boundary message for {body}: {err}"
+            );
+        }
     }
 
     #[test]
