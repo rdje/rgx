@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest cleanup was a consolidation-only pass over parser-contract `(?[...])` execution coverage in `rgx-core/src/parsing.rs`:
+  - the growing extended-character-class execution assertions now live in one `ExtendedCharClassExecutionFixture` table plus one helper
+  - the simple and algebraic parser-contract tests still exist as separate guardrails, but they now iterate through fixture rows instead of duplicating compile/assert boilerplate
+  - shipped regex behavior did not widen; this was strictly a maintainability cleanup around the default-path extended-char-class contract
 - Latest extended-character-class feature pass widened the shipped POSIX slice again:
   - bare negated ASCII POSIX class terms such as `[:^alpha:]` now count as an explicit shipped part of the default-path `(?[...])` subset instead of remaining merely latent in the lowering helper
   - compiler/unit, parser-path, parser-contract, and PCRE2 differential coverage now lock representative cases like `(?[ [:^alpha:] ])`

@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Consolidate parser-contract extended char class fixtures
+- Scope: internal test cleanup, parser-contract maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the long hand-written `(?[...])` execution assertion chain in `rgx-core/src/parsing.rs` with one shared `ExtendedCharClassExecutionFixture` table plus a small helper.
+  - Kept the shipped regex surface unchanged while making parser-contract extended-character-class coverage cheaper to widen safely the next time the default-path subset grows.
+  - Preserved the simple-vs-algebraic test split, but both tests now iterate through fixture rows instead of duplicating compile/assert boilerplate.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_simple_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not widen.
+
 ### 2026-04-02 - Extend shipped extended char class negated POSIX subset
 - Scope: regex runtime feature surfacing, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:
