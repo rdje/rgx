@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Preserve extended char class parity boundary and trim warning debt
+- Scope: parity-boundary confirmation, targeted warning cleanup, and continuity refresh.
+- Changes:
+  - Probed bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])`, then deliberately kept them out of the shipped subset after local PCRE2 parity checks compile-rejected those forms.
+  - Backed out the exploratory syntax widening before commit so the default RGX path stays aligned with current PCRE2 behavior for `(?[...])`.
+  - Removed a small RGX-owned clippy-warning slice in `rgx-core` by adding separators to the Unicode scalar-universe literal, simplifying the lexer's relative-conditional sign pattern, renaming quantified locals in the parser and PGEN adapter, and dropping unnecessary raw-string hashes in native-code-block tests.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `cargo clippy --manifest-path Cargo.toml -p rgx-core --tests --message-format short 2>&1 | rg 'rgx-core/src/(compiler\\.rs:18:79|lexer\\.rs:1092:13|parser\\.rs:19:13|parser\\.rs:429:13|parsing\\.rs:919:13|lib\\.rs:(1174:13|1196:38|1220:13|1248:38|1275:38|1289:38|1301:38|1319:38|1337:38|1356:38))'`
+- Notes/impact:
+  - Shipped extended-character-class behavior did not widen in this pass; the practical boundary is now more explicit: nested ordinary bracket terms remain supported, while bare top-level ordinary terms remain intentionally unsupported unless future parity evidence changes.
+
 ### 2026-04-02 - Extend nested ordinary extended char class terms
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and continuity refresh.
 - Changes:

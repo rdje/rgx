@@ -16,20 +16,20 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn wrap_quantified(expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
-        let quantified = Regex::Quantified {
+        let quantified_expr = Regex::Quantified {
             expr: Box::new(expr),
             quantifier,
         };
 
         if possessive {
             Regex::Group {
-                expr: Box::new(quantified),
+                expr: Box::new(quantified_expr),
                 kind: GroupKind::Atomic,
                 index: None,
                 name: None,
             }
         } else {
-            quantified
+            quantified_expr
         }
     }
 
@@ -426,11 +426,11 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
-        let quantified = quantifier.is_some();
+        let has_quantifier = quantifier.is_some();
         trace_decision!(
             "parser",
             "quantifier.is_some()",
-            quantified,
+            has_quantifier,
             "wrap atom into quantified AST node only when suffix quantifier is present"
         );
         let result = if let Some((q, possessive)) = quantifier {
@@ -443,7 +443,7 @@ impl<'a> Parser<'a> {
             "Parser::parse_quantified",
             "ok=true,node_kind={},quantified={}",
             Self::regex_kind(&result),
-            quantified
+            has_quantifier
         );
         Ok(result)
     }

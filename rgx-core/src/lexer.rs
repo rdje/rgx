@@ -1089,8 +1089,8 @@ impl<'a> Lexer<'a> {
                 }
                 ConditionalTest::GroupExists(group_num)
             }
-            Some('+') | Some('-') => {
-                let sign = if self.current == Some('-') { -1 } else { 1 };
+            Some(sign @ ('+' | '-')) => {
+                let sign = if sign == '-' { -1 } else { 1 };
                 self.advance(); // Skip '+' or '-'
 
                 let mut number_str = String::new();

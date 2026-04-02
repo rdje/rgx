@@ -1171,7 +1171,7 @@ mod tests {
     #[test]
     fn full_mode_native_code_block_can_use_registered_callback() {
         let regex = Regex::with_mode(
-            r#"(?<word>cat)(?{native:validate_word})"#,
+            r"(?<word>cat)(?{native:validate_word})",
             ExecutionMode::Full,
         )
         .expect("Failed to compile native code block pattern");
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_code_block_can_access_host_variables() {
-        let regex = Regex::with_mode(r#"(?{native:check_env})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"(?{native:check_env})", ExecutionMode::Full)
             .expect("Failed to compile native variable pattern");
         regex
             .set_variable("env", "prod")
@@ -1217,7 +1217,7 @@ mod tests {
     #[test]
     fn full_mode_native_code_block_can_access_match_metadata() {
         let regex = Regex::with_mode(
-            r#"foo|cat(?{native:check_match_metadata})"#,
+            r"foo|cat(?{native:check_match_metadata})",
             ExecutionMode::Full,
         )
         .expect("Failed to compile native match-metadata pattern");
@@ -1245,7 +1245,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_code_block_find_all_surfaces_replacement_results() {
-        let regex = Regex::with_mode(r#"(?<ch>.)(?{native:emit_char})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"(?<ch>.)(?{native:emit_char})", ExecutionMode::Full)
             .expect("Failed to compile native richer-result pattern");
         regex
             .register_native("emit_char", |ctx| {
@@ -1272,7 +1272,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_replace_with_code_uses_replacement_payloads() {
-        let regex = Regex::with_mode(r#"(?<word>cat)(?{native:emit_upper})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"(?<word>cat)(?{native:emit_upper})", ExecutionMode::Full)
             .expect("Failed to compile native replacement pattern");
         regex
             .register_native("emit_upper", |ctx| {
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_replace_with_code_preserves_original_match_without_replacement() {
-        let regex = Regex::with_mode(r#"cat(?{native:emit_numeric})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"cat(?{native:emit_numeric})", ExecutionMode::Full)
             .expect("Failed to compile native numeric replacement-fallback pattern");
         regex
             .register_native("emit_numeric", |_| ExecResult::Numeric(7.0))
@@ -1298,7 +1298,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_replace_first_with_code_uses_winning_path_replacement() {
-        let regex = Regex::with_mode(r#"a*(?{native:emit_path})a"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"a*(?{native:emit_path})a", ExecutionMode::Full)
             .expect("Failed to compile native backtracking replacement pattern");
         regex
             .register_native("emit_path", |ctx| {
@@ -1316,7 +1316,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_find_all_numeric_with_code_collects_numeric_payloads() {
-        let regex = Regex::with_mode(r#"(?<digit>\d)(?{native:emit_digit})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"(?<digit>\d)(?{native:emit_digit})", ExecutionMode::Full)
             .expect("Failed to compile native numeric collection pattern");
         regex
             .register_native("emit_digit", |ctx| {
@@ -1334,7 +1334,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_numeric_helpers_skip_non_numeric_payloads() {
-        let regex = Regex::with_mode(r#"(?<ch>.)(?{native:emit_mixed})"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"(?<ch>.)(?{native:emit_mixed})", ExecutionMode::Full)
             .expect("Failed to compile native mixed-payload pattern");
         regex
             .register_native("emit_mixed", |ctx| match ctx.named("ch") {
@@ -1353,7 +1353,7 @@ mod tests {
 
     #[test]
     fn full_mode_native_find_first_numeric_with_code_uses_winning_path_numeric() {
-        let regex = Regex::with_mode(r#"a*(?{native:emit_len})a"#, ExecutionMode::Full)
+        let regex = Regex::with_mode(r"a*(?{native:emit_len})a", ExecutionMode::Full)
             .expect("Failed to compile native backtracking numeric pattern");
         regex
             .register_native("emit_len", |ctx| {

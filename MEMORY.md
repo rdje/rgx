@@ -45,6 +45,15 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` should remain outside the shipped subset for now:
+  - a local PCRE2 parity probe compile-rejected those forms
+  - RGX intentionally kept only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`
+  - this avoids widening `(?[...])` in a direction that current PCRE2 bytes-mode behavior does not support
+- Latest warning-debt cleanup was a small RGX-owned pass across `rgx-core`:
+  - added separators to the Unicode scalar-universe literal in `compiler.rs`
+  - simplified the relative-conditional sign pattern in `lexer.rs`
+  - renamed quantified locals in `parser.rs` and `parsing.rs`
+  - removed unnecessary raw-string hashes from native-code-block tests in `lib.rs`
 - Latest feature pass widened the shipped Perl extended character class subset again:
   - nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset instead of staying limited to plain literal/range bodies
   - representative shipped forms now include `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`
@@ -204,6 +213,18 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-02
+- Preserved the shipped Perl extended-character-class boundary after a parity probe:
+  - an exploratory implementation for bare top-level ordinary terms such as `(?[a-z])` and `(?[\dA-F])` passed local RGX tests but failed the local PCRE2 differential harness because upstream PCRE2 compile-rejected those forms
+  - the widening was intentionally reverted before commit so RGX stays aligned with current PCRE2 behavior
+  - nested ordinary bracket terms such as `(?[[a-z]])` and `(?[[\dA-F]])` remain the shipped ordinary-term slice
+- Landed one small RGX-owned warning-debt cleanup instead:
+  - cleaned the Unicode scalar-universe literal formatting in `compiler.rs`
+  - simplified the relative-group sign pattern in `lexer.rs`
+  - renamed quantified locals in `parser.rs` and `parsing.rs` to remove "too similar" clippy warnings
+  - removed unnecessary raw-string hashes in native-code-block tests in `lib.rs`
+  - validation passed with `cargo fmt`, `cargo test -p rgx-core`, `cargo test -p rgx-cli`, full workspace `cargo clippy --all-targets`, and a targeted no-output `rgx-core` short-format clippy grep for the cleaned warning sites
+
 ### 2026-04-01
 - Consolidated the shipped Perl extended-character-class operator parser without widening syntax:
   - replaced the duplicated low-precedence/intersection parsing loops in `rgx-core/src/compiler.rs` with one precedence-climbing parser that now owns left-associativity and the shipped `&` precedence in one place

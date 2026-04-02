@@ -15,7 +15,7 @@ pub struct Compiler {
 
 type ScalarRange = (u32, u32);
 
-const UNICODE_SCALAR_UNIVERSE: [ScalarRange; 2] = [(0x0000, 0xD7FF), (0xE000, 0x10FFFF)];
+const UNICODE_SCALAR_UNIVERSE: [ScalarRange; 2] = [(0x0000, 0xD7FF), (0xE000, 0x0010_FFFF)];
 const ASCII_DIGIT_RANGES: [ScalarRange; 1] = [('0' as u32, '9' as u32)];
 const ASCII_WORD_RANGES: [ScalarRange; 4] = [
     ('0' as u32, '9' as u32),

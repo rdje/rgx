@@ -916,20 +916,20 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn wrap_quantified(&self, expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
-        let quantified = Regex::Quantified {
+        let quantified_expr = Regex::Quantified {
             expr: Box::new(expr),
             quantifier,
         };
 
         if possessive {
             Regex::Group {
-                expr: Box::new(quantified),
+                expr: Box::new(quantified_expr),
                 kind: GroupKind::Atomic,
                 index: None,
                 name: None,
             }
         } else {
-            quantified
+            quantified_expr
         }
     }
 
