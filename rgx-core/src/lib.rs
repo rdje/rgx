@@ -3356,207 +3356,207 @@ mod tests {
         assert!(!regex.is_match("cd"));
     }
 
-    #[test]
-    fn parser_extended_char_class_simple_ranges_execute_on_default_path() {
-        let regex = Regex::compile(r"\A(?[[a-z]])+\z")
-            .expect("Failed to compile simple extended character class range pattern");
-        assert!(regex.is_match("abcxyz"));
-        assert!(!regex.is_match("abc123"));
+    #[derive(Clone, Copy)]
+    struct ParserExtendedCharClassExecutionFixture {
+        pattern: &'static str,
+        matches_input: &'static str,
+        rejects_input: &'static str,
+        description: &'static str,
     }
 
-    #[test]
-    fn parser_extended_char_class_simple_negation_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[[^0-9]])+\z")
-            .expect("Failed to compile negated extended character class pattern");
-        assert!(regex.is_match("abcXYZ"));
-        assert!(!regex.is_match("abc123"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_single_difference_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[[a-z] - [aeiou]])+\z")
-            .expect("Failed to compile difference-style extended character class pattern");
-        assert!(regex.is_match("bcdfxyz"));
-        assert!(!regex.is_match("facet"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_property_intersection_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\p{L} & \p{Lu}])+\z")
-            .expect("Failed to compile property-intersection extended character class pattern");
-        assert!(regex.is_match("ABCXYZ"));
-        assert!(!regex.is_match("ABcXYZ"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_complement_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ ![0-9] ])+\z")
-            .expect("Failed to compile complemented extended character class pattern");
-        assert!(regex.is_match("abcXYZ!"));
-        assert!(!regex.is_match("abc123"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_grouped_algebra_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z")
-            .expect("Failed to compile grouped-algebra extended character class pattern");
-        assert!(regex.is_match("bcdb"));
-        assert!(!regex.is_match("bef"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_symmetric_difference_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [AC] ^ [BC] ])+\z")
-            .expect("Failed to compile symmetric-difference extended character class pattern");
-        assert!(regex.is_match("ABBA"));
-        assert!(!regex.is_match("AC"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_same_level_precedence_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [a-f] | [d-z] & [m-p] ])+\z")
-            .expect("Failed to compile same-level precedence extended character class pattern");
-        assert!(regex.is_match("abcmnop"));
-        assert!(!regex.is_match("xyz"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_multi_operator_chain_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [a-z] - [aeiou] + [0-9] - [5] ])+\z")
-            .expect("Failed to compile multi-operator chain extended character class pattern");
-        assert!(regex.is_match("bcdf0249xyz"));
-        assert!(!regex.is_match("face5"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_digit_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\d - [3]])+\z")
-            .expect("Failed to compile digit-shorthand extended character class pattern");
-        assert!(regex.is_match("20479"));
-        assert!(!regex.is_match("1234"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_word_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\w & [a-z]])+\z")
-            .expect("Failed to compile word-shorthand extended character class pattern");
-        assert!(regex.is_match("facet"));
-        assert!(!regex.is_match("face_"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_negated_bare_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\D & [A-F]])+\z")
-            .expect("Failed to compile negated-shorthand extended character class pattern");
-        assert!(regex.is_match("FACE"));
-        assert!(!regex.is_match("FA3E"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_posix_graph_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [:graph:] ])+\z")
-            .expect("Failed to compile bare POSIX graph extended character class pattern");
-        assert!(regex.is_match("AZ9!"));
-        assert!(!regex.is_match("AZ 9"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_negated_bare_posix_alpha_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [:^alpha:] ])+\z")
-            .expect("Failed to compile negated bare POSIX alpha extended character class pattern");
-        assert!(regex.is_match("19?!"));
-        assert!(!regex.is_match("A1"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_complemented_bare_posix_alpha_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ ![:alpha:] ])+\z").expect(
-            "Failed to compile complemented bare POSIX alpha extended character class pattern",
+    fn assert_parser_extended_char_class_execution_fixture(
+        fixture: ParserExtendedCharClassExecutionFixture,
+    ) {
+        let regex = Regex::compile(fixture.pattern).unwrap_or_else(|e| {
+            panic!(
+                "Failed to compile {} pattern '{}': {e}",
+                fixture.description, fixture.pattern
+            )
+        });
+        assert!(
+            regex.is_match(fixture.matches_input),
+            "{} pattern should match '{}'",
+            fixture.description,
+            fixture.matches_input
         );
-        assert!(regex.is_match("19?!"));
-        assert!(!regex.is_match("A1"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_posix_alpha_algebra_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[ [:alpha:] & [a-z\t] ])+\z")
-            .expect("Failed to compile POSIX-alpha algebra extended character class pattern");
-        assert!(regex.is_match("facet"));
-        assert!(!regex.is_match("Face\t"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_hex_escape_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\x{41} - [B]])+\z")
-            .expect("Failed to compile hex-escape extended character class pattern");
-        assert!(regex.is_match("AAAA"));
-        assert!(!regex.is_match("AAB"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_control_escapes_execute_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\n | \t])+\z")
-            .expect("Failed to compile control-escape extended character class pattern");
-        assert!(regex.is_match("\n\t\n"));
-        assert!(!regex.is_match(" \n"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_control_literal_escapes_execute_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\a | \b | \e | \f])+\z")
-            .expect("Failed to compile control-literal extended character class pattern");
-        assert!(regex.is_match("\u{07}\u{08}\u{1B}\u{0C}\u{07}"));
-        assert!(!regex.is_match("\u{07}A"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_control_letter_escape_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\cA | [B]])+\z")
-            .expect("Failed to compile control-letter extended character class pattern");
-        assert!(regex.is_match("\u{0001}B\u{0001}"));
-        assert!(!regex.is_match("ABC"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_octal_escapes_execute_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\040 | \011 | \o{101}])+\z")
-            .expect("Failed to compile octal-escape extended character class pattern");
-        assert!(regex.is_match(" \tA\t "));
-        assert!(!regex.is_match("\nA"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_bare_horizontal_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\h])+\z")
-            .expect("Failed to compile horizontal-whitespace extended character class pattern");
-        assert!(regex.is_match(" \t\u{00A0}\u{1680}\u{202F}\u{3000}"));
-        assert!(!regex.is_match("\n \t"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_negated_horizontal_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\H])+\z").expect(
-            "Failed to compile negated horizontal-whitespace extended character class pattern",
+        assert!(
+            !regex.is_match(fixture.rejects_input),
+            "{} pattern should reject '{}'",
+            fixture.description,
+            fixture.rejects_input
         );
-        assert!(regex.is_match("A\nB"));
-        assert!(!regex.is_match(" \t\u{00A0}"));
+    }
+
+    const SIMPLE_PARSER_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES:
+        &[ParserExtendedCharClassExecutionFixture] = &[
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[a-z]])+\z",
+            matches_input: "abcxyz",
+            rejects_input: "abc123",
+            description: "simple extended character class range",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[^0-9]])+\z",
+            matches_input: "abcXYZ",
+            rejects_input: "abc123",
+            description: "negated extended character class",
+        },
+    ];
+
+    const ALGEBRAIC_PARSER_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES:
+        &[ParserExtendedCharClassExecutionFixture] = &[
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[a-z] - [aeiou]])+\z",
+            matches_input: "bcdfxyz",
+            rejects_input: "facet",
+            description: "difference-style extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\p{L} & \p{Lu}])+\z",
+            matches_input: "ABCXYZ",
+            rejects_input: "ABcXYZ",
+            description: "property-intersection extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ ![0-9] ])+\z",
+            matches_input: "abcXYZ!",
+            rejects_input: "abc123",
+            description: "complemented extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ ([a-z] - [aeiou]) & [b-d] ])+\z",
+            matches_input: "bcdb",
+            rejects_input: "bef",
+            description: "grouped-algebra extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [AC] ^ [BC] ])+\z",
+            matches_input: "ABBA",
+            rejects_input: "AC",
+            description: "symmetric-difference extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [a-f] | [d-z] & [m-p] ])+\z",
+            matches_input: "abcmnop",
+            rejects_input: "xyz",
+            description: "same-level precedence extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [a-z] - [aeiou] + [0-9] - [5] ])+\z",
+            matches_input: "bcdf0249xyz",
+            rejects_input: "face5",
+            description: "multi-operator chain extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\d - [3]])+\z",
+            matches_input: "20479",
+            rejects_input: "1234",
+            description: "digit-shorthand extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\w & [a-z]])+\z",
+            matches_input: "facet",
+            rejects_input: "face_",
+            description: "word-shorthand extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\D & [A-F]])+\z",
+            matches_input: "FACE",
+            rejects_input: "FA3E",
+            description: "negated-shorthand extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [:graph:] ])+\z",
+            matches_input: "AZ9!",
+            rejects_input: "AZ 9",
+            description: "bare POSIX graph extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [:^alpha:] ])+\z",
+            matches_input: "19?!",
+            rejects_input: "A1",
+            description: "negated bare POSIX alpha extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ ![:alpha:] ])+\z",
+            matches_input: "19?!",
+            rejects_input: "A1",
+            description: "complemented bare POSIX alpha extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[ [:alpha:] & [a-z\t] ])+\z",
+            matches_input: "facet",
+            rejects_input: "Face\t",
+            description: "POSIX-alpha algebra extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\x{41} - [B]])+\z",
+            matches_input: "AAAA",
+            rejects_input: "AAB",
+            description: "hex-escape extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\n | \t])+\z",
+            matches_input: "\n\t\n",
+            rejects_input: " \n",
+            description: "control-escape extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\a | \b | \e | \f])+\z",
+            matches_input: "\u{07}\u{08}\u{1B}\u{0C}\u{07}",
+            rejects_input: "\u{07}A",
+            description: "control-literal extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\cA | [B]])+\z",
+            matches_input: "\u{0001}B\u{0001}",
+            rejects_input: "ABC",
+            description: "control-letter extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\040 | \011 | \o{101}])+\z",
+            matches_input: " \tA\t ",
+            rejects_input: "\nA",
+            description: "octal-escape extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\h])+\z",
+            matches_input: " \t\u{00A0}\u{1680}\u{202F}\u{3000}",
+            rejects_input: "\n \t",
+            description: "horizontal-whitespace extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\H])+\z",
+            matches_input: "A\nB",
+            rejects_input: " \t\u{00A0}",
+            description: "negated horizontal-whitespace extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\v])+\z",
+            matches_input: "\n\u{000B}\u{0085}\u{2028}\u{2029}",
+            rejects_input: " \n",
+            description: "vertical-whitespace extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[\V])+\z",
+            matches_input: "A \u{00A0}\t",
+            rejects_input: "\n\u{0085}\u{2028}",
+            description: "negated vertical-whitespace extended character class",
+        },
+    ];
+
+    #[test]
+    fn parser_extended_char_class_simple_cases_execute_on_default_path() {
+        for fixture in SIMPLE_PARSER_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES {
+            assert_parser_extended_char_class_execution_fixture(*fixture);
+        }
     }
 
     #[test]
-    fn parser_extended_char_class_bare_vertical_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\v])+\z")
-            .expect("Failed to compile vertical-whitespace extended character class pattern");
-        assert!(regex.is_match("\n\u{000B}\u{0085}\u{2028}\u{2029}"));
-        assert!(!regex.is_match(" \n"));
-    }
-
-    #[test]
-    fn parser_extended_char_class_negated_vertical_shorthand_executes_on_default_path() {
-        let regex = Regex::compile(r"\A(?[\V])+\z").expect(
-            "Failed to compile negated vertical-whitespace extended character class pattern",
-        );
-        assert!(regex.is_match("A \u{00A0}\t"));
-        assert!(!regex.is_match("\n\u{0085}\u{2028}"));
+    fn parser_extended_char_class_algebraic_cases_execute_on_default_path() {
+        for fixture in ALGEBRAIC_PARSER_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES {
+            assert_parser_extended_char_class_execution_fixture(*fixture);
+        }
     }
 
     #[test]

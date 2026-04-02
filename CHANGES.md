@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Consolidate parser-path extended char class fixtures
+- Scope: internal test cleanup, parser-path maintainability hardening, and continuity refresh.
+- Changes:
+  - Replaced the long run of one-off parser-path `(?[...])` execution tests in `rgx-core/src/lib.rs` with one shared `ParserExtendedCharClassExecutionFixture` helper plus simple/algebraic fixture tables.
+  - Kept the user-visible parser-path coverage unchanged while making the extended-character-class match/reject matrix cheaper to widen and less error-prone to maintain.
+  - Mirrored the same simple-vs-algebraic split already used in the parser-contract coverage so the two test surfaces stay easier to compare.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core capability_matrix_supported_parser_path_cases -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This is a consolidation-only pass; shipped regex behavior did not widen.
+
 ### 2026-04-02 - Extend extended char class control-literal escapes
 - Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
 - Changes:
