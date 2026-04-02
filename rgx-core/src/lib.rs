@@ -3502,6 +3502,14 @@ mod tests {
     }
 
     #[test]
+    fn parser_extended_char_class_bare_control_literal_escapes_execute_on_default_path() {
+        let regex = Regex::compile(r"\A(?[\a | \b | \e | \f])+\z")
+            .expect("Failed to compile control-literal extended character class pattern");
+        assert!(regex.is_match("\u{07}\u{08}\u{1B}\u{0C}\u{07}"));
+        assert!(!regex.is_match("\u{07}A"));
+    }
+
+    #[test]
     fn parser_extended_char_class_bare_control_letter_escape_executes_on_default_path() {
         let regex = Regex::compile(r"\A(?[\cA | [B]])+\z")
             .expect("Failed to compile control-letter extended character class pattern");

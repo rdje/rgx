@@ -3,8 +3,8 @@ Canonical interoperability contract between `rgx` parser backends (the default l
 
 ## Contract metadata
 - Status: active
-- Version: `v0.1.18`
-- Last updated: `2026-04-01`
+- Version: `v0.1.19`
+- Last updated: `2026-04-02`
 - Owners: `rgx-core` parser/compiler maintainers
 
 ## Why this exists
@@ -83,7 +83,7 @@ Current contract:
   - recursion, backreferences, Unicode property classes, branch-reset groups, and current shipped conditional forms, including relative group-exists conditionals, current recursion-condition forms, and single-branch `DEFINE` definition blocks, are integrated on the default regex path
   - `DEFINE` conditionals with a false branch are compile-rejected explicitly because RGX follows PCRE2's single-branch rule for `DEFINE`
   - branch-reset groups preserve the wrapper in the AST, and the compiler now assigns PCRE2-style shared capture numbering across the branch-reset group's top-level alternatives before VM codegen
-- Perl extended character classes now execute on the default path for the current grouped bracket/property/POSIX/shorthand/escaped-term subset: bracket/property terms, bare ASCII POSIX class terms including negated forms such as `[:alpha:]`, `[:^alpha:]`, and `[:graph:]`, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/control/octal/codepoint terms such as `\n`, `\t`, `\r`, `\cA`, `\040`, `\o{101}`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
+- Perl extended character classes now execute on the default path for the current grouped bracket/property/POSIX/shorthand/escaped-term subset: bracket/property terms, bare ASCII POSIX class terms including negated forms such as `[:alpha:]`, `[:^alpha:]`, and `[:graph:]`, bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/control/octal/codepoint terms such as `\a`, `\b`, `\e`, `\f`, `\n`, `\t`, `\r`, `\cA`, `\040`, `\o{101}`, `\x{41}`, `\x41`, and `\-`, unary complement (`!`), grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|`, `+`, `-`, and `^` are shipped, while wider set-expression forms and additional bare-term families beyond that current subset still compile-reject explicitly
   - code blocks remain mode/language/feature gated and fail explicitly when used outside the shipped execution surface
 
 This boundary enables parser progress without unsafe runtime behavior.
@@ -100,7 +100,7 @@ The conformance harness checks:
 - Active parser output parity with recursive-descent reference fixtures.
 - Group metadata invariants expected by downstream compiler/runtime.
 - Error mapping invariants (`RgxError::Compile` path).
-- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, unsupported algebraic Perl extended character classes, and missing capture-target references.
+- Parse-success/compile-fail boundary for still-gated runtime features and validation cases such as mode-restricted code blocks, invalid `DEFINE` false-branch forms, broader still-unsupported Perl extended character class forms beyond the shipped subset, and missing capture-target references.
 
 When the default submodule-backed PGEN build is available, the harness also checks the real PGEN backend against the same reference fixtures, including wider parser-surface cases such as anchors, range quantifiers, possessive quantifiers, branch-reset groups, Perl extended character classes, code-block tags, recursion, backreferences, current conditional families (including relative group-exists and recursion-condition transport), and Unicode property classes.
 

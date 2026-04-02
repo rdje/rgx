@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest feature pass widened the shipped Perl extended character class escaped-term subset again:
+  - `(?[...])` now accepts bare `\b` backspace atoms on the default path
+  - the current control-literal family `\a`, `\b`, `\e`, and `\f` is now explicitly locked by compiler/unit, parser-path, parser-contract, and PCRE2 differential coverage instead of remaining partly implicit
+  - docs and the compiler boundary message now describe the same escaped-term subset that the runtime actually executes
 - Latest cleanup was a consolidation-only pass over parser-contract `(?[...])` execution coverage in `rgx-core/src/parsing.rs`:
   - the growing extended-character-class execution assertions now live in one `ExtendedCharClassExecutionFixture` table plus one helper
   - the simple and algebraic parser-contract tests still exist as separate guardrails, but they now iterate through fixture rows instead of duplicating compile/assert boilerplate

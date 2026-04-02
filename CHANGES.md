@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Extend extended char class control-literal escapes
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and current-state doc refresh.
+- Changes:
+  - Extended the shipped `(?[...])` escaped-term subset again so the default path now also accepts bare `\b` backspace atoms inside Perl extended character classes instead of stopping at the explicit compile boundary.
+  - Locked the broader current control-literal family into the shipped contract at the same time by adding compiler, parser-path, parser-contract, and PCRE2 differential coverage for `\a`, `\b`, `\e`, and `\f`.
+  - Updated the public subset docs and compiler boundary message so the shipped escaped-term surface no longer under-describes the now-supported control-literal family.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This widens the shipped Perl extended character class subset by one real PCRE2-aligned atom family edge (`\b`) while making the already-supported `\a`, `\e`, and `\f` behavior explicit and locked by tests.
+
 ### 2026-04-02 - Consolidate parser-contract extended char class fixtures
 - Scope: internal test cleanup, parser-contract maintainability hardening, and continuity refresh.
 - Changes:

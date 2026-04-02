@@ -1359,6 +1359,12 @@ mod tests {
                 description: "control-escape extended character class",
             },
             ExtendedCharClassExecutionFixture {
+                pattern: r"\A(?[\a | \b | \e | \f])+\z",
+                matches_input: "\u{07}\u{08}\u{1B}\u{0C}\u{07}",
+                rejects_input: "\u{07}A",
+                description: "control-literal extended character class",
+            },
+            ExtendedCharClassExecutionFixture {
                 pattern: r"\A(?[\cA | [B]])+\z",
                 matches_input: "\u{0001}B\u{0001}",
                 rejects_input: "ABC",

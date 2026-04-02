@@ -101,6 +101,11 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "x\n\t\n y\t",
         },
         ParityCase {
+            name: "extended_class_control_literal_escape_union_all",
+            pattern: r"(?[\a | \b | \e | \f])+",
+            input: "x\u{07}\u{08}\u{1B}\u{0C} y\u{08}\u{07}",
+        },
+        ParityCase {
             name: "extended_class_control_letter_escape_union_all",
             pattern: r"(?[\cA | [B]])+",
             input: "x\u{0001}BB y B",
@@ -389,6 +394,11 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "    ",
         },
         ParityCase {
+            name: "no_match_extended_class_control_literal_escape_union",
+            pattern: r"(?[\a | \b | \e | \f])+",
+            input: "A\t ",
+        },
+        ParityCase {
             name: "no_match_extended_class_control_letter_escape_union",
             pattern: r"(?[\cA | [B]])+",
             input: "AAC",
@@ -621,6 +631,11 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_control_escape_union",
             pattern: "(?[\\n | \\t])+",
             input: "xx\n\tzz",
+        },
+        ParityCase {
+            name: "extended_class_control_literal_escape_union",
+            pattern: r"(?[\a | \b | \e | \f])+",
+            input: "xx\u{07}\u{08}\u{1B}\u{0C}zz",
         },
         ParityCase {
             name: "extended_class_control_letter_escape_union",

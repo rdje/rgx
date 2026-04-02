@@ -199,7 +199,7 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped single-character/codepoint terms such as '\\n', '\\t', '\\cA', '\\040', '\\o{101}', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\040 | \\011 ])', '(?[ \\cA | [B] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped single-character/codepoint terms such as '\\a', '\\b', '\\e', '\\f', '\\n', '\\t', '\\r', '\\cA', '\\040', '\\o{101}', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\a | \\b | \\e | \\f ])', '(?[ \\040 | \\011 ])', '(?[ \\cA | [B] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
@@ -987,6 +987,7 @@ impl Compiler {
 
     fn resolve_extended_literal_escape(kind: char) -> Option<char> {
         match kind {
+            'b' => Some('\u{08}'),
             'n' => Some('\n'),
             't' => Some('\t'),
             'r' => Some('\r'),
@@ -2492,6 +2493,23 @@ mod tests {
         assert!(range_contains(&ranges, '\n'));
         assert!(range_contains(&ranges, '\t'));
         assert!(!range_contains(&ranges, ' '));
+        assert!(!range_contains(&ranges, 'A'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_bare_control_literal_escape_terms() {
+        let lowered = Compiler::lower_extended_char_class_content(r"\a | \b | \e | \f".to_string())
+            .expect("Expected bare control-literal escape terms to lower into the shipped subset");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '\u{07}'));
+        assert!(range_contains(&ranges, '\u{08}'));
+        assert!(range_contains(&ranges, '\u{1B}'));
+        assert!(range_contains(&ranges, '\u{0C}'));
+        assert!(!range_contains(&ranges, '\n'));
         assert!(!range_contains(&ranges, 'A'));
     }
 
