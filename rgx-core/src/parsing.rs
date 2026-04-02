@@ -30,6 +30,11 @@ pub trait RegexParser {
     /// This is the main entry point for parsing. Different implementations
     /// may use different internal representations but must all produce
     /// the same AST format for compatibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::RgxError`] when the parser cannot translate the
+    /// pattern into a valid RGX AST.
     fn parse_pattern(&mut self, pattern: &str) -> Result<Regex>;
 
     /// Get the name/identifier of this parser implementation
@@ -73,10 +78,27 @@ pub struct ParserCapabilities {
     pub syntax_highlighting: bool,
 }
 
+fn standard_parser_capabilities() -> ParserCapabilities {
+    ParserCapabilities {
+        code_blocks: true,
+        named_groups: true,
+        perl_advanced: false,
+        unicode_properties: true,
+        lookarounds: true,
+        error_recovery: false,
+        syntax_highlighting: false,
+    }
+}
+
 /// Zero-cost parser selection via compile-time feature flags
 ///
 /// This function selects the parser at compile time, completely eliminating
 /// runtime overhead. No vtables, no heap allocations, no indirection.
+///
+/// # Errors
+///
+/// Returns [`crate::error::RgxError`] when the active parser cannot parse the
+/// provided pattern.
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     trace_enter!(
@@ -119,6 +141,11 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
 }
 
 /// Zero-cost PGEN parser (when enabled)
+///
+/// # Errors
+///
+/// Returns [`crate::error::RgxError`] when the active parser cannot parse the
+/// provided pattern or when the embedded PGEN contract is incompatible.
 #[cfg(feature = "pgen-parser")]
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     trace_enter!(
@@ -157,8 +184,9 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     result
 }
 
-/// Get the active parser name (compile-time)
+/// Get the active parser name selected at compile time.
 #[cfg(not(feature = "pgen-parser"))]
+#[must_use]
 pub fn parser_name() -> &'static str {
     trace_enter!("parsing", "parsing::parser_name[recursive-descent]");
     let name = "recursive-descent";
@@ -171,7 +199,9 @@ pub fn parser_name() -> &'static str {
     name
 }
 
+/// Get the active parser name selected at compile time.
 #[cfg(feature = "pgen-parser")]
+#[must_use]
 pub fn parser_name() -> &'static str {
     trace_enter!("parsing", "parsing::parser_name[pgen-feature]");
     let name = match PGEN_FEATURE_BACKEND {
@@ -187,19 +217,12 @@ pub fn parser_name() -> &'static str {
     name
 }
 
-/// Get active parser capabilities (compile-time)
+/// Get the active parser capabilities selected at compile time.
 #[cfg(not(feature = "pgen-parser"))]
+#[must_use]
 pub fn parser_capabilities() -> ParserCapabilities {
     trace_enter!("parsing", "parsing::parser_capabilities[recursive-descent]");
-    let capabilities = ParserCapabilities {
-        code_blocks: true,
-        named_groups: true,
-        perl_advanced: false,
-        unicode_properties: true,
-        lookarounds: true,
-        error_recovery: false,
-        syntax_highlighting: false,
-    };
+    let capabilities = standard_parser_capabilities();
     trace_decision!(
         "parsing",
         "capabilities.perl_advanced",
@@ -221,29 +244,12 @@ pub fn parser_capabilities() -> ParserCapabilities {
     capabilities
 }
 
+/// Get the active parser capabilities selected at compile time.
 #[cfg(feature = "pgen-parser")]
+#[must_use]
 pub fn parser_capabilities() -> ParserCapabilities {
     trace_enter!("parsing", "parsing::parser_capabilities[pgen-feature]");
-    let capabilities = match PGEN_FEATURE_BACKEND {
-        PgenFeatureBackend::Pgen => ParserCapabilities {
-            code_blocks: true,
-            named_groups: true,
-            perl_advanced: false,
-            unicode_properties: true,
-            lookarounds: true,
-            error_recovery: false,
-            syntax_highlighting: false,
-        },
-        PgenFeatureBackend::RecursiveDescent => ParserCapabilities {
-            code_blocks: true,
-            named_groups: true,
-            perl_advanced: false,
-            unicode_properties: true,
-            lookarounds: true,
-            error_recovery: false,
-            syntax_highlighting: false,
-        },
-    };
+    let capabilities = standard_parser_capabilities();
     trace_decision!(
         "parsing",
         "capabilities.perl_advanced",
@@ -267,16 +273,19 @@ pub fn parser_capabilities() -> ParserCapabilities {
 
 /// Wrapper for the current recursive descent parser
 ///
-/// This implements the RegexParser trait for our existing parser,
+/// This implements the `RegexParser` trait for our existing parser,
 /// making it pluggable with other implementations.
+#[derive(Default)]
 pub struct RecursiveDescentParser {
     // No internal state needed currently
 }
 
 impl RecursiveDescentParser {
+    /// Create a new recursive-descent parser adapter.
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("parsing", "RecursiveDescentParser::new");
-        let parser = Self {};
+        let parser = Self::default();
         trace_exit!("parsing", "RecursiveDescentParser::new", "ok=true");
         parser
     }
@@ -337,15 +346,7 @@ impl RegexParser for RecursiveDescentParser {
 
     fn capabilities(&self) -> ParserCapabilities {
         trace_enter!("parsing", "RecursiveDescentParser::capabilities");
-        let capabilities = ParserCapabilities {
-            code_blocks: true,
-            named_groups: true,
-            perl_advanced: false,
-            unicode_properties: true, // Lexer supports this
-            lookarounds: true,
-            error_recovery: false,
-            syntax_highlighting: false,
-        };
+        let capabilities = standard_parser_capabilities();
         trace_exit!(
             "parsing",
             "RecursiveDescentParser::capabilities",
@@ -364,15 +365,18 @@ impl RegexParser for RecursiveDescentParser {
 
 /// Placeholder for PGEN parser implementation
 #[cfg(feature = "pgen-parser")]
+#[derive(Default)]
 pub struct PgenParser {
     // PGEN is stateless per call; this type is just an adapter shell.
 }
 
 #[cfg(feature = "pgen-parser")]
 impl PgenParser {
+    /// Create a new PGEN parser adapter.
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("parsing", "PgenParser::new");
-        let parser = Self {};
+        let parser = Self::default();
         trace_exit!("parsing", "PgenParser::new", "ok=true");
         parser
     }
@@ -452,12 +456,10 @@ impl RegexParser for PgenParser {
         let dump = match dump_outcome.ast_dump {
             Some(dump) if dump_outcome.status == ParseStatus::Success => dump,
             _ => {
-                let err = dump_outcome
-                    .diagnostic
-                    .map(|diagnostic| RgxError::Compile(diagnostic.to_string()))
-                    .unwrap_or_else(|| {
-                        RgxError::Compile("pgen AST dump failed without a diagnostic".to_string())
-                    });
+                let err = dump_outcome.diagnostic.map_or_else(
+                    || RgxError::Compile("pgen AST dump failed without a diagnostic".to_string()),
+                    |diagnostic| RgxError::Compile(diagnostic.to_string()),
+                );
                 trace_exit!(
                     "parsing",
                     "PgenParser::parse_pattern",
@@ -662,7 +664,7 @@ impl<'a> PgenAstAdapter<'a> {
             .first_descendant(quantifier_slot, "quantifier")
             .ok_or_else(|| self.contract_error("pgen piece quantifier slot is malformed"))?;
         let (quantifier, possessive) = self.convert_quantifier(quantifier)?;
-        Ok(self.wrap_quantified(expr, quantifier, possessive))
+        Ok(Self::wrap_quantified(expr, quantifier, possessive))
     }
 
     fn convert_atom(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -915,7 +917,7 @@ impl<'a> PgenAstAdapter<'a> {
         Err(self.contract_error("unsupported empty pgen conditional condition"))
     }
 
-    fn wrap_quantified(&self, expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
+    fn wrap_quantified(expr: Regex, quantifier: Quantifier, possessive: bool) -> Regex {
         let quantified_expr = Regex::Quantified {
             expr: Box::new(expr),
             quantifier,
@@ -1023,6 +1025,7 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn alternative_child<'b>(&'b self, node: &'b PgenAstNode) -> Option<&'b PgenAstNode> {
+        let _ = self;
         match &node.content {
             PgenAstContent::Alternative(child) => Some(child),
             _ => None,
@@ -1075,6 +1078,7 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn contract_error(&self, message: &str) -> RgxError {
+        let _ = self;
         RgxError::Compile(format!("pgen AST contract mismatch: {message}"))
     }
 }

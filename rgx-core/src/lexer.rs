@@ -21,6 +21,7 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     /// Create a new lexer for the given input
+    #[must_use]
     pub fn new(input: &'a str) -> Self {
         trace_enter!("lexer", "Lexer::new", "input_len={}", input.len());
         let mut lexer = Self {
@@ -41,8 +42,7 @@ impl<'a> Lexer<'a> {
 
     fn current_char_snapshot(&self) -> String {
         self.current
-            .map(|c| format!("{c:?}"))
-            .unwrap_or_else(|| "<eof>".to_string())
+            .map_or_else(|| "<eof>".to_string(), |c| format!("{c:?}"))
     }
 
     fn token_kind(token: &Token) -> &'static str {
@@ -114,10 +114,15 @@ impl<'a> Lexer<'a> {
 
     /// Get the current position
     fn current_position(&self) -> Position {
-        self.position.clone()
+        self.position
     }
 
     /// Get the next token from the input
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LexError`] when the remaining input cannot be tokenized into a
+    /// valid regex token stream.
     pub fn next_token(&mut self) -> Result<TokenWithPos, LexError> {
         trace_enter!(
             "lexer",

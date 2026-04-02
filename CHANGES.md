@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Harden parser-facing utility docs and warning contracts
+- Scope: parser/AST utility cleanup, public-doc hardening, and warning-debt reduction.
+- Changes:
+  - Added `#[must_use]` coverage for parser/AST/token constructors and result-returning utility helpers where dropping the value would be surprising.
+  - Added missing `# Errors` sections and module docs across parser-facing/public API surfaces, including parser entry points, lexer tokenization, and `Regex` construction/registration helpers.
+  - Simplified a small parser/lexer utility slice by switching several `Option` snapshots to `map_or_else`, removing `Position` clones on `Copy` data, centralizing parser fallback-position lookup, adding `Default` to the parser adapter shells, and making a couple of internal `Regex` helpers static.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `cargo clippy --manifest-path Cargo.toml -p rgx-core --tests --message-format short 2>&1 | rg 'rgx-core/src/(ast\\.rs|token\\.rs|lexer\\.rs|parser\\.rs|parsing\\.rs|lib\\.rs)' | rg 'could have a `#\\[must_use\\]` attribute|docs for function returning `Result` missing `# Errors` section|called `map\\(<f>\\)\\.unwrap_or_else\\(<g>\\)` on an `Option` value|using `clone` on type `Position` which implements the `Copy` trait|you should consider adding a `Default` implementation|missing documentation for a function|missing documentation for an associated function|missing documentation for a module|unused `self` argument'`
+- Notes/impact:
+  - This is a cleanup-only pass; shipped regex behavior did not change.
+  - The full workspace `clippy` run now reports `rgx-core` lib warnings down to 329 from the previous 426-warning snapshot, with the remaining backlog now concentrated more heavily in broader docs, lexer structure, and VM/runtime internals.
+
 ### 2026-04-02 - Preserve extended char class parity boundary and trim warning debt
 - Scope: parity-boundary confirmation, targeted warning cleanup, and continuity refresh.
 - Changes:

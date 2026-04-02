@@ -34,6 +34,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Create a new parser for the given input
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LexError`] when the lexer cannot produce the first token for
+    /// the provided pattern.
     pub fn new(input: &'a str) -> Result<Self, LexError> {
         trace_enter!("parser", "Parser::new", "input_len={}", input.len());
         let mut lexer = Lexer::new(input);
@@ -45,10 +50,10 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let initial_token = current_token
-            .as_ref()
-            .map(|token| format!("{:?}", token.token))
-            .unwrap_or_else(|| "<none>".to_string());
+        let initial_token = current_token.as_ref().map_or_else(
+            || "<none>".to_string(),
+            |token| format!("{:?}", token.token),
+        );
 
         let parser = Self {
             lexer,
@@ -72,8 +77,7 @@ impl<'a> Parser<'a> {
         );
         let snapshot = self
             .peek()
-            .map(|token| format!("{token:?}"))
-            .unwrap_or_else(|| "<none>".to_string());
+            .map_or_else(|| "<none>".to_string(), |token| format!("{token:?}"));
         trace_exit!(
             "parser",
             "Parser::current_token_snapshot",
@@ -127,11 +131,16 @@ impl<'a> Parser<'a> {
             token.is_some(),
             "peek current-token availability"
         );
-        let token_snapshot = token
-            .map(|current| format!("{current:?}"))
-            .unwrap_or_else(|| "<none>".to_string());
+        let token_snapshot =
+            token.map_or_else(|| "<none>".to_string(), |current| format!("{current:?}"));
         trace_exit!("parser", "Parser::peek", "ok=true,token={}", token_snapshot);
         token
+    }
+
+    fn current_position_or_start(&self) -> crate::token::Position {
+        self.current_token
+            .as_ref()
+            .map_or_else(crate::token::Position::start, |token| token.position)
     }
 
     /// Consume the current token and advance to the next
@@ -143,10 +152,10 @@ impl<'a> Parser<'a> {
             self.current_token_snapshot()
         );
         let current = self.current_token.take();
-        let consumed_token = current
-            .as_ref()
-            .map(|token| format!("{:?}", token.token))
-            .unwrap_or_else(|| "<none>".to_string());
+        let consumed_token = current.as_ref().map_or_else(
+            || "<none>".to_string(),
+            |token| format!("{:?}", token.token),
+        );
         let should_fetch_next = current
             .as_ref()
             .is_some_and(|token| token.token != Token::EOF);
@@ -167,11 +176,10 @@ impl<'a> Parser<'a> {
             };
         }
 
-        let next_token = self
-            .current_token
-            .as_ref()
-            .map(|token| format!("{:?}", token.token))
-            .unwrap_or_else(|| "<none>".to_string());
+        let next_token = self.current_token.as_ref().map_or_else(
+            || "<none>".to_string(),
+            |token| format!("{:?}", token.token),
+        );
         trace_exit!(
             "parser",
             "Parser::advance",
@@ -183,6 +191,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse the entire regex pattern
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LexError`] when the token stream is malformed or when parsing
+    /// stops before reaching the end of the input.
     pub fn parse(&mut self) -> Result<Regex, LexError> {
         trace_enter!(
             "parser",
@@ -217,7 +230,7 @@ impl<'a> Parser<'a> {
                 );
                 return Err(LexError::UnexpectedEOF {
                     expected: "end of input".to_string(),
-                    position: token.position.clone(),
+                    position: token.position,
                 });
             }
         }
@@ -587,11 +600,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -613,11 +622,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -639,11 +644,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -666,11 +667,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -692,11 +689,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -717,11 +710,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -741,11 +730,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -765,11 +750,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -789,11 +770,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
@@ -813,31 +790,19 @@ impl<'a> Parser<'a> {
                     }
                     _ => Err(LexError::UnexpectedEOF {
                         expected: "closing parenthesis ')'".to_string(),
-                        position: self
-                            .current_token
-                            .as_ref()
-                            .map(|t| t.position.clone())
-                            .unwrap_or_else(|| crate::token::Position::start()),
+                        position: self.current_position_or_start(),
                     }),
                 }
             }
 
             Some(Token::EOF) => Err(LexError::UnexpectedEOF {
                 expected: "regex expression".to_string(),
-                position: self
-                    .current_token
-                    .as_ref()
-                    .map(|t| t.position.clone())
-                    .unwrap_or_else(|| crate::token::Position::start()),
+                position: self.current_position_or_start(),
             }),
 
             Some(other) => Err(LexError::UnexpectedEOF {
-                expected: format!("unexpected token: {:?}", other),
-                position: self
-                    .current_token
-                    .as_ref()
-                    .map(|t| t.position.clone())
-                    .unwrap_or_else(|| crate::token::Position::start()),
+                expected: format!("unexpected token: {other:?}"),
+                position: self.current_position_or_start(),
             }),
 
             None => Err(LexError::UnexpectedEOF {

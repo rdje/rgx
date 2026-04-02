@@ -143,6 +143,7 @@ pub struct CharRange {
 
 impl CharRange {
     /// Create a single character range
+    #[must_use]
     pub fn single(ch: char) -> Self {
         trace_enter!("ast", "CharRange::single", "ch='{}'({})", ch, ch as u32);
         let range = Self { start: ch, end: ch };
@@ -159,6 +160,7 @@ impl CharRange {
     }
 
     /// Create a character range from start to end
+    #[must_use]
     pub fn range(start: char, end: char) -> Self {
         trace_enter!(
             "ast",
@@ -249,6 +251,7 @@ pub struct ParseContext {
 
 impl ParseContext {
     /// Create a new parse context
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("ast", "ParseContext::new");
         let context = Self::default();
@@ -281,7 +284,8 @@ impl ParseContext {
     }
 
     /// Register a named group
-    pub fn register_named_group(&mut self, name: String) -> u32 {
+    pub fn register_named_group(&mut self, name: impl Into<String>) -> u32 {
+        let name = name.into();
         trace_enter!(
             "ast",
             "ParseContext::register_named_group",
@@ -311,6 +315,7 @@ impl ParseContext {
     }
 
     /// Look up a named group number
+    #[must_use]
     pub fn get_named_group(&self, name: &str) -> Option<u32> {
         trace_enter!(
             "ast",
@@ -384,7 +389,7 @@ mod tests {
         assert_eq!(ctx.next_group_number(), 1);
         assert_eq!(ctx.next_group_number(), 2);
 
-        let name_num = ctx.register_named_group("test".to_string());
+        let name_num = ctx.register_named_group("test");
         assert_eq!(name_num, 3);
         assert_eq!(ctx.get_named_group("test"), Some(3));
         assert_eq!(ctx.get_named_group("missing"), None);

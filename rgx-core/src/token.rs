@@ -155,6 +155,7 @@ pub struct Position {
 
 impl Position {
     /// Create a new position
+    #[must_use]
     pub fn new(offset: usize, line: usize, column: usize) -> Self {
         trace_enter!(
             "token",
@@ -181,6 +182,7 @@ impl Position {
     }
 
     /// Create position at start of input
+    #[must_use]
     pub fn start() -> Self {
         trace_enter!("token", "Position::start");
         let position = Self::new(0, 1, 1);
@@ -207,6 +209,7 @@ pub struct TokenWithPos {
 
 impl TokenWithPos {
     /// Create a new token with position
+    #[must_use]
     pub fn new(token: Token, position: Position) -> Self {
         trace_enter!(
             "token",

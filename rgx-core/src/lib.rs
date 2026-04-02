@@ -48,20 +48,32 @@
 #![allow(clippy::module_name_repetitions)]
 
 // Core modules
+/// Abstract syntax tree types for regex patterns.
 pub mod ast;
+/// Pattern-to-program compiler logic.
 pub mod compiler;
+/// Execution-engine entry points.
 pub mod engine;
+/// Code-block execution runtime support.
 pub mod execution;
+/// Regex pattern tokenization.
 pub mod lexer;
+/// Recursive-descent parser implementation.
 pub mod parser;
+/// Zero-cost parser abstraction and backend selection.
 pub mod parsing;
+/// Compiled-pattern data structures.
 pub mod pattern;
+/// Token and source-position types.
 pub mod token;
 mod unicode_support;
+/// Virtual machine bytecode and runtime execution.
 pub mod vm;
 
 // Performance optimizations
+/// Cache-related scaffolding and helpers.
 pub mod cache;
+/// SIMD acceleration scaffolding and helpers.
 pub mod simd;
 
 // Code execution backends
@@ -75,6 +87,7 @@ pub mod rhai;
 pub mod wasm;
 
 // Error handling
+/// Shared error types and result aliases.
 pub mod error;
 
 // Logging system
@@ -112,6 +125,11 @@ impl Regex {
     /// let matches = regex.find_all("SSN: 123-45-6789");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the pattern cannot be compiled or when the
+    /// compiled program cannot be lowered into an executable engine.
     pub fn compile(pattern: &str) -> Result<Self> {
         trace_enter!("api", "Regex::compile", "pattern_len={}", pattern.len());
         let compiled = match Compiler::new().compile(pattern) {
@@ -140,6 +158,11 @@ impl Regex {
     /// - `ExecutionMode::Pure`: Maximum performance, no code execution
     /// - `ExecutionMode::Safe`: Code execution in sandboxed environments only
     /// - `ExecutionMode::Full`: enables the native-callback path in addition to the sandboxed backends
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the pattern is invalid for the requested mode
+    /// or when engine construction fails.
     pub fn with_mode(pattern: &str, mode: ExecutionMode) -> Result<Self> {
         trace_enter!(
             "api",
@@ -172,6 +195,10 @@ impl Regex {
     ///
     /// This enables parser-independent development, testing, and benchmarking
     /// of the compiler/VM/engine pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when AST compilation or engine construction fails.
     pub fn from_ast(ast: ast::Regex) -> Result<Self> {
         trace_enter!("api", "Regex::from_ast");
         let compiled = match Compiler::new().compile_ast(ast) {
@@ -195,6 +222,11 @@ impl Regex {
     }
 
     /// Compile a regex from AST using a specific execution mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when AST compilation or engine construction fails
+    /// for the requested mode.
     pub fn from_ast_with_mode(ast: ast::Regex, mode: ExecutionMode) -> Result<Self> {
         trace_enter!("api", "Regex::from_ast_with_mode", "mode={:?}", mode);
         let compiled = match Compiler::with_mode(mode).compile_ast(ast) {
@@ -221,6 +253,7 @@ impl Regex {
     ///
     /// This method is optimized for bulk processing and will use SIMD
     /// instructions when beneficial.
+    #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
         let matches = self.engine.find_all(text.as_bytes());
@@ -243,6 +276,7 @@ impl Regex {
     /// Find the first match in the given text.
     ///
     /// Optimized for early termination when only one match is needed.
+    #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
         let first = self.engine.find_first(text.as_bytes());
@@ -266,6 +300,7 @@ impl Regex {
     /// Matches that do not surface a replacement payload are copied through
     /// unchanged, which keeps this API safe to use with mixed predicate and
     /// replacement-style code-block patterns.
+    #[must_use]
     pub fn replace_first_with_code(&self, text: &str) -> String {
         trace_enter!(
             "api",
@@ -274,7 +309,7 @@ impl Regex {
             text.len()
         );
         let replaced = if let Some(first) = self.find_first(text) {
-            self.apply_code_replacements(text, std::iter::once(first))
+            Self::apply_code_replacements(text, std::iter::once(first))
         } else {
             text.to_string()
         };
@@ -292,6 +327,7 @@ impl Regex {
     /// Matches that do not surface a replacement payload are copied through
     /// unchanged, which keeps this API safe to use with mixed predicate and
     /// replacement-style code-block patterns.
+    #[must_use]
     pub fn replace_all_with_code(&self, text: &str) -> String {
         trace_enter!(
             "api",
@@ -299,7 +335,7 @@ impl Regex {
             "text_len={}",
             text.len()
         );
-        let replaced = self.apply_code_replacements(text, self.find_all(text));
+        let replaced = Self::apply_code_replacements(text, self.find_all(text));
         trace_exit!(
             "api",
             "Regex::replace_all_with_code",
@@ -313,6 +349,7 @@ impl Regex {
     ///
     /// Matches whose winning path produces only predicate-style or replacement-style
     /// results are skipped, which keeps this API useful with mixed code-block patterns.
+    #[must_use]
     pub fn find_first_numeric_with_code(&self, text: &str) -> Option<f64> {
         trace_enter!(
             "api",
@@ -343,6 +380,7 @@ impl Regex {
     ///
     /// Matches whose winning path produces only predicate-style or replacement-style
     /// results are skipped, preserving match-order numeric output for mixed patterns.
+    #[must_use]
     pub fn find_all_numeric_with_code(&self, text: &str) -> Vec<f64> {
         trace_enter!(
             "api",
@@ -350,7 +388,7 @@ impl Regex {
             "text_len={}",
             text.len()
         );
-        let numeric = self.collect_numeric_code_results(self.find_all(text));
+        let numeric = Self::collect_numeric_code_results(self.find_all(text));
         trace_exit!(
             "api",
             "Regex::find_all_numeric_with_code",
@@ -364,6 +402,7 @@ impl Regex {
     ///
     /// This is the fastest possible operation as it can terminate as soon
     /// as any match is found without capturing details.
+    #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
         let matched = self.engine.is_match(text.as_bytes());
@@ -378,6 +417,11 @@ impl Regex {
     }
 
     /// Register a native callback for `(?{native:...})` code blocks on this compiled regex.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager or
+    /// when the callback cannot be registered.
     pub fn register_native<F>(&self, name: impl Into<String>, callback: F) -> Result<()>
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
@@ -390,6 +434,11 @@ impl Regex {
     }
 
     /// Register a named wasm module for `(?{wasm:module:function})` code blocks on this compiled regex.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager or
+    /// when the wasm module cannot be compiled or registered.
     pub fn register_wasm_module(
         &self,
         name: impl Into<String>,
@@ -415,6 +464,10 @@ impl Regex {
     }
 
     /// Register or replace a host-provided execution variable for code-block evaluation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager.
     pub fn set_variable(&self, name: impl Into<String>, value: impl Into<String>) -> Result<()> {
         let name = name.into();
         let value = value.into();
@@ -430,7 +483,7 @@ impl Regex {
         result
     }
 
-    fn apply_code_replacements<I>(&self, text: &str, matches: I) -> String
+    fn apply_code_replacements<I>(text: &str, matches: I) -> String
     where
         I: IntoIterator<Item = MatchResult>,
     {
@@ -454,7 +507,7 @@ impl Regex {
         output
     }
 
-    fn collect_numeric_code_results<I>(&self, matches: I) -> Vec<f64>
+    fn collect_numeric_code_results<I>(matches: I) -> Vec<f64>
     where
         I: IntoIterator<Item = MatchResult>,
     {

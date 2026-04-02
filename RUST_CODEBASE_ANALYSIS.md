@@ -59,9 +59,11 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `rgx-core/src/cache.rs`
   - `rgx-core/src/simd.rs`
   - `rgx-wasm/src/lib.rs`
+- Latest warning-debt cleanup hardened parser-facing utilities and public docs in `ast.rs`, `token.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs`, including `#[must_use]` coverage, missing `# Errors` sections, missing module docs, parser-adapter `Default` implementations, and a small parser/lexer utility simplification pass.
 - Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` remain outside the shipped subset because the local PCRE2 differential harness compile-rejected those forms; RGX intentionally keeps only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`.
 - Latest RGX-owned warning-debt cleanup trimmed dead private scaffolding in the base parser/runtime path and brought the visible `rgx-core` warning count in the standard validation loop down from 101 to 93.
 - Latest RGX-owned warning-debt cleanup trimmed another small isolated slice in `compiler.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs` without widening syntax.
+- The latest full workspace `clippy` pass now reports `rgx-core` lib warnings down to 329 from the previous 426-warning snapshot, so the warning backlog is still real but the parser-facing/doc-driven slice is materially smaller than it was at the start of this turn.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.

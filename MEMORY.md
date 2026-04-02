@@ -45,6 +45,11 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest warning-debt cleanup focused on parser-facing utilities and public docs:
+  - added `#[must_use]` on parser/AST/token constructors and match/query helpers where dropped results would be surprising
+  - added missing `# Errors` sections and missing module docs across parser-facing/public API surfaces
+  - cleaned a small parser/lexer utility slice (`map_or_else`, `Copy`-position handling, shared fallback-position helper, `Default` parser adapters, static internal `Regex` helpers)
+  - the latest full workspace `clippy` run now reports `rgx-core` lib warnings down to 329 from the previous 426-warning snapshot
 - Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` should remain outside the shipped subset for now:
   - a local PCRE2 parity probe compile-rejected those forms
   - RGX intentionally kept only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`
@@ -213,6 +218,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-02
+- Landed another low-risk warning-debt pass in parser-facing RGX code:
+  - added `#[must_use]` coverage in `rgx-core/src/ast.rs`, `rgx-core/src/token.rs`, `rgx-core/src/lexer.rs`, `rgx-core/src/parsing.rs`, and `rgx-core/src/lib.rs`
+  - added missing module docs and `# Errors` sections for public parser/API entry points
+  - simplified parser/lexer utilities by replacing several `Option` snapshots with `map_or_else`, removing `Position` clones, centralizing parser fallback-position lookup, adding `Default` to parser adapter shells, and making two internal `Regex` helpers static
+  - targeted short-format `clippy` verification for the touched files came back empty for the cleaned warning classes, and the full workspace `clippy` run now reports `rgx-core` lib warnings down from 426 to 329
+  - validation passed with `cargo fmt`, `cargo test -p rgx-core`, `cargo test -p rgx-cli`, and full workspace `cargo clippy --all-targets`
+
 ### 2026-04-02
 - Preserved the shipped Perl extended-character-class boundary after a parity probe:
   - an exploratory implementation for bare top-level ordinary terms such as `(?[a-z])` and `(?[\dA-F])` passed local RGX tests but failed the local PCRE2 differential harness because upstream PCRE2 compile-rejected those forms
