@@ -51,6 +51,21 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "123abc45!!",
         },
         ParityCase {
+            name: "extended_class_nested_ordinary_shorthand_range_all",
+            pattern: r"(?[[\dA-F]])+",
+            input: "zz FACE204 xx 19B yy",
+        },
+        ParityCase {
+            name: "extended_class_nested_ordinary_posix_all",
+            pattern: r"(?[[[:graph:]]])+",
+            input: "\x01AZ9! \tB",
+        },
+        ParityCase {
+            name: "extended_class_nested_ordinary_property_difference_all",
+            pattern: r"(?[[\p{L}] - [\p{Lu}]])+",
+            input: "AZ facet qQ XYZ",
+        },
+        ParityCase {
             name: "extended_class_difference_all",
             pattern: r"(?[[a-z] - [aeiou]])+",
             input: "aei bcdf xyz ou",
@@ -329,6 +344,21 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
             input: "12345",
         },
         ParityCase {
+            name: "no_match_extended_class_nested_ordinary_shorthand_range",
+            pattern: r"(?[[\dA-F]])+",
+            input: "xyz_",
+        },
+        ParityCase {
+            name: "no_match_extended_class_nested_ordinary_posix",
+            pattern: r"(?[[[:graph:]]])+",
+            input: " \t\n",
+        },
+        ParityCase {
+            name: "no_match_extended_class_nested_ordinary_property_difference",
+            pattern: r"(?[[\p{L}] - [\p{Lu}]])+",
+            input: "FACE",
+        },
+        ParityCase {
             name: "no_match_extended_class_difference",
             pattern: r"(?[[a-z] - [aeiou]])+",
             input: "aeiou",
@@ -571,6 +601,21 @@ fn pcre2_parity_supported_syntax_first_match_span() {
             name: "extended_class_difference",
             pattern: r"(?[[a-z] - [aeiou]])+",
             input: "aei bcdf xyz",
+        },
+        ParityCase {
+            name: "extended_class_nested_ordinary_shorthand_range",
+            pattern: r"(?[[\dA-F]])+",
+            input: "xxFACE204yy",
+        },
+        ParityCase {
+            name: "extended_class_nested_ordinary_posix",
+            pattern: r"(?[[[:graph:]]])+",
+            input: " \t!A9 ",
+        },
+        ParityCase {
+            name: "extended_class_nested_ordinary_property_difference",
+            pattern: r"(?[[\p{L}] - [\p{Lu}]])+",
+            input: "AZfacet",
         },
         ParityCase {
             name: "extended_class_digit_shorthand_difference",

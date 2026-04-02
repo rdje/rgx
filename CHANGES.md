@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-02 - Extend nested ordinary extended char class terms
+- Scope: regex runtime feature delivery, parser-contract widening, differential parity coverage, and continuity refresh.
+- Changes:
+  - Nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset instead of staying limited to plain literal/range bodies.
+  - Added compiler support and guardrails for representative shorthand/range, POSIX, and Unicode-property forms such as `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`.
+  - Locked the widened slice through parser-path, parser-contract, compiler/unit, and PCRE2 differential coverage.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core lower_extended_char_class_content_maps_nested_ordinary -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_extended_char_class -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path -- --nocapture`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench pcre2_parity_supported_syntax -- --nocapture`
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm`
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
+  - `./scripts/run-local-ci.sh`
+- Notes/impact:
+  - This widens the shipped extended-character-class subset toward ordinary PCRE2 char-class behavior without claiming the remaining broader extended-class grammar.
+
 ### 2026-04-02 - Consolidate parser-path extended char class fixtures
 - Scope: internal test cleanup, parser-path maintainability hardening, and continuity refresh.
 - Changes:

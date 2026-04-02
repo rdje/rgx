@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest feature pass widened the shipped Perl extended character class subset again:
+  - nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset instead of staying limited to plain literal/range bodies
+  - representative shipped forms now include `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`
+  - parser-path, parser-contract, compiler/unit, and PCRE2 differential coverage now lock this slice while wider remaining extended-class forms still compile-reject deliberately
 - Latest cleanup was a consolidation-only pass over parser-path `(?[...])` execution coverage in `rgx-core/src/lib.rs`:
   - the user-facing parser-path extended-character-class match/reject cases now live in one `ParserExtendedCharClassExecutionFixture` table plus one helper
   - the coverage still keeps a simple-vs-algebraic split, but the test bodies no longer duplicate compile/assert boilerplate across dozens of cases

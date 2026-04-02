@@ -3406,6 +3406,24 @@ mod tests {
     const ALGEBRAIC_PARSER_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES:
         &[ParserExtendedCharClassExecutionFixture] = &[
         ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[\dA-F]])+\z",
+            matches_input: "FACE204",
+            rejects_input: "face_",
+            description: "nested ordinary shorthand/range extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[[:graph:]]])+\z",
+            matches_input: "AZ9!",
+            rejects_input: "AZ 9",
+            description: "nested ordinary POSIX extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
+            pattern: r"\A(?[[\p{L}] - [\p{Lu}]])+\z",
+            matches_input: "facet",
+            rejects_input: "Face",
+            description: "nested ordinary property algebra extended character class",
+        },
+        ParserExtendedCharClassExecutionFixture {
             pattern: r"\A(?[[a-z] - [aeiou]])+\z",
             matches_input: "bcdfxyz",
             rejects_input: "facet",
@@ -3639,6 +3657,12 @@ mod tests {
         (r"\A(?[[a-z]])+\z", "abc123", false),
         (r"\A(?[[^0-9]])+\z", "abcXYZ", true),
         (r"\A(?[[^0-9]])+\z", "abc123", false),
+        (r"\A(?[[\dA-F]])+\z", "FACE204", true),
+        (r"\A(?[[\dA-F]])+\z", "face_", false),
+        (r"\A(?[[[:graph:]]])+\z", "AZ9!", true),
+        (r"\A(?[[[:graph:]]])+\z", "AZ 9", false),
+        (r"\A(?[[\p{L}] - [\p{Lu}]])+\z", "facet", true),
+        (r"\A(?[[\p{L}] - [\p{Lu}]])+\z", "Face", false),
         (r"\A(?[[a-z] - [aeiou]])+\z", "bcdfxyz", true),
         (r"\A(?[[a-z] - [aeiou]])+\z", "facet", false),
         (r"\A(?[\p{L} & \p{Lu}])+\z", "ABCXYZ", true),

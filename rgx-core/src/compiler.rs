@@ -2,7 +2,6 @@ use crate::ast::Regex as RegexAst;
 use crate::ast::{CharClass, CharRange};
 use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
-use crate::parser::Parser as ReferenceParser;
 use crate::parsing;
 use crate::pattern::CompiledPattern;
 use crate::unicode_support::resolve_unicode_property_class;
@@ -159,6 +158,31 @@ struct ExtendedPosixClassSpec {
     negated: bool,
 }
 
+#[derive(Clone)]
+struct ExtendedNestedCharClassAtom {
+    set: ScalarRangeSet,
+    scalar: Option<u32>,
+}
+
+impl ExtendedNestedCharClassAtom {
+    fn from_char(ch: char) -> Self {
+        Self {
+            set: ScalarRangeSet::from_char(ch),
+            scalar: Some(ch as u32),
+        }
+    }
+
+    fn from_set(set: ScalarRangeSet) -> Self {
+        let scalar = match set.ranges.as_slice() {
+            [(start, end)] if start == end => Some(*start),
+            _ => None,
+        };
+
+        Self { set, scalar }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct ExtendedCharClassCursor<'a> {
     input: &'a str,
     offset: usize,
@@ -199,7 +223,7 @@ struct ScalarRangeSet {
     ranges: Vec<ScalarRange>,
 }
 
-pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped single-character/codepoint terms such as '\\a', '\\b', '\\e', '\\f', '\\n', '\\t', '\\r', '\\cA', '\\040', '\\o{101}', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[ \\a | \\b | \\e | \\f ])', '(?[ \\040 | \\011 ])', '(?[ \\cA | [B] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/POSIX/shorthand/escaped-term subset remain unsupported";
+pub(crate) const EXTENDED_CHAR_CLASS_SUBSET_MESSAGE: &str = "Perl extended character classes '(?[...])' currently support bracket/property terms, bare POSIX class terms in current ASCII forms such as '[:alpha:]' and '[:graph:]', nested ordinary bracket terms that use the current ordinary char-class atom subset (for example '[\\dA-F]', '[[:graph:]]', or '[\\p{L}]'), bare shorthand terms ('\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\h', '\\H', '\\v', '\\V'), bare escaped single-character/codepoint terms such as '\\a', '\\b', '\\e', '\\f', '\\n', '\\t', '\\r', '\\cA', '\\040', '\\o{101}', '\\x{41}', and '\\-', unary complement ('!'), grouped subexpressions, and left-associative set algebra with '&' binding tighter than '|', '+', '-', and '^' in rgx, such as '(?[ [:graph:] ])', '(?[[\\dA-F]])', '(?[[\\p{L}] - [\\p{Lu}]])', '(?[ \\a | \\b | \\e | \\f ])', '(?[ \\040 | \\011 ])', '(?[ \\cA | [B] ])', or '(?[ [a-z] - [aeiou] + [0-9] - [5] ])'; wider set-expression forms and additional bare-term families beyond the current bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset remain unsupported";
 
 impl ScalarRangeSet {
     fn new(ranges: Vec<ScalarRange>) -> Self {
@@ -713,49 +737,6 @@ impl Compiler {
         Some(&content[1..content.len() - 1])
     }
 
-    fn validate_simple_char_class_body(content: &str) -> Result<()> {
-        if content.is_empty() {
-            return Err(Self::extended_char_class_subset_error());
-        }
-
-        let mut index = 0usize;
-        let mut chars = content.chars();
-
-        while let Some(ch) = chars.next() {
-            if ch.is_whitespace() {
-                return Err(Self::extended_char_class_subset_error());
-            }
-
-            if ch == '\\' {
-                let Some(escaped) = chars.next() else {
-                    return Err(Self::extended_char_class_subset_error());
-                };
-
-                match escaped {
-                    'n' | 't' | 'r' | '\\' | ']' | '-' | '^' => {}
-                    _ => return Err(Self::extended_char_class_subset_error()),
-                }
-
-                index += 2;
-                continue;
-            }
-
-            match ch {
-                '[' | ']' | '&' | '+' | '|' | '!' => {
-                    return Err(Self::extended_char_class_subset_error());
-                }
-                '^' if index != 0 => {
-                    return Err(Self::extended_char_class_subset_error());
-                }
-                _ => {}
-            }
-
-            index += 1;
-        }
-
-        Ok(())
-    }
-
     fn resolve_extended_char_class_ranges(content: &str) -> Result<Vec<CharRange>> {
         let mut cursor = ExtendedCharClassCursor::new(content);
         let resolved = Self::parse_extended_char_class_expr(&mut cursor)?;
@@ -879,18 +860,7 @@ impl Compiler {
 
         let body = Self::extract_simple_extended_char_class_body(term)
             .ok_or_else(Self::extended_char_class_subset_error)?;
-        Self::validate_simple_char_class_body(body)?;
-
-        let mut parser =
-            ReferenceParser::new(term).map_err(|_| Self::extended_char_class_subset_error())?;
-        let lowered = parser
-            .parse()
-            .map_err(|_| Self::extended_char_class_subset_error())?;
-
-        match lowered {
-            RegexAst::CharClass(char_class) => Self::resolve_char_class_scalar_ranges(&char_class),
-            _ => Err(Self::extended_char_class_subset_error()),
-        }
+        Self::resolve_extended_nested_char_class_body(body)
     }
 
     fn resolve_extended_posix_class_term(term: &str) -> Result<Option<ScalarRangeSet>> {
@@ -982,6 +952,82 @@ impl Compiler {
             'x' => Self::resolve_extended_hex_escape_term(cursor),
             'p' | 'P' => Self::resolve_extended_unicode_property_escape_term(kind, cursor),
             _ => Err(Self::extended_char_class_subset_error()),
+        }
+    }
+
+    fn resolve_extended_nested_char_class_body(body: &str) -> Result<ScalarRangeSet> {
+        if body.is_empty() {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        let mut cursor = ExtendedCharClassCursor::new(body);
+        let negated = matches!(cursor.peek_char(), Some('^'));
+        if negated {
+            cursor.consume_char();
+        }
+
+        let mut resolved = ScalarRangeSet::new(Vec::new());
+        let mut saw_atom = false;
+
+        while !cursor.is_eof() {
+            let atom = Self::parse_extended_nested_char_class_atom(&mut cursor)?;
+            saw_atom = true;
+
+            if let Some(start) = atom.scalar {
+                let snapshot = cursor;
+                if cursor.peek_char() == Some('-') {
+                    cursor.consume_char();
+                    if !cursor.is_eof() {
+                        if let Ok(end_atom) =
+                            Self::parse_extended_nested_char_class_atom(&mut cursor)
+                        {
+                            if let Some(end) = end_atom.scalar {
+                                if end < start {
+                                    return Err(Self::extended_char_class_subset_error());
+                                }
+                                resolved = resolved.union(&ScalarRangeSet::new(vec![(start, end)]));
+                                continue;
+                            }
+                        }
+                    }
+                    cursor = snapshot;
+                }
+            }
+
+            resolved = resolved.union(&atom.set);
+        }
+
+        if !saw_atom {
+            return Err(Self::extended_char_class_subset_error());
+        }
+
+        if negated {
+            Ok(resolved.complement())
+        } else {
+            Ok(resolved)
+        }
+    }
+
+    fn parse_extended_nested_char_class_atom(
+        cursor: &mut ExtendedCharClassCursor<'_>,
+    ) -> Result<ExtendedNestedCharClassAtom> {
+        match cursor.peek_char() {
+            Some('\\') => Ok(ExtendedNestedCharClassAtom::from_set(
+                Self::resolve_extended_escape_term(cursor)?,
+            )),
+            Some('[') => {
+                let term = Self::consume_extended_char_class_bracket_term(cursor)?;
+                let Some(posix) = Self::resolve_extended_posix_class_term(term)? else {
+                    return Err(Self::extended_char_class_subset_error());
+                };
+                Ok(ExtendedNestedCharClassAtom::from_set(posix))
+            }
+            Some(ch) if ch.is_whitespace() => Err(Self::extended_char_class_subset_error()),
+            Some(ch) => {
+                cursor.consume_char();
+                Ok(ExtendedNestedCharClassAtom::from_char(ch))
+            }
+            None => Err(Self::extended_char_class_subset_error()),
         }
     }
 
@@ -2465,6 +2511,55 @@ mod tests {
         assert!(range_contains(&ranges, 'F'));
         assert!(!range_contains(&ranges, '3'));
         assert!(!range_contains(&ranges, 'Z'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_nested_ordinary_shorthand_and_range_term() {
+        let lowered = Compiler::lower_extended_char_class_content(r"[\dA-F]".to_string())
+            .expect("Expected nested ordinary class to accept current shorthand and range atoms");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, '0'));
+        assert!(range_contains(&ranges, '9'));
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, 'F'));
+        assert!(!range_contains(&ranges, 'G'));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_nested_ordinary_posix_term() {
+        let lowered = Compiler::lower_extended_char_class_content("[[:graph:]]".to_string())
+            .expect("Expected nested ordinary class to accept current POSIX atoms");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'A'));
+        assert!(range_contains(&ranges, '9'));
+        assert!(range_contains(&ranges, '!'));
+        assert!(!range_contains(&ranges, ' '));
+    }
+
+    #[test]
+    fn lower_extended_char_class_content_maps_nested_ordinary_property_term_inside_algebra() {
+        let lowered = Compiler::lower_extended_char_class_content(
+            r"[\p{L}] - [\p{Lu}]".to_string(),
+        )
+        .expect("Expected nested ordinary class property atoms to compose with shipped algebra");
+
+        let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
+            panic!("expected lowered custom char class");
+        };
+        assert!(!negated);
+        assert!(range_contains(&ranges, 'a'));
+        assert!(range_contains(&ranges, 'z'));
+        assert!(!range_contains(&ranges, 'A'));
+        assert!(!range_contains(&ranges, 'Z'));
+        assert!(!range_contains(&ranges, '1'));
     }
 
     #[test]

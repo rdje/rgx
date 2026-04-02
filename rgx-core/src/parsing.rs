@@ -1174,6 +1174,9 @@ mod tests {
             "(?:a)(?<word>b)(?>c)",
             "(?|a|b)",
             "(?[[a-z]])",
+            r"(?[[\dA-F]])",
+            r"(?[[[:graph:]]])",
+            r"(?[[\p{L}] - [\p{Lu}]])",
             "(?[[a-z] - [aeiou]])",
             r"(?[\d - [3]])",
             r"(?[\w & [a-z]])",
@@ -1268,6 +1271,24 @@ mod tests {
 
     const ALGEBRAIC_EXTENDED_CHAR_CLASS_EXECUTION_FIXTURES: &[ExtendedCharClassExecutionFixture] =
         &[
+            ExtendedCharClassExecutionFixture {
+                pattern: r"\A(?[[\dA-F]])+\z",
+                matches_input: "FACE204",
+                rejects_input: "face_",
+                description: "nested ordinary shorthand/range extended character class",
+            },
+            ExtendedCharClassExecutionFixture {
+                pattern: r"\A(?[[[:graph:]]])+\z",
+                matches_input: "AZ9!",
+                rejects_input: "AZ 9",
+                description: "nested ordinary POSIX extended character class",
+            },
+            ExtendedCharClassExecutionFixture {
+                pattern: r"\A(?[[\p{L}] - [\p{Lu}]])+\z",
+                matches_input: "facet",
+                rejects_input: "Face",
+                description: "nested ordinary property algebra extended character class",
+            },
             ExtendedCharClassExecutionFixture {
                 pattern: r"\A(?[[a-z] - [aeiou]])+\z",
                 matches_input: "bcdfxyz",

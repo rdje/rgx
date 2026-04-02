@@ -66,7 +66,7 @@ Live forward-looking tracker for rgx.
 - Scope:
   - define RGX AST/interoperability handling for returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
   - decide explicit compile-boundary or runtime behavior for newer conditional forms such as `(?(VERSION[...])...)`, now that current recursion-condition variants `(?(R)...)` / `(?(Rn)...)` / `(?(R&name)...)` are shipped
-  - extend Perl extended character classes `(?[...])` beyond the newly shipped grouped bracket/property/POSIX/shorthand/escaped-term subset, which now also includes current control-literal escapes such as `\a`, `\b`, `\e`, `\f`, control/octal/codepoint atoms such as `\cA`, `\040`, `\o{101}`, and `\x{41}`, with explicit runtime policy for wider set-expression forms and any further bare-term families
+  - extend Perl extended character classes `(?[...])` beyond the newly shipped grouped bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset, which now also includes nested ordinary bracket terms such as `[\dA-F]`, `[[:graph:]]`, and `[\p{L}]`, current control-literal escapes such as `\a`, `\b`, `\e`, `\f`, and control/octal/codepoint atoms such as `\cA`, `\040`, `\o{101}`, and `\x{41}`, with explicit runtime policy for wider set-expression forms and any further bare-term families
   - expand `docs/CAPABILITY_MATRIX.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, and differential tests to reflect whichever boundary or support level is chosen
 
 ### Performance validation loop
@@ -112,6 +112,7 @@ Live forward-looking tracker for rgx.
 - Scope: production-ready external bindings and runtime targets after core stability gates.
 
 ## Done recently (snapshot)
+- Extended Perl extended character classes again so nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset, including representative shorthand/range, POSIX, and Unicode-property forms such as `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`, with parser-path, parser-contract, compiler/unit, and differential parity coverage.
 - Extended Perl extended character classes again so the default path now also supports bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and escaped operators like `\-` inside the shipped `(?[...])` subset, including differential parity coverage for hex/control-escape cases while still keeping broader remaining forms behind an explicit compile boundary.
 - Extended Perl extended character classes again so the default path now also supports horizontal/vertical whitespace shorthands (`\h`, `\H`, `\v`, `\V`) inside the shipped `(?[...])` subset, including parser-path and differential parity coverage while still keeping broader remaining forms behind an explicit compile boundary.
 - Extended Perl extended character classes again so the default path now also supports bare ASCII POSIX class terms such as `[:graph:]`, complemented `[:alpha:]`, and POSIX-class algebra cases like `(?[ [:alpha:] & [a-z\t] ])` inside the shipped `(?[...])` subset, including parser-path and differential parity coverage while still keeping broader remaining forms behind an explicit compile boundary.
