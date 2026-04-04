@@ -181,6 +181,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Quantified { .. } => "Quantified",
         Regex::Group { .. } => "Group",
         Regex::Backreference(_) => "Backreference",
+        Regex::NamedBackreference(_) => "NamedBackreference",
         Regex::Lookahead { .. } => "Lookahead",
         Regex::Lookbehind { .. } => "Lookbehind",
         Regex::CodeBlock { .. } => "CodeBlock",
@@ -3624,7 +3625,9 @@ impl OptimizingCompiler {
             }
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
-            Regex::Backreference(_) => self.flags.has_backrefs = true,
+            Regex::Backreference(_) | Regex::NamedBackreference(_) => {
+                self.flags.has_backrefs = true;
+            }
             Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
                 self.flags.has_lookarounds = true;
                 self.analyze_pass(expr);
@@ -3948,6 +3951,16 @@ impl OptimizingCompiler {
             Regex::Backreference(group_id) => {
                 self.emit_op(OpCode::Backref);
                 self.code.push(*group_id as u8);
+            }
+
+            Regex::NamedBackreference(name) => {
+                let group_id = self
+                    .named_groups
+                    .get(name)
+                    .copied()
+                    .expect("named backreference should be validated before codegen");
+                self.emit_op(OpCode::Backref);
+                self.code.push(group_id as u8);
             }
 
             Regex::Recursion { target } => {
@@ -4359,6 +4372,7 @@ impl OptimizingCompiler {
             | Regex::Anchor(_)
             | Regex::WordBoundary { .. }
             | Regex::Backreference(_)
+            | Regex::NamedBackreference(_)
             | Regex::Recursion { .. }
             | Regex::CodeBlock { .. }
             | Regex::Empty => {}

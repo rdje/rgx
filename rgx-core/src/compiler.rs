@@ -1413,6 +1413,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => (ast, next_group),
@@ -1645,6 +1646,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => Ok((ast, opened_groups)),
@@ -1785,6 +1787,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => None,
@@ -2068,6 +2071,15 @@ impl Compiler {
                     }
                 }
             },
+            RegexAst::NamedBackreference(name) => {
+                if named_groups.contains_key(name) {
+                    None
+                } else {
+                    Some(format!(
+                        "named backreference '\\k<{name}>' refers to missing named capture group"
+                    ))
+                }
+            }
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
                 .iter()
                 .find_map(|item| self.feature_validation_message(item, total_groups, named_groups)),
@@ -2213,6 +2225,7 @@ impl Compiler {
                     })
             }
             RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Char(_)
             | RegexAst::CharClass(_)
             | RegexAst::Dot
@@ -2369,6 +2382,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => 0,
@@ -2444,6 +2458,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
+            | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => {}

@@ -87,6 +87,7 @@ impl<'a> Lexer<'a> {
             Token::Alternation => "Alternation",
             Token::Anchor(_) => "Anchor",
             Token::Backreference(_) => "Backreference",
+            Token::NamedBackreference { .. } => "NamedBackreference",
             Token::FlagModifier { .. } => "FlagModifier",
             Token::FlagToggle { .. } => "FlagToggle",
             Token::EOF => "EOF",
@@ -314,6 +315,9 @@ impl<'a> Lexer<'a> {
                 Ok(Token::Char(c))
             }
 
+            // Named backreferences \k<name> or \k'name'
+            'k' => self.parse_named_backreference(start_pos),
+
             // Hex escapes \x{...} or \xFF
             'x' => self.parse_hex_escape(),
 
@@ -460,6 +464,59 @@ impl<'a> Lexer<'a> {
             number
         );
         Ok(token)
+    }
+
+    /// Parse named backreference \k<name> or \k'name'
+    fn parse_named_backreference(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip 'k'
+
+        let close_delim = match self.current {
+            Some('<') => '>',
+            Some('\'') => '\'',
+            _ => {
+                return Err(LexError::InvalidEscape {
+                    sequence: "\\k".to_string(),
+                    position: start_pos,
+                });
+            }
+        };
+        self.advance(); // Skip opening delimiter
+
+        let mut name = String::new();
+        loop {
+            match self.current {
+                Some(c) if c == close_delim => {
+                    self.advance(); // Skip closing delimiter
+                    break;
+                }
+                Some(c) if c.is_alphanumeric() || c == '_' => {
+                    name.push(c);
+                    self.advance();
+                }
+                _ => {
+                    return Err(LexError::InvalidEscape {
+                        sequence: format!(
+                            "\\k{}{name}",
+                            if close_delim == '>' { '<' } else { '\'' }
+                        ),
+                        position: start_pos,
+                    });
+                }
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexError::InvalidEscape {
+                sequence: format!(
+                    "\\k{}{}",
+                    if close_delim == '>' { '<' } else { '\'' },
+                    close_delim
+                ),
+                position: start_pos,
+            });
+        }
+
+        Ok(Token::NamedBackreference { name })
     }
 
     /// Parse hex escape \x{...} or \xFF

@@ -106,6 +106,7 @@ impl<'a> Parser<'a> {
             Regex::Quantified { .. } => "Quantified",
             Regex::Group { .. } => "Group",
             Regex::Backreference(_) => "Backreference",
+            Regex::NamedBackreference(_) => "NamedBackreference",
             Regex::Lookahead { .. } => "Lookahead",
             Regex::Lookbehind { .. } => "Lookbehind",
             Regex::CodeBlock { .. } => "CodeBlock",
@@ -571,6 +572,11 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Regex::Backreference(n))
             }
+            Some(Token::NamedBackreference { name }) => {
+                let name = name.clone();
+                self.advance()?;
+                Ok(Regex::NamedBackreference(name))
+            }
             Some(Token::CodeBlock { lang, code }) => {
                 let lang = lang.clone();
                 let code = code.clone();
@@ -754,6 +760,7 @@ impl<'a> Parser<'a> {
                 | Token::UnicodeClass { .. }
                 | Token::UnicodeClassNeg { .. }
                 | Token::Backreference(_)
+                | Token::NamedBackreference { .. }
                 | Token::CodeBlock { .. }
                 | Token::ExtendedCharClass { .. }
                 | Token::Recursion { .. },

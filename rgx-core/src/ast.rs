@@ -102,6 +102,8 @@ pub enum Regex {
     // Advanced features
     /// Backreference to capture group \1, \2, etc.
     Backreference(u32),
+    /// Named backreference \k<name> or \k'name'
+    NamedBackreference(String),
     /// Conditional patterns (?(condition)yes|no)
     Conditional {
         /// The condition to evaluate

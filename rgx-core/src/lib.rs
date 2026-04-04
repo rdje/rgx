@@ -3958,4 +3958,28 @@ mod tests {
         assert!(re.is_match("A1B"));
         assert!(!re.is_match("A2B"));
     }
+
+    #[test]
+    fn named_backreference_basic() {
+        let re = Regex::compile(r"(?<word>\w+)\s+\k<word>").unwrap();
+        assert!(re.is_match("the the"));
+        assert!(!re.is_match("the that"));
+    }
+
+    #[test]
+    fn named_backreference_quote_style() {
+        let re = Regex::compile(r"(?<x>a)\k'x'").unwrap();
+        assert!(re.is_match("aa"));
+    }
+
+    #[test]
+    fn named_backreference_missing_group_reports_compile_error() {
+        let result = Regex::compile(r"(a)\k<missing>");
+        assert!(
+            result.is_err(),
+            "Named backreference to a missing group should not silently compile"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("named backreference"));
+    }
 }

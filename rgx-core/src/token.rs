@@ -145,6 +145,11 @@ pub enum Token {
     Anchor(AnchorType),
     /// \1, \2, etc. - Backreferences
     Backreference(u32),
+    /// \k<name> or \k'name' - Named backreferences
+    NamedBackreference {
+        /// Name of the referenced capture group
+        name: String,
+    },
 
     // Flags and modifiers
     /// (?flags: - Inline flag modifiers (?i:...), (?m:...), etc.

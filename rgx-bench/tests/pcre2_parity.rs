@@ -1595,6 +1595,16 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "(?im)^abc",
             input: "x\nABC",
         },
+        ParityCase {
+            name: "named_backref_angle",
+            pattern: r"(?<w>\w+)\s+\k<w>",
+            input: "the the end",
+        },
+        ParityCase {
+            name: "named_backref_simple",
+            pattern: r"(?<x>ab)\k<x>",
+            input: "abab xx",
+        },
     ];
 
     for case in cases {

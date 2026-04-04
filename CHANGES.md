@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Ship named backreferences \k<name> and \k'name'
+- Scope: new regex feature — named backreferences.
+- Changes:
+  - `\k<name>` and `\k'name'` now reference previously captured named groups and match the same text.
+  - Added `Token::NamedBackreference`, `Regex::NamedBackreference(String)` AST node, lexer parsing for both delimiter styles, and compiler resolution to numbered `OpCode::Backref` via the named-group registry.
+  - Missing named groups produce explicit compile errors.
+  - Added 3 unit tests (basic, quote-style, missing-group error) and 2 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (263 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - Patterns like `(?<word>\w+)\s+\k<word>` now work for repeated-word detection.
+  - Parity case count now 237.
+
 ### 2026-04-05 - Ship non-scoped inline flags (?i), (?m), (?s) and combinations
 - Scope: new regex feature — non-scoped inline flag toggles.
 - Changes:
