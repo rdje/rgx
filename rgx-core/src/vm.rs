@@ -3503,6 +3503,8 @@ pub struct OptimizingCompiler {
     multiline: bool,
     /// Whether dotall mode is active (. matches any character including newline)
     dotall: bool,
+    /// Whether case-insensitive mode is active (ASCII letters match both cases)
+    case_insensitive: bool,
 }
 
 impl OptimizingCompiler {
@@ -3540,6 +3542,7 @@ impl OptimizingCompiler {
             },
             multiline: false,
             dotall: false,
+            case_insensitive: false,
         };
         trace_exit!(
             "vm",
@@ -3693,7 +3696,16 @@ impl OptimizingCompiler {
     fn codegen_pass(&mut self, ast: &Regex, is_top_level: bool) {
         match ast {
             Regex::Char(ch) => {
-                self.emit_char_op(OpCode::Char, *ch);
+                if self.case_insensitive && ch.is_ascii_alphabetic() {
+                    let lower = ch.to_ascii_lowercase();
+                    let upper = ch.to_ascii_uppercase();
+                    let ranges = vec![CharRange::single(lower), CharRange::single(upper)];
+                    let class_id = self.compile_char_class(&ranges);
+                    self.emit_op(OpCode::CharClass);
+                    self.code.push(class_id as u8);
+                } else {
+                    self.emit_char_op(OpCode::Char, *ch);
+                }
             }
 
             Regex::Dot => {
@@ -3715,7 +3727,12 @@ impl OptimizingCompiler {
                     CharClass::Custom { ranges, negated } => {
                         // Compile custom character class into optimized bytecode
                         // Store the class definition and emit CharClass opcode with index
-                        let class_id = self.compile_char_class(ranges);
+                        let effective_ranges = if self.case_insensitive {
+                            Self::case_fold_ranges(ranges)
+                        } else {
+                            ranges.clone()
+                        };
+                        let class_id = self.compile_char_class(&effective_ranges);
 
                         if *negated {
                             self.emit_op(OpCode::CharClassNeg);
@@ -4076,15 +4093,20 @@ impl OptimizingCompiler {
             Regex::FlagGroup { flags, expr } => {
                 let saved_multiline = self.multiline;
                 let saved_dotall = self.dotall;
+                let saved_case_insensitive = self.case_insensitive;
                 if flags.contains('m') {
                     self.multiline = true;
                 }
                 if flags.contains('s') {
                     self.dotall = true;
                 }
+                if flags.contains('i') {
+                    self.case_insensitive = true;
+                }
                 self.codegen_pass(expr, false);
                 self.multiline = saved_multiline;
                 self.dotall = saved_dotall;
+                self.case_insensitive = saved_case_insensitive;
             }
 
             Regex::Empty => {
@@ -4225,6 +4247,7 @@ impl OptimizingCompiler {
         sub_compiler.group_counter = starting_group_counter;
         sub_compiler.multiline = self.multiline;
         sub_compiler.dotall = self.dotall;
+        sub_compiler.case_insensitive = self.case_insensitive;
         sub_compiler.codegen_pass(expr, false);
 
         let char_class_base = self.char_classes.len();
@@ -4486,6 +4509,32 @@ impl OptimizingCompiler {
             _ => return None,
         }
         Some(ip + 2)
+    }
+
+    /// Expand character ranges to include ASCII case folds.
+    fn case_fold_ranges(ranges: &[CharRange]) -> Vec<CharRange> {
+        let mut result = ranges.to_vec();
+        for range in ranges {
+            let start = range.start;
+            let end = range.end;
+            if start.is_ascii_lowercase() || start.is_ascii_uppercase() {
+                let folded_start = if start.is_ascii_lowercase() {
+                    start.to_ascii_uppercase()
+                } else {
+                    start.to_ascii_lowercase()
+                };
+                let folded_end = if end.is_ascii_lowercase() {
+                    end.to_ascii_uppercase()
+                } else {
+                    end.to_ascii_lowercase()
+                };
+                result.push(CharRange {
+                    start: folded_start,
+                    end: folded_end,
+                });
+            }
+        }
+        result
     }
 
     /// Emit opcode with character operand

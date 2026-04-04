@@ -275,6 +275,21 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             pattern: "cat",
             input: "dog bird",
         },
+        ParityCase {
+            name: "case_insensitive_literal_all",
+            pattern: "(?i:abc)",
+            input: "ABC abc AbC",
+        },
+        ParityCase {
+            name: "case_insensitive_class_all",
+            pattern: "(?i:[a-z])+",
+            input: "Hello WORLD foo",
+        },
+        ParityCase {
+            name: "case_insensitive_scoped_all",
+            pattern: "(?i:abc)def",
+            input: "ABCdef abcdef AbCdef",
+        },
     ];
 
     for case in cases {

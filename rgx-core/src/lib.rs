@@ -3928,4 +3928,34 @@ mod tests {
         assert!(!re.is_match("a\nb"));
         assert!(re.is_match("axb"));
     }
+
+    #[test]
+    fn scoped_case_insensitive_literal_match() {
+        let re = Regex::compile("(?i:abc)").unwrap();
+        assert!(re.is_match("ABC"));
+        assert!(re.is_match("AbC"));
+        assert!(re.is_match("abc"));
+    }
+
+    #[test]
+    fn case_insensitive_does_not_leak() {
+        let re = Regex::compile("(?i:abc)def").unwrap();
+        assert!(re.is_match("ABCdef"));
+        assert!(!re.is_match("ABCDef"));
+    }
+
+    #[test]
+    fn case_insensitive_char_class() {
+        let re = Regex::compile("(?i:[a-z])+").unwrap();
+        let m = re.find_first("Hello").unwrap();
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 5);
+    }
+
+    #[test]
+    fn case_insensitive_non_letter() {
+        let re = Regex::compile("(?i:a1b)").unwrap();
+        assert!(re.is_match("A1B"));
+        assert!(!re.is_match("A2B"));
+    }
 }

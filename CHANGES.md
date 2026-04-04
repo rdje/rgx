@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Ship scoped case-insensitive mode (?i:...)
+- Scope: new regex feature — scoped case-insensitive flag groups.
+- Changes:
+  - `(?i:...)` now makes literal characters and character classes match case-insensitively within the group scope.
+  - When case-insensitive, `Char('a')` compiles to a 2-entry char class matching both `'a'` and `'A'`; custom character class ranges are expanded with their case-folded counterparts.
+  - Added `case_insensitive: bool` flag to compiler, propagated through sub-compilers.
+  - Added 4 unit tests and 3 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (250 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - Third inline flag shipped. `(?i:...)` is the most commonly used flag in real-world regex patterns.
+  - Current scope is ASCII case folding. Unicode case folding is future work.
+  - Parity case count now 232.
+
 ### 2026-04-04 - Ship scoped dotall mode (?s:...)
 - Scope: new regex feature — scoped dotall flag groups.
 - Changes:
