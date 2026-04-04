@@ -374,6 +374,8 @@ pub struct RegexVM {
     execution_manager: Option<Arc<ExecutionManager>>,
     /// SIMD instruction support detected at runtime
     simd_support: SimdSupport,
+    /// Cached first required literal byte for scanning skip optimization
+    first_literal_byte: Option<u8>,
 }
 
 /// Runtime SIMD capability detection
@@ -422,11 +424,13 @@ impl RegexVM {
             simd_support.avx2,
             simd_support.neon
         );
-        let vm = Self {
+        let mut vm = Self {
             program,
             execution_manager,
             simd_support,
+            first_literal_byte: None,
         };
+        vm.first_literal_byte = vm.first_required_byte();
         trace_exit!(
             "vm",
             "RegexVM::with_execution_manager",
@@ -557,8 +561,12 @@ impl RegexVM {
         result
     }
 
-    /// Determine if SIMD pre-filtering would be beneficial  
+    /// Determine if SIMD pre-filtering would be beneficial
     fn should_use_simd_search(&self, ctx: &ExecContext) -> bool {
+        // SIMD candidate collection followed by per-candidate VM execution is
+        // only a net win when the first literal is rare in the input.  For now
+        // keep this gated on x86 SSE2 where it was originally benchmarked;
+        // ARM NEON can use the lighter memchr-style skip in the scanning loop.
         self.simd_support.sse2 &&
         ctx.text.len() > 64 && // Worth SIMD overhead
         self.program.stats.literal_chars > 0 // Has literal content to search for
@@ -684,6 +692,39 @@ impl RegexVM {
         }
     }
 
+    /// Extract the first required literal byte from the program, if the
+    /// bytecode begins with a `Char` opcode for a single-byte character
+    /// (optionally preceded by `SaveStart`/`SaveEnd` capture markers).
+    fn first_required_byte(&self) -> Option<u8> {
+        let code = &self.program.code;
+        let mut ip = 0;
+        while ip < code.len() {
+            let Ok(op) = OpCode::try_from(code[ip]) else {
+                return None;
+            };
+            ip += 1;
+            match op {
+                OpCode::Char => {
+                    if ip < code.len() {
+                        let char_len = code[ip] as usize;
+                        ip += 1;
+                        if char_len == 1 && ip < code.len() {
+                            return Some(code[ip]);
+                        }
+                    }
+                    return None;
+                }
+                OpCode::SaveStart | OpCode::SaveEnd => {
+                    if ip < code.len() {
+                        ip += 1; // skip group ID operand
+                    }
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
     /// Standard scanning approach - try match at each position
     fn find_first_scanning(&self, ctx: &mut ExecContext) -> Option<Match> {
         trace_enter!(
@@ -700,6 +741,13 @@ impl RegexVM {
         );
 
         for start in 0..=ctx.text.len() {
+            // Skip positions where the first required literal byte cannot match
+            if let Some(fb) = self.first_literal_byte {
+                if start < ctx.text.len() && ctx.text[start] != fb {
+                    continue;
+                }
+            }
+
             trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
             ctx.pos = start;
             Self::reset_captures(ctx);

@@ -113,6 +113,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - the real PGEN backend is green locally through pinned submodule commit `f97e0fe31750885f4fc48a67ed7660110cd20271`
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
   - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, emits a cross-mode `overview.*` for latest quick/full state, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
+  - the first VM performance optimization (literal-prefix skip in scanning loop) improved literal find_first by ~2x; the scanning loop now skips positions where the first required byte cannot match, which is cached once at VM construction
 
 ## What is shipped today
 ### Default public regex path

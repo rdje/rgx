@@ -45,6 +45,11 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- First VM performance optimization landed: literal-prefix skip in the scanning loop
+  - caches the first required literal byte from the compiled bytecode at VM construction
+  - skips positions where that byte doesn't match, avoiding full VM invocations at impossible positions
+  - literal_simple find_first improved ~2x (109x → 55x slower vs PCRE2)
+  - conservative single-byte approach; multi-byte prefixes, memchr, and ExecContext allocation reduction are follow-up opportunities
 - RGX-owned clippy warnings are now at **zero** (from 296 at session start):
   - refactored 10 over-length functions through helper extraction
   - added targeted `#[allow(clippy::too_many_lines)]` to 3 architectural VM dispatch loops

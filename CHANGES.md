@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Add literal-prefix skip to VM scanning loop
+- Scope: performance optimization for the VM scanning strategy.
+- Changes:
+  - Added `first_required_byte()` helper that extracts the first literal byte from the compiled bytecode, cached once at VM construction.
+  - Modified `find_first_scanning` to skip positions where the first required literal byte doesn't match, avoiding full VM invocations at impossible positions.
+  - Added explanatory comment to `should_use_simd_search` documenting why the SIMD candidate-collection strategy is gated on x86 SSE2 rather than ARM NEON.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (33 total, 0 RGX-owned)
+  - Quick benchmark trend capture confirms measurable improvement for literal-starting patterns:
+    - `find_first literal_simple 1K`: 109x → 55x slower vs PCRE2 (~2x faster)
+    - `find_first literal_simple 10K`: 130x → 74x slower vs PCRE2 (~1.8x faster)
+    - `find_all literal_simple 1K`: 106x → 60x slower vs PCRE2 (~1.8x faster)
+    - `find_all literal_simple 10K`: 119x → 70x slower vs PCRE2 (~1.7x faster)
+  - No change for patterns that don't start with a single-byte literal (capture_groups, email_basic with word boundary).
+- Notes/impact:
+  - This is the first landed VM performance optimization targeting the scanning loop hot path.
+  - The approach is conservative — it only skips when the pattern begins with a single-byte `Char` opcode. Multi-byte and non-literal prefixes fall through to the full scan.
+  - Future work: extend to multi-byte literal prefixes, use `memchr` for the byte search, and reduce per-call `ExecContext` allocation.
+
 ### 2026-04-04 - Eliminate all RGX-owned clippy warnings through function refactoring
 - Scope: structural refactoring of 10 over-length functions plus targeted suppression of 3 architectural VM functions.
 - Changes:
