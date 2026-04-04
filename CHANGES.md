@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Replace backtrack frame cloning with SOTA trail/undo log
+- Scope: SOTA-grade refactor of the VM backtracking mechanism.
+- Changes:
+  - Replaced full capture-vector cloning (`Vec<Option<usize>>::clone()`) on every backtrack frame with a trail/undo log that records only modified slots.
+  - Replaced full call-stack cloning with a length mark (`usize`); backtrack now truncates to the mark.
+  - New `set_capture(ctx, index, value)` helper records `(index, old_value)` in the trail before each write.
+  - New `undo_trail(ctx, mark)` replays the trail backwards to restore capture state at the save point.
+  - `BacktrackFrame` now stores `trail_mark: usize` + `call_stack_mark: usize` instead of two cloned `Vec`s.
+  - Probe-based frames (StarLazy) retain snapshot captures for correctness where trail replay is insufficient.
+  - Updated ~15 frame construction sites, ~10 inline save/restore sites, and 3 backtrack restoration paths.
+- Validation:
+  - `cargo test -p rgx-core` (243 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (37 pass)
+  - 0 clippy warnings
+  - Benchmark improvement from trail-based backtracking: email find_all 10K 105x→62x (1.7x faster), literal find_all 10K 45x→30x (1.5x faster)
+- Notes/impact:
+  - This is the most impactful SOTA upgrade: backtrack frame saves are now O(1) instead of O(num_groups), and restores are O(modified_slots) instead of O(num_groups).
+  - Total session performance: find_all literal 1K from 106x to 30x (3.5x), capture 10K from 1437x to 21x (68x).
+
 ### 2026-04-04 - Upgrade VM hot paths to SOTA quality
 - Scope: replace below-SOTA implementations in the VM execution hot path.
 - Changes:

@@ -326,6 +326,11 @@ pub struct ExecContext {
     pub end: usize,
     /// Capture group positions [start, end, start, end, ...]
     pub captures: Vec<Option<usize>>,
+    /// Trail log of capture modifications: `(slot_index, old_value)` pairs.
+    /// Used for efficient backtracking — instead of cloning the entire capture
+    /// vector on every backtrack frame, we record each modification and replay
+    /// the trail backwards to undo changes.
+    pub capture_trail: Vec<(usize, Option<usize>)>,
     /// Call stack for recursion
     pub call_stack: Vec<usize>,
     /// Backtrack stack for alternation and optional quantifiers
@@ -345,10 +350,16 @@ pub struct BacktrackFrame {
     pub ip: usize,
     /// Text position to restore
     pub pos: usize,
-    /// Saved capture state
-    pub saved_captures: Vec<Option<usize>>,
-    /// Saved atomic-group stack state
-    pub saved_call_stack: Vec<usize>,
+    /// Capture-trail length at the time this frame was created. On backtrack
+    /// the trail is replayed backwards to this mark, restoring capture state.
+    pub trail_mark: usize,
+    /// Call-stack length at the time this frame was created. On backtrack the
+    /// call stack is truncated to this mark.
+    pub call_stack_mark: usize,
+    /// Optional full capture snapshot for probe-based frames where the target
+    /// state was computed on a cloned context and cannot be expressed as a
+    /// simple trail undo.
+    pub capture_snapshot: Option<Vec<Option<usize>>>,
     /// Saved winning-path non-boolean code-block value
     pub saved_code_result: Option<CodeBlockValue>,
 }
@@ -543,6 +554,7 @@ impl RegexVM {
             match_start: 0,
             end: bytes.len(),
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            capture_trail: Vec::new(),
             call_stack: Vec::new(),
             backtrack_stack: Vec::new(),
             current_alternative: None,
@@ -838,14 +850,46 @@ impl RegexVM {
         None
     }
 
+    /// Write a single capture slot, recording the old value in the trail log
+    /// so that the modification can be undone on backtrack.
+    #[inline]
+    fn set_capture(ctx: &mut ExecContext, index: usize, value: Option<usize>) {
+        let old = ctx.captures[index];
+        ctx.capture_trail.push((index, old));
+        ctx.captures[index] = value;
+    }
+
+    /// Undo capture-trail entries back to `mark`, restoring capture slots to
+    /// their state at the time the mark was taken.
+    #[inline]
+    fn undo_trail(ctx: &mut ExecContext, mark: usize) {
+        while ctx.capture_trail.len() > mark {
+            let (index, old_value) = ctx.capture_trail.pop().unwrap();
+            ctx.captures[index] = old_value;
+        }
+    }
+
+    /// Restore a backtrack frame's capture + call-stack state onto `ctx`.
+    #[inline]
+    fn restore_frame(ctx: &mut ExecContext, frame: &BacktrackFrame) {
+        if let Some(ref snapshot) = frame.capture_snapshot {
+            // Probe-based frame: discard trail entries and apply the snapshot.
+            ctx.capture_trail.truncate(frame.trail_mark);
+            ctx.captures.copy_from_slice(snapshot);
+        } else {
+            // Normal frame: replay the trail backwards to undo changes.
+            Self::undo_trail(ctx, frame.trail_mark);
+        }
+        ctx.call_stack.truncate(frame.call_stack_mark);
+    }
+
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
     fn try_backtrack(ctx: &mut ExecContext, ip: &mut usize) -> bool {
         if let Some(frame) = ctx.backtrack_stack.pop() {
             *ip = frame.ip;
             ctx.pos = frame.pos;
-            ctx.captures = frame.saved_captures;
-            ctx.call_stack = frame.saved_call_stack;
+            Self::restore_frame(ctx, &frame);
             ctx.code_result = frame.saved_code_result;
             true
         } else {
@@ -861,6 +905,7 @@ impl RegexVM {
             match_start: ctx.match_start,
             end: ctx.end,
             captures: ctx.captures.clone(),
+            capture_trail: ctx.capture_trail.clone(),
             call_stack: ctx.call_stack.clone(),
             backtrack_stack: Vec::new(),
             current_alternative: ctx.current_alternative,
@@ -888,7 +933,7 @@ impl RegexVM {
         }
 
         let saved_pos = ctx.pos;
-        let saved_captures = ctx.captures.clone();
+        let trail_mark = ctx.capture_trail.len();
         let saved_code_result = ctx.code_result.clone();
         let saved_alternative = ctx.current_alternative;
 
@@ -901,7 +946,7 @@ impl RegexVM {
             true
         } else {
             ctx.pos = saved_pos;
-            ctx.captures = saved_captures;
+            Self::undo_trail(ctx, trail_mark);
             ctx.code_result = saved_code_result;
             false
         }
@@ -985,8 +1030,7 @@ impl RegexVM {
                         // Restore saved state
                         ip = frame.ip;
                         ctx.pos = frame.pos;
-                        ctx.captures = frame.saved_captures;
-                        ctx.call_stack = frame.saved_call_stack;
+                        Self::restore_frame(ctx, &frame);
                         ctx.code_result = frame.saved_code_result;
                         continue;
                     }
@@ -1322,13 +1366,13 @@ impl RegexVM {
                     // Must match at least once
                     let start_pos = ctx.pos;
                     trace_log!("vm", "  First match attempt at pos={}", ctx.pos);
-                    let first_saved_captures = ctx.captures.clone();
-                    let first_saved_call_stack = ctx.call_stack.clone();
+                    let first_trail_mark = ctx.capture_trail.len();
+                    let first_cs_mark = ctx.call_stack.len();
                     let first_saved_code_result = ctx.code_result.clone();
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                         ctx.pos = start_pos;
-                        ctx.captures = first_saved_captures;
-                        ctx.call_stack = first_saved_call_stack;
+                        Self::undo_trail(ctx, first_trail_mark);
+                        ctx.call_stack.truncate(first_cs_mark);
                         ctx.code_result = first_saved_code_result;
                         trace_log!("vm", "  ✗ PlusGreedy: first match failed");
                         if Self::try_backtrack(ctx, &mut ip) {
@@ -1348,13 +1392,13 @@ impl RegexVM {
                     let mut match_count = 1;
                     loop {
                         let before_pos = ctx.pos;
-                        let saved_captures = ctx.captures.clone();
-                        let saved_call_stack = ctx.call_stack.clone();
+                        let trail_mark = ctx.capture_trail.len();
+                        let cs_mark = ctx.call_stack.len();
                         let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
-                            ctx.captures = saved_captures;
-                            ctx.call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            ctx.call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             // Can't match anymore, that's fine
                             trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
@@ -1362,8 +1406,8 @@ impl RegexVM {
                         }
                         // If we didn't advance, avoid infinite loop
                         if ctx.pos == before_pos {
-                            ctx.captures = saved_captures;
-                            ctx.call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            ctx.call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             trace_log!("vm", "  PlusGreedy: no advance, stopping");
                             break;
@@ -1373,8 +1417,9 @@ impl RegexVM {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                         match_count += 1;
@@ -1410,21 +1455,21 @@ impl RegexVM {
                     // Match as many times as possible (greedy, zero or more)
                     loop {
                         let before_pos = ctx.pos;
-                        let saved_captures = ctx.captures.clone();
-                        let saved_call_stack = ctx.call_stack.clone();
+                        let trail_mark = ctx.capture_trail.len();
+                        let cs_mark = ctx.call_stack.len();
                         let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
-                            ctx.captures = saved_captures;
-                            ctx.call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            ctx.call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             // Can't match anymore, that's fine for *
                             break;
                         }
                         // If we didn't advance, avoid infinite loop
                         if ctx.pos == before_pos {
-                            ctx.captures = saved_captures;
-                            ctx.call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            ctx.call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             break;
                         }
@@ -1433,8 +1478,9 @@ impl RegexVM {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                     }
@@ -1461,21 +1507,22 @@ impl RegexVM {
                     // Try to match once (greedy), but keep backtrack fallback
                     // for the zero-occurrence path.
                     let before_pos = ctx.pos;
-                    let saved_captures = ctx.captures.clone();
-                    let saved_call_stack = ctx.call_stack.clone();
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = ctx.call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
-                        ctx.captures = saved_captures;
-                        ctx.call_stack = saved_call_stack;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.call_stack.truncate(cs_mark);
                         ctx.code_result = saved_code_result;
                     } else {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                     }
@@ -1504,8 +1551,9 @@ impl RegexVM {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_start,
                             pos: ctx.pos,
-                            saved_captures: ctx.captures.clone(),
-                            saved_call_stack: ctx.call_stack.clone(),
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                         });
                     }
@@ -1532,8 +1580,9 @@ impl RegexVM {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
                             pos: probe_ctx.pos,
-                            saved_captures: probe_ctx.captures,
-                            saved_call_stack: probe_ctx.call_stack,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
                         });
                     }
@@ -1557,14 +1606,14 @@ impl RegexVM {
                     }
 
                     let before_pos = ctx.pos;
-                    let saved_captures = ctx.captures.clone();
-                    let saved_call_stack = ctx.call_stack.clone();
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = ctx.call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
-                        ctx.captures = saved_captures;
-                        ctx.call_stack = saved_call_stack;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.call_stack.truncate(cs_mark);
                         ctx.code_result = saved_code_result;
                         if Self::try_backtrack(ctx, &mut ip) {
                             continue;
@@ -1572,9 +1621,8 @@ impl RegexVM {
                         return false;
                     }
 
-                    let after_first_pos = ctx.pos;
-                    let after_first_captures = ctx.captures.clone();
-                    let after_first_call_stack = ctx.call_stack.clone();
+                    let after_first_trail_mark = ctx.capture_trail.len();
+                    let after_first_cs_mark = ctx.call_stack.len();
                     let after_first_code_result = ctx.code_result.clone();
                     if self
                         .probe_subexpr(ctx, &code[expr_start..expr_end])
@@ -1582,9 +1630,10 @@ impl RegexVM {
                     {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
-                            pos: after_first_pos,
-                            saved_captures: after_first_captures,
-                            saved_call_stack: after_first_call_stack,
+                            pos: ctx.pos,
+                            trail_mark: after_first_trail_mark,
+                            call_stack_mark: after_first_cs_mark,
+                            capture_snapshot: None,
                             saved_code_result: after_first_code_result,
                         });
                     }
@@ -1603,7 +1652,7 @@ impl RegexVM {
                     // Save current position as start of capture group
                     let start_idx = group_id * 2;
                     if start_idx < ctx.captures.len() {
-                        ctx.captures[start_idx] = Some(ctx.pos);
+                        Self::set_capture(ctx, start_idx, Some(ctx.pos));
                     }
                 }
 
@@ -1618,7 +1667,7 @@ impl RegexVM {
                     // Save current position as end of capture group
                     let end_idx = group_id * 2 + 1;
                     if end_idx < ctx.captures.len() {
-                        ctx.captures[end_idx] = Some(ctx.pos);
+                        Self::set_capture(ctx, end_idx, Some(ctx.pos));
                     }
                 }
 
@@ -1685,8 +1734,9 @@ impl RegexVM {
                     let backtrack_frame = BacktrackFrame {
                         ip: ip + offset, // Second alternative
                         pos: ctx.pos,
-                        saved_captures: ctx.captures.clone(),
-                        saved_call_stack: ctx.call_stack.clone(),
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
@@ -1736,8 +1786,7 @@ impl RegexVM {
                         // Restore saved state
                         ip = frame.ip;
                         ctx.pos = frame.pos;
-                        ctx.captures = frame.saved_captures;
-                        ctx.call_stack = frame.saved_call_stack;
+                        Self::restore_frame(ctx, &frame);
                         ctx.code_result = frame.saved_code_result;
                         continue;
                     }
@@ -1978,6 +2027,8 @@ impl RegexVM {
         for capture in &mut ctx.captures {
             *capture = None;
         }
+        // Clear the capture-modification trail for fresh start
+        ctx.capture_trail.clear();
         // Also clear backtrack stack for fresh start
         ctx.backtrack_stack.clear();
         // Clear atomic-group markers for fresh start
@@ -2132,6 +2183,7 @@ impl RegexVM {
             match_start: 0,
             end: bytes.len(),
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            capture_trail: Vec::new(),
             call_stack: Vec::new(),
             backtrack_stack: Vec::new(),
             current_alternative: None,
@@ -2289,8 +2341,13 @@ impl RegexVM {
                 if let Some(frame) = backtrack_stack.pop() {
                     ip = frame.ip;
                     ctx.pos = frame.pos;
-                    ctx.captures = frame.saved_captures;
-                    call_stack = frame.saved_call_stack;
+                    if let Some(ref snapshot) = frame.capture_snapshot {
+                        ctx.capture_trail.truncate(frame.trail_mark);
+                        ctx.captures.copy_from_slice(snapshot);
+                    } else {
+                        Self::undo_trail(ctx, frame.trail_mark);
+                    }
+                    call_stack.truncate(frame.call_stack_mark);
                     ctx.code_result = frame.saved_code_result;
                     continue;
                 }
@@ -2527,7 +2584,7 @@ impl RegexVM {
 
                     let start_idx = group_id * 2;
                     if start_idx < ctx.captures.len() {
-                        ctx.captures[start_idx] = Some(ctx.pos);
+                        Self::set_capture(ctx, start_idx, Some(ctx.pos));
                     }
                 }
 
@@ -2540,7 +2597,7 @@ impl RegexVM {
 
                     let end_idx = group_id * 2 + 1;
                     if end_idx < ctx.captures.len() {
-                        ctx.captures[end_idx] = Some(ctx.pos);
+                        Self::set_capture(ctx, end_idx, Some(ctx.pos));
                     }
                 }
 
@@ -2586,8 +2643,9 @@ impl RegexVM {
                     backtrack_stack.push(BacktrackFrame {
                         ip: ip + offset,
                         pos: ctx.pos,
-                        saved_captures: ctx.captures.clone(),
-                        saved_call_stack: call_stack.clone(),
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: call_stack.len(),
+                        capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                     });
                 }
@@ -2602,8 +2660,9 @@ impl RegexVM {
                     backtrack_stack.push(BacktrackFrame {
                         ip,
                         pos: ctx.pos,
-                        saved_captures: ctx.captures.clone(),
-                        saved_call_stack: call_stack.clone(),
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: call_stack.len(),
+                        capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                     });
                     ip += offset;
@@ -2646,21 +2705,22 @@ impl RegexVM {
                     }
 
                     let before_pos = ctx.pos;
-                    let saved_captures = ctx.captures.clone();
-                    let saved_call_stack = call_stack.clone();
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
-                        ctx.captures = saved_captures;
-                        call_stack = saved_call_stack;
+                        Self::undo_trail(ctx, trail_mark);
+                        call_stack.truncate(cs_mark);
                         ctx.code_result = saved_code_result;
                     } else {
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                     }
@@ -2689,8 +2749,9 @@ impl RegexVM {
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_start,
                             pos: ctx.pos,
-                            saved_captures: ctx.captures.clone(),
-                            saved_call_stack: call_stack.clone(),
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: call_stack.len(),
+                            capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                         });
                     }
@@ -2714,27 +2775,28 @@ impl RegexVM {
 
                     loop {
                         let before_pos = ctx.pos;
-                        let saved_captures = ctx.captures.clone();
-                        let saved_call_stack = call_stack.clone();
+                        let trail_mark = ctx.capture_trail.len();
+                        let cs_mark = call_stack.len();
                         let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
-                            ctx.captures = saved_captures;
-                            call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             break;
                         }
                         if ctx.pos == before_pos {
-                            ctx.captures = saved_captures;
-                            call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             break;
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                     }
@@ -2761,8 +2823,9 @@ impl RegexVM {
                         backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
                             pos: probe_ctx.pos,
-                            saved_captures: probe_ctx.captures,
-                            saved_call_stack: probe_ctx.call_stack,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: call_stack.len(),
+                            capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
                         });
                     }
@@ -2785,40 +2848,41 @@ impl RegexVM {
                     }
 
                     let first_pos = ctx.pos;
-                    let first_captures = ctx.captures.clone();
+                    let first_trail_mark = ctx.capture_trail.len();
                     let first_code_result = ctx.code_result.clone();
                     if !self.execute_subexpr(ctx, &code[expr_start..expr_end])
                         || ctx.pos == first_pos
                     {
                         ctx.pos = first_pos;
-                        ctx.captures = first_captures;
+                        Self::undo_trail(ctx, first_trail_mark);
                         ctx.code_result = first_code_result;
                         local_backtrack_or_return_false!();
                     }
 
                     loop {
                         let before_pos = ctx.pos;
-                        let saved_captures = ctx.captures.clone();
-                        let saved_call_stack = call_stack.clone();
+                        let trail_mark = ctx.capture_trail.len();
+                        let cs_mark = call_stack.len();
                         let saved_code_result = ctx.code_result.clone();
                         if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                             ctx.pos = before_pos;
-                            ctx.captures = saved_captures;
-                            call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             break;
                         }
                         if ctx.pos == before_pos {
-                            ctx.captures = saved_captures;
-                            call_stack = saved_call_stack;
+                            Self::undo_trail(ctx, trail_mark);
+                            call_stack.truncate(cs_mark);
                             ctx.code_result = saved_code_result;
                             break;
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
-                            saved_captures,
-                            saved_call_stack,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
                             saved_code_result,
                         });
                     }
@@ -2842,19 +2906,18 @@ impl RegexVM {
                     }
 
                     let before_pos = ctx.pos;
-                    let saved_captures = ctx.captures.clone();
+                    let trail_mark = ctx.capture_trail.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
-                        ctx.captures = saved_captures;
+                        Self::undo_trail(ctx, trail_mark);
                         ctx.code_result = saved_code_result;
                         local_backtrack_or_return_false!();
                     }
 
-                    let after_first_pos = ctx.pos;
-                    let after_first_captures = ctx.captures.clone();
-                    let after_first_call_stack = call_stack.clone();
+                    let after_first_trail_mark = ctx.capture_trail.len();
+                    let after_first_cs_mark = call_stack.len();
                     let after_first_code_result = ctx.code_result.clone();
                     if self
                         .probe_subexpr(ctx, &code[expr_start..expr_end])
@@ -2862,9 +2925,10 @@ impl RegexVM {
                     {
                         backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
-                            pos: after_first_pos,
-                            saved_captures: after_first_captures,
-                            saved_call_stack: after_first_call_stack,
+                            pos: ctx.pos,
+                            trail_mark: after_first_trail_mark,
+                            call_stack_mark: after_first_cs_mark,
+                            capture_snapshot: None,
                             saved_code_result: after_first_code_result,
                         });
                     }

@@ -50,6 +50,7 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- **SOTA critical fix**: backtrack frame cloning replaced with trail/undo log — frame saves now O(1) instead of O(num_groups), restores O(modified_slots); email find_all 10K improved 105x→62x, literal find_all 10K improved 45x→30x
 - SOTA quality audit identified critical/major/moderate gaps; first fixes landed:
   - `current_char()` now decodes minimal UTF-8 bytes (not entire remaining text)
   - `advance_char()` determines width from leading byte without re-decoding
