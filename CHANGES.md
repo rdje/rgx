@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Use memchr for scanning loop candidate search
+- Scope: performance optimization for VM scanning strategy.
+- Changes:
+  - Replaced manual byte-comparison skip in `find_first_scanning` and `find_all` with `memchr`-based candidate jumping, which uses platform-native SIMD internally.
+  - Both fast paths now use `memchr(fb, &ctx.text[offset..])` to find the next position where the first required literal byte occurs, skipping all impossible positions in bulk.
+  - The slow path (no literal prefix) falls through to the original position-by-position scan unchanged.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - Benchmark results within noise of previous byte-comparison skip for these inputs; the win is in code clarity and future rare-byte scenarios.
+- Notes/impact:
+  - This completes the three-part scanning optimization series: (1) literal-prefix extraction, (2) in-place find_all, (3) memchr-accelerated candidate search.
+  - Total session improvement vs original baseline: find_all literal 1K 106x→35x (3.0x), find_first literal 1K 109x→57x (1.9x).
+
 ### 2026-04-04 - Rewrite find_all to scan in-place with single context
 - Scope: performance optimization for `find_all` matching.
 - Changes:

@@ -17,6 +17,7 @@ use crate::execution::{
 };
 use crate::unicode_support::resolve_unicode_property_class;
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
+use memchr::memchr;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -725,7 +726,11 @@ impl RegexVM {
         None
     }
 
-    /// Standard scanning approach - try match at each position
+    /// Standard scanning approach - try match at each position.
+    ///
+    /// When the compiled program begins with a single-byte literal, uses
+    /// `memchr` to jump directly to candidate positions instead of testing
+    /// every byte offset.
     fn find_first_scanning(&self, ctx: &mut ExecContext) -> Option<Match> {
         trace_enter!(
             "vm",
@@ -740,27 +745,38 @@ impl RegexVM {
             ctx.text.len()
         );
 
-        for start in 0..=ctx.text.len() {
-            // Skip positions where the first required literal byte cannot match
-            if let Some(fb) = self.first_literal_byte {
-                if start < ctx.text.len() && ctx.text[start] != fb {
-                    continue;
+        if let Some(fb) = self.first_literal_byte {
+            // Fast path: use memchr to jump to candidate positions
+            let mut offset = 0;
+            while let Some(pos) = memchr(fb, &ctx.text[offset..]) {
+                let start = offset + pos;
+                trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
+                ctx.pos = start;
+                Self::reset_captures(ctx);
+                if self.execute_at(ctx, start) {
+                    debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
+                    trace_exit!(
+                        "vm",
+                        "RegexVM::find_first_scanning",
+                        "matched=true, start={}, end={}",
+                        start,
+                        ctx.pos
+                    );
+                    return Some(Match {
+                        start,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
                 }
+                offset = start + 1;
             }
-
-            trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
+            // Also try match at end-of-text for zero-width patterns
+            let start = ctx.text.len();
             ctx.pos = start;
             Self::reset_captures(ctx);
-
             if self.execute_at(ctx, start) {
-                debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
-                let matched = Some(Match {
-                    start,
-                    end: ctx.pos,
-                    groups: self.extract_captures_with_match(ctx, start, ctx.pos),
-                    matched_alternative: ctx.current_alternative,
-                    code_result: ctx.code_result.clone(),
-                });
                 trace_exit!(
                     "vm",
                     "RegexVM::find_first_scanning",
@@ -768,10 +784,40 @@ impl RegexVM {
                     start,
                     ctx.pos
                 );
-                return matched;
+                return Some(Match {
+                    start,
+                    end: ctx.pos,
+                    groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                    matched_alternative: ctx.current_alternative,
+                    code_result: ctx.code_result.clone(),
+                });
             }
-            trace_log!("vm", "✗ No match at position {}", start);
+        } else {
+            // Slow path: try every position
+            for start in 0..=ctx.text.len() {
+                trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
+                ctx.pos = start;
+                Self::reset_captures(ctx);
+                if self.execute_at(ctx, start) {
+                    debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
+                    trace_exit!(
+                        "vm",
+                        "RegexVM::find_first_scanning",
+                        "matched=true, start={}, end={}",
+                        start,
+                        ctx.pos
+                    );
+                    return Some(Match {
+                        start,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                }
+            }
         }
+
         debug_log!("vm", "Scanning complete - no match found");
         trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
         None
@@ -2067,31 +2113,46 @@ impl RegexVM {
         let mut matches = Vec::new();
         let mut start = 0;
 
-        while start <= bytes.len() {
-            // Skip positions where the first required literal byte cannot match
-            if let Some(fb) = self.first_literal_byte {
-                if start < bytes.len() && ctx.text[start] != fb {
-                    start += 1;
-                    continue;
+        if let Some(fb) = self.first_literal_byte {
+            // Fast path: use memchr to jump between candidate positions
+            while let Some(pos) = memchr(fb, &ctx.text[start..]) {
+                let candidate = start + pos;
+                ctx.pos = candidate;
+                ctx.match_start = candidate;
+                Self::reset_captures(&mut ctx);
+                if self.execute_at(&mut ctx, candidate) {
+                    let m = Match {
+                        start: candidate,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(&ctx, candidate, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    };
+                    start = m.end.max(m.start + 1);
+                    matches.push(m);
+                } else {
+                    start = candidate + 1;
                 }
             }
-
-            ctx.pos = start;
-            ctx.match_start = start;
-            Self::reset_captures(&mut ctx);
-
-            if self.execute_at(&mut ctx, start) {
-                let m = Match {
-                    start,
-                    end: ctx.pos,
-                    groups: self.extract_captures_with_match(&ctx, start, ctx.pos),
-                    matched_alternative: ctx.current_alternative,
-                    code_result: ctx.code_result.clone(),
-                };
-                start = m.end.max(m.start + 1);
-                matches.push(m);
-            } else {
-                start += 1;
+        } else {
+            // Slow path: try every position
+            while start <= bytes.len() {
+                ctx.pos = start;
+                ctx.match_start = start;
+                Self::reset_captures(&mut ctx);
+                if self.execute_at(&mut ctx, start) {
+                    let m = Match {
+                        start,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(&ctx, start, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    };
+                    start = m.end.max(m.start + 1);
+                    matches.push(m);
+                } else {
+                    start += 1;
+                }
             }
         }
         trace_exit!("vm", "RegexVM::find_all", "match_count={}", matches.len());

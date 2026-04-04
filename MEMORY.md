@@ -45,6 +45,7 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Third VM optimization: switched scanning loops from manual byte comparison to `memchr`-based candidate jumping (uses platform SIMD internally; cleaner code, same or better performance for rare-byte patterns)
 - Second VM performance optimization: rewrote `find_all` to scan in-place with a single `ExecContext` instead of calling `find_first` on substrings (eliminates O(n) text copies per match)
   - find_all literal 1K: 106x → 34x vs PCRE2 (3.1x total session improvement)
   - find_all literal 10K: 119x → 43x vs PCRE2 (2.8x total improvement)
