@@ -3620,10 +3620,15 @@ impl OptimizingCompiler {
             }
 
             Regex::Anchor(anchor) => match anchor {
-                AnchorType::Start => self.emit_op(OpCode::StartLine),
-                AnchorType::End => self.emit_op(OpCode::EndLine),
-                AnchorType::AbsStart => self.emit_op(OpCode::StartText),
-                AnchorType::AbsEnd => self.emit_op(OpCode::EndTextOrNL),
+                // Without (?m), ^ and $ match only at start/end of text
+                // (matching PCRE2's default single-line anchor semantics).
+                // StartLine/EndLine are reserved for future (?m) multiline mode.
+                AnchorType::Start | AnchorType::AbsStart => {
+                    self.emit_op(OpCode::StartText);
+                }
+                AnchorType::End | AnchorType::AbsEnd => {
+                    self.emit_op(OpCode::EndTextOrNL);
+                }
                 AnchorType::AbsEndNoNL => self.emit_op(OpCode::EndText),
             },
 

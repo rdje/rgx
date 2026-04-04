@@ -45,6 +45,11 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- **Accuracy fix**: `^` and `$` now compile to single-line semantics by default (matching PCRE2), not multiline
+  - previously `^` matched after `\n` and `$` matched before `\n` without `(?m)` — incorrect
+  - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
+  - 4 new parity regression tests lock this behavior
+- Accuracy probing found 3 real bugs: anchor defaults (fixed), empty-string match suppression (open), lookahead+alternation find_all (open)
 - Fourth VM optimization: extended prefix filter from single-byte literals to character classes (`\d`, `\w`, `\s`), dramatically improving digit/word/space-prefixed patterns
   - capture_groups find_all 10K: 1437x → 22x vs PCRE2 (65x faster total session improvement)
   - uses a cached `PrefixFilter` enum with `memchr` for bytes and inline predicates for classes

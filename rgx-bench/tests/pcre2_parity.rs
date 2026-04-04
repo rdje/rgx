@@ -1461,6 +1461,27 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "[a-zA-Z0-9_]+",
             input: "foo_BAR!! baz123",
         },
+        // Anchor default-mode regressions: ^ and $ must NOT be multiline without (?m)
+        ParityCase {
+            name: "caret_not_multiline_by_default",
+            pattern: "^a",
+            input: "b\na",
+        },
+        ParityCase {
+            name: "dollar_not_multiline_by_default",
+            pattern: "a$",
+            input: "a\nb",
+        },
+        ParityCase {
+            name: "caret_only_matches_string_start",
+            pattern: "^.",
+            input: "a\nb\nc",
+        },
+        ParityCase {
+            name: "dollar_before_final_newline",
+            pattern: "a$",
+            input: "a\n",
+        },
     ];
 
     for case in cases {

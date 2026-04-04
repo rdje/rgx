@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Fix ^ and $ to match PCRE2 single-line default semantics
+- Scope: accuracy fix for anchor behavior in default mode.
+- Changes:
+  - `^` and `$` now compile to `StartText` / `EndTextOrNL` (start-of-string / end-of-string-or-before-final-newline), matching PCRE2's default single-line anchor semantics.
+  - Previously `^` compiled to `StartLine` (matched after `\n`) and `$` compiled to `EndLine` (matched before `\n`), which is multiline behavior that PCRE2 only enables with `(?m)`.
+  - `StartLine` / `EndLine` opcodes are preserved for future `(?m)` multiline mode support.
+  - Added 4 differential parity regression tests specifically covering default-mode anchor behavior: `caret_not_multiline_by_default`, `dollar_not_multiline_by_default`, `caret_only_matches_string_start`, `dollar_before_final_newline`.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - 0 clippy warnings
+- Notes/impact:
+  - This is a **semantic accuracy fix**, not a performance change. Without it, `^a` would incorrectly match `a` after a newline in `"b\na"`, and `a$` would incorrectly match `a` before a newline in `"a\nb"`.
+  - Total parity case count now 213.
+
 ### 2026-04-04 - Add character-class prefix filter to scanning loop
 - Scope: performance optimization extending the prefix skip to character classes.
 - Changes:
