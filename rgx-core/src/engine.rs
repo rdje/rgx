@@ -68,6 +68,7 @@ impl Engine {
     }
 
     /// Find all non-overlapping matches in the input
+    #[must_use]
     pub fn find_all(&self, text: &[u8]) -> Vec<MatchResult> {
         trace_enter!(
             "engine",
@@ -132,6 +133,7 @@ impl Engine {
     }
 
     /// Find the first match in the input
+    #[must_use]
     pub fn find_first(&self, text: &[u8]) -> Option<MatchResult> {
         trace_enter!(
             "engine",
@@ -190,6 +192,7 @@ impl Engine {
     }
 
     /// Test if pattern matches the input (fastest operation)
+    #[must_use]
     pub fn is_match(&self, text: &[u8]) -> bool {
         trace_enter!(
             "engine",

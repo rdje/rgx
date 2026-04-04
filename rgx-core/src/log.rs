@@ -31,6 +31,7 @@ pub enum Verbosity {
 
 impl Verbosity {
     /// Parse verbosity from env/CLI text.
+    #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "off" | "0" => Some(Self::None),
@@ -43,6 +44,7 @@ impl Verbosity {
     }
 
     /// Canonical lower-case text form.
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -103,8 +105,7 @@ fn resolve_env_verbosity(debug: bool, trace: bool) -> Verbosity {
     match std::env::var("RGX_VERBOSITY") {
         Ok(raw) => Verbosity::parse(&raw).unwrap_or_else(|| {
             eprintln!(
-                "[WARN] [rgx-core/src/log.rs:init] invalid RGX_VERBOSITY='{}'; expected none|low|medium|high|debug",
-                raw
+                "[WARN] [rgx-core/src/log.rs:init] invalid RGX_VERBOSITY='{raw}'; expected none|low|medium|high|debug"
             );
             if trace {
                 Verbosity::Debug
@@ -126,14 +127,14 @@ fn resolve_env_verbosity(debug: bool, trace: bool) -> Verbosity {
     }
 }
 
-// Initialize logging on first use.
+/// Initialize logging on first use, reading configuration from environment variables.
 pub fn init() {
     if INITIALIZED.swap(true, Ordering::Relaxed) {
         return;
     }
 
-    let debug = std::env::var("RGX_DEBUG").map_or(false, |v| v == "1");
-    let trace = std::env::var("RGX_TRACE").map_or(false, |v| v == "1");
+    let debug = std::env::var("RGX_DEBUG").is_ok_and(|v| v == "1");
+    let trace = std::env::var("RGX_TRACE").is_ok_and(|v| v == "1");
     let verbosity = resolve_env_verbosity(debug, trace);
     set_verbosity_inner(verbosity);
 
@@ -142,19 +143,20 @@ pub fn init() {
         if !trimmed.is_empty() {
             if let Err(err) = set_output_file(trimmed) {
                 eprintln!(
-                    "[WARN] [rgx-core/src/log.rs:init] failed to open trace file '{}': {}",
-                    trimmed, err
+                    "[WARN] [rgx-core/src/log.rs:init] failed to open trace file '{trimmed}': {err}"
                 );
             }
         }
     }
 }
 
+/// Return whether debug-level logging is active.
 #[inline(always)]
 pub fn is_debug_enabled() -> bool {
     DEBUG_ENABLED.load(Ordering::Relaxed)
 }
 
+/// Return whether trace-level logging is active.
 #[inline(always)]
 pub fn is_trace_enabled() -> bool {
     TRACE_ENABLED.load(Ordering::Relaxed)
@@ -180,6 +182,7 @@ pub fn set_verbosity(level: Verbosity) {
 
 /// Check if a minimum verbosity level is enabled.
 #[inline(always)]
+#[must_use]
 pub fn is_verbosity_enabled(min_level: Verbosity) -> bool {
     min_level != Verbosity::None && current_verbosity() >= min_level
 }
@@ -511,7 +514,7 @@ pub fn hex_dump(module: &str, label: &str, data: &[u8]) {
     ));
 
     for (i, chunk) in data.chunks(16).enumerate() {
-        let hex: String = chunk.iter().map(|b| format!("{:02x} ", b)).collect();
+        let hex: String = chunk.iter().map(|b| format!("{b:02x} ")).collect();
 
         let ascii: String = chunk
             .iter()

@@ -48,11 +48,13 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized and the explicit RGX package test matrix enabled)
 - Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 4603 lines
-  - `rgx-core/src/lib.rs`: 2976 lines
-  - `rgx-core/src/execution.rs`: 2099 lines
-  - `rgx-core/src/lexer.rs`: 1877 lines
-  - `rgx-core/src/parser.rs`: 1246 lines
+  - `rgx-core/src/vm.rs`: 4626 lines
+  - `rgx-core/src/lib.rs`: 3886 lines
+  - `rgx-core/src/compiler.rs`: 2936 lines
+  - `rgx-core/src/execution.rs`: 2407 lines
+  - `rgx-core/src/lexer.rs`: 2146 lines
+  - `rgx-core/src/parsing.rs`: 1619 lines
+  - `rgx-core/src/parser.rs`: 1389 lines
 - Current scaffold concentration remains visible in several near-empty modules/crates:
   - `rgx-core/src/javascript.rs`
   - `rgx-core/src/wasm.rs`
@@ -63,7 +65,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` remain outside the shipped subset because the local PCRE2 differential harness compile-rejected those forms; RGX intentionally keeps only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`.
 - Latest RGX-owned warning-debt cleanup trimmed dead private scaffolding in the base parser/runtime path and brought the visible `rgx-core` warning count in the standard validation loop down from 101 to 93.
 - Latest RGX-owned warning-debt cleanup trimmed another small isolated slice in `compiler.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs` without widening syntax.
-- The latest full workspace `clippy` pass now reports `rgx-core` lib warnings down to 329 from the previous 426-warning snapshot, so the warning backlog is still real but the parser-facing/doc-driven slice is materially smaller than it was at the start of this turn.
+- The latest full workspace `clippy` pass now reports `rgx-core` lib warnings down to 121 from the previous 329-warning snapshot, with RGX-owned warnings at 88 (the rest are from the PGEN submodule); the remaining backlog is concentrated in cast truncation warnings, missing `# Errors` / `# Panics` doc sections, function-length limits, and a few design-intentional patterns.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
@@ -219,4 +221,4 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 1. Decide whether native registration should stay Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 3. Deepen the quick benchmark history/delta capture beyond the shipped same-label quick/full pairing plus rolling paired-label history into a fuller release-profile longitudinal story.
-4. Continue reducing warning debt in `vm.rs`, `execution.rs`, `parser.rs`, `lexer.rs`, `lib.rs`, `ast.rs`, and `token.rs`, with the next wins likely in long test/doc-noise and public-item documentation rather than dead private scaffolding.
+4. Continue reducing warning debt in `vm.rs`, `execution.rs`, and `compiler.rs`, with the next wins likely in cast-truncation guardrails, missing `# Errors` / `# Panics` doc sections, and the remaining `let...else` / unnecessary-`Result` rewrites; `ast.rs`, `token.rs`, `error.rs`, and `log.rs` field/variant/function docs are now clean.

@@ -45,11 +45,16 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
-- Latest warning-debt cleanup focused on parser-facing utilities and public docs:
-  - added `#[must_use]` on parser/AST/token constructors and match/query helpers where dropped results would be surprising
-  - added missing `# Errors` sections and missing module docs across parser-facing/public API surfaces
-  - cleaned a small parser/lexer utility slice (`map_or_else`, `Copy`-position handling, shared fallback-position helper, `Default` parser adapters, static internal `Regex` helpers)
-  - the latest full workspace `clippy` run now reports `rgx-core` lib warnings down to 329 from the previous 426-warning snapshot
+- Latest warning-debt pass was a deep cleanup across the entire `rgx-core` crate:
+  - removed 30 redundant `continue` statements from VM execution loops
+  - converted 16 private methods to associated functions in `vm.rs` (unused `self`), plus 3 cascade conversions
+  - combined 11 identical match arms across `compiler.rs`, `parsing.rs`, and `vm.rs`
+  - rewrote `let...else` and unwrapped 3 unnecessary `Result`-wrapped functions in `lexer.rs`
+  - added missing field/variant docs across `ast.rs` (40 items), `token.rs` (36 items), `error.rs` (4 items), and `log.rs` (3 functions)
+  - fixed stale BranchReset "runtime semantics pending" comment in `ast.rs` to reflect shipped status
+  - inlined format string variables and applied auto-fixable lint suggestions across multiple files
+  - RGX-owned warnings dropped from 296 to 88 (70% reduction); the full workspace `clippy` pass now reports `rgx-core` lib warnings at 121 (down from 329)
+  - remaining backlog is concentrated in cast-truncation warnings, missing `# Errors` / `# Panics` doc sections, function-length limits, and design-intentional patterns
 - Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` should remain outside the shipped subset for now:
   - a local PCRE2 parity probe compile-rejected those forms
   - RGX intentionally kept only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`

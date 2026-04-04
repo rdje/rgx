@@ -83,12 +83,12 @@ impl ExtendedCharClassOperator {
         }
     }
 
-    fn apply(self, lhs: ScalarRangeSet, rhs: ScalarRangeSet) -> ScalarRangeSet {
+    fn apply(self, lhs: &ScalarRangeSet, rhs: &ScalarRangeSet) -> ScalarRangeSet {
         match self {
-            Self::Union => lhs.union(&rhs),
-            Self::Difference => lhs.difference(&rhs),
-            Self::Intersection => lhs.intersection(&rhs),
-            Self::SymmetricDifference => lhs.difference(&rhs).union(&rhs.difference(&lhs)),
+            Self::Union => lhs.union(rhs),
+            Self::Difference => lhs.difference(rhs),
+            Self::Intersection => lhs.intersection(rhs),
+            Self::SymmetricDifference => lhs.difference(rhs).union(&rhs.difference(lhs)),
         }
     }
 }
@@ -387,6 +387,7 @@ impl ScalarRangeSet {
 
 impl Compiler {
     /// Create new compiler with pure execution mode (maximum performance)
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("compiler", "Compiler::new");
         let compiler = Self {
@@ -402,6 +403,7 @@ impl Compiler {
     }
 
     /// Create compiler with specific execution mode
+    #[must_use]
     pub fn with_mode(mode: ExecutionMode) -> Self {
         trace_enter!("compiler", "Compiler::with_mode", "mode={:?}", mode);
         let compiler = Self { mode };
@@ -650,7 +652,7 @@ impl Compiler {
                     .transpose()?,
             }),
             RegexAst::ExtendedCharClass { content } => {
-                Self::lower_extended_char_class_content(content)
+                Self::lower_extended_char_class_content(&content)
             }
             other => Ok(other),
         }
@@ -694,9 +696,9 @@ impl Compiler {
         }
     }
 
-    fn lower_extended_char_class_content(content: String) -> Result<RegexAst> {
+    fn lower_extended_char_class_content(content: &str) -> Result<RegexAst> {
         Ok(RegexAst::CharClass(crate::ast::CharClass::Custom {
-            ranges: Self::resolve_extended_char_class_ranges(&content)?,
+            ranges: Self::resolve_extended_char_class_ranges(content)?,
             negated: false,
         }))
     }
@@ -774,7 +776,7 @@ impl Compiler {
             cursor.consume_char();
             let rhs =
                 Self::parse_extended_char_class_binary_expr(cursor, operator.precedence() + 1)?;
-            lhs = operator.apply(lhs, rhs);
+            lhs = operator.apply(&lhs, &rhs);
         }
     }
 
@@ -1122,9 +1124,8 @@ impl Compiler {
         };
 
         let normalized = match ch {
-            'A'..='Z' => ch,
             'a'..='z' => ch.to_ascii_uppercase(),
-            '@' | '[' | '\\' | ']' | '^' | '_' | '?' => ch,
+            'A'..='Z' | '@' | '[' | '\\' | ']' | '^' | '_' | '?' => ch,
             _ => return Err(Self::extended_char_class_subset_error()),
         };
 
@@ -1588,8 +1589,8 @@ impl Compiler {
                 .find_map(Self::parser_boundary_validation_message),
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => Self::parser_boundary_validation_message(expr),
-            RegexAst::Group { expr, .. } => Self::parser_boundary_validation_message(expr),
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::Group { expr, .. } => Self::parser_boundary_validation_message(expr),
             RegexAst::Conditional {
                 condition,
                 true_branch,
@@ -1881,14 +1882,12 @@ impl Compiler {
     ) -> Option<String> {
         match ast {
             RegexAst::CodeBlock { lang, code } => self.code_block_validation_message(lang, code),
-            RegexAst::UnicodeClass { name, negated } => {
+            RegexAst::UnicodeClass { name, negated }
+            | RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
                 resolve_unicode_property_class(name, *negated).err()
             }
             RegexAst::ExtendedCharClass { .. } => {
                 Some(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
-            }
-            RegexAst::CharClass(crate::ast::CharClass::UnicodeClass { name, negated }) => {
-                resolve_unicode_property_class(name, *negated).err()
             }
             RegexAst::Recursion { target } => match target {
                 crate::ast::RecursionTarget::Entire => None,
@@ -1916,10 +1915,8 @@ impl Compiler {
                 .find_map(|item| self.feature_validation_message(item, total_groups, named_groups)),
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => {
-                self.feature_validation_message(expr, total_groups, named_groups)
-            }
-            RegexAst::Group { expr, .. } => {
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::Group { expr, .. } => {
                 self.feature_validation_message(expr, total_groups, named_groups)
             }
             RegexAst::Conditional {
@@ -2005,10 +2002,8 @@ impl Compiler {
     fn backreference_validation_message_inner(ast: &RegexAst, total_groups: u32) -> Option<String> {
         match ast {
             RegexAst::Backreference(group) if *group > total_groups => Some(format!(
-                "backreference '\\{}' refers to missing capture group",
-                group
+                "backreference '\\{group}' refers to missing capture group"
             )),
-            RegexAst::Backreference(_) => None,
             RegexAst::Sequence(items) | RegexAst::Alternation(items) => items
                 .iter()
                 .find_map(|item| Self::backreference_validation_message_inner(item, total_groups)),
@@ -2046,7 +2041,8 @@ impl Compiler {
                         })
                     })
             }
-            RegexAst::Char(_)
+            RegexAst::Backreference(_)
+            | RegexAst::Char(_)
             | RegexAst::CharClass(_)
             | RegexAst::Dot
             | RegexAst::Digit { .. }
@@ -2325,7 +2321,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_simple_range_to_char_class() {
-        let lowered = Compiler::lower_extended_char_class_content("[a-z]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[a-z]")
             .expect("Expected simple nested range to lower into a plain char class");
 
         assert_eq!(
@@ -2339,7 +2335,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_simple_negation_to_char_class() {
-        let lowered = Compiler::lower_extended_char_class_content("[^0-9]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[^0-9]")
             .expect("Expected simple nested negated range to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2356,7 +2352,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_single_difference_operator() {
-        let lowered = Compiler::lower_extended_char_class_content("[a-z] - [aeiou]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[a-z] - [aeiou]")
             .expect("Expected single-operator difference to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2371,7 +2367,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_property_intersection() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\p{L} & \p{Lu}".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\p{L} & \p{Lu}")
             .expect("Expected property intersection to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2386,7 +2382,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_unary_complement() {
-        let lowered = Compiler::lower_extended_char_class_content("![0-9]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("![0-9]")
             .expect("Expected unary complement to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2400,9 +2396,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_grouped_algebra() {
-        let lowered =
-            Compiler::lower_extended_char_class_content("([a-z] - [aeiou]) & [b-d]".to_string())
-                .expect("Expected grouped algebra to lower into a plain char class");
+        let lowered = Compiler::lower_extended_char_class_content("([a-z] - [aeiou]) & [b-d]")
+            .expect("Expected grouped algebra to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2417,7 +2412,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_symmetric_difference() {
-        let lowered = Compiler::lower_extended_char_class_content("[AC] ^ [BC]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[AC] ^ [BC]")
             .expect("Expected symmetric difference to lower into a plain char class");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2431,9 +2426,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_same_level_multi_operator_precedence() {
-        let lowered =
-            Compiler::lower_extended_char_class_content("[a-f] | [d-z] & [m-p]".to_string())
-                .expect("Expected same-level multi-operator form to lower with '&' precedence");
+        let lowered = Compiler::lower_extended_char_class_content("[a-f] | [d-z] & [m-p]")
+            .expect("Expected same-level multi-operator form to lower with '&' precedence");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2449,10 +2443,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_left_associative_low_precedence_chain() {
-        let lowered = Compiler::lower_extended_char_class_content(
-            "[a-z] - [aeiou] + [0-9] - [5]".to_string(),
-        )
-        .expect("Expected chained low-precedence operators to lower left-associatively");
+        let lowered = Compiler::lower_extended_char_class_content("[a-z] - [aeiou] + [0-9] - [5]")
+            .expect("Expected chained low-precedence operators to lower left-associatively");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2469,9 +2461,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_left_associative_intersection_chain() {
-        let lowered =
-            Compiler::lower_extended_char_class_content("[a-z] & [d-z] & [m-p]".to_string())
-                .expect("Expected chained intersections to lower left-associatively");
+        let lowered = Compiler::lower_extended_char_class_content("[a-z] & [d-z] & [m-p]")
+            .expect("Expected chained intersections to lower left-associatively");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2485,7 +2476,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_digit_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\d - [3]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\d - [3]")
             .expect("Expected bare digit shorthand set term to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2500,7 +2491,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_negated_bare_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\D & [A-F]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\D & [A-F]")
             .expect("Expected negated bare shorthand set term to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2515,7 +2506,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_nested_ordinary_shorthand_and_range_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"[\dA-F]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"[\dA-F]")
             .expect("Expected nested ordinary class to accept current shorthand and range atoms");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2531,7 +2522,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_nested_ordinary_posix_term() {
-        let lowered = Compiler::lower_extended_char_class_content("[[:graph:]]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[[:graph:]]")
             .expect("Expected nested ordinary class to accept current POSIX atoms");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2546,10 +2537,9 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_nested_ordinary_property_term_inside_algebra() {
-        let lowered = Compiler::lower_extended_char_class_content(
-            r"[\p{L}] - [\p{Lu}]".to_string(),
-        )
-        .expect("Expected nested ordinary class property atoms to compose with shipped algebra");
+        let lowered = Compiler::lower_extended_char_class_content(r"[\p{L}] - [\p{Lu}]").expect(
+            "Expected nested ordinary class property atoms to compose with shipped algebra",
+        );
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2564,7 +2554,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_hex_escape_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\x{41} - [B]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\x{41} - [B]")
             .expect("Expected bare hex-escape set term to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2578,7 +2568,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_control_escape_terms() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\n | \t".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\n | \t")
             .expect("Expected bare control-escape set terms to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2593,7 +2583,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_control_literal_escape_terms() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\a | \b | \e | \f".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\a | \b | \e | \f")
             .expect("Expected bare control-literal escape terms to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2610,7 +2600,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_control_letter_escape_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\cA | [B]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\cA | [B]")
             .expect("Expected bare control-letter escape to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2624,9 +2614,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_octal_escape_terms() {
-        let lowered =
-            Compiler::lower_extended_char_class_content(r"\040 | \011 | \o{101}".to_string())
-                .expect("Expected bare octal escapes to lower into the shipped subset");
+        let lowered = Compiler::lower_extended_char_class_content(r"\040 | \011 | \o{101}")
+            .expect("Expected bare octal escapes to lower into the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2640,7 +2629,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_escaped_operator_literal_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\- | [A]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\- | [A]")
             .expect("Expected escaped operator literal term to remain part of the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2654,7 +2643,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_horizontal_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\h".to_string()).expect(
+        let lowered = Compiler::lower_extended_char_class_content(r"\h").expect(
             "Expected horizontal-whitespace shorthand to remain part of the shipped subset",
         );
 
@@ -2674,7 +2663,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_negated_bare_horizontal_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\H".to_string()).expect(
+        let lowered = Compiler::lower_extended_char_class_content(r"\H").expect(
             "Expected negated horizontal-whitespace shorthand to remain part of the shipped subset",
         );
 
@@ -2691,7 +2680,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_vertical_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\v".to_string())
+        let lowered = Compiler::lower_extended_char_class_content(r"\v")
             .expect("Expected vertical-whitespace shorthand to remain part of the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2709,7 +2698,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_negated_bare_vertical_shorthand_term() {
-        let lowered = Compiler::lower_extended_char_class_content(r"\V".to_string()).expect(
+        let lowered = Compiler::lower_extended_char_class_content(r"\V").expect(
             "Expected negated vertical-whitespace shorthand to remain part of the shipped subset",
         );
 
@@ -2726,7 +2715,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_posix_graph_term() {
-        let lowered = Compiler::lower_extended_char_class_content("[:graph:]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[:graph:]")
             .expect("Expected bare POSIX graph term to remain part of the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2743,7 +2732,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_negated_bare_posix_alpha_term() {
-        let lowered = Compiler::lower_extended_char_class_content("[:^alpha:]".to_string())
+        let lowered = Compiler::lower_extended_char_class_content("[:^alpha:]")
             .expect("Expected negated bare POSIX alpha term to remain part of the shipped subset");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
@@ -2758,9 +2747,8 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_bare_posix_alpha_term_inside_algebra() {
-        let lowered =
-            Compiler::lower_extended_char_class_content(r"[:alpha:] & [a-z\t]".to_string())
-                .expect("Expected bare POSIX alpha term to compose with shipped algebra");
+        let lowered = Compiler::lower_extended_char_class_content(r"[:alpha:] & [a-z\t]")
+            .expect("Expected bare POSIX alpha term to compose with shipped algebra");
 
         let RegexAst::CharClass(CharClass::Custom { ranges, negated }) = lowered else {
             panic!("expected lowered custom char class");
@@ -2775,7 +2763,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_maps_complemented_bare_posix_alpha_term() {
-        let lowered = Compiler::lower_extended_char_class_content("![:alpha:]".to_string()).expect(
+        let lowered = Compiler::lower_extended_char_class_content("![:alpha:]").expect(
             "Expected complemented bare POSIX alpha term to remain part of the shipped subset",
         );
 
@@ -2858,7 +2846,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_rejects_unclosed_hex_escape() {
-        let err = Compiler::lower_extended_char_class_content(r"\x{41".to_string())
+        let err = Compiler::lower_extended_char_class_content(r"\x{41")
             .expect_err("Expected malformed hex escape to stay behind the explicit boundary");
         assert!(
             err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
@@ -2868,7 +2856,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_rejects_malformed_octal_escape() {
-        let err = Compiler::lower_extended_char_class_content(r"\o{8}".to_string())
+        let err = Compiler::lower_extended_char_class_content(r"\o{8}")
             .expect_err("Expected malformed octal escape to stay behind the explicit boundary");
         assert!(
             err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),
@@ -2878,7 +2866,7 @@ mod tests {
 
     #[test]
     fn lower_extended_char_class_content_rejects_invalid_control_escape() {
-        let err = Compiler::lower_extended_char_class_content(r"\c1".to_string())
+        let err = Compiler::lower_extended_char_class_content(r"\c1")
             .expect_err("Expected invalid control escape to stay behind the explicit boundary");
         assert!(
             err.to_string().contains(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE),

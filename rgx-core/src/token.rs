@@ -16,7 +16,9 @@ pub enum Token {
     // Character classes and shortcuts
     /// Character class [a-z], [^0-9], etc.
     CharClass {
+        /// Character ranges included in the class
         ranges: Vec<CharRange>,
+        /// Whether the class is negated (e.g., `[^...]`)
         negated: bool,
     },
     /// Dot metacharacter .
@@ -43,14 +45,17 @@ pub enum Token {
     // Unicode classes
     /// \p{Name} (Unicode property class)
     UnicodeClass {
+        /// Unicode property name (e.g., `Greek`, `Letter`)
         name: String,
     },
     /// \P{Name} (negated Unicode property class)
     UnicodeClassNeg {
+        /// Negated Unicode property name
         name: String,
     },
     /// (?[...]) - Perl/PCRE2 extended character class
     ExtendedCharClass {
+        /// Raw content of the extended character class expression
         content: String,
     },
 
@@ -75,9 +80,13 @@ pub enum Token {
     QuestionLazy,
     /// {n}, {n,}, {n,m}, {n,m}? (counted repetition)
     Repeat {
+        /// Minimum number of repetitions
         min: u32,
+        /// Maximum number of repetitions (`None` means unbounded)
         max: Option<u32>,
+        /// Whether the quantifier is lazy (prefers fewer matches)
         lazy: bool,
+        /// Whether the quantifier is possessive (no backtracking)
         possessive: bool,
     },
 
@@ -86,6 +95,7 @@ pub enum Token {
     GroupStart,
     /// (?<name> - Start of named capturing group
     NamedGroupStart {
+        /// Name of the capturing group
         name: String,
     },
     /// (?:  - Start of non-capturing group
@@ -110,17 +120,21 @@ pub enum Token {
     // Code execution blocks (rgx's unique feature!)
     /// (?{lang:code}) - Code execution block
     CodeBlock {
+        /// Programming language identifier
         lang: String,
+        /// Source code to execute
         code: String,
     },
 
     // Conditionals and recursion
     /// (?(...) - Conditional pattern start
     ConditionalStart {
+        /// The condition to test
         condition: ConditionalTest,
     },
     /// (?R), (?1), (?&name) - Recursion
     Recursion {
+        /// The recursion target (whole pattern, group number, or group name)
         target: RecursionTarget,
     },
 
@@ -135,10 +149,12 @@ pub enum Token {
     // Flags and modifiers
     /// (?flags: - Inline flag modifiers (?i:...), (?m:...), etc.
     FlagModifier {
+        /// Flag characters (e.g., `i`, `m`, `s`, `x`)
         flags: String,
     },
 
     // End of input
+    /// End of the input stream
     EOF,
 }
 
@@ -238,37 +254,79 @@ impl TokenWithPos {
 #[derive(Debug, Clone, PartialEq)]
 pub enum LexError {
     /// Unexpected character in input
-    UnexpectedChar { char: char, position: Position },
+    UnexpectedChar {
+        /// The unexpected character encountered
+        char: char,
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid escape sequence
     InvalidEscape {
+        /// The invalid escape sequence text
         sequence: String,
+        /// Position in the input where the error occurred
         position: Position,
     },
     /// Unterminated character class [abc...
-    UnterminatedCharClass { position: Position },
+    UnterminatedCharClass {
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid character class range [z-a]
     InvalidCharRange {
+        /// Start character of the invalid range
         start: char,
+        /// End character of the invalid range
         end: char,
+        /// Position in the input where the error occurred
         position: Position,
     },
     /// Unterminated group (...
-    UnterminatedGroup { position: Position },
+    UnterminatedGroup {
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid group syntax (?xyz...)
-    InvalidGroupSyntax { position: Position },
+    InvalidGroupSyntax {
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Expected colon after language in code block (?{lang...
-    ExpectedColon { position: Position },
+    ExpectedColon {
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Unterminated code block (?{lang:code...
-    UnterminatedCodeBlock { position: Position },
+    UnterminatedCodeBlock {
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid repeat quantifier {x,y}
-    InvalidRepeat { text: String, position: Position },
+    InvalidRepeat {
+        /// The invalid repeat quantifier text
+        text: String,
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid Unicode class name \p{...}
-    InvalidUnicodeClass { name: String, position: Position },
+    InvalidUnicodeClass {
+        /// The invalid Unicode class name
+        name: String,
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Invalid backreference number \99999...
-    InvalidBackreference { number: String, position: Position },
+    InvalidBackreference {
+        /// The invalid backreference number text
+        number: String,
+        /// Position in the input where the error occurred
+        position: Position,
+    },
     /// Unexpected end of input
     UnexpectedEOF {
+        /// Description of what was expected
         expected: String,
+        /// Position in the input where the error occurred
         position: Position,
     },
 }

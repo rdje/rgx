@@ -307,7 +307,7 @@ impl<'a> Lexer<'a> {
             Some(c) if c.is_ascii_digit() => self.parse_octal_escape(),
 
             Some(c) => {
-                let sequence = format!("\\{}", c);
+                let sequence = format!("\\{c}");
                 Err(LexError::InvalidEscape {
                     sequence,
                     position: start_pos,
@@ -414,20 +414,19 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let number: u32 = match number_str.parse() {
-            Ok(number) => number,
-            Err(_) => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_backreference",
-                    "ok=false,error=invalid backreference number parse {}",
-                    number_str
-                );
-                return Err(LexError::InvalidBackreference {
-                    number: number_str.clone(),
-                    position: start_pos,
-                });
-            }
+        let number: u32 = if let Ok(number) = number_str.parse() {
+            number
+        } else {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_backreference",
+                "ok=false,error=invalid backreference number parse {}",
+                number_str
+            );
+            return Err(LexError::InvalidBackreference {
+                number: number_str.clone(),
+                position: start_pos,
+            });
         };
         let in_valid_range = number != 0 && number <= 99;
         trace_decision!(
@@ -496,7 +495,7 @@ impl<'a> Lexer<'a> {
                         c
                     );
                     return Err(LexError::InvalidEscape {
-                        sequence: format!("\\x{{{}", digits),
+                        sequence: format!("\\x{{{digits}"),
                         position: start_pos,
                     });
                 }
@@ -530,36 +529,34 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = match u32::from_str_radix(&hex_digits, 16) {
-            Ok(code_point) => code_point,
-            Err(_) => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_hex_escape",
-                    "ok=false,error=invalid hex digits {}",
-                    hex_digits
-                );
-                return Err(LexError::InvalidEscape {
-                    sequence: format!("\\x{}", hex_digits),
-                    position: start_pos,
-                });
-            }
+        let code_point = if let Ok(code_point) = u32::from_str_radix(&hex_digits, 16) {
+            code_point
+        } else {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_hex_escape",
+                "ok=false,error=invalid hex digits {}",
+                hex_digits
+            );
+            return Err(LexError::InvalidEscape {
+                sequence: format!("\\x{hex_digits}"),
+                position: start_pos,
+            });
         };
 
-        let ch = match char::from_u32(code_point) {
-            Some(ch) => ch,
-            None => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_hex_escape",
-                    "ok=false,error=invalid hex code point {}",
-                    code_point
-                );
-                return Err(LexError::InvalidEscape {
-                    sequence: format!("\\x{}", hex_digits),
-                    position: start_pos,
-                });
-            }
+        let ch = if let Some(ch) = char::from_u32(code_point) {
+            ch
+        } else {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_hex_escape",
+                "ok=false,error=invalid hex code point {}",
+                code_point
+            );
+            return Err(LexError::InvalidEscape {
+                sequence: format!("\\x{hex_digits}"),
+                position: start_pos,
+            });
         };
         let token = Token::Char(ch);
         trace_exit!(
@@ -587,7 +584,7 @@ impl<'a> Lexer<'a> {
         // Collect up to 3 octal digits
         for _ in 0..3 {
             if let Some(c) = self.current {
-                if c >= '0' && c <= '7' {
+                if ('0'..='7').contains(&c) {
                     octal_digits.push(c);
                     self.advance();
                 } else {
@@ -608,20 +605,19 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = match u32::from_str_radix(&octal_digits, 8) {
-            Ok(code_point) => code_point,
-            Err(_) => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_octal_escape",
-                    "ok=false,error=invalid octal digits {}",
-                    octal_digits
-                );
-                return Err(LexError::InvalidEscape {
-                    sequence: format!("\\{}", octal_digits),
-                    position: start_pos,
-                });
-            }
+        let code_point = if let Ok(code_point) = u32::from_str_radix(&octal_digits, 8) {
+            code_point
+        } else {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_octal_escape",
+                "ok=false,error=invalid octal digits {}",
+                octal_digits
+            );
+            return Err(LexError::InvalidEscape {
+                sequence: format!("\\{octal_digits}"),
+                position: start_pos,
+            });
         };
 
         // Octal escapes are limited to byte values (0-255)
@@ -640,25 +636,24 @@ impl<'a> Lexer<'a> {
                 code_point
             );
             return Err(LexError::InvalidEscape {
-                sequence: format!("\\{}", octal_digits),
+                sequence: format!("\\{octal_digits}"),
                 position: start_pos,
             });
         }
 
-        let ch = match char::from_u32(code_point) {
-            Some(ch) => ch,
-            None => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_octal_escape",
-                    "ok=false,error=invalid octal code point {}",
-                    code_point
-                );
-                return Err(LexError::InvalidEscape {
-                    sequence: format!("\\{}", octal_digits),
-                    position: start_pos,
-                });
-            }
+        let ch = if let Some(ch) = char::from_u32(code_point) {
+            ch
+        } else {
+            trace_exit!(
+                "lexer",
+                "Lexer::parse_octal_escape",
+                "ok=false,error=invalid octal code point {}",
+                code_point
+            );
+            return Err(LexError::InvalidEscape {
+                sequence: format!("\\{octal_digits}"),
+                position: start_pos,
+            });
         };
         let token = Token::Char(ch);
         trace_exit!(

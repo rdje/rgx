@@ -19,22 +19,41 @@ pub enum Regex {
 
     // Predefined character classes
     /// \d or \D (digits)
-    Digit { negated: bool },
+    Digit {
+        /// Whether the class is negated (\D)
+        negated: bool,
+    },
     /// \w or \W (word characters)
-    Word { negated: bool },
+    Word {
+        /// Whether the class is negated (\W)
+        negated: bool,
+    },
     /// \s or \S (whitespace)
-    Space { negated: bool },
+    Space {
+        /// Whether the class is negated (\S)
+        negated: bool,
+    },
 
     // Unicode classes
     /// \p{...} or \P{...} (Unicode properties)
-    UnicodeClass { name: String, negated: bool },
+    UnicodeClass {
+        /// Unicode property name
+        name: String,
+        /// Whether the class is negated (\P)
+        negated: bool,
+    },
     /// PCRE2/Perl extended character class syntax (?[...])
-    ExtendedCharClass { content: String },
+    ExtendedCharClass {
+        /// Raw content of the extended character class
+        content: String,
+    },
 
     // Quantified expressions
     /// Expression with quantifier (* + ? {n,m})
     Quantified {
+        /// The expression being quantified
         expr: Box<Regex>,
+        /// The quantifier applied to the expression
         quantifier: Quantifier,
     },
 
@@ -47,37 +66,65 @@ pub enum Regex {
     // Groups
     /// Grouping with (...), (?:...), (?<name>...)
     Group {
+        /// The expression inside the group
         expr: Box<Regex>,
+        /// The type of group construct
         kind: GroupKind,
-        index: Option<u32>,   // Capture group number (1, 2, 3...)
-        name: Option<String>, // Named capture (?<name>...)
+        /// Capture group number (1, 2, 3...), if capturing
+        index: Option<u32>,
+        /// Named capture identifier (?<name>...), if named
+        name: Option<String>,
     },
 
     // Assertions
     /// Lookahead (?=...) or negative lookahead (?!...)
-    Lookahead { expr: Box<Regex>, positive: bool },
+    Lookahead {
+        /// The assertion expression
+        expr: Box<Regex>,
+        /// Whether this is a positive lookahead
+        positive: bool,
+    },
     /// Lookbehind (?<=...) or negative lookbehind (?<!...)
-    Lookbehind { expr: Box<Regex>, positive: bool },
+    Lookbehind {
+        /// The assertion expression
+        expr: Box<Regex>,
+        /// Whether this is a positive lookbehind
+        positive: bool,
+    },
     /// Anchors like ^, $, \A, \Z, \z
     Anchor(AnchorType),
     /// Word boundaries \b and \B
-    WordBoundary { positive: bool },
+    WordBoundary {
+        /// Whether this is a positive word boundary (\b vs \B)
+        positive: bool,
+    },
 
     // Advanced features
     /// Backreference to capture group \1, \2, etc.
     Backreference(u32),
     /// Conditional patterns (?(condition)yes|no)
     Conditional {
+        /// The condition to evaluate
         condition: ConditionalTest,
+        /// Pattern to match when the condition is true
         true_branch: Box<Regex>,
+        /// Optional pattern to match when the condition is false
         false_branch: Option<Box<Regex>>,
     },
     /// Recursive patterns (?R), (?1), (?&name)
-    Recursion { target: RecursionTarget },
+    Recursion {
+        /// The recursion target (entire pattern, group, or named group)
+        target: RecursionTarget,
+    },
 
     // Code execution (rgx's unique feature!)
     /// Code block (?{lua:...}) or (?{js:...})
-    CodeBlock { lang: String, code: String },
+    CodeBlock {
+        /// The scripting language identifier
+        lang: String,
+        /// The code to execute
+        code: String,
+    },
 
     // Special
     /// Empty pattern (epsilon)
@@ -93,7 +140,7 @@ pub enum GroupKind {
     NonCapturing,
     /// Atomic group (?>...) - no backtracking
     Atomic,
-    /// Branch-reset group (?|...) - parser-recognized, runtime semantics pending
+    /// Branch-reset group (?|...) - alternatives share capture group numbering
     BranchReset,
 }
 
@@ -101,15 +148,27 @@ pub enum GroupKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Quantifier {
     /// ? quantifier (0 or 1)
-    ZeroOrOne { lazy: bool },
+    ZeroOrOne {
+        /// Whether the quantifier is lazy (non-greedy)
+        lazy: bool,
+    },
     /// * quantifier (0 or more)
-    ZeroOrMore { lazy: bool },
+    ZeroOrMore {
+        /// Whether the quantifier is lazy (non-greedy)
+        lazy: bool,
+    },
     /// + quantifier (1 or more)
-    OneOrMore { lazy: bool },
+    OneOrMore {
+        /// Whether the quantifier is lazy (non-greedy)
+        lazy: bool,
+    },
     /// {n,m} quantifier (n to m repetitions)
     Range {
+        /// Minimum number of repetitions
         min: u32,
+        /// Maximum number of repetitions (None means unbounded)
         max: Option<u32>,
+        /// Whether the quantifier is lazy (non-greedy)
         lazy: bool,
     },
 }
@@ -118,16 +177,32 @@ pub enum Quantifier {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CharClass {
     /// \d or \D (digits)
-    Digit { negated: bool },
+    Digit {
+        /// Whether the class is negated (\D)
+        negated: bool,
+    },
     /// \w or \W (word characters)
-    Word { negated: bool },
+    Word {
+        /// Whether the class is negated (\W)
+        negated: bool,
+    },
     /// \s or \S (whitespace)
-    Space { negated: bool },
+    Space {
+        /// Whether the class is negated (\S)
+        negated: bool,
+    },
     /// \p{...} or \P{...} (Unicode properties)
-    UnicodeClass { name: String, negated: bool },
+    UnicodeClass {
+        /// Unicode property name
+        name: String,
+        /// Whether the class is negated (\P)
+        negated: bool,
+    },
     /// Custom character class like [abc] or [a-z]
     Custom {
+        /// Character ranges included in the class
         ranges: Vec<CharRange>,
+        /// Whether the class is negated ([^...])
         negated: bool,
     },
 }
@@ -224,9 +299,19 @@ pub enum ConditionalTest {
     /// DEFINE conditional (?(DEFINE)...)
     Define,
     /// Lookahead test (?(?=...)...) or (?(?!...)...)
-    Lookahead { expr: Box<Regex>, positive: bool },
+    Lookahead {
+        /// The lookahead assertion expression
+        expr: Box<Regex>,
+        /// Whether this is a positive lookahead test
+        positive: bool,
+    },
     /// Lookbehind test (?(?<=...)...) or (?(?<!...)...)
-    Lookbehind { expr: Box<Regex>, positive: bool },
+    Lookbehind {
+        /// The lookbehind assertion expression
+        expr: Box<Regex>,
+        /// Whether this is a positive lookbehind test
+        positive: bool,
+    },
 }
 
 /// Recursion targets

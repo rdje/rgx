@@ -76,6 +76,7 @@ pub struct ExecContext {
 
 impl ExecContext {
     /// Create a new execution context
+    #[must_use]
     pub fn new(text: String, position: usize) -> Self {
         trace_enter!(
             "execution",
@@ -127,21 +128,25 @@ impl ExecContext {
     }
 
     /// Get the current match-attempt start offset in bytes.
+    #[must_use]
     pub fn match_start(&self) -> usize {
         self.match_start
     }
 
     /// Get the current match-attempt end offset in bytes.
+    #[must_use]
     pub fn match_end(&self) -> usize {
         self.match_end
     }
 
     /// Get the current match-attempt length in bytes.
+    #[must_use]
     pub fn match_length(&self) -> usize {
         self.match_end.saturating_sub(self.match_start)
     }
 
     /// Get the current 1-based top-level branch number, if any.
+    #[must_use]
     pub fn matched_branch_number(&self) -> Option<usize> {
         self.matched_branch_number
     }
@@ -197,6 +202,7 @@ impl ExecContext {
     }
 
     /// Get a host-provided execution variable by name.
+    #[must_use]
     pub fn variable(&self, name: &str) -> Option<String> {
         let variable_slots = self.variables.read().unwrap().len();
         trace_enter!(
@@ -223,6 +229,7 @@ impl ExecContext {
     }
 
     /// Clone the current execution-variable snapshot into an owned map.
+    #[must_use]
     pub fn variables_snapshot(&self) -> HashMap<String, String> {
         let variable_slots = self.variables.read().unwrap().len();
         trace_enter!(
@@ -1771,6 +1778,7 @@ pub struct NativeCallbackRegistry {
 
 impl NativeCallbackRegistry {
     /// Create a new callback registry
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("execution", "NativeCallbackRegistry::new");
         let registry = Self {
@@ -1823,39 +1831,36 @@ impl NativeCallbackRegistry {
             context.captures.len()
         );
         let callback = self.callbacks.read().unwrap().get(name).cloned();
-        match callback {
-            Some(callback) => {
-                trace_decision!(
-                    "execution",
-                    "callbacks.get(name).is_some()",
-                    true,
-                    "dispatching to registered native callback"
-                );
-                let result = callback(context);
-                trace_exit!(
-                    "execution",
-                    "NativeCallbackRegistry::call",
-                    "ok=true,result_kind={}",
-                    exec_result_kind(&result)
-                );
-                result
-            }
-            None => {
-                trace_decision!(
-                    "execution",
-                    "callbacks.get(name).is_some()",
-                    false,
-                    "native callback name is not registered"
-                );
-                let result = ExecResult::Error(format!("Unknown native function: {name}"));
-                trace_exit!(
-                    "execution",
-                    "NativeCallbackRegistry::call",
-                    "ok=true,result_kind={}",
-                    exec_result_kind(&result)
-                );
-                result
-            }
+        if let Some(callback) = callback {
+            trace_decision!(
+                "execution",
+                "callbacks.get(name).is_some()",
+                true,
+                "dispatching to registered native callback"
+            );
+            let result = callback(context);
+            trace_exit!(
+                "execution",
+                "NativeCallbackRegistry::call",
+                "ok=true,result_kind={}",
+                exec_result_kind(&result)
+            );
+            result
+        } else {
+            trace_decision!(
+                "execution",
+                "callbacks.get(name).is_some()",
+                false,
+                "native callback name is not registered"
+            );
+            let result = ExecResult::Error(format!("Unknown native function: {name}"));
+            trace_exit!(
+                "execution",
+                "NativeCallbackRegistry::call",
+                "ok=true,result_kind={}",
+                exec_result_kind(&result)
+            );
+            result
         }
     }
 
@@ -1902,6 +1907,7 @@ pub struct ExecutionVariableRegistry {
 
 impl ExecutionVariableRegistry {
     /// Create a new execution-variable registry.
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("execution", "ExecutionVariableRegistry::new");
         let registry = Self {
@@ -1999,6 +2005,7 @@ pub struct ExecutionManager {
 
 impl ExecutionManager {
     /// Create a new execution manager with all available engines
+    #[must_use]
     pub fn new() -> Self {
         trace_enter!("execution", "ExecutionManager::new");
         let manager = Self {
@@ -2241,7 +2248,7 @@ impl ExecutionManager {
                     "unsupported language dispatch attempted: {}",
                     language
                 );
-                let result = ExecResult::Error(format!("Unknown language: {}", language));
+                let result = ExecResult::Error(format!("Unknown language: {language}"));
                 trace_exit!(
                     "execution",
                     "ExecutionManager::execute",

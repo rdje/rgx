@@ -14,18 +14,11 @@ pub(crate) fn resolve_unicode_property_class(
         format!(r"\p{{{name}}}")
     };
 
-    let hir = parse(&property_pattern).map_err(|err| {
-        format!(
-            "invalid Unicode property class '{}': {}",
-            property_pattern, err
-        )
-    })?;
+    let hir = parse(&property_pattern)
+        .map_err(|err| format!("invalid Unicode property class '{property_pattern}': {err}"))?;
 
     hir_to_ranges(&hir).ok_or_else(|| {
-        format!(
-            "Unicode property class '{}' did not resolve to a character class",
-            property_pattern
-        )
+        format!("Unicode property class '{property_pattern}' did not resolve to a character class")
     })
 }
 

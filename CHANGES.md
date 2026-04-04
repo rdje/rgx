@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Deep warning-debt reduction across rgx-core
+- Scope: workspace-wide clippy warning cleanup, doc hardening, and code quality improvement.
+- Changes:
+  - Removed 30 redundant `continue` statements from VM execution loops in `vm.rs`.
+  - Converted 16 private methods to associated functions in `vm.rs` (unused `self`), updating all call sites.
+  - Added `#[allow(clippy::unused_self)]` to 3 intentional stub methods (`simd_compare`, `optimize_ast`, `peephole_optimize`).
+  - Combined 11 identical match arms across `compiler.rs`, `parsing.rs`, and `vm.rs`.
+  - Rewrote 4 `if let` patterns to `let...else` in `lexer.rs`.
+  - Unwrapped 3 unnecessarily `Result`-wrapped private functions in `lexer.rs` (`parse_star`, `parse_plus`, `parse_question`).
+  - Changed 2 pass-by-value parameters to references in `compiler.rs` (`ScalarRangeSet::apply`, `lower_extended_char_class_content`).
+  - Inlined format string variables across `lexer.rs`, `execution.rs`, `log.rs`, `unicode_support.rs`, and `compiler.rs`.
+  - Applied auto-fixable suggestions: redundant else blocks, `map_or` simplifications, `if let` rewrites, and miscellaneous lint fixes across `vm.rs`, `execution.rs`, `lexer.rs`, `engine.rs`, `log.rs`.
+  - Added missing `///` field/variant docs to 40 items in `ast.rs`, 36 items in `token.rs`, 4 items in `error.rs`, and 3 functions in `log.rs`.
+  - Fixed stale `BranchReset` AST comment from "runtime semantics pending" to reflect shipped status.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (121 warnings, down from 329)
+- Notes/impact:
+  - RGX-owned warnings dropped from 296 to 88 (70% reduction).
+  - Remaining backlog is concentrated in cast-truncation warnings, missing `# Errors` / `# Panics` doc sections, function-length limits, and design-intentional patterns.
+  - Shipped regex behavior did not change; this is purely a code quality pass.
+
 ### 2026-04-02 - Harden parser-facing utility docs and warning contracts
 - Scope: parser/AST utility cleanup, public-doc hardening, and warning-debt reduction.
 - Changes:

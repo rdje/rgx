@@ -217,6 +217,7 @@ pub struct Instruction {
 
 impl Instruction {
     /// Create instruction with no operands
+    #[must_use]
     pub fn simple(op: OpCode) -> Self {
         Self {
             op,
@@ -225,6 +226,7 @@ impl Instruction {
     }
 
     /// Create instruction with single byte operand
+    #[must_use]
     pub fn with_byte(op: OpCode, operand: u8) -> Self {
         Self {
             op,
@@ -233,6 +235,7 @@ impl Instruction {
     }
 
     /// Create instruction with 16-bit operand (little-endian)
+    #[must_use]
     pub fn with_word(op: OpCode, operand: u16) -> Self {
         Self {
             op,
@@ -241,6 +244,7 @@ impl Instruction {
     }
 
     /// Create instruction with character operand  
+    #[must_use]
     pub fn with_char(op: OpCode, ch: char) -> Self {
         let mut operands = Vec::new();
         let mut buf = [0; 4];
@@ -395,11 +399,13 @@ pub struct SimdSupport {
 
 impl RegexVM {
     /// Create new VM with compiled program
+    #[must_use]
     pub fn new(program: Program) -> Self {
         Self::with_execution_manager(program, None)
     }
 
     /// Create new VM with compiled program and optional execution manager
+    #[must_use]
     pub fn with_execution_manager(
         program: Program,
         execution_manager: Option<Arc<ExecutionManager>>,
@@ -472,6 +478,7 @@ impl RegexVM {
     }
 
     /// Find first match using adaptive execution strategy
+    #[must_use]
     pub fn find_first(&self, text: &str) -> Option<Match> {
         trace_enter!(
             "vm",
@@ -633,7 +640,7 @@ impl RegexVM {
         // Try full pattern match at each candidate position
         for candidate_pos in candidates {
             ctx.pos = candidate_pos;
-            self.reset_captures(ctx);
+            Self::reset_captures(ctx);
 
             if self.execute_at(ctx, candidate_pos) {
                 let matched = Some(Match {
@@ -706,7 +713,7 @@ impl RegexVM {
         for start in 0..=ctx.text.len() {
             trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
             ctx.pos = start;
-            self.reset_captures(ctx);
+            Self::reset_captures(ctx);
 
             if self.execute_at(ctx, start) {
                 debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
@@ -725,9 +732,8 @@ impl RegexVM {
                     ctx.pos
                 );
                 return matched;
-            } else {
-                trace_log!("vm", "✗ No match at position {}", start);
             }
+            trace_log!("vm", "✗ No match at position {}", start);
         }
         debug_log!("vm", "Scanning complete - no match found");
         trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
@@ -736,7 +742,7 @@ impl RegexVM {
 
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
-    fn try_backtrack(&self, ctx: &mut ExecContext, ip: &mut usize) -> bool {
+    fn try_backtrack(ctx: &mut ExecContext, ip: &mut usize) -> bool {
         if let Some(frame) = ctx.backtrack_stack.pop() {
             *ip = frame.ip;
             ctx.pos = frame.pos;
@@ -750,7 +756,7 @@ impl RegexVM {
     }
 
     /// Clone the current execution state for speculative sub-expression execution.
-    fn clone_exec_context(&self, ctx: &ExecContext) -> ExecContext {
+    fn clone_exec_context(ctx: &ExecContext) -> ExecContext {
         ExecContext {
             text: ctx.text.clone(),
             pos: ctx.pos,
@@ -844,14 +850,14 @@ impl RegexVM {
             match op {
                 OpCode::Char => {
                     // Read UTF-8 character from operands
-                    if let Some(expected) = self.read_char_operand(code, &mut ip) {
+                    if let Some(expected) = Self::read_char_operand(code, &mut ip) {
                         trace_log!(
                             "vm",
                             "  Char: expect='{}' (U+{:04X})",
                             expected,
                             expected as u32
                         );
-                        if let Some(actual) = self.current_char(ctx) {
+                        if let Some(actual) = Self::current_char(ctx) {
                             if actual == expected {
                                 trace_log!(
                                     "vm",
@@ -860,11 +866,10 @@ impl RegexVM {
                                     ctx.pos,
                                     ctx.pos + actual.len_utf8()
                                 );
-                                self.advance_char(ctx);
+                                Self::advance_char(ctx);
                                 continue;
-                            } else {
-                                trace_log!("vm", "  ✗ Got '{}' != '{}'", actual, expected);
                             }
+                            trace_log!("vm", "  ✗ Got '{}' != '{}'", actual, expected);
                         } else {
                             trace_log!("vm", "  ✗ EOF, expected '{}'", expected);
                         }
@@ -925,7 +930,7 @@ impl RegexVM {
                     };
 
                     if !assertion_holds {
-                        if self.try_backtrack(ctx, &mut ip) {
+                        if Self::try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -933,13 +938,12 @@ impl RegexVM {
 
                     // Assertions do not consume input
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
-                    Some(true) => continue,
+                    Some(true) => {}
                     Some(false) => {
-                        if self.try_backtrack(ctx, &mut ip) {
+                        if Self::try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -948,93 +952,93 @@ impl RegexVM {
                 },
 
                 OpCode::Any => {
-                    if let Some(ch) = self.current_char(ctx) {
-                        if ch != '\n' {
-                            trace_log!("vm", "  ✓ Any: matched '{}' (not newline)", ch);
-                            self.advance_char(ctx);
-                            continue;
-                        } else {
+                    if let Some(ch) = Self::current_char(ctx) {
+                        if ch == '\n' {
                             trace_log!("vm", "  ✗ Any: got newline");
+                        } else {
+                            trace_log!("vm", "  ✓ Any: matched '{}' (not newline)", ch);
+                            Self::advance_char(ctx);
+                            continue;
                         }
                     } else {
                         trace_log!("vm", "  ✗ Any: EOF");
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
                 OpCode::SpaceAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !ch.is_ascii_whitespace() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
 
                 OpCode::DigitAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_digit() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
                 OpCode::DigitAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !ch.is_ascii_digit() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
 
                 OpCode::WordAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_alphanumeric() || ch == '_' {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
                 OpCode::WordAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !(ch.is_ascii_alphanumeric() || ch == '_') {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
 
                 OpCode::SpaceAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_whitespace() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1044,7 +1048,7 @@ impl RegexVM {
                     if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1053,7 +1057,7 @@ impl RegexVM {
                     if ctx.pos == 0 {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1063,25 +1067,25 @@ impl RegexVM {
                     if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
                 OpCode::EndText => {
-                    if self.is_at_absolute_end(ctx) {
+                    if Self::is_at_absolute_end(ctx) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
                 }
                 OpCode::EndTextOrNL => {
-                    if self.is_at_absolute_end_or_before_final_newline(ctx) {
+                    if Self::is_at_absolute_end_or_before_final_newline(ctx) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1094,10 +1098,10 @@ impl RegexVM {
 
                 OpCode::WordBoundary => {
                     // Check if we're at a word boundary
-                    if self.is_at_word_boundary(ctx) {
+                    if Self::is_at_word_boundary(ctx) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1105,10 +1109,10 @@ impl RegexVM {
 
                 OpCode::NonWordBoundary => {
                     // Check if we're NOT at a word boundary
-                    if !self.is_at_word_boundary(ctx) {
+                    if !Self::is_at_word_boundary(ctx) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1159,14 +1163,14 @@ impl RegexVM {
                     );
 
                     // Get current character
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         trace_log!(
                             "vm",
                             "  Testing char '{}' (U+{:04X}) against class",
                             ch,
                             ch as u32
                         );
-                        let matches = self.test_char_class(ch, char_class);
+                        let matches = Self::test_char_class(ch, char_class);
                         let should_match = if is_neg { !matches } else { matches };
 
                         trace_log!(
@@ -1184,15 +1188,14 @@ impl RegexVM {
                                 ctx.pos,
                                 ctx.pos + ch.len_utf8()
                             );
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
-                        } else {
-                            trace_log!("vm", "  ✗ CharClass no match");
                         }
+                        trace_log!("vm", "  ✗ CharClass no match");
                     } else {
                         trace_log!("vm", "  ✗ EOF, can't match char class");
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1230,7 +1233,7 @@ impl RegexVM {
                         ctx.call_stack = first_saved_call_stack;
                         ctx.code_result = first_saved_code_result;
                         trace_log!("vm", "  ✗ PlusGreedy: first match failed");
-                        if self.try_backtrack(ctx, &mut ip) {
+                        if Self::try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1288,7 +1291,6 @@ impl RegexVM {
 
                     ip = expr_end;
                     trace_log!("vm", "  PlusGreedy complete, continuing at IP={}", ip);
-                    continue;
                 }
 
                 OpCode::StarGreedy => {
@@ -1340,7 +1342,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::QuestionGreedy => {
@@ -1382,7 +1383,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::QuestionLazy => {
@@ -1413,7 +1413,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::StarLazy => {
@@ -1442,7 +1441,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::PlusLazy => {
@@ -1470,7 +1468,7 @@ impl RegexVM {
                         ctx.captures = saved_captures;
                         ctx.call_stack = saved_call_stack;
                         ctx.code_result = saved_code_result;
-                        if self.try_backtrack(ctx, &mut ip) {
+                        if Self::try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1494,7 +1492,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::SaveStart => {
@@ -1510,7 +1507,6 @@ impl RegexVM {
                     if start_idx < ctx.captures.len() {
                         ctx.captures[start_idx] = Some(ctx.pos);
                     }
-                    continue;
                 }
 
                 OpCode::SaveEnd => {
@@ -1526,7 +1522,6 @@ impl RegexVM {
                     if end_idx < ctx.captures.len() {
                         ctx.captures[end_idx] = Some(ctx.pos);
                     }
-                    continue;
                 }
 
                 OpCode::Backref => {
@@ -1539,7 +1534,7 @@ impl RegexVM {
                     if self.match_backreference(ctx, group_id) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1562,7 +1557,6 @@ impl RegexVM {
                     if condition_matches == jump_if_match {
                         ip += offset;
                     }
-                    continue;
                 }
 
                 OpCode::Call => {
@@ -1575,7 +1569,7 @@ impl RegexVM {
                     if self.invoke_subroutine(ctx, target) {
                         continue;
                     }
-                    if self.try_backtrack(ctx, &mut ip) {
+                    if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1598,9 +1592,6 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
-
-                    // Continue with first alternative (current path)
-                    continue;
                 }
 
                 OpCode::Jump => {
@@ -1611,7 +1602,6 @@ impl RegexVM {
                     let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
                     ip += 2; // Skip the 2-byte offset operand
                     ip += offset; // Then add the offset
-                    continue;
                 }
 
                 OpCode::SetAlternative => {
@@ -1624,14 +1614,12 @@ impl RegexVM {
 
                     // Set the current alternative being tested
                     ctx.current_alternative = Some(alternative_index);
-                    continue;
                 }
 
                 OpCode::AtomicStart => {
                     // Mark current backtrack depth; frames created after this point
                     // are internal to the atomic group.
                     ctx.call_stack.push(ctx.backtrack_stack.len());
-                    continue;
                 }
 
                 OpCode::AtomicEnd => {
@@ -1669,7 +1657,7 @@ impl RegexVM {
 
     /// Probe whether a sub-expression can match once while advancing the input.
     fn probe_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> Option<ExecContext> {
-        let mut probe_ctx = self.clone_exec_context(ctx);
+        let mut probe_ctx = Self::clone_exec_context(ctx);
         if self.execute_subexpr(&mut probe_ctx, code) && probe_ctx.pos != ctx.pos {
             Some(probe_ctx)
         } else {
@@ -1678,12 +1666,7 @@ impl RegexVM {
     }
 
     /// Read a raw byte slice from bytecode operands.
-    fn read_bytes_operand<'a>(
-        &self,
-        code: &'a [u8],
-        ip: &mut usize,
-        len: usize,
-    ) -> Option<&'a [u8]> {
+    fn read_bytes_operand<'a>(code: &'a [u8], ip: &mut usize, len: usize) -> Option<&'a [u8]> {
         if *ip + len > code.len() {
             return None;
         }
@@ -1704,10 +1687,10 @@ impl RegexVM {
         }
         let lang_len = code[*ip] as usize;
         *ip += 1;
-        let lang = std::str::from_utf8(self.read_bytes_operand(code, ip, lang_len)?).ok()?;
-        let body_len_bytes = self.read_bytes_operand(code, ip, 2)?;
+        let lang = std::str::from_utf8(Self::read_bytes_operand(code, ip, lang_len)?).ok()?;
+        let body_len_bytes = Self::read_bytes_operand(code, ip, 2)?;
         let body_len = u16::from_le_bytes([body_len_bytes[0], body_len_bytes[1]]) as usize;
-        let body = std::str::from_utf8(self.read_bytes_operand(code, ip, body_len)?).ok()?;
+        let body = std::str::from_utf8(Self::read_bytes_operand(code, ip, body_len)?).ok()?;
         Some(self.evaluate_code_block(ctx, lang, body))
     }
 
@@ -1757,7 +1740,7 @@ impl RegexVM {
         exec_ctx.match_end = ctx.pos;
         exec_ctx.matched_branch_number = ctx.current_alternative.map(|id| id + 1);
         let mut captures = Vec::with_capacity(self.program.num_groups as usize + 1);
-        captures.push(self.capture_text(ctx, ctx.match_start, ctx.pos));
+        captures.push(Self::capture_text(ctx, ctx.match_start, ctx.pos));
         for group_id in 1..=self.program.num_groups {
             let start_idx = (group_id * 2) as usize;
             let end_idx = start_idx + 1;
@@ -1765,7 +1748,7 @@ impl RegexVM {
                 ctx.captures.get(start_idx).and_then(|&x| x),
                 ctx.captures.get(end_idx).and_then(|&x| x),
             ) {
-                (Some(start), Some(end)) => self.capture_text(ctx, start, end),
+                (Some(start), Some(end)) => Self::capture_text(ctx, start, end),
                 _ => None,
             };
             captures.push(capture);
@@ -1783,7 +1766,7 @@ impl RegexVM {
     }
 
     /// Convert a capture byte range into owned UTF-8 text.
-    fn capture_text(&self, ctx: &ExecContext, start: usize, end: usize) -> Option<String> {
+    fn capture_text(ctx: &ExecContext, start: usize, end: usize) -> Option<String> {
         if start > end || end > ctx.text.len() {
             return None;
         }
@@ -1825,7 +1808,7 @@ impl RegexVM {
     }
 
     /// Read UTF-8 character from bytecode operands
-    fn read_char_operand(&self, code: &[u8], ip: &mut usize) -> Option<char> {
+    fn read_char_operand(code: &[u8], ip: &mut usize) -> Option<char> {
         if *ip >= code.len() {
             return None;
         }
@@ -1844,7 +1827,7 @@ impl RegexVM {
     }
 
     /// Get current character at context position
-    fn current_char(&self, ctx: &ExecContext) -> Option<char> {
+    fn current_char(ctx: &ExecContext) -> Option<char> {
         if ctx.pos >= ctx.end {
             return None;
         }
@@ -1855,15 +1838,15 @@ impl RegexVM {
     }
 
     /// Advance context position by one character
-    fn advance_char(&self, ctx: &mut ExecContext) {
-        if let Some(ch) = self.current_char(ctx) {
+    fn advance_char(ctx: &mut ExecContext) {
+        if let Some(ch) = Self::current_char(ctx) {
             ctx.pos += ch.len_utf8();
         }
     }
 
     /// Reset capture groups for new match attempt
-    fn reset_captures(&self, ctx: &mut ExecContext) {
-        for capture in ctx.captures.iter_mut() {
+    fn reset_captures(ctx: &mut ExecContext) {
+        for capture in &mut ctx.captures {
             *capture = None;
         }
         // Also clear backtrack stack for fresh start
@@ -1877,13 +1860,13 @@ impl RegexVM {
     }
 
     /// Check if current position is at the absolute end of the input text.
-    fn is_at_absolute_end(&self, ctx: &ExecContext) -> bool {
+    fn is_at_absolute_end(ctx: &ExecContext) -> bool {
         ctx.pos == ctx.text.len()
     }
 
     /// Check if current position is at the absolute end of the input text,
     /// or immediately before one final trailing newline sequence.
-    fn is_at_absolute_end_or_before_final_newline(&self, ctx: &ExecContext) -> bool {
+    fn is_at_absolute_end_or_before_final_newline(ctx: &ExecContext) -> bool {
         let len = ctx.text.len();
         ctx.pos == len
             || (ctx.pos + 1 == len && ctx.text.get(ctx.pos) == Some(&b'\n'))
@@ -1923,7 +1906,7 @@ impl RegexVM {
     }
 
     /// Check if we're at a word boundary (\b)
-    fn is_at_word_boundary(&self, ctx: &ExecContext) -> bool {
+    fn is_at_word_boundary(ctx: &ExecContext) -> bool {
         let is_word_char = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
 
         let prev_is_word = if ctx.pos == 0 {
@@ -1946,7 +1929,7 @@ impl RegexVM {
             }
         };
 
-        let curr_is_word = if let Some(ch) = self.current_char(ctx) {
+        let curr_is_word = if let Some(ch) = Self::current_char(ctx) {
             is_word_char(ch)
         } else {
             false
@@ -1957,7 +1940,7 @@ impl RegexVM {
     }
 
     /// Test if a character matches a compiled character class
-    fn test_char_class(&self, ch: char, char_class: &CompiledCharClass) -> bool {
+    fn test_char_class(ch: char, char_class: &CompiledCharClass) -> bool {
         let ch_code = ch as u32;
         trace_log!("vm", "    test_char_class: ch='{}' (U+{:04X})", ch, ch_code);
 
@@ -2021,6 +2004,7 @@ impl RegexVM {
     }
 
     /// Find all non-overlapping matches
+    #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<Match> {
         trace_enter!(
             "vm",
@@ -2058,6 +2042,7 @@ impl RegexVM {
     }
 
     /// Test if pattern matches text
+    #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!(
             "vm",
@@ -2141,18 +2126,18 @@ impl RegexVM {
 
             match op {
                 OpCode::WordAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_alphanumeric() || ch == '_' {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::WordAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !(ch.is_ascii_alphanumeric() || ch == '_') {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
@@ -2160,36 +2145,36 @@ impl RegexVM {
                 }
 
                 OpCode::DigitAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_digit() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::DigitAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !ch.is_ascii_digit() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::SpaceAscii => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch.is_ascii_whitespace() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::SpaceAsciiNeg => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if !ch.is_ascii_whitespace() {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
@@ -2198,10 +2183,10 @@ impl RegexVM {
 
                 OpCode::Char => {
                     // Read UTF-8 character from operands
-                    if let Some(expected) = self.read_char_operand(code, &mut ip) {
-                        if let Some(actual) = self.current_char(ctx) {
+                    if let Some(expected) = Self::read_char_operand(code, &mut ip) {
+                        if let Some(actual) = Self::current_char(ctx) {
                             if actual == expected {
-                                self.advance_char(ctx);
+                                Self::advance_char(ctx);
                                 continue;
                             }
                         }
@@ -2210,9 +2195,9 @@ impl RegexVM {
                 }
 
                 OpCode::Any => {
-                    if let Some(ch) = self.current_char(ctx) {
+                    if let Some(ch) = Self::current_char(ctx) {
                         if ch != '\n' {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
@@ -2237,25 +2222,25 @@ impl RegexVM {
                     local_backtrack_or_return_false!();
                 }
                 OpCode::EndText => {
-                    if self.is_at_absolute_end(ctx) {
+                    if Self::is_at_absolute_end(ctx) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::EndTextOrNL => {
-                    if self.is_at_absolute_end_or_before_final_newline(ctx) {
+                    if Self::is_at_absolute_end_or_before_final_newline(ctx) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::WordBoundary => {
-                    if self.is_at_word_boundary(ctx) {
+                    if Self::is_at_word_boundary(ctx) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::NonWordBoundary => {
-                    if !self.is_at_word_boundary(ctx) {
+                    if !Self::is_at_word_boundary(ctx) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -2278,12 +2263,12 @@ impl RegexVM {
                     let char_class = &self.program.char_classes[class_id];
 
                     // Get current character
-                    if let Some(ch) = self.current_char(ctx) {
-                        let matches = self.test_char_class(ch, char_class);
+                    if let Some(ch) = Self::current_char(ctx) {
+                        let matches = Self::test_char_class(ch, char_class);
                         let should_match = if is_neg { !matches } else { matches };
 
                         if should_match {
-                            self.advance_char(ctx);
+                            Self::advance_char(ctx);
                             continue;
                         }
                     }
@@ -2329,11 +2314,10 @@ impl RegexVM {
 
                     // Assertions do not consume input
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
-                    Some(true) => continue,
+                    Some(true) => {}
                     Some(false) => {
                         local_backtrack_or_return_false!();
                     }
@@ -2342,7 +2326,6 @@ impl RegexVM {
 
                 OpCode::AtomicStart => {
                     call_stack.push(backtrack_stack.len());
-                    continue;
                 }
 
                 OpCode::AtomicEnd => {
@@ -2364,7 +2347,6 @@ impl RegexVM {
                     if start_idx < ctx.captures.len() {
                         ctx.captures[start_idx] = Some(ctx.pos);
                     }
-                    continue;
                 }
 
                 OpCode::SaveEnd => {
@@ -2378,7 +2360,6 @@ impl RegexVM {
                     if end_idx < ctx.captures.len() {
                         ctx.captures[end_idx] = Some(ctx.pos);
                     }
-                    continue;
                 }
 
                 OpCode::Backref => {
@@ -2411,7 +2392,6 @@ impl RegexVM {
                     if condition_matches == jump_if_match {
                         ip += offset;
                     }
-                    continue;
                 }
 
                 OpCode::Split => {
@@ -2428,7 +2408,6 @@ impl RegexVM {
                         saved_call_stack: call_stack.clone(),
                         saved_code_result: ctx.code_result.clone(),
                     });
-                    continue;
                 }
 
                 OpCode::SplitLazy => {
@@ -2446,7 +2425,6 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                     });
                     ip += offset;
-                    continue;
                 }
 
                 OpCode::Jump => {
@@ -2456,7 +2434,6 @@ impl RegexVM {
                     let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
                     ip += 2;
                     ip += offset;
-                    continue;
                 }
 
                 OpCode::Call => {
@@ -2507,7 +2484,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::QuestionLazy => {
@@ -2538,7 +2514,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::StarGreedy => {
@@ -2583,7 +2558,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::StarLazy => {
@@ -2612,7 +2586,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::PlusGreedy => {
@@ -2669,7 +2642,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::PlusLazy => {
@@ -2716,7 +2688,6 @@ impl RegexVM {
                     }
 
                     ip = expr_end;
-                    continue;
                 }
 
                 OpCode::Fail => {
@@ -2737,7 +2708,7 @@ impl RegexVM {
     /// Execute an assertion sub-expression without consuming input
     /// or mutating the parent execution context.
     fn execute_assertion_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> bool {
-        let mut assertion_ctx = self.clone_exec_context(ctx);
+        let mut assertion_ctx = Self::clone_exec_context(ctx);
 
         self.execute_subexpr(&mut assertion_ctx, code)
     }
@@ -2762,7 +2733,7 @@ impl RegexVM {
                 }
                 let group_id = code[*ip] as usize;
                 *ip += 1;
-                Some(self.capture_group_exists(ctx, group_id))
+                Some(Self::capture_group_exists(ctx, group_id))
             }
             CONDITIONAL_KIND_RECURSION_ANY => Some(!ctx.recursion_stack.is_empty()),
             CONDITIONAL_KIND_RECURSION_GROUP => {
@@ -2774,8 +2745,7 @@ impl RegexVM {
                 Some(
                     ctx.recursion_stack
                         .last()
-                        .map(|(target, _)| *target == group_id)
-                        .unwrap_or(false),
+                        .is_some_and(|(target, _)| *target == group_id),
                 )
             }
             CONDITIONAL_KIND_LOOKAHEAD_POSITIVE | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE => {
@@ -2821,7 +2791,7 @@ impl RegexVM {
         }
     }
 
-    fn capture_group_exists(&self, ctx: &ExecContext, group_id: usize) -> bool {
+    fn capture_group_exists(ctx: &ExecContext, group_id: usize) -> bool {
         if group_id == 0 {
             return false;
         }
@@ -2843,7 +2813,7 @@ impl RegexVM {
         let assertion_end = ctx.pos;
 
         for start in (0..=assertion_end).rev() {
-            let mut lookbehind_ctx = self.clone_exec_context(ctx);
+            let mut lookbehind_ctx = Self::clone_exec_context(ctx);
             lookbehind_ctx.pos = start;
             lookbehind_ctx.end = assertion_end;
 
@@ -2882,7 +2852,7 @@ impl RegexVM {
     /// 3. **Frequency Analysis**: Less common bytes are preferred (e.g., 'q' over 'e').
     /// 4. **UTF-8 Awareness**: Multi-byte UTF-8 sequences are kept intact.
     ///
-    /// Returns: (literal_bytes, length) where literal_bytes is a 32-byte buffer
+    /// Returns: (`literal_bytes`, length) where `literal_bytes` is a 32-byte buffer
     /// (padded for SIMD alignment) and length is the actual literal length.
     fn extract_first_literal(&self) -> ([u8; 32], usize) {
         let mut literal = [0u8; 32]; // 32-byte aligned buffer for AVX2
@@ -2895,7 +2865,7 @@ impl RegexVM {
             // Limit to 16 bytes for efficiency
             let op = match OpCode::try_from(code[ip]) {
                 Ok(op) => op,
-                Err(_) => break,
+                Err(()) => break,
             };
             ip += 1;
 
@@ -2916,17 +2886,6 @@ impl RegexVM {
                     }
                 }
 
-                // Stop at any non-literal instruction
-                OpCode::Split
-                | OpCode::SplitLazy
-                | OpCode::Jump
-                | OpCode::StarGreedy
-                | OpCode::StarLazy
-                | OpCode::PlusGreedy
-                | OpCode::PlusLazy
-                | OpCode::QuestionGreedy
-                | OpCode::QuestionLazy => break,
-
                 // Skip certain instructions but continue scanning
                 OpCode::SaveStart | OpCode::SaveEnd => {
                     if ip < code.len() {
@@ -2934,6 +2893,7 @@ impl RegexVM {
                     }
                 }
 
+                // Stop at any non-literal instruction
                 _ => break,
             }
         }
@@ -3048,7 +3008,7 @@ impl RegexVM {
             if self.simd_support.neon {
                 // ARM NEON path: Process 16 bytes at a time
                 unsafe {
-                    use std::arch::aarch64::*;
+                    use std::arch::aarch64::{vceqq_u8, vdupq_n_u8, vld1q_u8, vst1q_u8};
 
                     let needle_vec = vdupq_n_u8(needle);
                     let mut i = 0;
@@ -3138,10 +3098,8 @@ impl RegexVM {
 
         // Then verify the full pattern at each position
         for &pos in &first_byte_positions {
-            if pos + needle_len <= haystack.len() {
-                if &haystack[pos..pos + needle_len] == needle {
-                    positions.push(pos);
-                }
+            if pos + needle_len <= haystack.len() && &haystack[pos..pos + needle_len] == needle {
+                positions.push(pos);
             }
         }
 
@@ -3219,6 +3177,7 @@ impl RegexVM {
     /// - Uses unaligned loads (modern CPUs handle these efficiently)
     /// - Processes largest possible chunks first (32, 16, 8 bytes)
     /// - Falls back to scalar comparison for small remainders
+    #[allow(clippy::unused_self)]
     #[inline(always)]
     fn simd_compare(&self, a: &[u8], b: &[u8]) -> bool {
         if a.len() != b.len() {
@@ -3280,11 +3239,13 @@ pub struct OptimizingCompiler {
 
 impl OptimizingCompiler {
     /// Create new optimizing compiler
+    #[must_use]
     pub fn new() -> Self {
         Self::with_named_groups(HashMap::new())
     }
 
     /// Create new optimizing compiler with resolved named group references.
+    #[must_use]
     pub fn with_named_groups(named_groups: HashMap<String, u32>) -> Self {
         trace_enter!("vm", "OptimizingCompiler::new");
         let compiler = Self {
@@ -3386,7 +3347,7 @@ impl OptimizingCompiler {
         match ast {
             Regex::Char(_) => self.stats.literal_chars += 1,
             Regex::CharClass(_) | Regex::UnicodeClass { .. } | Regex::ExtendedCharClass { .. } => {
-                self.stats.char_classes += 1
+                self.stats.char_classes += 1;
             }
             Regex::Quantified { .. } => self.stats.quantifiers += 1,
             Regex::Anchor(_) => self.flags.has_anchors = true,
@@ -3444,6 +3405,7 @@ impl OptimizingCompiler {
     }
 
     /// Optimization pass - AST-level optimizations
+    #[allow(clippy::unused_self)]
     fn optimize_ast(&mut self, _ast: &Regex) {
         // TODO: Implement AST optimizations like:
         // - String literal concatenation
@@ -3745,36 +3707,33 @@ impl OptimizingCompiler {
                         for _ in 0..min_count {
                             self.codegen_pass(expr, false);
                         }
-                        match max {
-                            Some(max_value) => {
-                                let max_count = *max_value as usize;
-                                // Emit greedy optional repetitions (bounded tail).
-                                for _ in min_count..max_count {
-                                    // Split first tries the expr path and saves a fallback
-                                    // that skips this optional repetition.
-                                    self.emit_op(OpCode::Split);
-                                    let split_offset_pos = self.code.len();
-                                    self.code.push(0); // patch later
-                                    self.code.push(0); // patch later
+                        if let Some(max_value) = max {
+                            let max_count = *max_value as usize;
+                            // Emit greedy optional repetitions (bounded tail).
+                            for _ in min_count..max_count {
+                                // Split first tries the expr path and saves a fallback
+                                // that skips this optional repetition.
+                                self.emit_op(OpCode::Split);
+                                let split_offset_pos = self.code.len();
+                                self.code.push(0); // patch later
+                                self.code.push(0); // patch later
 
-                                    self.codegen_pass(expr, false);
+                                self.codegen_pass(expr, false);
 
-                                    let skip_expr_target = self.code.len();
-                                    let split_offset = skip_expr_target - (split_offset_pos + 2);
-                                    let offset_bytes = (split_offset as u16).to_le_bytes();
-                                    self.code[split_offset_pos] = offset_bytes[0];
-                                    self.code[split_offset_pos + 1] = offset_bytes[1];
-                                }
+                                let skip_expr_target = self.code.len();
+                                let split_offset = skip_expr_target - (split_offset_pos + 2);
+                                let offset_bytes = (split_offset as u16).to_le_bytes();
+                                self.code[split_offset_pos] = offset_bytes[0];
+                                self.code[split_offset_pos + 1] = offset_bytes[1];
                             }
-                            None => {
-                                // Emit unbounded tail as A* after required prefix.
-                                self.emit_op(OpCode::StarGreedy);
+                        } else {
+                            // Emit unbounded tail as A* after required prefix.
+                            self.emit_op(OpCode::StarGreedy);
 
-                                let sub_code = self.compile_inline_subexpr(expr);
+                            let sub_code = self.compile_inline_subexpr(expr);
 
-                                self.code.push(sub_code.len() as u8);
-                                self.code.extend(sub_code);
-                            }
+                            self.code.push(sub_code.len() as u8);
+                            self.code.extend(sub_code);
                         }
                     }
                 }
@@ -3827,6 +3786,7 @@ impl OptimizingCompiler {
     }
 
     /// Peephole optimization pass on generated bytecode
+    #[allow(clippy::unused_self)]
     fn peephole_optimize(&mut self) {
         // TODO: Implement peephole optimizations like:
         // - Adjacent character merging into strings
@@ -4073,7 +4033,7 @@ impl OptimizingCompiler {
             ip += 1;
 
             match op {
-                OpCode::Char => {
+                OpCode::Char | OpCode::String | OpCode::StringNoCase => {
                     if ip >= code.len() {
                         return;
                     }
@@ -4088,13 +4048,6 @@ impl OptimizingCompiler {
                         .checked_add(char_class_base as u8)
                         .expect("char class table exceeded single-byte operand range");
                     ip += 1;
-                }
-                OpCode::String | OpCode::StringNoCase => {
-                    if ip >= code.len() {
-                        return;
-                    }
-                    let len = code[ip] as usize;
-                    ip += 1 + len;
                 }
                 OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
                     ip += 2;
@@ -4147,9 +4100,8 @@ impl OptimizingCompiler {
                     let kind = code[ip];
                     ip += 1;
                     match kind {
-                        CONDITIONAL_KIND_GROUP_EXISTS => ip += 1,
-                        CONDITIONAL_KIND_RECURSION_ANY => {}
-                        CONDITIONAL_KIND_RECURSION_GROUP => ip += 1,
+                        CONDITIONAL_KIND_GROUP_EXISTS | CONDITIONAL_KIND_RECURSION_GROUP => ip += 1,
+                        CONDITIONAL_KIND_RECURSION_ANY | CONDITIONAL_KIND_DEFINE_FALSE => {}
                         CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
                         | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
                         | CONDITIONAL_KIND_LOOKBEHIND_POSITIVE
@@ -4166,7 +4118,6 @@ impl OptimizingCompiler {
                             self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
                             ip = end;
                         }
-                        CONDITIONAL_KIND_DEFINE_FALSE => {}
                         _ => return,
                     }
                     ip += 2;
@@ -4276,7 +4227,14 @@ impl TryFrom<u8> for OpCode {
     type Error = ();
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        use OpCode::*;
+        use OpCode::{
+            Any, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg, CodeBlock,
+            DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump, JumpIfMatch,
+            JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
+            NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy, Return, SaveEnd,
+            SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
+            StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
+        };
         match value {
             0x00 => Ok(Char),
             0x01 => Ok(Any),

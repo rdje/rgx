@@ -1054,8 +1054,9 @@ impl<'a> PgenAstAdapter<'a> {
 
     fn is_empty_wrapper(&self, node: &PgenAstNode) -> bool {
         match &node.content {
-            PgenAstContent::Sequence(children) => children.is_empty(),
-            PgenAstContent::Quantified((children, _)) => children.is_empty(),
+            PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {
+                children.is_empty()
+            }
             PgenAstContent::Alternative(child) => self.is_empty_wrapper(child),
             PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
                 text.is_empty()
@@ -1088,9 +1089,10 @@ impl PgenAstNode {
     fn children(&self) -> Vec<&PgenAstNode> {
         match &self.content {
             PgenAstContent::Terminal(_) | PgenAstContent::TransformedTerminal(_) => Vec::new(),
-            PgenAstContent::Sequence(children) => children.iter().collect(),
+            PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {
+                children.iter().collect()
+            }
             PgenAstContent::Alternative(child) => vec![child.as_ref()],
-            PgenAstContent::Quantified((children, _)) => children.iter().collect(),
         }
     }
 }
