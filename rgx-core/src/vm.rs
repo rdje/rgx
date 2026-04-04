@@ -367,6 +367,38 @@ pub struct Match {
     pub code_result: Option<CodeBlockValue>,
 }
 
+/// Fast position filter extracted from the program prefix.
+///
+/// Used by the scanning loop to skip positions where the first required
+/// atom cannot match, avoiding full VM invocations at impossible offsets.
+#[derive(Debug, Clone, Copy)]
+enum PrefixFilter {
+    /// No usable prefix — must try every position.
+    None,
+    /// Pattern starts with a specific single byte.
+    Byte(u8),
+    /// Pattern starts with `\d` (ASCII digit).
+    Digit,
+    /// Pattern starts with `\w` (ASCII word character).
+    Word,
+    /// Pattern starts with `\s` (ASCII whitespace).
+    Space,
+}
+
+impl PrefixFilter {
+    /// Test whether a byte could match this filter.
+    #[inline]
+    fn matches(self, b: u8) -> bool {
+        match self {
+            Self::None => true,
+            Self::Byte(expected) => b == expected,
+            Self::Digit => b.is_ascii_digit(),
+            Self::Word => b.is_ascii_alphanumeric() || b == b'_',
+            Self::Space => b.is_ascii_whitespace(),
+        }
+    }
+}
+
 /// High-performance regex execution engine
 pub struct RegexVM {
     /// Compiled program
@@ -375,8 +407,8 @@ pub struct RegexVM {
     execution_manager: Option<Arc<ExecutionManager>>,
     /// SIMD instruction support detected at runtime
     simd_support: SimdSupport,
-    /// Cached first required literal byte for scanning skip optimization
-    first_literal_byte: Option<u8>,
+    /// Cached prefix filter for scanning skip optimization
+    prefix_filter: PrefixFilter,
 }
 
 /// Runtime SIMD capability detection
@@ -429,9 +461,9 @@ impl RegexVM {
             program,
             execution_manager,
             simd_support,
-            first_literal_byte: None,
+            prefix_filter: PrefixFilter::None,
         };
-        vm.first_literal_byte = vm.first_required_byte();
+        vm.prefix_filter = vm.extract_prefix_filter();
         trace_exit!(
             "vm",
             "RegexVM::with_execution_manager",
@@ -693,15 +725,17 @@ impl RegexVM {
         }
     }
 
-    /// Extract the first required literal byte from the program, if the
-    /// bytecode begins with a `Char` opcode for a single-byte character
-    /// (optionally preceded by `SaveStart`/`SaveEnd` capture markers).
-    fn first_required_byte(&self) -> Option<u8> {
+    /// Extract a fast position filter from the program prefix.
+    ///
+    /// Scans the compiled bytecode (skipping capture markers) and returns
+    /// a [`PrefixFilter`] describing the first required atom, which the
+    /// scanning loop uses to skip impossible start positions.
+    fn extract_prefix_filter(&self) -> PrefixFilter {
         let code = &self.program.code;
         let mut ip = 0;
         while ip < code.len() {
             let Ok(op) = OpCode::try_from(code[ip]) else {
-                return None;
+                return PrefixFilter::None;
             };
             ip += 1;
             match op {
@@ -710,20 +744,23 @@ impl RegexVM {
                         let char_len = code[ip] as usize;
                         ip += 1;
                         if char_len == 1 && ip < code.len() {
-                            return Some(code[ip]);
+                            return PrefixFilter::Byte(code[ip]);
                         }
                     }
-                    return None;
+                    return PrefixFilter::None;
                 }
+                OpCode::DigitAscii => return PrefixFilter::Digit,
+                OpCode::WordAscii => return PrefixFilter::Word,
+                OpCode::SpaceAscii => return PrefixFilter::Space,
                 OpCode::SaveStart | OpCode::SaveEnd => {
                     if ip < code.len() {
                         ip += 1; // skip group ID operand
                     }
                 }
-                _ => return None,
+                _ => return PrefixFilter::None,
             }
         }
-        None
+        PrefixFilter::None
     }
 
     /// Standard scanning approach - try match at each position.
@@ -745,23 +782,15 @@ impl RegexVM {
             ctx.text.len()
         );
 
-        if let Some(fb) = self.first_literal_byte {
-            // Fast path: use memchr to jump to candidate positions
+        if let PrefixFilter::Byte(fb) = self.prefix_filter {
+            // Fastest path: use memchr to jump to candidate positions
             let mut offset = 0;
             while let Some(pos) = memchr(fb, &ctx.text[offset..]) {
                 let start = offset + pos;
-                trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
                 ctx.pos = start;
                 Self::reset_captures(ctx);
                 if self.execute_at(ctx, start) {
-                    debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
-                    trace_exit!(
-                        "vm",
-                        "RegexVM::find_first_scanning",
-                        "matched=true, start={}, end={}",
-                        start,
-                        ctx.pos
-                    );
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
                         start,
                         end: ctx.pos,
@@ -772,41 +801,17 @@ impl RegexVM {
                 }
                 offset = start + 1;
             }
-            // Also try match at end-of-text for zero-width patterns
-            let start = ctx.text.len();
-            ctx.pos = start;
-            Self::reset_captures(ctx);
-            if self.execute_at(ctx, start) {
-                trace_exit!(
-                    "vm",
-                    "RegexVM::find_first_scanning",
-                    "matched=true, start={}, end={}",
-                    start,
-                    ctx.pos
-                );
-                return Some(Match {
-                    start,
-                    end: ctx.pos,
-                    groups: self.extract_captures_with_match(ctx, start, ctx.pos),
-                    matched_alternative: ctx.current_alternative,
-                    code_result: ctx.code_result.clone(),
-                });
-            }
         } else {
-            // Slow path: try every position
-            for start in 0..=ctx.text.len() {
-                trace_log!("vm", "Try match at position {}/{}", start, ctx.text.len());
+            // Class-filter or full-scan path
+            let filter = self.prefix_filter;
+            for start in 0..ctx.text.len() {
+                if !filter.matches(ctx.text[start]) {
+                    continue;
+                }
                 ctx.pos = start;
                 Self::reset_captures(ctx);
                 if self.execute_at(ctx, start) {
-                    debug_log!("vm", "✓ MATCH at position {} (end={})", start, ctx.pos);
-                    trace_exit!(
-                        "vm",
-                        "RegexVM::find_first_scanning",
-                        "matched=true, start={}, end={}",
-                        start,
-                        ctx.pos
-                    );
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
                         start,
                         end: ctx.pos,
@@ -817,8 +822,20 @@ impl RegexVM {
                 }
             }
         }
-
-        debug_log!("vm", "Scanning complete - no match found");
+        // Try match at end-of-text for zero-width patterns
+        let start = ctx.text.len();
+        ctx.pos = start;
+        Self::reset_captures(ctx);
+        if self.execute_at(ctx, start) {
+            trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
+            return Some(Match {
+                start,
+                end: ctx.pos,
+                groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                matched_alternative: ctx.current_alternative,
+                code_result: ctx.code_result.clone(),
+            });
+        }
         trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
         None
     }
@@ -2113,8 +2130,8 @@ impl RegexVM {
         let mut matches = Vec::new();
         let mut start = 0;
 
-        if let Some(fb) = self.first_literal_byte {
-            // Fast path: use memchr to jump between candidate positions
+        if let PrefixFilter::Byte(fb) = self.prefix_filter {
+            // Fastest path: use memchr to jump between candidate positions
             while let Some(pos) = memchr(fb, &ctx.text[start..]) {
                 let candidate = start + pos;
                 ctx.pos = candidate;
@@ -2135,8 +2152,13 @@ impl RegexVM {
                 }
             }
         } else {
-            // Slow path: try every position
+            // Class-filter or full-scan path
+            let filter = self.prefix_filter;
             while start <= bytes.len() {
+                if start < bytes.len() && !filter.matches(ctx.text[start]) {
+                    start += 1;
+                    continue;
+                }
                 ctx.pos = start;
                 ctx.match_start = start;
                 Self::reset_captures(&mut ctx);

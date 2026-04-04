@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Add character-class prefix filter to scanning loop
+- Scope: performance optimization extending the prefix skip to character classes.
+- Changes:
+  - Replaced the single-byte `first_literal_byte` field with a richer `PrefixFilter` enum that also recognizes `\d` (Digit), `\w` (Word), and `\s` (Space) class prefixes.
+  - Both `find_first_scanning` and `find_all` now skip positions where the first byte cannot match the prefix class, using `memchr` for literal bytes and inline class predicates for `\d`/`\w`/`\s`.
+  - `PrefixFilter` is cached once at VM construction and used on every scanning iteration.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - Benchmark trend capture confirms dramatic improvement for digit-prefixed patterns:
+    - `find_first capture_groups 1K`: 1116x → 31x slower vs PCRE2 (**36x faster**)
+    - `find_all capture_groups 1K`: 1098x → 23x slower vs PCRE2 (**49x faster**)
+    - `find_first capture_groups 10K`: 1414x → 28x slower vs PCRE2 (**50x faster**)
+    - `find_all capture_groups 10K`: 1437x → 22x slower vs PCRE2 (**65x faster**)
+  - Literal patterns unchanged from previous memchr baseline (~35-57x vs PCRE2).
+- Notes/impact:
+  - Total session performance improvement across all benchmark patterns now ranges from 1.9x to 65x faster vs the original baseline.
+  - The remaining ~22-57x gap vs PCRE2 is primarily in per-position VM execution overhead, not in candidate selection.
+
 ### 2026-04-04 - Use memchr for scanning loop candidate search
 - Scope: performance optimization for VM scanning strategy.
 - Changes:
