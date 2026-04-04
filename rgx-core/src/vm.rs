@@ -1924,22 +1924,53 @@ impl RegexVM {
         std::str::from_utf8(utf8_bytes).ok()?.chars().next()
     }
 
-    /// Get current character at context position
+    /// Get current character at context position.
+    ///
+    /// Decodes only the minimal UTF-8 bytes at the current position instead of
+    /// validating the entire remaining text.
     fn current_char(ctx: &ExecContext) -> Option<char> {
         if ctx.pos >= ctx.end {
             return None;
         }
-
-        // Convert from UTF-8 bytes to char
-        let remaining = &ctx.text[ctx.pos..];
-        std::str::from_utf8(remaining).ok()?.chars().next()
+        let b = ctx.text[ctx.pos];
+        if b < 0x80 {
+            // ASCII fast path — single byte, no validation needed
+            return Some(b as char);
+        }
+        // Multi-byte: determine width from leading byte and decode only those bytes
+        let width = match b {
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => return None,
+        };
+        let end = (ctx.pos + width).min(ctx.end);
+        std::str::from_utf8(&ctx.text[ctx.pos..end])
+            .ok()?
+            .chars()
+            .next()
     }
 
-    /// Advance context position by one character
+    /// Advance context position by one UTF-8 character width.
+    ///
+    /// Determines the character width directly from the leading byte without
+    /// decoding the full character.
     fn advance_char(ctx: &mut ExecContext) {
-        if let Some(ch) = Self::current_char(ctx) {
-            ctx.pos += ch.len_utf8();
+        if ctx.pos >= ctx.end {
+            return;
         }
+        let b = ctx.text[ctx.pos];
+        let width = if b < 0x80 {
+            1
+        } else {
+            match b {
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => 1, // invalid leading byte — advance by 1 to avoid infinite loop
+            }
+        };
+        ctx.pos += width;
     }
 
     /// Reset capture groups for new match attempt
@@ -2060,45 +2091,28 @@ impl RegexVM {
                 matches_bitmap
             );
 
-            let result = matches_bitmap;
             trace_log!(
                 "vm",
                 "    ASCII result: {} (matches_bitmap={})",
-                result,
+                matches_bitmap,
                 matches_bitmap
             );
-            return result;
+            return matches_bitmap;
         }
 
-        // Check Unicode ranges
-        let mut in_range = false;
-        trace_log!(
-            "vm",
-            "    Checking {} Unicode ranges",
-            char_class.unicode_ranges.len()
-        );
-        for &(start, end) in &char_class.unicode_ranges {
-            trace_log!("vm", "      Range U+{:04X}..U+{:04X}", start, end);
-            if ch_code >= start && ch_code <= end {
-                in_range = true;
-                trace_log!("vm", "      → IN RANGE");
-                break;
-            }
-            if ch_code < start {
-                trace_log!("vm", "      → char < start, stopping");
-                break; // Ranges are sorted, no need to check further
-            }
-        }
-
-        // Apply negation if needed
-        let result = in_range;
-        trace_log!(
-            "vm",
-            "    Unicode result: {} (in_range={})",
-            result,
-            in_range
-        );
-        result
+        // Check Unicode ranges using binary search (ranges are sorted by start)
+        char_class
+            .unicode_ranges
+            .binary_search_by(|&(start, end)| {
+                if ch_code < start {
+                    std::cmp::Ordering::Greater
+                } else if ch_code > end {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .is_ok()
     }
 
     /// Find all non-overlapping matches

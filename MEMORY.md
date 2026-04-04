@@ -50,6 +50,11 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- SOTA quality audit identified critical/major/moderate gaps; first fixes landed:
+  - `current_char()` now decodes minimal UTF-8 bytes (not entire remaining text)
+  - `advance_char()` determines width from leading byte without re-decoding
+  - Unicode range lookup upgraded from linear scan O(N) to binary search O(log N)
+  - remaining SOTA gaps: backtrack capture cloning (critical), text reference copy (major), trace log overhead (moderate)
 - **New feature**: `(?m:...)` scoped multiline mode shipped — `^`/`$` match at line boundaries within scope, default single-line outside; lexer also accepts `(?i:`, `(?s:`, `(?x:` syntax for future compiler support
 - **Accuracy fix**: `find_all` now suppresses zero-width matches at the end of a just-completed consuming match, matching PCRE2 iteration semantics (also fixes the `(?=a)|b` open item)
 - Second accuracy probe found more issues: zero-width iteration (fixed), dot UTF-8 byte semantics (design decision needed), capture group[0] convention (API convention), missing `(?i)`/`(?m)`/`(?s)` flags and `\k` backreferences (features to add)

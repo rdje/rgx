@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Upgrade VM hot paths to SOTA quality
+- Scope: replace below-SOTA implementations in the VM execution hot path.
+- Changes:
+  - **UTF-8 character decoding**: `current_char()` now decodes only the minimal bytes at the current position (1 for ASCII, 2-4 for multi-byte) instead of validating the entire remaining text via `from_utf8()`. ASCII fast path is a single byte check and cast.
+  - **Character advance**: `advance_char()` now determines character width directly from the leading byte without calling `current_char()` to decode the full character.
+  - **Unicode range lookup**: `test_char_class()` now uses binary search (`O(log N)`) on sorted Unicode ranges instead of linear scan (`O(N)`). For classes with 50+ Unicode ranges (common with `\p{...}` properties), this is a significant improvement.
+- Validation:
+  - `cargo test -p rgx-core` (243 pass), `-p rgx-bench` (37 pass)
+  - 0 clippy warnings
+- Notes/impact:
+  - These are the first SOTA-grade replacements in the VM hot path, targeting the two areas where the implementation was furthest from production regex engine quality.
+  - The ASCII bitmap character class lookup was already O(1) and SOTA-grade; no changes needed there.
+  - Remaining SOTA gaps: backtrack frame capture cloning (critical, needs trail/undo log), text reference copy (major, needs lifetime refactor), trace log overhead in hot loop (moderate, needs compile-time gating).
+
 ### 2026-04-04 - Ship scoped multiline mode (?m:...)
 - Scope: new regex feature — scoped multiline flag groups.
 - Changes:
