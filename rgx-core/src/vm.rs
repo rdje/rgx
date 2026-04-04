@@ -2050,27 +2050,48 @@ impl RegexVM {
             text.len(),
             self.program.code.len()
         );
+        let bytes = text.as_bytes();
+        let mut ctx = ExecContext {
+            text: bytes.to_vec(),
+            pos: 0,
+            match_start: 0,
+            end: bytes.len(),
+            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: None,
+            recursion_stack: Vec::new(),
+            code_result: None,
+        };
+
         let mut matches = Vec::new();
         let mut start = 0;
 
-        while start <= text.len() {
-            if let Some(m) = self.find_first(&text[start..]) {
-                let adjusted_match = Match {
-                    start: start + m.start,
-                    end: start + m.end,
-                    groups: m
-                        .groups
-                        .iter()
-                        .map(|opt| opt.map(|(s, e)| (start + s, start + e)))
-                        .collect(),
-                    matched_alternative: m.matched_alternative,
-                    code_result: m.code_result,
-                };
+        while start <= bytes.len() {
+            // Skip positions where the first required literal byte cannot match
+            if let Some(fb) = self.first_literal_byte {
+                if start < bytes.len() && ctx.text[start] != fb {
+                    start += 1;
+                    continue;
+                }
+            }
 
-                start = adjusted_match.end.max(adjusted_match.start + 1);
-                matches.push(adjusted_match);
+            ctx.pos = start;
+            ctx.match_start = start;
+            Self::reset_captures(&mut ctx);
+
+            if self.execute_at(&mut ctx, start) {
+                let m = Match {
+                    start,
+                    end: ctx.pos,
+                    groups: self.extract_captures_with_match(&ctx, start, ctx.pos),
+                    matched_alternative: ctx.current_alternative,
+                    code_result: ctx.code_result.clone(),
+                };
+                start = m.end.max(m.start + 1);
+                matches.push(m);
             } else {
-                break;
+                start += 1;
             }
         }
         trace_exit!("vm", "RegexVM::find_all", "match_count={}", matches.len());

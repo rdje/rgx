@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Rewrite find_all to scan in-place with single context
+- Scope: performance optimization for `find_all` matching.
+- Changes:
+  - Replaced the old `find_all` implementation (which called `find_first` on substrings, copying the remaining text on each iteration) with an in-place scanning loop that reuses one `ExecContext`.
+  - The new implementation also applies the literal-prefix skip directly, avoiding unnecessary `execute_at` calls at impossible positions.
+  - Eliminates O(n) text copies per match — for a 10K input with 100 matches, the old path allocated ~1MB of copies; the new path allocates once.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - Benchmark trend capture confirms measurable `find_all` improvement across all patterns:
+    - `find_all literal_simple 1K`: 60x → 34x slower vs PCRE2 (~1.8x faster)
+    - `find_all literal_simple 10K`: 70x → 43x slower vs PCRE2 (~1.6x faster)
+    - `find_all capture_groups 1K`: 1144x → 876x slower vs PCRE2 (~1.3x faster)
+    - `find_all capture_groups 10K`: 1426x → 1124x slower vs PCRE2 (~1.3x faster)
+  - Combined with the earlier literal-prefix skip, total `find_all` improvement vs original baseline: up to 3.1x faster.
+
 ### 2026-04-04 - Add literal-prefix skip to VM scanning loop
 - Scope: performance optimization for the VM scanning strategy.
 - Changes:

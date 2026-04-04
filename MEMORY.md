@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Second VM performance optimization: rewrote `find_all` to scan in-place with a single `ExecContext` instead of calling `find_first` on substrings (eliminates O(n) text copies per match)
+  - find_all literal 1K: 106x → 34x vs PCRE2 (3.1x total session improvement)
+  - find_all literal 10K: 119x → 43x vs PCRE2 (2.8x total improvement)
+  - find_all capture 10K: 1426x → 1124x vs PCRE2 (1.3x improvement)
 - First VM performance optimization landed: literal-prefix skip in the scanning loop
   - caches the first required literal byte from the compiled bytecode at VM construction
   - skips positions where that byte doesn't match, avoiding full VM invocations at impossible positions
