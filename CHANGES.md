@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Expand PCRE2 differential parity coverage for combined features
+- Scope: parity test expansion covering combined-feature patterns and edge cases.
+- Changes:
+  - Added `pcre2_parity_supported_combined_feature_patterns` test function with 24 new differential parity cases covering:
+    - nested lookarounds (lookahead-in-lookbehind, lookbehind-in-lookahead, negative lookahead in alternation)
+    - atomic groups combined with quantifiers and alternation (3 no-match behavioral cases)
+    - backreference edge cases (alternation, quantified captures)
+    - possessive quantifiers combined with alternation
+    - named groups in various positions
+    - complex quantifier interactions (nested, lazy-inside-greedy, counted-range backtracking)
+    - anchors combined with groups and alternation
+    - dot and character class interactions
+  - All 24 cases verify both first-match and find-all span parity against PCRE2.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+- Notes/impact:
+  - Parity case count increased from 185 to 209 (13% increase).
+  - All new cases pass, confirming RGX matches PCRE2 behavior for these combined-feature patterns.
+
 ### 2026-04-04 - Clear remaining non-architectural clippy warnings
 - Scope: final mechanical warning cleanup across rgx-core.
 - Changes:

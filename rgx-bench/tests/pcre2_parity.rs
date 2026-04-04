@@ -1339,3 +1339,149 @@ fn pcre2_parity_supported_conditionals() {
         );
     }
 }
+
+#[test]
+fn pcre2_parity_supported_combined_feature_patterns() {
+    let cases = [
+        // Nested lookarounds
+        ParityCase {
+            name: "lookahead_inside_lookbehind",
+            pattern: "(?<=(?=a).)b",
+            input: "ab xb",
+        },
+        ParityCase {
+            name: "lookbehind_inside_lookahead",
+            pattern: "(?=b(?<=ab))ab",
+            input: "ab xb cab",
+        },
+        ParityCase {
+            name: "nested_lookahead",
+            pattern: "(?=a(?=ab))a",
+            input: "aab xaa",
+        },
+        ParityCase {
+            name: "negative_lookahead_in_alternation",
+            pattern: "(?!cat)c\\w+|dog",
+            input: "cat car cup dog",
+        },
+        // Atomic groups combined with quantifiers
+        ParityCase {
+            name: "atomic_greedy_star_no_match",
+            pattern: "(?>a*)ab",
+            input: "aab aaab",
+        },
+        ParityCase {
+            name: "atomic_alternation_prefix_no_match",
+            pattern: "(?>cat|ca)t",
+            input: "cat",
+        },
+        ParityCase {
+            name: "atomic_nested_group_no_match",
+            pattern: "(?>(?:ab)+)ab",
+            input: "ababab abab",
+        },
+        // Backreference edge cases
+        ParityCase {
+            name: "backreference_in_alternation",
+            pattern: "(a)\\1|bb",
+            input: "aa bb ab ba",
+        },
+        ParityCase {
+            name: "backreference_with_quantifier",
+            pattern: "(a+)b\\1",
+            input: "aba aabaa aabaaa",
+        },
+        // Possessive combined with alternation
+        ParityCase {
+            name: "possessive_star_in_alternation",
+            pattern: "a*+b|ac",
+            input: "ac aab aaac",
+        },
+        ParityCase {
+            name: "possessive_plus_suffix_no_match",
+            pattern: "a++ab",
+            input: "aaab",
+        },
+        // Named groups in various positions
+        ParityCase {
+            name: "named_group_basic",
+            pattern: "(?<year>\\d{4})-(?<month>\\d{2})",
+            input: "date: 2026-04 end",
+        },
+        ParityCase {
+            name: "named_group_with_alternation",
+            pattern: "(?<t>cat|dog)s",
+            input: "cats dogs birds",
+        },
+        // Complex quantifier interactions
+        ParityCase {
+            name: "nested_quantifiers",
+            pattern: "(?:ab?)+c",
+            input: "abc aac ababc c",
+        },
+        ParityCase {
+            name: "lazy_inside_greedy",
+            pattern: "a(?:b+?c)+",
+            input: "abc abbc abbbc",
+        },
+        ParityCase {
+            name: "counted_range_backtracking",
+            pattern: "a{2,4}b",
+            input: "ab aab aaab aaaab aaaaab",
+        },
+        // Anchors with groups
+        ParityCase {
+            name: "anchor_start_group",
+            pattern: "^(a|b)c",
+            input: "ac bc cc",
+        },
+        ParityCase {
+            name: "anchor_end_alternation",
+            pattern: "cat$|dog$",
+            input: "the cat",
+        },
+        ParityCase {
+            name: "word_boundary_in_group",
+            pattern: "(\\bcat\\b)s?",
+            input: "cats cat scat",
+        },
+        // Dot and character class interactions
+        ParityCase {
+            name: "dot_with_alternation",
+            pattern: ".at|.ot",
+            input: "cat hot sit",
+        },
+        ParityCase {
+            name: "char_class_with_quantifier_greedy",
+            pattern: "[aeiou]+",
+            input: "aei bbb ooo",
+        },
+        ParityCase {
+            name: "nested_char_class_ranges",
+            pattern: "[a-zA-Z0-9_]+",
+            input: "foo_BAR!! baz123",
+        },
+    ];
+
+    for case in cases {
+        let rgx_first = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2_first = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx_first, pcre2_first,
+            "combined first-match mismatch for '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+
+        let rgx_all = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2_all = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx_all, pcre2_all,
+            "combined find_all mismatch for '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+}
