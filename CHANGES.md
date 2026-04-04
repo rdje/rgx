@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Ship scoped dotall mode (?s:...)
+- Scope: new regex feature — scoped dotall flag groups.
+- Changes:
+  - `(?s:...)` now makes `.` match any character INCLUDING `\n` within the group scope.
+  - Added `AnyDotAll` opcode (0x05) for dotall-mode dot matching.
+  - Added `dotall: bool` flag to `OptimizingCompiler`, toggling `Dot` compilation between `Any` (default, excludes `\n`) and `AnyDotAll` (dotall, includes `\n`).
+  - Flag state saves/restores correctly across nested groups, propagated to sub-compilers.
+  - Added 3 unit tests (dotall match, scope-leak, default behavior) and 3 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (246 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - Second inline flag shipped. Combined with `(?m:...)`, patterns like `(?ms:^.*$)` can now match entire lines including newlines.
+  - Parity case count now 229.
+
 ### 2026-04-04 - Replace backtrack frame cloning with SOTA trail/undo log
 - Scope: SOTA-grade refactor of the VM backtracking mechanism.
 - Changes:

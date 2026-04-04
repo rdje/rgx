@@ -33,6 +33,8 @@ pub enum OpCode {
     // 0x02 removed: String (never emitted)
     // 0x03 removed: CharNoCase (never emitted)
     // 0x04 removed: StringNoCase (never emitted)
+    /// Match any character including newline (dotall / (?s) mode)
+    AnyDotAll = 0x05,
 
     // === CHARACTER CLASSES (0x10-0x1F) ===
     /// ASCII digit [0-9]
@@ -1105,6 +1107,18 @@ impl RegexVM {
                     } else {
                         trace_log!("vm", "  ✗ Any: EOF");
                     }
+                    if Self::try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+                OpCode::AnyDotAll => {
+                    if let Some(ch) = Self::current_char(ctx) {
+                        trace_log!("vm", "  ✓ AnyDotAll: matched '{}'", ch);
+                        Self::advance_char(ctx);
+                        continue;
+                    }
+                    trace_log!("vm", "  ✗ AnyDotAll: EOF");
                     if Self::try_backtrack(ctx, &mut ip) {
                         continue;
                     }
@@ -2442,6 +2456,13 @@ impl RegexVM {
                     }
                     local_backtrack_or_return_false!();
                 }
+                OpCode::AnyDotAll => {
+                    if Self::current_char(ctx).is_some() {
+                        Self::advance_char(ctx);
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
                 OpCode::StartLine => {
                     if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
                         continue;
@@ -3480,6 +3501,8 @@ pub struct OptimizingCompiler {
     stats: CompilationStats,
     /// Whether multiline mode is active (^ and $ match at line boundaries)
     multiline: bool,
+    /// Whether dotall mode is active (. matches any character including newline)
+    dotall: bool,
 }
 
 impl OptimizingCompiler {
@@ -3516,6 +3539,7 @@ impl OptimizingCompiler {
                 jit_worthy: false,
             },
             multiline: false,
+            dotall: false,
         };
         trace_exit!(
             "vm",
@@ -3673,7 +3697,11 @@ impl OptimizingCompiler {
             }
 
             Regex::Dot => {
-                self.emit_op(OpCode::Any);
+                if self.dotall {
+                    self.emit_op(OpCode::AnyDotAll);
+                } else {
+                    self.emit_op(OpCode::Any);
+                }
             }
 
             Regex::CharClass(char_class) => {
@@ -4047,11 +4075,16 @@ impl OptimizingCompiler {
 
             Regex::FlagGroup { flags, expr } => {
                 let saved_multiline = self.multiline;
+                let saved_dotall = self.dotall;
                 if flags.contains('m') {
                     self.multiline = true;
                 }
+                if flags.contains('s') {
+                    self.dotall = true;
+                }
                 self.codegen_pass(expr, false);
                 self.multiline = saved_multiline;
+                self.dotall = saved_dotall;
             }
 
             Regex::Empty => {
@@ -4191,6 +4224,7 @@ impl OptimizingCompiler {
         let mut sub_compiler = OptimizingCompiler::with_named_groups(self.named_groups.clone());
         sub_compiler.group_counter = starting_group_counter;
         sub_compiler.multiline = self.multiline;
+        sub_compiler.dotall = self.dotall;
         sub_compiler.codegen_pass(expr, false);
 
         let char_class_base = self.char_classes.len();
@@ -4396,6 +4430,7 @@ impl OptimizingCompiler {
                 | OpCode::SpaceAscii
                 | OpCode::SpaceAsciiNeg
                 | OpCode::Any
+                | OpCode::AnyDotAll
                 | OpCode::StartLine
                 | OpCode::EndLine
                 | OpCode::StartText
@@ -4536,9 +4571,9 @@ impl TryFrom<u8> for OpCode {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
-            Any, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg, CodeBlock,
-            DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump, JumpIfMatch,
-            JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
+            Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
+            CodeBlock, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump,
+            JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
             NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy, SaveEnd,
             SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
             StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
@@ -4546,6 +4581,7 @@ impl TryFrom<u8> for OpCode {
         match value {
             0x00 => Ok(Char),
             0x01 => Ok(Any),
+            0x05 => Ok(AnyDotAll),
             0x10 => Ok(DigitAscii),
             0x11 => Ok(DigitAsciiNeg),
             0x12 => Ok(WordAscii),

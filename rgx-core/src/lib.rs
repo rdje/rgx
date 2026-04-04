@@ -3906,4 +3906,26 @@ mod tests {
         // But (?m:^a$) should match after newline
         assert!(re.is_match("x\na"));
     }
+
+    #[test]
+    fn scoped_dotall_dot_matches_newline() {
+        let re = Regex::compile("(?s:a.b)").unwrap();
+        assert!(re.is_match("a\nb"));
+        assert!(re.is_match("axb"));
+    }
+
+    #[test]
+    fn dotall_does_not_leak_outside_scope() {
+        let re = Regex::compile("(?s:a.b)|c.d").unwrap();
+        assert!(re.is_match("a\nb")); // dotall in scope
+        assert!(!re.is_match("c\nd")); // not dotall outside
+        assert!(re.is_match("cxd")); // normal dot outside
+    }
+
+    #[test]
+    fn default_dot_does_not_match_newline() {
+        let re = Regex::compile("a.b").unwrap();
+        assert!(!re.is_match("a\nb"));
+        assert!(re.is_match("axb"));
+    }
 }

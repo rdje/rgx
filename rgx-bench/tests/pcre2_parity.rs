@@ -1550,6 +1550,21 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "(?m:^a)|^b",
             input: "x\nb",
         },
+        ParityCase {
+            name: "dotall_matches_newline",
+            pattern: "(?s:a.b)",
+            input: "a\nb axb",
+        },
+        ParityCase {
+            name: "dotall_scoped_no_leak",
+            pattern: "(?s:a.b)c.d",
+            input: "a\nbcxd",
+        },
+        ParityCase {
+            name: "default_dot_no_newline",
+            pattern: "a.b",
+            input: "a\nb axb",
+        },
     ];
 
     for case in cases {
