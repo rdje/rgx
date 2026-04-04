@@ -241,7 +241,7 @@ impl Engine {
     ///
     /// # Errors
     /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
-    pub fn register_native<F>(&self, name: String, callback: F) -> Result<()>
+    pub fn register_native<F>(&self, name: &str, callback: F) -> Result<()>
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -260,7 +260,7 @@ impl Engine {
     ///
     /// # Errors
     /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
-    pub fn set_variable(&self, name: String, value: String) -> Result<()> {
+    pub fn set_variable(&self, name: &str, value: String) -> Result<()> {
         self.vm.set_variable(name, value)
     }
 }

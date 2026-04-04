@@ -65,7 +65,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` remain outside the shipped subset because the local PCRE2 differential harness compile-rejected those forms; RGX intentionally keeps only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`.
 - Latest RGX-owned warning-debt cleanup trimmed dead private scaffolding in the base parser/runtime path and brought the visible `rgx-core` warning count in the standard validation loop down from 101 to 93.
 - Latest RGX-owned warning-debt cleanup trimmed another small isolated slice in `compiler.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs` without widening syntax.
-- The latest full workspace `clippy` pass now reports RGX-owned warnings at 35 (down from the original 296), with the remaining backlog concentrated in function-length limits (12 large functions, architectural), intentional `#[inline(always)]` usage (5 hot logging paths), and a small tail of structural suggestions; all cast-truncation, documentation, dead-code, redundant-control-flow, and match-arm warnings are now resolved.
+- The latest full workspace `clippy` pass now reports RGX-owned warnings at 13 (down from the original 296), with every remaining warning being a function-length limit (`too_many_lines`); all other warning categories — cast-truncation, documentation, dead-code, redundant-control-flow, match-arm, `let...else`, unnecessary-`Result`, unused-`self`, inline-always, and struct-bools — are fully resolved.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
@@ -221,4 +221,4 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 1. Decide whether native registration should stay Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
 3. Deepen the quick benchmark history/delta capture beyond the shipped same-label quick/full pairing plus rolling paired-label history into a fuller release-profile longitudinal story.
-4. Continue reducing the remaining 35 warnings, with the next wins likely in the 5 `let...else` rewrites, 3 unnecessary-`Result` unwraps, and the 5 `#[inline(always)]` annotations on hot log functions; the 12 function-length warnings are architectural and require larger structural refactors.
+4. The remaining 13 warnings are all function-length (`too_many_lines`) limits on large functions like `execute_at` (718 lines) and `execute_subexpr` (527 lines); addressing these requires structural refactors to the VM execution loop and compiler codegen pipeline rather than mechanical fixes.

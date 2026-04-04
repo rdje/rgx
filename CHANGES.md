@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Clear remaining non-architectural clippy warnings
+- Scope: final mechanical warning cleanup across rgx-core.
+- Changes:
+  - Rewrote 5 `let...else` patterns in `lexer.rs` and `vm.rs`.
+  - Unwrapped 3 unnecessary `Result` wrappers from private lexer functions (`parse_star`, `parse_plus`, `parse_question`).
+  - Changed 2 pass-by-value `name: String` parameters to `name: &str` in `execution.rs` callback/variable registries, propagated through `engine.rs` and `lib.rs`.
+  - Added `#[allow(clippy::inline_always)]` to 5 hot logging/SIMD check functions.
+  - Added `#[allow(clippy::struct_excessive_bools)]` to 2 naturally-boolean flag structs.
+  - Added `#[allow(clippy::only_used_in_recursion)]` to 3 recursive traversal helpers.
+  - Replaced `format!`-based iterator string building with `fold` + `write!` in `log.rs`.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (46 total, 13 RGX-owned, all function-length)
+- Notes/impact:
+  - RGX-owned warnings now at 13, all exclusively function-length limits (architectural). Every other warning category is resolved.
+  - Warning count dropped from 296 to 13 (96% reduction) across this session's four commits.
+
 ### 2026-04-04 - Resolve cast-truncation and doc-section warnings
 - Scope: targeted clippy warning cleanup in codegen paths and public API docs.
 - Changes:

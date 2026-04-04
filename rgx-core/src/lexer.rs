@@ -155,9 +155,9 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::Anchor(AnchorType::End))
             }
-            Some('*') => self.parse_star(),
-            Some('+') => self.parse_plus(),
-            Some('?') => self.parse_question(),
+            Some('*') => Ok(self.parse_star()),
+            Some('+') => Ok(self.parse_plus()),
+            Some('?') => Ok(self.parse_question()),
             Some('|') => {
                 self.advance();
                 Ok(Token::Alternation)
@@ -529,9 +529,7 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = if let Ok(code_point) = u32::from_str_radix(&hex_digits, 16) {
-            code_point
-        } else {
+        let Ok(code_point) = u32::from_str_radix(&hex_digits, 16) else {
             trace_exit!(
                 "lexer",
                 "Lexer::parse_hex_escape",
@@ -544,9 +542,7 @@ impl<'a> Lexer<'a> {
             });
         };
 
-        let ch = if let Some(ch) = char::from_u32(code_point) {
-            ch
-        } else {
+        let Some(ch) = char::from_u32(code_point) else {
             trace_exit!(
                 "lexer",
                 "Lexer::parse_hex_escape",
@@ -605,9 +601,7 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let code_point = if let Ok(code_point) = u32::from_str_radix(&octal_digits, 8) {
-            code_point
-        } else {
+        let Ok(code_point) = u32::from_str_radix(&octal_digits, 8) else {
             trace_exit!(
                 "lexer",
                 "Lexer::parse_octal_escape",
@@ -641,9 +635,7 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        let ch = if let Some(ch) = char::from_u32(code_point) {
-            ch
-        } else {
+        let Some(ch) = char::from_u32(code_point) else {
             trace_exit!(
                 "lexer",
                 "Lexer::parse_octal_escape",
@@ -667,7 +659,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Parse *, *?, and *+ quantifiers
-    fn parse_star(&mut self) -> Result<Token, LexError> {
+    fn parse_star(&mut self) -> Token {
         trace_enter!(
             "lexer",
             "Lexer::parse_star",
@@ -691,11 +683,11 @@ impl<'a> Lexer<'a> {
             "ok=true,token_kind={}",
             Self::token_kind(&token)
         );
-        Ok(token)
+        token
     }
 
     /// Parse +, +?, and ++ quantifiers
-    fn parse_plus(&mut self) -> Result<Token, LexError> {
+    fn parse_plus(&mut self) -> Token {
         trace_enter!(
             "lexer",
             "Lexer::parse_plus",
@@ -719,11 +711,11 @@ impl<'a> Lexer<'a> {
             "ok=true,token_kind={}",
             Self::token_kind(&token)
         );
-        Ok(token)
+        token
     }
 
     /// Parse ?, ??, and ?+ quantifiers
-    fn parse_question(&mut self) -> Result<Token, LexError> {
+    fn parse_question(&mut self) -> Token {
         trace_enter!(
             "lexer",
             "Lexer::parse_question",
@@ -747,7 +739,7 @@ impl<'a> Lexer<'a> {
             "ok=true,token_kind={}",
             Self::token_kind(&token)
         );
-        Ok(token)
+        token
     }
 
     /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?[...]), (?(...)), (?{lang:code})

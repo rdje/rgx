@@ -45,7 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
-- Latest warning-debt pass resolved all cast-truncation and doc-section warnings:
+- Latest warning-debt pass cleared all non-architectural clippy warnings:
+  - rewrote `let...else`, unwrapped unnecessary Result, changed pass-by-value to reference, added targeted `#[allow]` for inline-always/excessive-bools/recursion-only
+  - RGX-owned warnings now at 13, all function-length limits (architectural); 96% reduction from the original 296
+- Previous warning-debt pass resolved all cast-truncation and doc-section warnings:
   - added `#[allow(clippy::cast_possible_truncation)]` to 9 VM codegen functions (intentional compact bytecode encoding)
   - added missing `# Errors` (11) and `# Panics` (10) sections across public API surfaces
   - RGX-owned warnings now at 35 (88% reduction from original 296)

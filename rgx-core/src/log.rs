@@ -151,18 +151,21 @@ pub fn init() {
 }
 
 /// Return whether debug-level logging is active.
+#[allow(clippy::inline_always)] // hot logging check, intentionally inlined
 #[inline(always)]
 pub fn is_debug_enabled() -> bool {
     DEBUG_ENABLED.load(Ordering::Relaxed)
 }
 
 /// Return whether trace-level logging is active.
+#[allow(clippy::inline_always)] // hot logging check, intentionally inlined
 #[inline(always)]
 pub fn is_trace_enabled() -> bool {
     TRACE_ENABLED.load(Ordering::Relaxed)
 }
 
 /// Return current global verbosity.
+#[allow(clippy::inline_always)] // hot logging check, intentionally inlined
 #[inline(always)]
 pub fn current_verbosity() -> Verbosity {
     match VERBOSITY_LEVEL.load(Ordering::Relaxed) {
@@ -181,6 +184,7 @@ pub fn set_verbosity(level: Verbosity) {
 }
 
 /// Check if a minimum verbosity level is enabled.
+#[allow(clippy::inline_always)] // hot logging check, intentionally inlined
 #[inline(always)]
 #[must_use]
 pub fn is_verbosity_enabled(min_level: Verbosity) -> bool {
@@ -520,7 +524,11 @@ pub fn hex_dump(module: &str, label: &str, data: &[u8]) {
     ));
 
     for (i, chunk) in data.chunks(16).enumerate() {
-        let hex: String = chunk.iter().map(|b| format!("{b:02x} ")).collect();
+        let hex = chunk.iter().fold(String::new(), |mut s, b| {
+            use std::fmt::Write;
+            write!(s, "{b:02x} ").unwrap();
+            s
+        });
 
         let ascii: String = chunk
             .iter()

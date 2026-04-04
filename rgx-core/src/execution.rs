@@ -1802,7 +1802,7 @@ impl NativeCallbackRegistry {
     ///
     /// # Panics
     /// Panics if the internal callbacks `RwLock` is poisoned.
-    pub fn register<F>(&self, name: String, callback: F)
+    pub fn register<F>(&self, name: &str, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -1813,7 +1813,9 @@ impl NativeCallbackRegistry {
             name
         );
         let mut callbacks = self.callbacks.write().unwrap();
-        let replaced_existing = callbacks.insert(name.clone(), Arc::new(callback)).is_some();
+        let replaced_existing = callbacks
+            .insert(name.to_string(), Arc::new(callback))
+            .is_some();
         trace_decision!(
             "execution",
             "callbacks.insert(name,...).is_some()",
@@ -1943,7 +1945,7 @@ impl ExecutionVariableRegistry {
     ///
     /// # Panics
     /// Panics if the internal variables `RwLock` is poisoned.
-    pub fn set(&self, name: String, value: String) {
+    pub fn set(&self, name: &str, value: String) {
         trace_enter!(
             "execution",
             "ExecutionVariableRegistry::set",
@@ -1952,7 +1954,7 @@ impl ExecutionVariableRegistry {
             value.len()
         );
         let mut variables = self.variables.write().unwrap();
-        let replaced_existing = variables.insert(name.clone(), value).is_some();
+        let replaced_existing = variables.insert(name.to_string(), value).is_some();
         trace_decision!(
             "execution",
             "variables.insert(name,...).is_some()",
@@ -2289,7 +2291,7 @@ impl ExecutionManager {
     }
 
     /// Register a native callback
-    pub fn register_native<F>(&self, name: String, callback: F)
+    pub fn register_native<F>(&self, name: &str, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -2299,7 +2301,7 @@ impl ExecutionManager {
             "name={}",
             name
         );
-        let replaced_existing = self.native_callbacks.has(&name);
+        let replaced_existing = self.native_callbacks.has(name);
         self.native_callbacks.register(name, callback);
         trace_decision!(
             "execution",
@@ -2365,7 +2367,7 @@ impl ExecutionManager {
     }
 
     /// Register or replace a host-provided execution variable.
-    pub fn set_variable(&self, name: String, value: String) {
+    pub fn set_variable(&self, name: &str, value: String) {
         trace_enter!(
             "execution",
             "ExecutionManager::set_variable",

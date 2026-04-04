@@ -428,7 +428,7 @@ impl Regex {
     {
         let name = name.into();
         trace_enter!("api", "Regex::register_native", "name={}", name);
-        let result = self.engine.register_native(name, callback);
+        let result = self.engine.register_native(&name, callback);
         trace_exit!("api", "Regex::register_native", "ok={}", result.is_ok());
         result
     }
@@ -478,7 +478,7 @@ impl Regex {
             name,
             value.len()
         );
-        let result = self.engine.set_variable(name, value);
+        let result = self.engine.set_variable(&name, value);
         trace_exit!("api", "Regex::set_variable", "ok={}", result.is_ok());
         result
     }

@@ -61,6 +61,7 @@ pub trait RegexParser {
 
 /// Capabilities that different parser implementations may support
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)] // capability flags are naturally boolean
 pub struct ParserCapabilities {
     /// Supports code execution blocks (?{lang:...})
     pub code_blocks: bool,
@@ -1009,6 +1010,7 @@ impl<'a> PgenAstAdapter<'a> {
             .map_err(|err| RgxError::Compile(err.to_string()))
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn first_descendant<'b>(
         &'b self,
         node: &'b PgenAstNode,
@@ -1053,6 +1055,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn is_empty_wrapper(&self, node: &PgenAstNode) -> bool {
         match &node.content {
             PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {

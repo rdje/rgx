@@ -278,6 +278,7 @@ pub struct Program {
 
 /// Program optimization flags
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ProgramFlags {
     /// Can use SIMD instructions
     pub simd_enabled: bool,
@@ -2047,7 +2048,7 @@ impl RegexVM {
     ///
     /// # Errors
     /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
-    pub fn register_native<F>(&self, name: String, callback: F) -> crate::error::Result<()>
+    pub fn register_native<F>(&self, name: &str, callback: F) -> crate::error::Result<()>
     where
         F: Fn(&CodeExecContext) -> ExecResult + Send + Sync + 'static,
     {
@@ -2081,7 +2082,7 @@ impl RegexVM {
     ///
     /// # Errors
     /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
-    pub fn set_variable(&self, name: String, value: String) -> crate::error::Result<()> {
+    pub fn set_variable(&self, name: &str, value: String) -> crate::error::Result<()> {
         let Some(execution_manager) = &self.execution_manager else {
             return Err(crate::error::RgxError::Engine(
                 "execution variable registration is unavailable for this compiled regex"
@@ -2859,9 +2860,8 @@ impl RegexVM {
         // Scan bytecode for the first substantial literal
         while ip < code.len() && len < 16 {
             // Limit to 16 bytes for efficiency
-            let op = match OpCode::try_from(code[ip]) {
-                Ok(op) => op,
-                Err(()) => break,
+            let Ok(op) = OpCode::try_from(code[ip]) else {
+                break;
             };
             ip += 1;
 
@@ -3174,6 +3174,7 @@ impl RegexVM {
     /// - Processes largest possible chunks first (32, 16, 8 bytes)
     /// - Falls back to scalar comparison for small remainders
     #[allow(clippy::unused_self)]
+    #[allow(clippy::inline_always)] // hot SIMD path
     #[inline(always)]
     fn simd_compare(&self, a: &[u8], b: &[u8]) -> bool {
         if a.len() != b.len() {
@@ -4022,6 +4023,7 @@ impl OptimizingCompiler {
     }
 
     #[allow(clippy::cast_possible_truncation)] // Char-class IDs are single-byte operands.
+    #[allow(clippy::only_used_in_recursion)]
     fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
         if char_class_base == 0 || code.is_empty() {
             return;
