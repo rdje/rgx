@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Remove dead opcodes and memoization scaffolding from VM
+- Scope: dead code cleanup in `vm.rs` opcode surface and execution context.
+- Changes:
+  - Removed 11 dead/superseded opcodes from the `OpCode` enum: `String`, `CharNoCase`, `StringNoCase`, `Range`, `RangeNeg`, `Return`, `SaveStartCond`, `RestoreCaptures`, `RepeatRange`, `RepeatExact`.
+  - Removed the dead `memo_cache: HashMap<(usize, usize), bool>` field from `ExecContext` and its two initializations.
+  - Preserved hex slot stability with tombstone comments so remaining opcode values don't shift.
+  - Added explicit "reserved for future work" comments on kept-but-unemitted opcodes (SIMD, optimization hints, Accept, Halt, JumpIfMatch).
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (36 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (121 warnings, unchanged)
+- Notes/impact:
+  - Shipped regex behavior did not change; this is a dead-code cleanup pass.
+  - The opcode surface is now cleaner: every declared opcode is either emitted/executed or explicitly reserved.
+
 ### 2026-04-04 - Deep warning-debt reduction across rgx-core
 - Scope: workspace-wide clippy warning cleanup, doc hardening, and code quality improvement.
 - Changes:

@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest dead-code cleanup removed 11 superseded opcodes and the dead `memo_cache` field from `vm.rs`:
+  - removed: String, CharNoCase, StringNoCase, Range, RangeNeg, Return, SaveStartCond, RestoreCaptures, RepeatRange, RepeatExact
+  - hex slot values preserved via tombstone comments so remaining opcodes don't shift
+  - remaining unemitted opcodes (SIMD, optimization hints, Accept, Halt, JumpIfMatch) are now explicitly marked as reserved for future work
 - Latest warning-debt pass was a deep cleanup across the entire `rgx-core` crate:
   - removed 30 redundant `continue` statements from VM execution loops
   - converted 16 private methods to associated functions in `vm.rs` (unused `self`), plus 3 cascade conversions

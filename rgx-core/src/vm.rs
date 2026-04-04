@@ -29,12 +29,9 @@ pub enum OpCode {
     Char = 0x00,
     /// Match any character except newline
     Any = 0x01,
-    /// Match literal string (length in next byte, followed by UTF-8 bytes)
-    String = 0x02,
-    /// Case-insensitive character match
-    CharNoCase = 0x03,
-    /// Case-insensitive string match
-    StringNoCase = 0x04,
+    // 0x02 removed: String (never emitted)
+    // 0x03 removed: CharNoCase (never emitted)
+    // 0x04 removed: StringNoCase (never emitted)
 
     // === CHARACTER CLASSES (0x10-0x1F) ===
     /// ASCII digit [0-9]
@@ -53,20 +50,18 @@ pub enum OpCode {
     CharClass = 0x16,
     /// Negated custom character class
     CharClassNeg = 0x17,
-    /// Range check [a-z] style (followed by start, end chars)
-    Range = 0x18,
-    /// Negated range check
-    RangeNeg = 0x19,
+    // 0x18 removed: Range (superseded by CharClass/CharClassNeg)
+    // 0x19 removed: RangeNeg (superseded by CharClass/CharClassNeg)
 
     // === SIMD-OPTIMIZED OPERATIONS (0x20-0x2F) ===
     /// Find any byte from set using SIMD (up to 16 bytes)
-    SimdFind = 0x20,
+    SimdFind = 0x20, // Reserved: not yet emitted by the compiler
     /// Find literal string using SIMD Boyer-Moore
-    SimdString = 0x21,
+    SimdString = 0x21, // Reserved: not yet emitted by the compiler
     /// Vectorized character class matching
-    SimdCharClass = 0x22,
+    SimdCharClass = 0x22, // Reserved: not yet emitted by the compiler
     /// SIMD-accelerated dot matching (skip non-newlines)
-    SimdAny = 0x23,
+    SimdAny = 0x23, // Reserved: not yet emitted by the compiler
 
     // === ANCHORS & BOUNDARIES (0x30-0x3F) ===
     /// Start of line ^
@@ -92,23 +87,20 @@ pub enum OpCode {
     /// Split execution (lazy quantifier) - try second path first
     SplitLazy = 0x42,
     /// Conditional jump based on lookahead
-    JumpIfMatch = 0x43,
+    JumpIfMatch = 0x43, // Reserved: not yet emitted by the compiler
     /// Conditional jump based on negative lookahead
     JumpIfNoMatch = 0x44,
     /// Call subroutine (for recursion/subroutine calls)
     Call = 0x45,
-    /// Return from subroutine
-    Return = 0x46,
+    // 0x46 removed: Return (never emitted; Call uses recursion stack instead)
 
     // === CAPTURE GROUPS (0x50-0x5F) ===
     /// Save position to capture group (group ID follows)
     SaveStart = 0x50,
     /// Save end position to capture group  
     SaveEnd = 0x51,
-    /// Conditional save (only if group doesn't exist)
-    SaveStartCond = 0x52,
-    /// Restore previous capture state (for backtracking)
-    RestoreCaptures = 0x53,
+    // 0x52 removed: SaveStartCond (no implementation; backtracking uses BacktrackFrame)
+    // 0x53 removed: RestoreCaptures (no implementation; backtracking uses BacktrackFrame)
 
     // === ADVANCED FEATURES (0x60-0x6F) ===
     /// Lookahead assertion (length follows, then sub-pattern)
@@ -130,13 +122,13 @@ pub enum OpCode {
 
     // === OPTIMIZATION HINTS (0x70-0x7F) ===
     /// Mark hot path for JIT compilation
-    HotPath = 0x70,
+    HotPath = 0x70, // Reserved: not yet emitted by the compiler
     /// Memoization point (cache match results)
-    Memoize = 0x71,
+    Memoize = 0x71, // Reserved: not yet emitted by the compiler
     /// Clear memoization cache
-    ClearMemo = 0x72,
+    ClearMemo = 0x72, // Reserved: not yet emitted by the compiler
     /// Prefetch hint for upcoming memory access
-    Prefetch = 0x73,
+    Prefetch = 0x73, // Reserved: not yet emitted by the compiler
 
     // === QUANTIFIERS (0x80-0x8F) ===
     /// Optimized ? quantifier (0 or 1, greedy)
@@ -151,10 +143,8 @@ pub enum OpCode {
     PlusGreedy = 0x84,
     /// Optimized + quantifier (1+, lazy)
     PlusLazy = 0x85,
-    /// Range quantifier {n,m} - min/max in next 2 bytes
-    RepeatRange = 0x86,
-    /// Exact repeat quantifier {n} - count in next byte
-    RepeatExact = 0x87,
+    // 0x86 removed: RepeatRange (superseded by Split+QuestionGreedy approach)
+    // 0x87 removed: RepeatExact (superseded by Split+QuestionGreedy approach)
 
     // === ALTERNATIVE TRACKING (0x90-0x9F) ===
     /// Set the current alternative index (for match reporting)
@@ -166,9 +156,9 @@ pub enum OpCode {
     /// Match failure - backtrack
     Fail = 0xF1,
     /// Accept - successful completion
-    Accept = 0xF2,
+    Accept = 0xF2, // Reserved: not yet emitted by the compiler
     /// Halt execution (for debugging)
-    Halt = 0xFF,
+    Halt = 0xFF, // Reserved: not yet emitted by the compiler
 }
 fn regex_kind(node: &Regex) -> &'static str {
     match node {
@@ -332,8 +322,6 @@ pub struct ExecContext {
     pub end: usize,
     /// Capture group positions [start, end, start, end, ...]
     pub captures: Vec<Option<usize>>,
-    /// Memoization cache for backtracking
-    pub memo_cache: HashMap<(usize, usize), bool>,
     /// Call stack for recursion
     pub call_stack: Vec<usize>,
     /// Backtrack stack for alternation and optional quantifiers
@@ -515,7 +503,6 @@ impl RegexVM {
             match_start: 0,
             end: bytes.len(),
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
-            memo_cache: HashMap::new(),
             call_stack: Vec::new(),
             backtrack_stack: Vec::new(),
             current_alternative: None,
@@ -763,7 +750,6 @@ impl RegexVM {
             match_start: ctx.match_start,
             end: ctx.end,
             captures: ctx.captures.clone(),
-            memo_cache: HashMap::new(),
             call_stack: ctx.call_stack.clone(),
             backtrack_stack: Vec::new(),
             current_alternative: ctx.current_alternative,
@@ -4033,7 +4019,7 @@ impl OptimizingCompiler {
             ip += 1;
 
             match op {
-                OpCode::Char | OpCode::String | OpCode::StringNoCase => {
+                OpCode::Char => {
                     if ip >= code.len() {
                         return;
                     }
@@ -4231,7 +4217,7 @@ impl TryFrom<u8> for OpCode {
             Any, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg, CodeBlock,
             DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump, JumpIfMatch,
             JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
-            NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy, Return, SaveEnd,
+            NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy, SaveEnd,
             SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
             StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
         };
@@ -4267,7 +4253,6 @@ impl TryFrom<u8> for OpCode {
             0x43 => Ok(JumpIfMatch),
             0x44 => Ok(JumpIfNoMatch),
             0x45 => Ok(Call),
-            0x46 => Ok(Return),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),

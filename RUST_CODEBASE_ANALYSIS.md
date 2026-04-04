@@ -166,7 +166,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 
 ## Codebase realities that matter for roadmap prioritization
 - `Compiler::feature_validation_message()` remains a critical safety boundary because `OptimizingCompiler::codegen_pass()` still carries placeholder branches for unsupported AST families.
-- The declared opcode surface in `rgx-core/src/vm.rs` still exceeds the emitted/decoded/runtime-used surface; several opcode families remain aspirational or only partially wired.
+- The declared opcode surface in `rgx-core/src/vm.rs` was cleaned up: 11 dead/superseded opcodes were removed (String, CharNoCase, StringNoCase, Range, RangeNeg, Return, SaveStartCond, RestoreCaptures, RepeatRange, RepeatExact) along with the dead `memo_cache` field; the remaining unemitted opcodes (SIMD, optimization hints, Accept, Halt, JumpIfMatch) are explicitly marked as reserved for future work.
 - `ParserConfig` still remains unused scaffolding even after the real PGEN backend rollout, but the older dead `PatternAnalysis` helper has now been removed.
 - The default local CI path now validates the default PGEN-backed RGX-scoped `fmt`, explicit package tests for `rgx-core`, `rgx-cli`, `rgx-bench`, and `rgx-wasm`, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`), combined-language build coverage (`all-languages`), `clippy`, and a quick benchmark-trend capture summary under `target/benchmark-trends/`.
 - The explicit package matrix is intentional because `cargo test --workspace` has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent RGX package coverage remains stable.
@@ -202,7 +202,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Deepen the now-operational mode-scoped benchmark capture into a fuller release-profile longitudinal story, now that explicit archived-baseline selection, revision-aware capture labels, same-mode history separation, same-label quick/full pairing, and rolling paired-label history all exist for targeted local comparisons.
 
 ### Later
-- Finish larger regex-surface gaps: newer PCRE2 advanced forms such as returned-capture subroutines and `VERSION[...]`, plus broader runtime semantics for algebraic Perl extended character classes beyond the newly shipped grouped bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset, and the still-declared-but-unwired opcode families.
+- Finish larger regex-surface gaps: newer PCRE2 advanced forms such as returned-capture subroutines and `VERSION[...]`, plus broader runtime semantics for algebraic Perl extended character classes beyond the newly shipped grouped bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset, and the reserved-but-unemitted opcode families (SIMD, optimization hints).
 
 ## Practical engineering notes
 - Inline code blocks are encoded directly into VM bytecode, which avoids an external callout table and keeps subprogram lowering simple.
