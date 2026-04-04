@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Fix find_all zero-width suppression to match PCRE2 iteration semantics
+- Scope: accuracy fix for find_all zero-width match handling.
+- Changes:
+  - `find_all` now tracks the end position of the previous consuming match and suppresses zero-width matches that start at that exact position, matching PCRE2's `find_iter` semantics.
+  - Previously `a*` on `"aab"` returned `[(0,2),(2,2),(3,3)]`; now returns `[(0,2),(3,3)]` (PCRE2 behavior).
+  - Also fixes the previously-known `(?=a)|b` on `"ba"` bug — the extra zero-width `(1,1)` match is now suppressed.
+  - Added 4 differential parity regression tests: `star_zero_width_suppressed_after_consuming`, `star_zero_width_suppressed_single_char`, `star_zero_width_suppressed_mixed`, `lookahead_alt_zero_width_suppressed`.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - 0 clippy warnings
+- Notes/impact:
+  - This closes all 3 accuracy bugs found by the initial PCRE2 probe plus the open low-severity item.
+  - Total parity case count now 221.
+
 ### 2026-04-04 - Fix empty-string match compilation bug
 - Scope: accuracy fix for zero-width pattern matching.
 - Changes:

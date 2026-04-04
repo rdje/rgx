@@ -2129,6 +2129,9 @@ impl RegexVM {
 
         let mut matches = Vec::new();
         let mut start = 0;
+        // Track previous consuming match end for PCRE2-style zero-width suppression:
+        // after a consuming match ending at position E, a zero-width match at E is skipped.
+        let mut last_match_end: Option<usize> = None;
 
         if let PrefixFilter::Byte(fb) = self.prefix_filter {
             // Fastest path: use memchr to jump between candidate positions
@@ -2138,14 +2141,22 @@ impl RegexVM {
                 ctx.match_start = candidate;
                 Self::reset_captures(&mut ctx);
                 if self.execute_at(&mut ctx, candidate) {
+                    let m_start = candidate;
+                    let m_end = ctx.pos;
+                    // Suppress zero-width match at the exact end of a previous consuming match
+                    if m_start == m_end && last_match_end == Some(m_start) {
+                        start = candidate + 1;
+                        continue;
+                    }
                     let m = Match {
-                        start: candidate,
-                        end: ctx.pos,
-                        groups: self.extract_captures_with_match(&ctx, candidate, ctx.pos),
+                        start: m_start,
+                        end: m_end,
+                        groups: self.extract_captures_with_match(&ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
                     };
-                    start = m.end.max(m.start + 1);
+                    last_match_end = Some(m_end);
+                    start = m_end.max(m_start + 1);
                     matches.push(m);
                 } else {
                     start = candidate + 1;
@@ -2163,14 +2174,22 @@ impl RegexVM {
                 ctx.match_start = start;
                 Self::reset_captures(&mut ctx);
                 if self.execute_at(&mut ctx, start) {
+                    let m_start = start;
+                    let m_end = ctx.pos;
+                    // Suppress zero-width match at the exact end of a previous consuming match
+                    if m_start == m_end && last_match_end == Some(m_start) {
+                        start += 1;
+                        continue;
+                    }
                     let m = Match {
-                        start,
-                        end: ctx.pos,
-                        groups: self.extract_captures_with_match(&ctx, start, ctx.pos),
+                        start: m_start,
+                        end: m_end,
+                        groups: self.extract_captures_with_match(&ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
                     };
-                    start = m.end.max(m.start + 1);
+                    last_match_end = Some(m_end);
+                    start = m_end.max(m_start + 1);
                     matches.push(m);
                 } else {
                     start += 1;

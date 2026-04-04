@@ -50,7 +50,9 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
-- Accuracy probing found 3 real bugs: anchor defaults (fixed), empty-string match suppression (fixed), lookahead+alternation find_all (open, low severity)
+- **Accuracy fix**: `find_all` now suppresses zero-width matches at the end of a just-completed consuming match, matching PCRE2 iteration semantics (also fixes the `(?=a)|b` open item)
+- Second accuracy probe found more issues: zero-width iteration (fixed), dot UTF-8 byte semantics (design decision needed), capture group[0] convention (API convention), missing `(?i)`/`(?m)`/`(?s)` flags and `\k` backreferences (features to add)
+- All 3 accuracy bugs from initial probe now fixed: anchor defaults, empty-string compilation, zero-width find_all iteration
 - Fourth VM optimization: extended prefix filter from single-byte literals to character classes (`\d`, `\w`, `\s`), dramatically improving digit/word/space-prefixed patterns
   - capture_groups find_all 10K: 1437x → 22x vs PCRE2 (65x faster total session improvement)
   - uses a cached `PrefixFilter` enum with `memchr` for bytes and inline predicates for classes

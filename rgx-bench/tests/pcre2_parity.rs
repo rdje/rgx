@@ -1503,6 +1503,27 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "a?",
             input: "bbb",
         },
+        // Zero-width suppression after consuming match (PCRE2 find_all semantics)
+        ParityCase {
+            name: "star_zero_width_suppressed_after_consuming",
+            pattern: "a*",
+            input: "aab",
+        },
+        ParityCase {
+            name: "star_zero_width_suppressed_single_char",
+            pattern: "a*",
+            input: "a",
+        },
+        ParityCase {
+            name: "star_zero_width_suppressed_mixed",
+            pattern: "a*",
+            input: "bab",
+        },
+        ParityCase {
+            name: "lookahead_alt_zero_width_suppressed",
+            pattern: "(?=a)|b",
+            input: "ba",
+        },
     ];
 
     for case in cases {
