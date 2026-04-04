@@ -3982,4 +3982,25 @@ mod tests {
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(msg.contains("named backreference"));
     }
+
+    #[test]
+    fn python_style_named_group() {
+        let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})").unwrap();
+        assert!(re.is_match("2026-04"));
+        assert!(!re.is_match("26-4"));
+    }
+
+    #[test]
+    fn python_style_named_backreference() {
+        let re = Regex::compile(r"(?P<x>ab)(?P=x)").unwrap();
+        assert!(re.is_match("abab"));
+        assert!(!re.is_match("abcd"));
+    }
+
+    #[test]
+    fn python_style_mixed_with_standard() {
+        // Python-style group with standard \k backreference
+        let re = Regex::compile(r"(?P<w>\w+)\s+\k<w>").unwrap();
+        assert!(re.is_match("the the"));
+    }
 }

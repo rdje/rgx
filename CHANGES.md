@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Ship Python-style named groups (?P<name>...) and (?P=name)
+- Scope: new regex feature — Python-compatible named group syntax.
+- Changes:
+  - `(?P<name>...)` now works as an alternative syntax for `(?<name>...)` named capturing groups.
+  - `(?P=name)` now works as an alternative syntax for `\k<name>` named backreferences.
+  - Added `parse_python_group` lexer helper that dispatches on `<` (named group) or `=` (backreference).
+  - Both forms reuse existing `NamedGroupStart` and `NamedBackreference` tokens — no new AST/compiler changes needed.
+  - Added 3 unit tests and 2 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (266 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - Patterns from Python's `re` module now work without rewriting. Parity case count now 239.
+
 ### 2026-04-05 - Wire PGEN adapter for inline flags and named backreferences
 - Scope: PGEN parser adapter integration for recently shipped syntax.
 - Changes:

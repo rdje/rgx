@@ -962,6 +962,67 @@ impl<'a> Lexer<'a> {
         Ok(Token::NamedGroupStart { name })
     }
 
+    /// Parse Python-style named group `(?P<name>...)` or named backreference `(?P=name)`.
+    fn parse_python_group(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip 'P'
+
+        match self.current {
+            Some('<') => {
+                // (?P<name>...) — Python-style named capturing group
+                self.advance(); // Skip '<'
+                let mut name = String::new();
+                while let Some(c) = self.current {
+                    if c == '>' {
+                        self.advance(); // Skip '>'
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+                if name.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                Ok(Token::NamedGroupStart { name })
+            }
+            Some('=') => {
+                // (?P=name) — Python-style named backreference
+                self.advance(); // Skip '='
+                let mut name = String::new();
+                while let Some(c) = self.current {
+                    if c == ')' {
+                        self.advance(); // Skip ')'
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        self.advance();
+                    } else {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                }
+                if name.is_empty() {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                Ok(Token::NamedBackreference { name })
+            }
+            _ => Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            }),
+        }
+    }
+
     /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?[...]), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         trace_enter!(
@@ -1022,6 +1083,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::BranchResetGroupStart)
             }
+            Some('P') => self.parse_python_group(start_pos),
             Some('m' | 'i' | 's' | 'x') => self.parse_flag_modifier(start_pos),
             Some('[') => self.parse_extended_char_class(start_pos),
             Some('R') => {

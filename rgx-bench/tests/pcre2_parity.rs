@@ -171,6 +171,16 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "abab xx ababab yy abab",
         },
         ParityCase {
+            name: "python_named_group_all",
+            pattern: r"(?P<year>\d{4})-(?P<month>\d{2})",
+            input: "2026-04 and 1999-12",
+        },
+        ParityCase {
+            name: "python_named_backref_all",
+            pattern: r"(?P<x>ab)(?P=x)",
+            input: "abab xx abab",
+        },
+        ParityCase {
             name: "branch_reset_backreference_all",
             pattern: r"(?|(a)|(b))\1",
             input: "aa bb ab ba",

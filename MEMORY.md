@@ -50,6 +50,7 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- **New feature**: Python-style `(?P<name>...)` named groups and `(?P=name)` named backreferences shipped — reuse existing tokens, no new AST needed
 - PGEN adapter now natively handles `scoped_inline_modifiers`, `inline_modifiers`, and `backreference` rule names instead of falling through to recursive-descent fallback — no PGEN bugs found, the gap was in RGX's adapter code
 - **New feature**: named backreferences `\k<name>` and `\k'name'` shipped — resolve to numbered backref at compile time; missing names produce compile errors
 - **New feature**: non-scoped inline flags `(?i)`, `(?m)`, `(?s)` and combinations shipped — apply to rest of current group; `lower_flag_toggles` compiler pass handles PGEN-backed empty-body flag nodes
