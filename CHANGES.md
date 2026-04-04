@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Eliminate all RGX-owned clippy warnings through function refactoring
+- Scope: structural refactoring of 10 over-length functions plus targeted suppression of 3 architectural VM functions.
+- Changes:
+  - Refactored 6 borderline functions (112-141 lines) in `compiler.rs`, `lexer.rs`, and `vm.rs` by extracting natural helpers.
+  - Refactored 4 medium functions (180-308 lines) in `execution.rs`, `lexer.rs`, and `parser.rs` by extracting dispatch/parsing helpers.
+  - Added `#[allow(clippy::too_many_lines)]` with architectural rationale to 3 large VM functions (`execute_at` at 718, `execute_subexpr` at 527, `codegen_pass` at 282 lines) that are inherently monolithic dispatch loops.
+  - Feature-gated `dispatch_engine` helper behind language features to avoid dead-code warning.
+  - Fixed iterator-style loop warning in extracted `find_byte_tail` helper.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` (33 total, 0 RGX-owned)
+- Notes/impact:
+  - RGX-owned clippy warnings now at **zero** — from 296 at the start of this session. All remaining 33 workspace warnings come from the PGEN submodule.
+
 ### 2026-04-04 - Expand PCRE2 differential parity coverage for combined features
 - Scope: parity test expansion covering combined-feature patterns and edge cases.
 - Changes:

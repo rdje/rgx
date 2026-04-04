@@ -462,78 +462,78 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse atomic expression: literals, groups, character classes, etc.
-    fn parse_atom(&mut self) -> Result<Regex, LexError> {
-        trace_enter!(
-            "parser",
-            "Parser::parse_atom",
-            "token={}",
-            self.current_token_snapshot()
-        );
-        let result = match self.peek() {
+    /// Parse the body of a group (alternation inside parentheses) and expect
+    /// a closing `GroupEnd` token. Returns the inner expression on success.
+    fn parse_group_body(&mut self) -> Result<Regex, LexError> {
+        let expr = self.parse_alternation()?;
+        match self.peek() {
+            Some(Token::GroupEnd) => {
+                self.advance()?;
+                Ok(expr)
+            }
+            _ => Err(LexError::UnexpectedEOF {
+                expected: "closing parenthesis ')'".to_string(),
+                position: self.current_position_or_start(),
+            }),
+        }
+    }
+
+    /// Parse simple leaf tokens that map directly to a `Regex` node without
+    /// consuming any further tokens beyond the current one.
+    fn parse_atom_leaf(&mut self) -> Result<Regex, LexError> {
+        match self.peek() {
             Some(Token::Char(c)) => {
                 let c = *c;
                 self.advance()?;
                 Ok(Regex::Char(c))
             }
-
             Some(Token::Dot) => {
                 self.advance()?;
                 Ok(Regex::Dot)
             }
-
             Some(Token::Anchor(anchor_type)) => {
                 let anchor_type = *anchor_type;
                 self.advance()?;
                 Ok(Regex::Anchor(anchor_type))
             }
-
             Some(Token::Digit) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Digit { negated: false }))
             }
-
             Some(Token::DigitNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Digit { negated: true }))
             }
-
             Some(Token::Word) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Word { negated: false }))
             }
-
             Some(Token::WordNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Word { negated: true }))
             }
-
             Some(Token::Space) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Space { negated: false }))
             }
-
             Some(Token::SpaceNeg) => {
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Space { negated: true }))
             }
-
             Some(Token::WordBoundary) => {
                 self.advance()?;
                 Ok(Regex::WordBoundary { positive: true })
             }
-
             Some(Token::WordBoundaryNeg) => {
                 self.advance()?;
                 Ok(Regex::WordBoundary { positive: false })
             }
-
             Some(Token::CharClass { ranges, negated }) => {
                 let ranges = ranges.clone();
                 let negated = *negated;
                 self.advance()?;
                 Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
             }
-
             Some(Token::UnicodeClass { name }) => {
                 let name = name.clone();
                 self.advance()?;
@@ -542,7 +542,6 @@ impl<'a> Parser<'a> {
                     negated: false,
                 }))
             }
-
             Some(Token::UnicodeClassNeg { name }) => {
                 let name = name.clone();
                 self.advance()?;
@@ -551,249 +550,198 @@ impl<'a> Parser<'a> {
                     negated: true,
                 }))
             }
-
             Some(Token::Backreference(n)) => {
                 let n = *n;
                 self.advance()?;
                 Ok(Regex::Backreference(n))
             }
-
             Some(Token::CodeBlock { lang, code }) => {
                 let lang = lang.clone();
                 let code = code.clone();
                 self.advance()?;
                 Ok(Regex::CodeBlock { lang, code })
             }
-
             Some(Token::ExtendedCharClass { content }) => {
                 let content = content.clone();
                 self.advance()?;
                 Ok(Regex::ExtendedCharClass { content })
             }
-
             Some(Token::Recursion { target }) => {
                 let target = target.clone();
                 self.advance()?;
                 Ok(Regex::Recursion { target })
             }
+            // Not a leaf token — should not be called for these.
+            _ => unreachable!("parse_atom_leaf called for non-leaf token"),
+        }
+    }
 
-            Some(Token::ConditionalStart { condition }) => {
-                let condition = condition.clone();
-                self.advance()?; // consume conditional start token
-
-                let true_branch = self.parse_sequence()?;
-                let false_branch = if matches!(self.peek(), Some(Token::Alternation)) {
-                    self.advance()?; // consume conditional branch separator '|'
-                    Some(Box::new(self.parse_sequence()?))
-                } else {
-                    None
-                };
-
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Conditional {
-                            condition,
-                            true_branch: Box::new(true_branch),
-                            false_branch,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
-            }
-
+    /// Parse a group-start atom (capturing, non-capturing, named, atomic,
+    /// branch-reset, lookahead, or lookbehind).
+    fn parse_atom_group(&mut self) -> Result<Regex, LexError> {
+        match self.peek() {
             Some(Token::GroupStart) => {
-                self.advance()?; // consume '('
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Group {
-                            expr: Box::new(expr),
-                            kind: GroupKind::Capturing,
-                            index: None, // Will be assigned during compilation
-                            name: None,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Group {
+                    expr: Box::new(expr),
+                    kind: GroupKind::Capturing,
+                    index: None,
+                    name: None,
+                })
             }
-
             Some(Token::NonCapturingGroupStart) => {
-                self.advance()?; // consume '(?:'
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Group {
-                            expr: Box::new(expr),
-                            kind: GroupKind::NonCapturing,
-                            index: None,
-                            name: None,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Group {
+                    expr: Box::new(expr),
+                    kind: GroupKind::NonCapturing,
+                    index: None,
+                    name: None,
+                })
             }
-
             Some(Token::NamedGroupStart { name }) => {
                 let name = name.clone();
-                self.advance()?; // consume '(?<name>'
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Group {
-                            expr: Box::new(expr),
-                            kind: GroupKind::Capturing,
-                            index: None,
-                            name: Some(name),
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Group {
+                    expr: Box::new(expr),
+                    kind: GroupKind::Capturing,
+                    index: None,
+                    name: Some(name),
+                })
             }
-
             Some(Token::AtomicGroupStart) => {
-                self.advance()?; // consume '(?>'
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Group {
-                            expr: Box::new(expr),
-                            kind: GroupKind::Atomic,
-                            index: None,
-                            name: None,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Group {
+                    expr: Box::new(expr),
+                    kind: GroupKind::Atomic,
+                    index: None,
+                    name: None,
+                })
             }
-
             Some(Token::BranchResetGroupStart) => {
-                self.advance()?; // consume '(?|'
-                let expr = self.parse_alternation()?;
-
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Group {
-                            expr: Box::new(expr),
-                            kind: GroupKind::BranchReset,
-                            index: None,
-                            name: None,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Group {
+                    expr: Box::new(expr),
+                    kind: GroupKind::BranchReset,
+                    index: None,
+                    name: None,
+                })
             }
-
             Some(Token::LookaheadPos) => {
-                self.advance()?; // consume '(?='
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Lookahead {
-                            expr: Box::new(expr),
-                            positive: true,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Lookahead {
+                    expr: Box::new(expr),
+                    positive: true,
+                })
             }
-
             Some(Token::LookaheadNeg) => {
-                self.advance()?; // consume '(?!'
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Lookahead {
-                            expr: Box::new(expr),
-                            positive: false,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Lookahead {
+                    expr: Box::new(expr),
+                    positive: false,
+                })
             }
-
             Some(Token::LookbehindPos) => {
-                self.advance()?; // consume '(?<='
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Lookbehind {
-                            expr: Box::new(expr),
-                            positive: true,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Lookbehind {
+                    expr: Box::new(expr),
+                    positive: true,
+                })
             }
-
             Some(Token::LookbehindNeg) => {
-                self.advance()?; // consume '(?<!'
-                let expr = self.parse_alternation()?;
-
-                // Expect closing ')'
-                match self.peek() {
-                    Some(Token::GroupEnd) => {
-                        self.advance()?; // consume ')'
-                        Ok(Regex::Lookbehind {
-                            expr: Box::new(expr),
-                            positive: false,
-                        })
-                    }
-                    _ => Err(LexError::UnexpectedEOF {
-                        expected: "closing parenthesis ')'".to_string(),
-                        position: self.current_position_or_start(),
-                    }),
-                }
+                self.advance()?;
+                let expr = self.parse_group_body()?;
+                Ok(Regex::Lookbehind {
+                    expr: Box::new(expr),
+                    positive: false,
+                })
             }
+            _ => unreachable!("parse_atom_group called for non-group token"),
+        }
+    }
+
+    /// Parse a conditional expression atom.
+    fn parse_atom_conditional(&mut self) -> Result<Regex, LexError> {
+        let condition = match self.peek() {
+            Some(Token::ConditionalStart { condition }) => condition.clone(),
+            _ => unreachable!("parse_atom_conditional called for non-conditional token"),
+        };
+        self.advance()?;
+
+        let true_branch = self.parse_sequence()?;
+        let false_branch = if matches!(self.peek(), Some(Token::Alternation)) {
+            self.advance()?;
+            Some(Box::new(self.parse_sequence()?))
+        } else {
+            None
+        };
+
+        match self.peek() {
+            Some(Token::GroupEnd) => {
+                self.advance()?;
+                Ok(Regex::Conditional {
+                    condition,
+                    true_branch: Box::new(true_branch),
+                    false_branch,
+                })
+            }
+            _ => Err(LexError::UnexpectedEOF {
+                expected: "closing parenthesis ')'".to_string(),
+                position: self.current_position_or_start(),
+            }),
+        }
+    }
+
+    /// Parse atomic expression: literals, groups, character classes, etc.
+    fn parse_atom(&mut self) -> Result<Regex, LexError> {
+        trace_enter!(
+            "parser",
+            "Parser::parse_atom",
+            "token={}",
+            self.current_token_snapshot()
+        );
+        let result = match self.peek() {
+            Some(
+                Token::Char(_)
+                | Token::Dot
+                | Token::Anchor(_)
+                | Token::Digit
+                | Token::DigitNeg
+                | Token::Word
+                | Token::WordNeg
+                | Token::Space
+                | Token::SpaceNeg
+                | Token::WordBoundary
+                | Token::WordBoundaryNeg
+                | Token::CharClass { .. }
+                | Token::UnicodeClass { .. }
+                | Token::UnicodeClassNeg { .. }
+                | Token::Backreference(_)
+                | Token::CodeBlock { .. }
+                | Token::ExtendedCharClass { .. }
+                | Token::Recursion { .. },
+            ) => self.parse_atom_leaf(),
+
+            Some(Token::ConditionalStart { .. }) => self.parse_atom_conditional(),
+
+            Some(
+                Token::GroupStart
+                | Token::NonCapturingGroupStart
+                | Token::NamedGroupStart { .. }
+                | Token::AtomicGroupStart
+                | Token::BranchResetGroupStart
+                | Token::LookaheadPos
+                | Token::LookaheadNeg
+                | Token::LookbehindPos
+                | Token::LookbehindNeg,
+            ) => self.parse_atom_group(),
 
             Some(Token::EOF) => Err(LexError::UnexpectedEOF {
                 expected: "regex expression".to_string(),

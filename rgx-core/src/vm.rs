@@ -799,6 +799,7 @@ impl RegexVM {
     }
 
     /// Execute bytecode starting at given position
+    #[allow(clippy::too_many_lines)] // Main VM dispatch loop — splitting would fragment the opcode state machine
     fn execute_at(&self, ctx: &mut ExecContext, start: usize) -> bool {
         debug_log!(
             "vm",
@@ -2094,6 +2095,7 @@ impl RegexVM {
     }
 
     /// Execute a sub-expression (used for quantifiers)
+    #[allow(clippy::too_many_lines)] // Subexpression dispatch mirrors execute_at — same architectural constraint
     fn execute_subexpr(&self, ctx: &mut ExecContext, code: &[u8]) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
@@ -2921,145 +2923,142 @@ impl RegexVM {
         #[cfg(target_arch = "x86_64")]
         {
             if self.simd_support.avx2 {
-                // AVX2 path: Process 32 bytes at a time
-                unsafe {
-                    use std::arch::x86_64::*;
-
-                    let needle_vec = _mm256_set1_epi8(needle as i8);
-                    let mut i = 0;
-
-                    while i + 32 <= haystack.len() {
-                        let hay_vec = _mm256_loadu_si256(haystack[i..].as_ptr() as *const __m256i);
-                        let cmp = _mm256_cmpeq_epi8(hay_vec, needle_vec);
-                        let mask = _mm256_movemask_epi8(cmp) as u32;
-
-                        if mask != 0 {
-                            // Found at least one match - extract all positions
-                            let mut m = mask;
-                            while m != 0 {
-                                let bit_pos = m.trailing_zeros() as usize;
-                                positions.push(i + bit_pos);
-                                m &= m - 1; // Clear lowest set bit
-                            }
-                        }
-
-                        i += 32;
-                    }
-
-                    // Handle remaining bytes
-                    while i < haystack.len() {
-                        if haystack[i] == needle {
-                            positions.push(i);
-                        }
-                        i += 1;
-                    }
-                }
+                Self::find_byte_avx2(&mut positions, haystack, needle);
             } else if self.simd_support.sse2 {
-                // SSE2 path: Process 16 bytes at a time
-                unsafe {
-                    use std::arch::x86_64::*;
-
-                    let needle_vec = _mm_set1_epi8(needle as i8);
-                    let mut i = 0;
-
-                    while i + 16 <= haystack.len() {
-                        let hay_vec = _mm_loadu_si128(haystack[i..].as_ptr() as *const __m128i);
-                        let cmp = _mm_cmpeq_epi8(hay_vec, needle_vec);
-                        let mask = _mm_movemask_epi8(cmp) as u16;
-
-                        if mask != 0 {
-                            let mut m = mask;
-                            while m != 0 {
-                                let bit_pos = m.trailing_zeros() as usize;
-                                positions.push(i + bit_pos);
-                                m &= m - 1;
-                            }
-                        }
-
-                        i += 16;
-                    }
-
-                    // Handle remaining bytes
-                    while i < haystack.len() {
-                        if haystack[i] == needle {
-                            positions.push(i);
-                        }
-                        i += 1;
-                    }
-                }
+                Self::find_byte_sse2(&mut positions, haystack, needle);
             } else {
-                // Fallback scalar path
-                positions.extend(haystack.iter().enumerate().filter_map(|(i, &b)| {
-                    if b == needle {
-                        Some(i)
-                    } else {
-                        None
-                    }
-                }));
+                Self::find_byte_scalar(&mut positions, haystack, needle);
             }
         }
 
         #[cfg(target_arch = "aarch64")]
         {
             if self.simd_support.neon {
-                // ARM NEON path: Process 16 bytes at a time
-                unsafe {
-                    use std::arch::aarch64::{vceqq_u8, vdupq_n_u8, vld1q_u8, vst1q_u8};
-
-                    let needle_vec = vdupq_n_u8(needle);
-                    let mut i = 0;
-
-                    while i + 16 <= haystack.len() {
-                        let hay_vec = vld1q_u8(haystack[i..].as_ptr());
-                        let cmp = vceqq_u8(hay_vec, needle_vec);
-
-                        // Extract matches - NEON doesn't have movemask equivalent
-                        // We need to extract each byte and check it
-                        let mut result = [0u8; 16];
-                        vst1q_u8(result.as_mut_ptr(), cmp);
-
-                        for (j, &byte) in result.iter().enumerate() {
-                            if byte != 0 {
-                                positions.push(i + j);
-                            }
-                        }
-
-                        i += 16;
-                    }
-
-                    // Handle remaining bytes
-                    while i < haystack.len() {
-                        if haystack[i] == needle {
-                            positions.push(i);
-                        }
-                        i += 1;
-                    }
-                }
+                Self::find_byte_neon(&mut positions, haystack, needle);
             } else {
-                // Fallback scalar path
-                positions.extend(haystack.iter().enumerate().filter_map(|(i, &b)| {
-                    if b == needle {
-                        Some(i)
-                    } else {
-                        None
-                    }
-                }));
+                Self::find_byte_scalar(&mut positions, haystack, needle);
             }
         }
 
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
-            // Generic fallback for other architectures
-            positions.extend(haystack.iter().enumerate().filter_map(|(i, &b)| {
-                if b == needle {
-                    Some(i)
-                } else {
-                    None
-                }
-            }));
+            Self::find_byte_scalar(&mut positions, haystack, needle);
         }
 
         positions
+    }
+
+    /// Scalar fallback for single-byte search.
+    fn find_byte_scalar(positions: &mut Vec<usize>, haystack: &[u8], needle: u8) {
+        positions.extend(haystack.iter().enumerate().filter_map(|(i, &b)| {
+            if b == needle {
+                Some(i)
+            } else {
+                None
+            }
+        }));
+    }
+
+    /// AVX2 path: search 32 bytes at a time.
+    #[cfg(target_arch = "x86_64")]
+    fn find_byte_avx2(positions: &mut Vec<usize>, haystack: &[u8], needle: u8) {
+        unsafe {
+            use std::arch::x86_64::*;
+
+            let needle_vec = _mm256_set1_epi8(needle as i8);
+            let mut i = 0;
+
+            while i + 32 <= haystack.len() {
+                let hay_vec = _mm256_loadu_si256(haystack[i..].as_ptr() as *const __m256i);
+                let cmp = _mm256_cmpeq_epi8(hay_vec, needle_vec);
+                let mask = _mm256_movemask_epi8(cmp) as u32;
+
+                if mask != 0 {
+                    let mut m = mask;
+                    while m != 0 {
+                        let bit_pos = m.trailing_zeros() as usize;
+                        positions.push(i + bit_pos);
+                        m &= m - 1; // Clear lowest set bit
+                    }
+                }
+
+                i += 32;
+            }
+
+            // Handle remaining bytes
+            Self::find_byte_tail(positions, haystack, needle, i);
+        }
+    }
+
+    /// SSE2 path: search 16 bytes at a time.
+    #[cfg(target_arch = "x86_64")]
+    fn find_byte_sse2(positions: &mut Vec<usize>, haystack: &[u8], needle: u8) {
+        unsafe {
+            use std::arch::x86_64::*;
+
+            let needle_vec = _mm_set1_epi8(needle as i8);
+            let mut i = 0;
+
+            while i + 16 <= haystack.len() {
+                let hay_vec = _mm_loadu_si128(haystack[i..].as_ptr() as *const __m128i);
+                let cmp = _mm_cmpeq_epi8(hay_vec, needle_vec);
+                let mask = _mm_movemask_epi8(cmp) as u16;
+
+                if mask != 0 {
+                    let mut m = mask;
+                    while m != 0 {
+                        let bit_pos = m.trailing_zeros() as usize;
+                        positions.push(i + bit_pos);
+                        m &= m - 1;
+                    }
+                }
+
+                i += 16;
+            }
+
+            // Handle remaining bytes
+            Self::find_byte_tail(positions, haystack, needle, i);
+        }
+    }
+
+    /// ARM NEON path: search 16 bytes at a time.
+    #[cfg(target_arch = "aarch64")]
+    fn find_byte_neon(positions: &mut Vec<usize>, haystack: &[u8], needle: u8) {
+        unsafe {
+            use std::arch::aarch64::{vceqq_u8, vdupq_n_u8, vld1q_u8, vst1q_u8};
+
+            let needle_vec = vdupq_n_u8(needle);
+            let mut i = 0;
+
+            while i + 16 <= haystack.len() {
+                let hay_vec = vld1q_u8(haystack[i..].as_ptr());
+                let cmp = vceqq_u8(hay_vec, needle_vec);
+
+                // Extract matches - NEON doesn't have movemask equivalent
+                let mut result = [0u8; 16];
+                vst1q_u8(result.as_mut_ptr(), cmp);
+
+                for (j, &byte) in result.iter().enumerate() {
+                    if byte != 0 {
+                        positions.push(i + j);
+                    }
+                }
+
+                i += 16;
+            }
+
+            // Handle remaining bytes
+            Self::find_byte_tail(positions, haystack, needle, i);
+        }
+    }
+
+    /// Scan remaining bytes after a SIMD-vectorized bulk pass.
+    fn find_byte_tail(positions: &mut Vec<usize>, haystack: &[u8], needle: u8, start: usize) {
+        for (i, &byte) in haystack.iter().enumerate().skip(start) {
+            if byte == needle {
+                positions.push(i);
+            }
+        }
     }
 
     /// SIMD short string search (2-4 bytes) using shuffle-based matching.
@@ -3412,6 +3411,7 @@ impl OptimizingCompiler {
     }
 
     /// Code generation pass - emit optimized bytecode
+    #[allow(clippy::too_many_lines)] // AST codegen covers all node types in one pass — splitting would scatter the emission logic
     #[allow(clippy::cast_possible_truncation)] // Bytecode operands are intentionally stored as compact u8/u16 values.
     fn codegen_pass(&mut self, ast: &Regex, is_top_level: bool) {
         match ast {
@@ -4098,33 +4098,10 @@ impl OptimizingCompiler {
                     ip += 2 + body_len;
                 }
                 OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
-                    if ip >= code.len() {
-                        return;
+                    match self.rebase_conditional_operand(code, ip, char_class_base) {
+                        Some(next_ip) => ip = next_ip,
+                        None => return,
                     }
-                    let kind = code[ip];
-                    ip += 1;
-                    match kind {
-                        CONDITIONAL_KIND_GROUP_EXISTS | CONDITIONAL_KIND_RECURSION_GROUP => ip += 1,
-                        CONDITIONAL_KIND_RECURSION_ANY | CONDITIONAL_KIND_DEFINE_FALSE => {}
-                        CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
-                        | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
-                        | CONDITIONAL_KIND_LOOKBEHIND_POSITIVE
-                        | CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE => {
-                            if ip >= code.len() {
-                                return;
-                            }
-                            let len = code[ip] as usize;
-                            ip += 1;
-                            let end = ip + len;
-                            if end > code.len() {
-                                return;
-                            }
-                            self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
-                            ip = end;
-                        }
-                        _ => return,
-                    }
-                    ip += 2;
                 }
                 OpCode::DigitAscii
                 | OpCode::DigitAsciiNeg
@@ -4149,6 +4126,45 @@ impl OptimizingCompiler {
                 _ => return,
             }
         }
+    }
+
+    /// Advance past a conditional (JumpIfMatch/JumpIfNoMatch) operand,
+    /// rebasing any embedded char-class ids.  Returns the new `ip`, or
+    /// `None` when the bytecode is malformed and iteration should stop.
+    #[allow(clippy::only_used_in_recursion)]
+    fn rebase_conditional_operand(
+        &self,
+        code: &mut [u8],
+        mut ip: usize,
+        char_class_base: usize,
+    ) -> Option<usize> {
+        if ip >= code.len() {
+            return None;
+        }
+        let kind = code[ip];
+        ip += 1;
+        match kind {
+            CONDITIONAL_KIND_GROUP_EXISTS | CONDITIONAL_KIND_RECURSION_GROUP => ip += 1,
+            CONDITIONAL_KIND_RECURSION_ANY | CONDITIONAL_KIND_DEFINE_FALSE => {}
+            CONDITIONAL_KIND_LOOKAHEAD_POSITIVE
+            | CONDITIONAL_KIND_LOOKAHEAD_NEGATIVE
+            | CONDITIONAL_KIND_LOOKBEHIND_POSITIVE
+            | CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE => {
+                if ip >= code.len() {
+                    return None;
+                }
+                let len = code[ip] as usize;
+                ip += 1;
+                let end = ip + len;
+                if end > code.len() {
+                    return None;
+                }
+                self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
+                ip = end;
+            }
+            _ => return None,
+        }
+        Some(ip + 2)
     }
 
     /// Emit opcode with character operand

@@ -2101,6 +2101,58 @@ impl ExecutionManager {
         manager
     }
 
+    /// Dispatch code to an optional engine, producing trace output for the
+    /// decision and exit points.
+    #[cfg(any(
+        feature = "lua",
+        feature = "javascript",
+        feature = "rhai",
+        feature = "wasm"
+    ))]
+    fn dispatch_engine(
+        engine: Option<&dyn ExecutionEngine>,
+        code: &str,
+        context: &ExecContext,
+        language: &str,
+        field_check: &str,
+    ) -> ExecResult {
+        if let Some(engine) = engine {
+            trace_decision!(
+                "execution",
+                field_check,
+                true,
+                "dispatching code to {} execution backend",
+                language
+            );
+            let result = engine.execute(code, context);
+            trace_exit!(
+                "execution",
+                "ExecutionManager::execute",
+                "ok=true,language={},result_kind={}",
+                language,
+                exec_result_kind(&result)
+            );
+            result
+        } else {
+            trace_decision!(
+                "execution",
+                field_check,
+                false,
+                "{} feature enabled but engine initialization unavailable",
+                language.to_ascii_lowercase()
+            );
+            let result = ExecResult::Error(format!("{language} engine not available"));
+            trace_exit!(
+                "execution",
+                "ExecutionManager::execute",
+                "ok=true,language={},result_kind={}",
+                language,
+                exec_result_kind(&result)
+            );
+            result
+        }
+    }
+
     /// Execute code in the specified language
     pub fn execute(&self, language: &str, code: &str, context: &ExecContext) -> ExecResult {
         trace_enter!(
@@ -2113,146 +2165,38 @@ impl ExecutionManager {
         );
         match language {
             #[cfg(feature = "wasm")]
-            "wasm" => {
-                if let Some(engine) = &self.wasm_engine {
-                    trace_decision!(
-                        "execution",
-                        "self.wasm_engine.is_some()",
-                        true,
-                        "dispatching code to WASM execution backend"
-                    );
-                    let result = engine.execute(code, context);
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=wasm,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                } else {
-                    trace_decision!(
-                        "execution",
-                        "self.wasm_engine.is_some()",
-                        false,
-                        "wasm feature enabled but engine initialization unavailable"
-                    );
-                    let result = ExecResult::Error("WASM engine not available".to_string());
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=wasm,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                }
-            }
+            "wasm" => Self::dispatch_engine(
+                self.wasm_engine.as_ref().map(|e| e as &dyn ExecutionEngine),
+                code,
+                context,
+                "WASM",
+                "self.wasm_engine.is_some()",
+            ),
             #[cfg(feature = "lua")]
-            "lua" => {
-                if let Some(engine) = &self.lua_engine {
-                    trace_decision!(
-                        "execution",
-                        "self.lua_engine.is_some()",
-                        true,
-                        "dispatching code to Lua execution backend"
-                    );
-                    let result = engine.execute(code, context);
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=lua,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                } else {
-                    trace_decision!(
-                        "execution",
-                        "self.lua_engine.is_some()",
-                        false,
-                        "lua feature enabled but engine initialization unavailable"
-                    );
-                    let result = ExecResult::Error("Lua engine not available".to_string());
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=lua,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                }
-            }
-
+            "lua" => Self::dispatch_engine(
+                self.lua_engine.as_ref().map(|e| e as &dyn ExecutionEngine),
+                code,
+                context,
+                "Lua",
+                "self.lua_engine.is_some()",
+            ),
             #[cfg(feature = "javascript")]
-            "js" | "javascript" => {
-                if let Some(engine) = &self.js_engine {
-                    trace_decision!(
-                        "execution",
-                        "self.js_engine.is_some()",
-                        true,
-                        "dispatching code to JavaScript execution backend"
-                    );
-                    let result = engine.execute(code, context);
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=javascript,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                } else {
-                    trace_decision!(
-                        "execution",
-                        "self.js_engine.is_some()",
-                        false,
-                        "javascript feature enabled but engine initialization unavailable"
-                    );
-                    let result = ExecResult::Error("JavaScript engine not available".to_string());
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=javascript,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                }
-            }
-
+            "js" | "javascript" => Self::dispatch_engine(
+                self.js_engine.as_ref().map(|e| e as &dyn ExecutionEngine),
+                code,
+                context,
+                "JavaScript",
+                "self.js_engine.is_some()",
+            ),
             #[cfg(feature = "rhai")]
-            "rhai" => {
-                if let Some(engine) = &self.rhai_engine {
-                    trace_decision!(
-                        "execution",
-                        "self.rhai_engine.is_some()",
-                        true,
-                        "dispatching code to Rhai execution backend"
-                    );
-                    let result = engine.execute(code, context);
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=rhai,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                } else {
-                    trace_decision!(
-                        "execution",
-                        "self.rhai_engine.is_some()",
-                        false,
-                        "rhai feature enabled but engine initialization unavailable"
-                    );
-                    let result = ExecResult::Error("Rhai engine not available".to_string());
-                    trace_exit!(
-                        "execution",
-                        "ExecutionManager::execute",
-                        "ok=true,language=rhai,result_kind={}",
-                        exec_result_kind(&result)
-                    );
-                    result
-                }
-            }
-
+            "rhai" => Self::dispatch_engine(
+                self.rhai_engine.as_ref().map(|e| e as &dyn ExecutionEngine),
+                code,
+                context,
+                "Rhai",
+                "self.rhai_engine.is_some()",
+            ),
             "native" => {
-                // For native, the 'code' is the function name
                 trace_decision!(
                     "execution",
                     "language == native",
@@ -2268,7 +2212,6 @@ impl ExecutionManager {
                 );
                 result
             }
-
             _ => {
                 trace_decision!(
                     "execution",

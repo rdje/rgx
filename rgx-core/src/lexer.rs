@@ -209,110 +209,7 @@ impl<'a> Lexer<'a> {
                 expected: "escape sequence".to_string(),
                 position: start_pos,
             }),
-
-            // Predefined character classes
-            Some('d') => {
-                self.advance();
-                Ok(Token::Digit)
-            }
-            Some('D') => {
-                self.advance();
-                Ok(Token::DigitNeg)
-            }
-            Some('w') => {
-                self.advance();
-                Ok(Token::Word)
-            }
-            Some('W') => {
-                self.advance();
-                Ok(Token::WordNeg)
-            }
-            Some('s') => {
-                self.advance();
-                Ok(Token::Space)
-            }
-            Some('S') => {
-                self.advance();
-                Ok(Token::SpaceNeg)
-            }
-            Some('b') => {
-                self.advance();
-                Ok(Token::WordBoundary)
-            }
-            Some('B') => {
-                self.advance();
-                Ok(Token::WordBoundaryNeg)
-            }
-
-            // Anchors
-            Some('A') => {
-                self.advance();
-                Ok(Token::Anchor(AnchorType::AbsStart))
-            }
-            Some('Z') => {
-                self.advance();
-                Ok(Token::Anchor(AnchorType::AbsEnd))
-            }
-            Some('z') => {
-                self.advance();
-                Ok(Token::Anchor(AnchorType::AbsEndNoNL))
-            }
-
-            // Backreferences
-            Some(c) if c.is_ascii_digit() => self.parse_backreference(),
-
-            // Unicode property classes
-            Some('p') => self.parse_unicode_class(false),
-            Some('P') => self.parse_unicode_class(true),
-
-            // Literal escape sequences
-            Some('n') => {
-                self.advance();
-                Ok(Token::Char('\n'))
-            }
-            Some('t') => {
-                self.advance();
-                Ok(Token::Char('\t'))
-            }
-            Some('r') => {
-                self.advance();
-                Ok(Token::Char('\r'))
-            }
-            Some('f') => {
-                self.advance();
-                Ok(Token::Char('\u{0C}'))
-            }
-            Some('a') => {
-                self.advance();
-                Ok(Token::Char('\u{07}'))
-            }
-            Some('e') => {
-                self.advance();
-                Ok(Token::Char('\u{1B}'))
-            }
-
-            // Escaped metacharacters
-            Some(
-                '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\',
-            ) => {
-                let ch = self.current.unwrap();
-                self.advance();
-                Ok(Token::Char(ch))
-            }
-
-            // Hex escapes \x{...} or \xFF
-            Some('x') => self.parse_hex_escape(),
-
-            // Octal escapes \777
-            Some(c) if c.is_ascii_digit() => self.parse_octal_escape(),
-
-            Some(c) => {
-                let sequence = format!("\\{c}");
-                Err(LexError::InvalidEscape {
-                    sequence,
-                    position: start_pos,
-                })
-            }
+            Some(c) => self.parse_escape_char(c, start_pos),
         };
         match &result {
             Ok(token) => trace_exit!(
@@ -324,6 +221,112 @@ impl<'a> Lexer<'a> {
             Err(err) => trace_exit!("lexer", "Lexer::parse_escape", "ok=false,error={}", err),
         }
         result
+    }
+
+    /// Dispatch a single escape character to the appropriate token.
+    fn parse_escape_char(&mut self, c: char, start_pos: Position) -> Result<Token, LexError> {
+        match c {
+            // Predefined character classes
+            'd' => {
+                self.advance();
+                Ok(Token::Digit)
+            }
+            'D' => {
+                self.advance();
+                Ok(Token::DigitNeg)
+            }
+            'w' => {
+                self.advance();
+                Ok(Token::Word)
+            }
+            'W' => {
+                self.advance();
+                Ok(Token::WordNeg)
+            }
+            's' => {
+                self.advance();
+                Ok(Token::Space)
+            }
+            'S' => {
+                self.advance();
+                Ok(Token::SpaceNeg)
+            }
+            'b' => {
+                self.advance();
+                Ok(Token::WordBoundary)
+            }
+            'B' => {
+                self.advance();
+                Ok(Token::WordBoundaryNeg)
+            }
+
+            // Anchors
+            'A' => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsStart))
+            }
+            'Z' => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsEnd))
+            }
+            'z' => {
+                self.advance();
+                Ok(Token::Anchor(AnchorType::AbsEndNoNL))
+            }
+
+            // Backreferences
+            c if c.is_ascii_digit() => self.parse_backreference(),
+
+            // Unicode property classes
+            'p' => self.parse_unicode_class(false),
+            'P' => self.parse_unicode_class(true),
+
+            // Literal escape sequences
+            'n' => {
+                self.advance();
+                Ok(Token::Char('\n'))
+            }
+            't' => {
+                self.advance();
+                Ok(Token::Char('\t'))
+            }
+            'r' => {
+                self.advance();
+                Ok(Token::Char('\r'))
+            }
+            'f' => {
+                self.advance();
+                Ok(Token::Char('\u{0C}'))
+            }
+            'a' => {
+                self.advance();
+                Ok(Token::Char('\u{07}'))
+            }
+            'e' => {
+                self.advance();
+                Ok(Token::Char('\u{1B}'))
+            }
+
+            // Escaped metacharacters
+            '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\' => {
+                self.advance();
+                Ok(Token::Char(c))
+            }
+
+            // Hex escapes \x{...} or \xFF
+            'x' => self.parse_hex_escape(),
+
+            // Octal escapes \777 (unreachable since digits are caught above, but kept for safety)
+            c if c.is_ascii_digit() => self.parse_octal_escape(),
+
+            _ => {
+                let sequence = format!("\\{c}");
+                Err(LexError::InvalidEscape {
+                    sequence,
+                    position: start_pos,
+                })
+            }
+        }
     }
 
     /// Parse Unicode property class \p{Name} or \P{Name}
@@ -743,6 +746,165 @@ impl<'a> Lexer<'a> {
     }
 
     /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?[...]), (?(...)), (?{lang:code})
+    /// Parse `(?{lang:code})` code block syntax.
+    fn parse_code_block(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip '{'
+
+        // Parse language name up to ':'
+        let mut lang = String::new();
+        while let Some(c) = self.current {
+            if c == ':' {
+                break;
+            }
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                lang.push(c);
+                self.advance();
+            } else {
+                return Err(LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                });
+            }
+        }
+
+        if lang.is_empty() {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+
+        if self.current != Some(':') {
+            return Err(LexError::ExpectedColon {
+                position: start_pos,
+            });
+        }
+        self.advance(); // Skip ':'
+
+        // Parse code until terminating "})"
+        let mut code = String::new();
+        loop {
+            match self.current {
+                Some('}') if self.peek() == Some(')') => {
+                    self.advance(); // Skip '}'
+                    self.advance(); // Skip ')'
+                    break;
+                }
+                Some(c) => {
+                    code.push(c);
+                    self.advance();
+                }
+                None => {
+                    return Err(LexError::UnterminatedCodeBlock {
+                        position: start_pos,
+                    });
+                }
+            }
+        }
+
+        Ok(Token::CodeBlock { lang, code })
+    }
+
+    /// Parse `(?&name)` named recursion syntax.
+    fn parse_named_recursion(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip '&'
+        let mut name = String::new();
+        while let Some(c) = self.current {
+            if c == ')' {
+                break;
+            }
+            if c.is_ascii_alphanumeric() || c == '_' {
+                name.push(c);
+                self.advance();
+            } else {
+                return Err(LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                });
+            }
+        }
+
+        if name.is_empty() || self.current != Some(')') {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        self.advance(); // Skip ')'
+        Ok(Token::Recursion {
+            target: RecursionTarget::NamedGroup(name),
+        })
+    }
+
+    /// Parse `(?N)` numbered recursion syntax (digit already current).
+    fn parse_numbered_recursion(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        let mut number_str = String::new();
+        while let Some(d) = self.current {
+            if d.is_ascii_digit() {
+                number_str.push(d);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if self.current != Some(')') {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        self.advance(); // Skip ')'
+
+        let group_num = number_str
+            .parse::<u32>()
+            .map_err(|_| LexError::InvalidGroupSyntax {
+                position: start_pos,
+            })?;
+        if group_num == 0 {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        Ok(Token::Recursion {
+            target: RecursionTarget::Group(group_num),
+        })
+    }
+
+    /// Parse `(?<` which may be lookbehind (`(?<=`, `(?<!`) or a named group (`(?<name>`).
+    fn parse_lookbehind_or_named_group(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        self.advance(); // Skip '<'
+
+        if self.current == Some('=') {
+            self.advance(); // Skip '='
+            return Ok(Token::LookbehindPos);
+        }
+        if self.current == Some('!') {
+            self.advance(); // Skip '!'
+            return Ok(Token::LookbehindNeg);
+        }
+        let mut name = String::new();
+
+        while let Some(c) = self.current {
+            if c == '>' {
+                self.advance(); // Skip '>'
+                break;
+            }
+            if c.is_ascii_alphanumeric() || c == '_' {
+                name.push(c);
+                self.advance();
+            } else {
+                return Err(LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                });
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+
+        Ok(Token::NamedGroupStart { name })
+    }
+
+    /// Parse group constructs: (...), (?:...), (?<name>...), (?=...), (?!...), (?<=...), (?<!...), (?>...), (?|...), (?[...]), (?(...)), (?{lang:code})
     fn parse_group(&mut self) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -781,79 +943,25 @@ impl<'a> Lexer<'a> {
 
         let result = match self.current {
             Some('(') => self.parse_conditional_start(start_pos),
-            Some('{') => {
-                self.advance(); // Skip '{'
-
-                // Parse language name up to ':'
-                let mut lang = String::new();
-                while let Some(c) = self.current {
-                    if c == ':' {
-                        break;
-                    }
-                    if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                        lang.push(c);
-                        self.advance();
-                    } else {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                }
-
-                if lang.is_empty() {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-
-                if self.current != Some(':') {
-                    return Err(LexError::ExpectedColon {
-                        position: start_pos,
-                    });
-                }
-                self.advance(); // Skip ':'
-
-                // Parse code until terminating "})"
-                let mut code = String::new();
-                loop {
-                    match self.current {
-                        Some('}') if self.peek() == Some(')') => {
-                            self.advance(); // Skip '}'
-                            self.advance(); // Skip ')'
-                            break;
-                        }
-                        Some(c) => {
-                            code.push(c);
-                            self.advance();
-                        }
-                        None => {
-                            return Err(LexError::UnterminatedCodeBlock {
-                                position: start_pos,
-                            });
-                        }
-                    }
-                }
-
-                Ok(Token::CodeBlock { lang, code })
-            }
+            Some('{') => self.parse_code_block(start_pos),
             Some(':') => {
-                self.advance(); // Skip ':'
+                self.advance();
                 Ok(Token::NonCapturingGroupStart)
             }
             Some('=') => {
-                self.advance(); // Skip '='
+                self.advance();
                 Ok(Token::LookaheadPos)
             }
             Some('!') => {
-                self.advance(); // Skip '!'
+                self.advance();
                 Ok(Token::LookaheadNeg)
             }
             Some('>') => {
-                self.advance(); // Skip '>'
+                self.advance();
                 Ok(Token::AtomicGroupStart)
             }
             Some('|') => {
-                self.advance(); // Skip '|'
+                self.advance();
                 Ok(Token::BranchResetGroupStart)
             }
             Some('[') => self.parse_extended_char_class(start_pos),
@@ -870,102 +978,9 @@ impl<'a> Lexer<'a> {
                     })
                 }
             }
-            Some('&') => {
-                self.advance(); // Skip '&'
-                let mut name = String::new();
-                while let Some(c) = self.current {
-                    if c == ')' {
-                        break;
-                    }
-                    if c.is_ascii_alphanumeric() || c == '_' {
-                        name.push(c);
-                        self.advance();
-                    } else {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                }
-
-                if name.is_empty() || self.current != Some(')') {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                self.advance(); // Skip ')'
-                Ok(Token::Recursion {
-                    target: RecursionTarget::NamedGroup(name),
-                })
-            }
-            Some(c) if c.is_ascii_digit() => {
-                let mut number_str = String::new();
-                while let Some(d) = self.current {
-                    if d.is_ascii_digit() {
-                        number_str.push(d);
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
-
-                if self.current != Some(')') {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                self.advance(); // Skip ')'
-
-                let group_num =
-                    number_str
-                        .parse::<u32>()
-                        .map_err(|_| LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        })?;
-                if group_num == 0 {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                Ok(Token::Recursion {
-                    target: RecursionTarget::Group(group_num),
-                })
-            }
-            Some('<') => {
-                self.advance(); // Skip '<'
-
-                if self.current == Some('=') {
-                    self.advance(); // Skip '='
-                    return Ok(Token::LookbehindPos);
-                }
-                if self.current == Some('!') {
-                    self.advance(); // Skip '!'
-                    return Ok(Token::LookbehindNeg);
-                }
-                let mut name = String::new();
-
-                while let Some(c) = self.current {
-                    if c == '>' {
-                        self.advance(); // Skip '>'
-                        break;
-                    }
-                    if c.is_ascii_alphanumeric() || c == '_' {
-                        name.push(c);
-                        self.advance();
-                    } else {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                }
-
-                if name.is_empty() {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-
-                Ok(Token::NamedGroupStart { name })
-            }
+            Some('&') => self.parse_named_recursion(start_pos),
+            Some(c) if c.is_ascii_digit() => self.parse_numbered_recursion(start_pos),
+            Some('<') => self.parse_lookbehind_or_named_group(start_pos),
             _ => Err(LexError::InvalidGroupSyntax {
                 position: start_pos,
             }),
@@ -1046,6 +1061,221 @@ impl<'a> Lexer<'a> {
     ///
     /// This returns only the condition-start token. Branch expressions and
     /// the closing group ')' are parsed by the parser stage.
+    /// Parse the alphabetic/underscore condition identifier, which may be a
+    /// named group check, `DEFINE`, `R`, `R<n>`, or `R&name`.
+    fn parse_conditional_alpha_test(
+        &mut self,
+        start_pos: Position,
+    ) -> Result<ConditionalTest, LexError> {
+        if self.current == Some('R') && self.peek() == Some('&') {
+            self.advance(); // Skip 'R'
+            self.advance(); // Skip '&'
+
+            let mut name = String::new();
+            match self.current {
+                Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {
+                    name.push(ch);
+                    self.advance();
+                }
+                _ => {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+            }
+
+            while let Some(ch) = self.current {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    name.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            return Ok(ConditionalTest::RecursionNamed(name));
+        }
+
+        let mut name = String::new();
+        while let Some(ch) = self.current {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                name.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        if let Some(group_text) = name.strip_prefix('R') {
+            if group_text.is_empty() {
+                Ok(ConditionalTest::RecursionAny)
+            } else if group_text.chars().all(|ch| ch.is_ascii_digit()) {
+                let group =
+                    group_text
+                        .parse::<u32>()
+                        .map_err(|_| LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        })?;
+                if group == 0 {
+                    return Err(LexError::InvalidGroupSyntax {
+                        position: start_pos,
+                    });
+                }
+                Ok(ConditionalTest::RecursionGroup(group))
+            } else if name == "DEFINE" {
+                Ok(ConditionalTest::Define)
+            } else {
+                Ok(ConditionalTest::NamedGroupExists(name))
+            }
+        } else if name == "DEFINE" {
+            Ok(ConditionalTest::Define)
+        } else {
+            Ok(ConditionalTest::NamedGroupExists(name))
+        }
+    }
+
+    /// Parse a lookaround condition test: `(?=`, `(?!`, `(?<=`, `(?<!`.
+    fn parse_conditional_lookaround_test(
+        &mut self,
+        start_pos: Position,
+    ) -> Result<ConditionalTest, LexError> {
+        self.advance(); // Skip '?' in condition test
+        match self.current {
+            Some('=') => {
+                self.advance(); // Skip '='
+                let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                Ok(ConditionalTest::Lookahead {
+                    expr: Box::new(expr),
+                    positive: true,
+                })
+            }
+            Some('!') => {
+                self.advance(); // Skip '!'
+                let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                Ok(ConditionalTest::Lookahead {
+                    expr: Box::new(expr),
+                    positive: false,
+                })
+            }
+            Some('<') => {
+                self.advance(); // Skip '<'
+                let positive = match self.current {
+                    Some('=') => true,
+                    Some('!') => false,
+                    _ => {
+                        return Err(LexError::InvalidGroupSyntax {
+                            position: start_pos,
+                        });
+                    }
+                };
+                self.advance(); // Skip '=' or '!'
+                let expr = self.parse_conditional_subexpression_ast(start_pos)?;
+                Ok(ConditionalTest::Lookbehind {
+                    expr: Box::new(expr),
+                    positive,
+                })
+            }
+            _ => Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            }),
+        }
+    }
+
+    /// Parse an absolute group-number condition test (digits already current).
+    fn parse_conditional_group_number(
+        &mut self,
+        start_pos: Position,
+    ) -> Result<ConditionalTest, LexError> {
+        let mut number_str = String::new();
+        while let Some(d) = self.current {
+            if d.is_ascii_digit() {
+                number_str.push(d);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let group_num = number_str
+            .parse::<u32>()
+            .map_err(|_| LexError::InvalidGroupSyntax {
+                position: start_pos,
+            })?;
+        if group_num == 0 {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        Ok(ConditionalTest::GroupExists(group_num))
+    }
+
+    /// Parse a relative group-number condition test (`+N` or `-N`).
+    fn parse_conditional_relative_group(
+        &mut self,
+        start_pos: Position,
+        sign_char: char,
+    ) -> Result<ConditionalTest, LexError> {
+        let sign = if sign_char == '-' { -1 } else { 1 };
+        self.advance(); // Skip '+' or '-'
+
+        let mut number_str = String::new();
+        while let Some(d) = self.current {
+            if d.is_ascii_digit() {
+                number_str.push(d);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let group_offset = number_str
+            .parse::<i32>()
+            .map_err(|_| LexError::InvalidGroupSyntax {
+                position: start_pos,
+            })?;
+        if group_offset == 0 {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        Ok(ConditionalTest::RelativeGroupExists(sign * group_offset))
+    }
+
+    /// Parse a `<name>` condition test for named group existence.
+    fn parse_conditional_angle_name(
+        &mut self,
+        start_pos: Position,
+    ) -> Result<ConditionalTest, LexError> {
+        self.advance(); // Skip '<'
+        let mut name = String::new();
+        while let Some(c) = self.current {
+            if c == '>' {
+                self.advance(); // Skip '>'
+                break;
+            }
+            if c.is_ascii_alphanumeric() || c == '_' {
+                name.push(c);
+                self.advance();
+            } else {
+                return Err(LexError::InvalidGroupSyntax {
+                    position: start_pos,
+                });
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            });
+        }
+        Ok(ConditionalTest::NamedGroupExists(name))
+    }
+
     fn parse_conditional_start(&mut self, start_pos: Position) -> Result<Token, LexError> {
         trace_enter!(
             "lexer",
@@ -1057,197 +1287,13 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip '(' after "(?"
 
         let condition = match self.current {
-            Some(c) if c.is_ascii_digit() => {
-                let mut number_str = String::new();
-                while let Some(d) = self.current {
-                    if d.is_ascii_digit() {
-                        number_str.push(d);
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
-
-                let group_num =
-                    number_str
-                        .parse::<u32>()
-                        .map_err(|_| LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        })?;
-                if group_num == 0 {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                ConditionalTest::GroupExists(group_num)
-            }
-            Some(sign @ ('+' | '-')) => {
-                let sign = if sign == '-' { -1 } else { 1 };
-                self.advance(); // Skip '+' or '-'
-
-                let mut number_str = String::new();
-                while let Some(d) = self.current {
-                    if d.is_ascii_digit() {
-                        number_str.push(d);
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
-
-                let group_offset =
-                    number_str
-                        .parse::<i32>()
-                        .map_err(|_| LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        })?;
-                if group_offset == 0 {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                ConditionalTest::RelativeGroupExists(sign * group_offset)
-            }
-            Some('<') => {
-                self.advance(); // Skip '<'
-                let mut name = String::new();
-                while let Some(c) = self.current {
-                    if c == '>' {
-                        self.advance(); // Skip '>'
-                        break;
-                    }
-                    if c.is_ascii_alphanumeric() || c == '_' {
-                        name.push(c);
-                        self.advance();
-                    } else {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                }
-
-                if name.is_empty() {
-                    return Err(LexError::InvalidGroupSyntax {
-                        position: start_pos,
-                    });
-                }
-                ConditionalTest::NamedGroupExists(name)
-            }
+            Some(c) if c.is_ascii_digit() => self.parse_conditional_group_number(start_pos)?,
+            Some(sign @ ('+' | '-')) => self.parse_conditional_relative_group(start_pos, sign)?,
+            Some('<') => self.parse_conditional_angle_name(start_pos)?,
             Some(c) if c.is_ascii_alphabetic() || c == '_' => {
-                if self.current == Some('R') && self.peek() == Some('&') {
-                    self.advance(); // Skip 'R'
-                    self.advance(); // Skip '&'
-
-                    let mut name = String::new();
-                    match self.current {
-                        Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {
-                            name.push(ch);
-                            self.advance();
-                        }
-                        _ => {
-                            return Err(LexError::InvalidGroupSyntax {
-                                position: start_pos,
-                            });
-                        }
-                    }
-
-                    while let Some(ch) = self.current {
-                        if ch.is_ascii_alphanumeric() || ch == '_' {
-                            name.push(ch);
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    ConditionalTest::RecursionNamed(name)
-                } else {
-                    let mut name = String::new();
-                    while let Some(ch) = self.current {
-                        if ch.is_ascii_alphanumeric() || ch == '_' {
-                            name.push(ch);
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if name.is_empty() {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                    if let Some(group_text) = name.strip_prefix('R') {
-                        if group_text.is_empty() {
-                            ConditionalTest::RecursionAny
-                        } else if group_text.chars().all(|ch| ch.is_ascii_digit()) {
-                            let group = group_text.parse::<u32>().map_err(|_| {
-                                LexError::InvalidGroupSyntax {
-                                    position: start_pos,
-                                }
-                            })?;
-                            if group == 0 {
-                                return Err(LexError::InvalidGroupSyntax {
-                                    position: start_pos,
-                                });
-                            }
-                            ConditionalTest::RecursionGroup(group)
-                        } else if name == "DEFINE" {
-                            ConditionalTest::Define
-                        } else {
-                            ConditionalTest::NamedGroupExists(name)
-                        }
-                    } else if name == "DEFINE" {
-                        ConditionalTest::Define
-                    } else {
-                        ConditionalTest::NamedGroupExists(name)
-                    }
-                }
+                self.parse_conditional_alpha_test(start_pos)?
             }
-            Some('?') => {
-                self.advance(); // Skip '?' in condition test
-                match self.current {
-                    Some('=') => {
-                        self.advance(); // Skip '='
-                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
-                        ConditionalTest::Lookahead {
-                            expr: Box::new(expr),
-                            positive: true,
-                        }
-                    }
-                    Some('!') => {
-                        self.advance(); // Skip '!'
-                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
-                        ConditionalTest::Lookahead {
-                            expr: Box::new(expr),
-                            positive: false,
-                        }
-                    }
-                    Some('<') => {
-                        self.advance(); // Skip '<'
-                        let positive = match self.current {
-                            Some('=') => true,
-                            Some('!') => false,
-                            _ => {
-                                return Err(LexError::InvalidGroupSyntax {
-                                    position: start_pos,
-                                });
-                            }
-                        };
-                        self.advance(); // Skip '=' or '!'
-                        let expr = self.parse_conditional_subexpression_ast(start_pos)?;
-                        ConditionalTest::Lookbehind {
-                            expr: Box::new(expr),
-                            positive,
-                        }
-                    }
-                    _ => {
-                        return Err(LexError::InvalidGroupSyntax {
-                            position: start_pos,
-                        });
-                    }
-                }
-            }
+            Some('?') => self.parse_conditional_lookaround_test(start_pos)?,
             _ => {
                 return Err(LexError::InvalidGroupSyntax {
                     position: start_pos,

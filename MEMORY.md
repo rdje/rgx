@@ -45,6 +45,10 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- RGX-owned clippy warnings are now at **zero** (from 296 at session start):
+  - refactored 10 over-length functions through helper extraction
+  - added targeted `#[allow(clippy::too_many_lines)]` to 3 architectural VM dispatch loops
+  - all 33 remaining workspace warnings are from the PGEN submodule
 - Latest PCRE2 parity expansion added 24 new differential cases for combined-feature patterns:
   - nested lookarounds, atomic groups with quantifiers, backreference edge cases, possessive+alternation, named groups, complex quantifier interactions, anchors with groups, and dot/class interactions
   - parity case count increased from 185 to 209; all pass against PCRE2

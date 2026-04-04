@@ -1244,46 +1244,7 @@ impl Compiler {
             }
             RegexAst::Group {
                 expr, kind, name, ..
-            } => match kind {
-                crate::ast::GroupKind::Capturing => {
-                    let group_id = next_group;
-                    let (expr, next) =
-                        Self::assign_capture_indices_inner(*expr, group_id.saturating_add(1));
-                    (
-                        RegexAst::Group {
-                            expr: Box::new(expr),
-                            kind,
-                            index: Some(group_id),
-                            name,
-                        },
-                        next,
-                    )
-                }
-                crate::ast::GroupKind::BranchReset => {
-                    let (expr, next) = Self::assign_branch_reset_expr(*expr, next_group);
-                    (
-                        RegexAst::Group {
-                            expr: Box::new(expr),
-                            kind,
-                            index: None,
-                            name,
-                        },
-                        next,
-                    )
-                }
-                crate::ast::GroupKind::NonCapturing | crate::ast::GroupKind::Atomic => {
-                    let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
-                    (
-                        RegexAst::Group {
-                            expr: Box::new(expr),
-                            kind,
-                            index: None,
-                            name,
-                        },
-                        next,
-                    )
-                }
-            },
+            } => Self::assign_capture_indices_group(*expr, kind, name, next_group),
             RegexAst::Lookahead { expr, positive } => {
                 let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
                 (
@@ -1343,6 +1304,54 @@ impl Compiler {
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => (ast, next_group),
+        }
+    }
+
+    fn assign_capture_indices_group(
+        expr: RegexAst,
+        kind: crate::ast::GroupKind,
+        name: Option<String>,
+        next_group: u32,
+    ) -> (RegexAst, u32) {
+        match kind {
+            crate::ast::GroupKind::Capturing => {
+                let group_id = next_group;
+                let (expr, next) =
+                    Self::assign_capture_indices_inner(expr, group_id.saturating_add(1));
+                (
+                    RegexAst::Group {
+                        expr: Box::new(expr),
+                        kind,
+                        index: Some(group_id),
+                        name,
+                    },
+                    next,
+                )
+            }
+            crate::ast::GroupKind::BranchReset => {
+                let (expr, next) = Self::assign_branch_reset_expr(expr, next_group);
+                (
+                    RegexAst::Group {
+                        expr: Box::new(expr),
+                        kind,
+                        index: None,
+                        name,
+                    },
+                    next,
+                )
+            }
+            crate::ast::GroupKind::NonCapturing | crate::ast::GroupKind::Atomic => {
+                let (expr, next) = Self::assign_capture_indices_inner(expr, next_group);
+                (
+                    RegexAst::Group {
+                        expr: Box::new(expr),
+                        kind,
+                        index: None,
+                        name,
+                    },
+                    next,
+                )
+            }
         }
     }
 
@@ -1460,36 +1469,14 @@ impl Compiler {
                 kind,
                 index,
                 name,
-            } => {
-                let (expr, opened_after_expr) =
-                    if matches!(kind, crate::ast::GroupKind::BranchReset) {
-                        Self::resolve_relative_conditionals_branch_reset(
-                            *expr,
-                            opened_groups,
-                            total_groups,
-                        )?
-                    } else {
-                        let inner_opened = if matches!(kind, crate::ast::GroupKind::Capturing) {
-                            index.unwrap_or_else(|| opened_groups.saturating_add(1))
-                        } else {
-                            opened_groups
-                        };
-                        Self::resolve_relative_conditionals_inner(
-                            *expr,
-                            inner_opened,
-                            total_groups,
-                        )?
-                    };
-                Ok((
-                    RegexAst::Group {
-                        expr: Box::new(expr),
-                        kind,
-                        index,
-                        name,
-                    },
-                    opened_after_expr,
-                ))
-            }
+            } => Self::resolve_relative_conditionals_group(
+                *expr,
+                kind,
+                index,
+                name,
+                opened_groups,
+                total_groups,
+            ),
             RegexAst::Lookahead { expr, positive } => {
                 let (expr, opened_after_expr) =
                     Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
@@ -1516,37 +1503,13 @@ impl Compiler {
                 condition,
                 true_branch,
                 false_branch,
-            } => {
-                let (condition, opened_after_condition) = Self::resolve_relative_conditional_test(
-                    condition,
-                    opened_groups,
-                    total_groups,
-                )?;
-                let (true_branch, opened_after_true) = Self::resolve_relative_conditionals_inner(
-                    *true_branch,
-                    opened_after_condition,
-                    total_groups,
-                )?;
-                let (false_branch, opened_after_false) = if let Some(false_branch) = false_branch {
-                    let (false_branch, opened_after_false) =
-                        Self::resolve_relative_conditionals_inner(
-                            *false_branch,
-                            opened_after_true,
-                            total_groups,
-                        )?;
-                    (Some(Box::new(false_branch)), opened_after_false)
-                } else {
-                    (None, opened_after_true)
-                };
-                Ok((
-                    RegexAst::Conditional {
-                        condition,
-                        true_branch: Box::new(true_branch),
-                        false_branch,
-                    },
-                    opened_after_false,
-                ))
-            }
+            } => Self::resolve_relative_conditionals_conditional(
+                condition,
+                *true_branch,
+                false_branch.map(|b| *b),
+                opened_groups,
+                total_groups,
+            ),
             RegexAst::Char(_)
             | RegexAst::CharClass(_)
             | RegexAst::Dot
@@ -1562,6 +1525,69 @@ impl Compiler {
             | RegexAst::CodeBlock { .. }
             | RegexAst::Empty => Ok((ast, opened_groups)),
         }
+    }
+
+    fn resolve_relative_conditionals_group(
+        expr: RegexAst,
+        kind: crate::ast::GroupKind,
+        index: Option<u32>,
+        name: Option<String>,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<(RegexAst, u32)> {
+        let (expr, opened_after_expr) = if matches!(kind, crate::ast::GroupKind::BranchReset) {
+            Self::resolve_relative_conditionals_branch_reset(expr, opened_groups, total_groups)?
+        } else {
+            let inner_opened = if matches!(kind, crate::ast::GroupKind::Capturing) {
+                index.unwrap_or_else(|| opened_groups.saturating_add(1))
+            } else {
+                opened_groups
+            };
+            Self::resolve_relative_conditionals_inner(expr, inner_opened, total_groups)?
+        };
+        Ok((
+            RegexAst::Group {
+                expr: Box::new(expr),
+                kind,
+                index,
+                name,
+            },
+            opened_after_expr,
+        ))
+    }
+
+    fn resolve_relative_conditionals_conditional(
+        condition: crate::ast::ConditionalTest,
+        true_branch: RegexAst,
+        false_branch: Option<RegexAst>,
+        opened_groups: u32,
+        total_groups: u32,
+    ) -> Result<(RegexAst, u32)> {
+        let (condition, opened_after_condition) =
+            Self::resolve_relative_conditional_test(condition, opened_groups, total_groups)?;
+        let (true_branch, opened_after_true) = Self::resolve_relative_conditionals_inner(
+            true_branch,
+            opened_after_condition,
+            total_groups,
+        )?;
+        let (false_branch, opened_after_false) = if let Some(false_branch) = false_branch {
+            let (false_branch, opened_after_false) = Self::resolve_relative_conditionals_inner(
+                false_branch,
+                opened_after_true,
+                total_groups,
+            )?;
+            (Some(Box::new(false_branch)), opened_after_false)
+        } else {
+            (None, opened_after_true)
+        };
+        Ok((
+            RegexAst::Conditional {
+                condition,
+                true_branch: Box::new(true_branch),
+                false_branch,
+            },
+            opened_after_false,
+        ))
     }
 
     fn resolve_relative_conditionals_branch_reset(
@@ -1930,74 +1956,86 @@ impl Compiler {
                 condition,
                 true_branch,
                 false_branch,
-            } => {
-                let condition_message = match condition {
-                    crate::ast::ConditionalTest::GroupExists(group) => {
-                        if *group > total_groups {
-                            Some(format!(
-                                "conditional '(?({group})...)' refers to missing capture group"
-                            ))
-                        } else {
-                            None
-                        }
-                    }
-                    crate::ast::ConditionalTest::NamedGroupExists(name) => {
-                        if named_groups.contains_key(name) {
-                            None
-                        } else {
-                            Some(format!(
-                                "conditional '(?({name})...)' refers to missing named capture group"
-                            ))
-                        }
-                    }
-                    crate::ast::ConditionalTest::RecursionAny => None,
-                    crate::ast::ConditionalTest::RecursionGroup(group) => {
-                        if *group > total_groups {
-                            Some(format!(
-                                "conditional '(?(R{group})...)' refers to missing capture group"
-                            ))
-                        } else {
-                            None
-                        }
-                    }
-                    crate::ast::ConditionalTest::RecursionNamed(name) => {
-                        if named_groups.contains_key(name) {
-                            None
-                        } else {
-                            Some(format!(
-                                "conditional '(?(R&{name})...)' refers to missing named capture group"
-                            ))
-                        }
-                    }
-                    crate::ast::ConditionalTest::Define => {
-                        if false_branch.is_some() {
-                            Some(
-                                "conditional '(?(DEFINE)...)' does not support a false branch"
-                                    .to_string(),
-                            )
-                        } else {
-                            None
-                        }
-                    }
-                    crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
-                        "internal compiler error: unresolved relative conditional group reference '(?({offset:+})...)'"
-                    )),
-                    crate::ast::ConditionalTest::Lookahead { expr, .. }
-                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
-                        self.feature_validation_message(expr, total_groups, named_groups)
-                    }
-                };
-                condition_message
-                    .or_else(|| {
-                        self.feature_validation_message(true_branch, total_groups, named_groups)
+            } => self
+                .validate_conditional_test(
+                    condition,
+                    false_branch.is_some(),
+                    total_groups,
+                    named_groups,
+                )
+                .or_else(|| {
+                    self.feature_validation_message(true_branch, total_groups, named_groups)
+                })
+                .or_else(|| {
+                    false_branch.as_ref().and_then(|branch| {
+                        self.feature_validation_message(branch, total_groups, named_groups)
                     })
-                    .or_else(|| {
-                        false_branch.as_ref().and_then(|branch| {
-                            self.feature_validation_message(branch, total_groups, named_groups)
-                        })
-                    })
-            }
+                }),
             _ => None,
+        }
+    }
+
+    fn validate_conditional_test(
+        &self,
+        condition: &crate::ast::ConditionalTest,
+        has_false_branch: bool,
+        total_groups: u32,
+        named_groups: &std::collections::HashMap<String, u32>,
+    ) -> Option<String> {
+        match condition {
+            crate::ast::ConditionalTest::GroupExists(group) => {
+                if *group > total_groups {
+                    Some(format!(
+                        "conditional '(?({group})...)' refers to missing capture group"
+                    ))
+                } else {
+                    None
+                }
+            }
+            crate::ast::ConditionalTest::NamedGroupExists(name) => {
+                if named_groups.contains_key(name) {
+                    None
+                } else {
+                    Some(format!(
+                        "conditional '(?({name})...)' refers to missing named capture group"
+                    ))
+                }
+            }
+            crate::ast::ConditionalTest::RecursionAny => None,
+            crate::ast::ConditionalTest::RecursionGroup(group) => {
+                if *group > total_groups {
+                    Some(format!(
+                        "conditional '(?(R{group})...)' refers to missing capture group"
+                    ))
+                } else {
+                    None
+                }
+            }
+            crate::ast::ConditionalTest::RecursionNamed(name) => {
+                if named_groups.contains_key(name) {
+                    None
+                } else {
+                    Some(format!(
+                        "conditional '(?(R&{name})...)' refers to missing named capture group"
+                    ))
+                }
+            }
+            crate::ast::ConditionalTest::Define => {
+                if has_false_branch {
+                    Some(
+                        "conditional '(?(DEFINE)...)' does not support a false branch".to_string(),
+                    )
+                } else {
+                    None
+                }
+            }
+            crate::ast::ConditionalTest::RelativeGroupExists(offset) => Some(format!(
+                "internal compiler error: unresolved relative conditional group reference '(?({offset:+})...)'"
+            )),
+            crate::ast::ConditionalTest::Lookahead { expr, .. }
+            | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                self.feature_validation_message(expr, total_groups, named_groups)
+            }
         }
     }
 
