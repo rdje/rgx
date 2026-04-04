@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Wire PGEN adapter for inline flags and named backreferences
+- Scope: PGEN parser adapter integration for recently shipped syntax.
+- Changes:
+  - Added native `convert_scoped_inline_modifiers`, `convert_inline_modifiers`, and `convert_named_backreference` methods to the PGEN AST adapter, replacing the recursive-descent `parse_leaf_fragment` fallback for these constructs.
+  - PGEN already produces correct rule names (`scoped_inline_modifiers`, `inline_modifiers`, `backreference`) — the gap was in RGX's adapter, not in PGEN.
+  - Removed dead `convert_flag_group` method (PGEN never produces a `flag_group` rule name).
+  - Added 6 parser-contract reference fixtures for the new syntax families.
+- Validation:
+  - `cargo test -p rgx-core` (263 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - No PGEN bug reports needed — PGEN handles all three syntax families correctly at the grammar level.
+  - The PGEN-backed path now converts inline flags and named backreferences natively instead of discarding the PGEN output and re-parsing.
+
 ### 2026-04-05 - Ship named backreferences \k<name> and \k'name'
 - Scope: new regex feature — named backreferences.
 - Changes:

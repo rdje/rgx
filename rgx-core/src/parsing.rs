@@ -679,14 +679,84 @@ impl<'a> PgenAstAdapter<'a> {
             | "lookbehind_neg" => self.convert_lookaround(actual),
             "conditional" => self.convert_conditional(actual),
             "extended_class" => self.convert_extended_char_class(actual),
-            "flag_group" => self.convert_flag_group(actual),
+            "scoped_inline_modifiers" => self.convert_scoped_inline_modifiers(actual),
+            "inline_modifiers" => self.convert_inline_modifiers(actual),
+            "backreference" => self.convert_named_backreference(actual),
             _ => self.parse_leaf_fragment(actual),
         }
     }
 
-    fn convert_flag_group(&self, node: &PgenAstNode) -> Result<Regex> {
-        // PGEN may emit flag_group nodes for (?m:...) etc.
-        // Fall back to leaf-fragment parsing which delegates to the recursive-descent parser.
+    fn convert_scoped_inline_modifiers(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN grammar: scoped_inline_modifiers = "(?" modifier_spec ":" pattern? ")"
+        // Span text is e.g. "(?i:abc)", "(?ms:^a.b)", "(?-i:x)"
+        let fragment = self.slice(node)?;
+        let inner = fragment
+            .strip_prefix("(?")
+            .and_then(|s| s.strip_suffix(')'))
+            .ok_or_else(|| {
+                self.contract_error(
+                    "pgen scoped_inline_modifiers did not retain '(?...:..)' delimiters",
+                )
+            })?;
+        let colon_pos = inner.find(':').ok_or_else(|| {
+            self.contract_error("pgen scoped_inline_modifiers is missing ':' separator")
+        })?;
+        let flags = &inner[..colon_pos];
+        let body_text = &inner[colon_pos + 1..];
+
+        let body = if body_text.is_empty() {
+            Regex::Empty
+        } else {
+            let mut parser = crate::parser::Parser::new(body_text)
+                .map_err(|err| RgxError::Compile(err.to_string()))?;
+            parser
+                .parse()
+                .map_err(|err| RgxError::Compile(err.to_string()))?
+        };
+
+        Ok(Regex::FlagGroup {
+            flags: flags.to_string(),
+            expr: Box::new(body),
+        })
+    }
+
+    fn convert_inline_modifiers(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN grammar: inline_modifiers = "(?" modifier_spec? ")"
+        // Span text is e.g. "(?i)", "(?ms)", "(?-i)", "(?)"
+        let fragment = self.slice(node)?;
+        let flags = fragment
+            .strip_prefix("(?")
+            .and_then(|s| s.strip_suffix(')'))
+            .ok_or_else(|| {
+                self.contract_error("pgen inline_modifiers did not retain '(?...)' delimiters")
+            })?;
+
+        Ok(Regex::FlagGroup {
+            flags: flags.to_string(),
+            expr: Box::new(Regex::Empty),
+        })
+    }
+
+    fn convert_named_backreference(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN grammar: backreference = "\\" digits | "\\k" name_ref | "\\k{" name "}" | "\\g" subroutine_ref
+        // For named backreferences (\k<name>, \k'name'), build NamedBackreference directly.
+        // For numeric backreferences (\1, \2) and \g variants, delegate to leaf-fragment parsing.
+        let fragment = self.slice(node)?;
+        if let Some(rest) = fragment.strip_prefix("\\k") {
+            // \k<name> or \k'name' or \k{name}
+            let name = rest
+                .strip_prefix('<')
+                .and_then(|s| s.strip_suffix('>'))
+                .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                .or_else(|| rest.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
+                .ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "pgen backreference '\\k' has unrecognized delimiter in '{fragment}'"
+                    ))
+                })?;
+            return Ok(Regex::NamedBackreference(name.to_string()));
+        }
+        // Numeric backreference (\1, \2, ...) or \g variant — delegate to leaf-fragment parsing.
         self.parse_leaf_fragment(node)
     }
 
@@ -1239,6 +1309,12 @@ mod tests {
             "(?&word)",
             r"(a)\1",
             r"\p{L}+",
+            "(?i:abc)",
+            "(?ms:^a.b)",
+            "(?i)",
+            "(?ms)",
+            r"(?<word>a)\k<word>",
+            r"(?<word>a)\k'word'",
         ]
     }
 
