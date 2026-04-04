@@ -1210,6 +1210,7 @@ impl Compiler {
         ast
     }
 
+    #[allow(clippy::too_many_lines)]
     fn assign_capture_indices_inner(ast: RegexAst, next_group: u32) -> (RegexAst, u32) {
         match ast {
             RegexAst::Sequence(items) => {
@@ -1231,6 +1232,16 @@ impl Compiler {
                     assigned.push(item);
                 }
                 (RegexAst::Alternation(assigned), next)
+            }
+            RegexAst::FlagGroup { flags, expr } => {
+                let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
+                (
+                    RegexAst::FlagGroup {
+                        flags,
+                        expr: Box::new(expr),
+                    },
+                    next,
+                )
             }
             RegexAst::Quantified { expr, quantifier } => {
                 let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
@@ -1425,6 +1436,7 @@ impl Compiler {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn resolve_relative_conditionals_inner(
         ast: RegexAst,
         opened_groups: u32,
@@ -1460,6 +1472,17 @@ impl Compiler {
                     RegexAst::Quantified {
                         expr: Box::new(expr),
                         quantifier,
+                    },
+                    opened_after_expr,
+                ))
+            }
+            RegexAst::FlagGroup { flags, expr } => {
+                let (expr, opened_after_expr) =
+                    Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
+                Ok((
+                    RegexAst::FlagGroup {
+                        flags,
+                        expr: Box::new(expr),
                     },
                     opened_after_expr,
                 ))
@@ -1622,7 +1645,8 @@ impl Compiler {
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. }
-            | RegexAst::Group { expr, .. } => Self::parser_boundary_validation_message(expr),
+            | RegexAst::Group { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => Self::parser_boundary_validation_message(expr),
             RegexAst::Conditional {
                 condition,
                 true_branch,
@@ -2055,7 +2079,8 @@ impl Compiler {
             RegexAst::Quantified { expr, .. }
             | RegexAst::Group { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => {
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => {
                 Self::backreference_validation_message_inner(expr, total_groups)
             }
             RegexAst::Conditional {
@@ -2196,7 +2221,8 @@ impl Compiler {
             }
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => Self::max_capture_group(expr),
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => Self::max_capture_group(expr),
             RegexAst::Group {
                 expr, kind, index, ..
             } => {
@@ -2266,7 +2292,8 @@ impl Compiler {
             }
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
-            | RegexAst::Lookbehind { expr, .. } => {
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => {
                 Self::collect_named_groups_inner(expr, named_groups);
             }
             RegexAst::Group {

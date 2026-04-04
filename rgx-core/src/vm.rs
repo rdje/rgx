@@ -184,6 +184,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::CodeBlock { .. } => "CodeBlock",
         Regex::Conditional { .. } => "Conditional",
         Regex::Recursion { .. } => "Recursion",
+        Regex::FlagGroup { .. } => "FlagGroup",
     }
 }
 
@@ -619,10 +620,7 @@ impl RegexVM {
             return false;
         };
 
-        matches!(
-            OpCode::try_from(*first),
-            Ok(OpCode::StartLine | OpCode::StartText)
-        )
+        matches!(OpCode::try_from(*first), Ok(OpCode::StartText))
     }
 
     /// SIMD-accelerated first match search using state-of-the-art algorithms
@@ -3402,6 +3400,8 @@ pub struct OptimizingCompiler {
     flags: ProgramFlags,
     /// Compilation statistics
     stats: CompilationStats,
+    /// Whether multiline mode is active (^ and $ match at line boundaries)
+    multiline: bool,
 }
 
 impl OptimizingCompiler {
@@ -3437,6 +3437,7 @@ impl OptimizingCompiler {
                 estimated_cycles: 0,
                 jit_worthy: false,
             },
+            multiline: false,
         };
         trace_exit!(
             "vm",
@@ -3562,6 +3563,9 @@ impl OptimizingCompiler {
                 // Only count groups during code generation, not analysis
                 self.analyze_pass(expr);
             }
+            Regex::FlagGroup { expr, .. } => {
+                self.analyze_pass(expr);
+            }
             _ => {}
         }
 
@@ -3639,13 +3643,24 @@ impl OptimizingCompiler {
             }
 
             Regex::Anchor(anchor) => match anchor {
-                // Without (?m), ^ and $ match only at start/end of text
-                // (matching PCRE2's default single-line anchor semantics).
-                // StartLine/EndLine are reserved for future (?m) multiline mode.
-                AnchorType::Start | AnchorType::AbsStart => {
+                AnchorType::Start => {
+                    if self.multiline {
+                        self.emit_op(OpCode::StartLine);
+                    } else {
+                        self.emit_op(OpCode::StartText);
+                    }
+                }
+                AnchorType::End => {
+                    if self.multiline {
+                        self.emit_op(OpCode::EndLine);
+                    } else {
+                        self.emit_op(OpCode::EndTextOrNL);
+                    }
+                }
+                AnchorType::AbsStart => {
                     self.emit_op(OpCode::StartText);
                 }
-                AnchorType::End | AnchorType::AbsEnd => {
+                AnchorType::AbsEnd => {
                     self.emit_op(OpCode::EndTextOrNL);
                 }
                 AnchorType::AbsEndNoNL => self.emit_op(OpCode::EndText),
@@ -3952,6 +3967,15 @@ impl OptimizingCompiler {
                 }
             }
 
+            Regex::FlagGroup { flags, expr } => {
+                let saved_multiline = self.multiline;
+                if flags.contains('m') {
+                    self.multiline = true;
+                }
+                self.codegen_pass(expr, false);
+                self.multiline = saved_multiline;
+            }
+
             Regex::Empty => {
                 // Empty/epsilon — trivially matches without consuming input.
                 // No bytecode needed; execution simply falls through to the
@@ -4088,6 +4112,7 @@ impl OptimizingCompiler {
     fn compile_nested_code(&mut self, expr: &Regex, starting_group_counter: u32) -> Vec<u8> {
         let mut sub_compiler = OptimizingCompiler::with_named_groups(self.named_groups.clone());
         sub_compiler.group_counter = starting_group_counter;
+        sub_compiler.multiline = self.multiline;
         sub_compiler.codegen_pass(expr, false);
 
         let char_class_base = self.char_classes.len();
@@ -4151,7 +4176,8 @@ impl OptimizingCompiler {
             }
             Regex::Quantified { expr, .. }
             | Regex::Lookahead { expr, .. }
-            | Regex::Lookbehind { expr, .. } => {
+            | Regex::Lookbehind { expr, .. }
+            | Regex::FlagGroup { expr, .. } => {
                 Self::collect_capturing_group_defs_inner(expr, next_group, defs);
             }
             Regex::Group {

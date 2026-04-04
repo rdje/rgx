@@ -964,6 +964,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::BranchResetGroupStart)
             }
+            Some('m' | 'i' | 's' | 'x') => self.parse_flag_modifier(start_pos),
             Some('[') => self.parse_extended_char_class(start_pos),
             Some('R') => {
                 self.advance(); // Skip 'R'
@@ -995,6 +996,27 @@ impl<'a> Lexer<'a> {
             Err(err) => trace_exit!("lexer", "Lexer::parse_group", "ok=false,error={}", err),
         }
         result
+    }
+
+    fn parse_flag_modifier(&mut self, start_pos: Position) -> Result<Token, LexError> {
+        // Inline flag modifier group: (?m:...), (?is:...), etc.
+        let mut flags = String::new();
+        while let Some(fc) = self.current {
+            if matches!(fc, 'm' | 'i' | 's' | 'x') {
+                flags.push(fc);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if self.current == Some(':') {
+            self.advance(); // consume ':'
+            Ok(Token::FlagModifier { flags })
+        } else {
+            Err(LexError::InvalidGroupSyntax {
+                position: start_pos,
+            })
+        }
     }
 
     fn parse_extended_char_class(&mut self, start_pos: Position) -> Result<Token, LexError> {

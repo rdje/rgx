@@ -126,6 +126,15 @@ pub enum Regex {
         code: String,
     },
 
+    // Inline flag groups
+    /// Scoped flag modifier group (?m:...), (?i:...), (?s:...), etc.
+    FlagGroup {
+        /// Active flag characters (e.g., "m", "mi", "s")
+        flags: String,
+        /// Inner expression affected by the flags
+        expr: Box<Regex>,
+    },
+
     // Special
     /// Empty pattern (epsilon)
     Empty,

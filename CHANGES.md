@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Ship scoped multiline mode (?m:...)
+- Scope: new regex feature — scoped multiline flag groups.
+- Changes:
+  - `(?m:...)` now makes `^` and `$` match at line boundaries (after/before `\n`) within the group scope, while keeping single-line semantics outside.
+  - Lexer: added `parse_flag_modifier()` that recognizes `(?m:`, `(?i:`, `(?s:`, `(?x:` and multi-flag combinations.
+  - Parser: handles `Token::FlagModifier` and wraps the group body in `Regex::FlagGroup { flags, expr }`.
+  - AST: added `FlagGroup` variant to the `Regex` enum.
+  - Compiler: added `multiline: bool` field to `OptimizingCompiler`, toggles anchor opcode emission between `StartLine`/`EndLine` (multiline) and `StartText`/`EndTextOrNL` (default). Flag state saves/restores correctly across nested groups.
+  - `should_use_start_anchored_search` now correctly avoids the anchored fast-path when `StartLine` is the first opcode (multiline `^` needs scanning, not just position 0).
+  - PGEN adapter handles the new AST node via leaf-fragment fallback.
+  - Added 3 unit tests and 5 PCRE2 differential parity tests, including scope-leak verification.
+- Validation:
+  - `cargo test -p rgx-core` (243 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (37 pass)
+  - 0 clippy warnings
+- Notes/impact:
+  - This is the first inline flag shipped on the default regex path.
+  - The lexer infrastructure also accepts `(?i:`, `(?s:`, `(?x:` syntax, but only `(?m:...)` has compiler/VM support in this commit.
+  - Total parity case count now 226.
+
 ### 2026-04-04 - Fix find_all zero-width suppression to match PCRE2 iteration semantics
 - Scope: accuracy fix for find_all zero-width match handling.
 - Changes:

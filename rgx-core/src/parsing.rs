@@ -679,8 +679,15 @@ impl<'a> PgenAstAdapter<'a> {
             | "lookbehind_neg" => self.convert_lookaround(actual),
             "conditional" => self.convert_conditional(actual),
             "extended_class" => self.convert_extended_char_class(actual),
+            "flag_group" => self.convert_flag_group(actual),
             _ => self.parse_leaf_fragment(actual),
         }
+    }
+
+    fn convert_flag_group(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN may emit flag_group nodes for (?m:...) etc.
+        // Fall back to leaf-fragment parsing which delegates to the recursive-descent parser.
+        self.parse_leaf_fragment(node)
     }
 
     fn convert_group(&self, node: &PgenAstNode) -> Result<Regex> {

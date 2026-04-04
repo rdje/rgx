@@ -111,6 +111,7 @@ impl<'a> Parser<'a> {
             Regex::CodeBlock { .. } => "CodeBlock",
             Regex::Conditional { .. } => "Conditional",
             Regex::Recursion { .. } => "Recursion",
+            Regex::FlagGroup { .. } => "FlagGroup",
         };
         trace_exit!("parser", "Parser::regex_kind", "ok=true,kind={}", kind);
         kind
@@ -699,6 +700,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a flag-modifier group atom: `(?m:...)`, `(?is:...)`, etc.
+    fn parse_atom_flag_group(&mut self) -> Result<Regex, LexError> {
+        let flags = match self.peek() {
+            Some(Token::FlagModifier { flags }) => flags.clone(),
+            _ => unreachable!("parse_atom_flag_group called for non-flag-modifier token"),
+        };
+        self.advance()?;
+        let expr = self.parse_group_body()?;
+        Ok(Regex::FlagGroup {
+            flags,
+            expr: Box::new(expr),
+        })
+    }
+
     /// Parse atomic expression: literals, groups, character classes, etc.
     fn parse_atom(&mut self) -> Result<Regex, LexError> {
         trace_enter!(
@@ -730,6 +745,8 @@ impl<'a> Parser<'a> {
             ) => self.parse_atom_leaf(),
 
             Some(Token::ConditionalStart { .. }) => self.parse_atom_conditional(),
+
+            Some(Token::FlagModifier { .. }) => self.parse_atom_flag_group(),
 
             Some(
                 Token::GroupStart

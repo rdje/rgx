@@ -1524,6 +1524,32 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "(?=a)|b",
             input: "ba",
         },
+        // Scoped multiline mode (?m:...)
+        ParityCase {
+            name: "multiline_caret_after_newline",
+            pattern: "(?m:^a)",
+            input: "b\na",
+        },
+        ParityCase {
+            name: "multiline_dollar_before_newline",
+            pattern: "(?m:a$)",
+            input: "a\nb",
+        },
+        ParityCase {
+            name: "multiline_caret_at_start",
+            pattern: "(?m:^a)",
+            input: "abc",
+        },
+        ParityCase {
+            name: "multiline_dollar_at_end",
+            pattern: "(?m:a$)",
+            input: "ba",
+        },
+        ParityCase {
+            name: "multiline_scoped_no_leak",
+            pattern: "(?m:^a)|^b",
+            input: "x\nb",
+        },
     ];
 
     for case in cases {

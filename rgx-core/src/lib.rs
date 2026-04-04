@@ -3883,4 +3883,27 @@ mod tests {
         let m = regex.find_first("xxcatxx").expect("Expected a match");
         assert_eq!(m.matched_branch_number, None);
     }
+
+    #[test]
+    fn scoped_multiline_caret_matches_after_newline() {
+        let re = Regex::compile("(?m:^a)").unwrap();
+        assert!(re.is_match("b\na"));
+        assert!(re.is_match("a"));
+    }
+
+    #[test]
+    fn scoped_multiline_dollar_matches_before_newline() {
+        let re = Regex::compile("(?m:a$)").unwrap();
+        assert!(re.is_match("a\nb"));
+        assert!(re.is_match("a"));
+    }
+
+    #[test]
+    fn multiline_does_not_leak_outside_scope() {
+        let re = Regex::compile("(?m:^a$)|^b$").unwrap();
+        // ^b$ should NOT match after newline (outside multiline scope)
+        assert!(!re.is_match("x\nb"));
+        // But (?m:^a$) should match after newline
+        assert!(re.is_match("x\na"));
+    }
 }
