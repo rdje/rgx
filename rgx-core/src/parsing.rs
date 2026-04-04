@@ -1627,4 +1627,23 @@ mod tests {
             assert_extended_char_class_execution_fixture(*fixture);
         }
     }
+
+    #[test]
+    fn inline_flag_case_insensitive() {
+        let re = crate::Regex::compile("(?i)abc").unwrap();
+        assert!(re.is_match("ABC"));
+        assert!(re.is_match("abc"));
+    }
+
+    #[test]
+    fn inline_flag_multiline() {
+        let re = crate::Regex::compile("(?m)^a").unwrap();
+        assert!(re.is_match("b\na"));
+    }
+
+    #[test]
+    fn inline_flag_combined() {
+        let re = crate::Regex::compile("(?im)^abc").unwrap();
+        assert!(re.is_match("x\nABC"));
+    }
 }

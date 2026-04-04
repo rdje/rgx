@@ -88,6 +88,7 @@ impl<'a> Lexer<'a> {
             Token::Anchor(_) => "Anchor",
             Token::Backreference(_) => "Backreference",
             Token::FlagModifier { .. } => "FlagModifier",
+            Token::FlagToggle { .. } => "FlagToggle",
             Token::EOF => "EOF",
         }
     }
@@ -1000,6 +1001,7 @@ impl<'a> Lexer<'a> {
 
     fn parse_flag_modifier(&mut self, start_pos: Position) -> Result<Token, LexError> {
         // Inline flag modifier group: (?m:...), (?is:...), etc.
+        // or non-scoped flag toggle: (?i), (?im), etc.
         let mut flags = String::new();
         while let Some(fc) = self.current {
             if matches!(fc, 'm' | 'i' | 's' | 'x') {
@@ -1012,6 +1014,9 @@ impl<'a> Lexer<'a> {
         if self.current == Some(':') {
             self.advance(); // consume ':'
             Ok(Token::FlagModifier { flags })
+        } else if self.current == Some(')') {
+            self.advance(); // consume ')'
+            Ok(Token::FlagToggle { flags })
         } else {
             Err(LexError::InvalidGroupSyntax {
                 position: start_pos,
@@ -2200,6 +2205,56 @@ mod tests {
                 Token::Char(')'),
                 Token::Char('['),
                 Token::Char(']')
+            ]
+        );
+    }
+
+    #[test]
+    fn test_flag_toggle_single() {
+        let tokens = tokenize_all("(?i)abc").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::FlagToggle {
+                    flags: "i".to_string()
+                },
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::Char('c'),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_flag_toggle_combined() {
+        let tokens = tokenize_all("(?im)abc").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::FlagToggle {
+                    flags: "im".to_string()
+                },
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::Char('c'),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_flag_toggle_vs_scoped() {
+        // Scoped form: (?i:abc) should still produce FlagModifier
+        let tokens = tokenize_all("(?i:abc)").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::FlagModifier {
+                    flags: "i".to_string()
+                },
+                Token::Char('a'),
+                Token::Char('b'),
+                Token::Char('c'),
+                Token::GroupEnd,
             ]
         );
     }

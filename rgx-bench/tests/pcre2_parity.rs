@@ -1580,6 +1580,21 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "a.b",
             input: "a\nb axb",
         },
+        ParityCase {
+            name: "inline_flag_case_insensitive",
+            pattern: "(?i)abc",
+            input: "xxABCyy",
+        },
+        ParityCase {
+            name: "inline_flag_multiline",
+            pattern: "(?m)^a",
+            input: "b\na",
+        },
+        ParityCase {
+            name: "inline_flag_combined",
+            pattern: "(?im)^abc",
+            input: "x\nABC",
+        },
     ];
 
     for case in cases {

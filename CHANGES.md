@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Ship non-scoped inline flags (?i), (?m), (?s) and combinations
+- Scope: new regex feature — non-scoped inline flag toggles.
+- Changes:
+  - `(?i)`, `(?m)`, `(?s)` and combinations like `(?im)` now apply their flag to the rest of the current group or pattern.
+  - Added `Token::FlagToggle { flags }` to the lexer; when flag chars are followed by `)` instead of `:`, emit a toggle instead of a scoped group start.
+  - Parser intercepts `FlagToggle` in `parse_sequence` and wraps the remaining sequence in `Regex::FlagGroup`.
+  - Added `lower_flag_toggles` compiler pass to handle standalone empty-body `FlagGroup` nodes (from PGEN-backed parsing) by absorbing subsequent siblings.
+  - Added 7 lexer/parser unit tests and 3 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (260 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - `(?i)abc` is now equivalent to `(?i:abc)`. Combined forms like `(?ims)` work.
+  - Parity case count now 235.
+
 ### 2026-04-04 - Ship scoped case-insensitive mode (?i:...)
 - Scope: new regex feature — scoped case-insensitive flag groups.
 - Changes:

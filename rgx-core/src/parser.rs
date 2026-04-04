@@ -334,6 +334,21 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.peek() {
             match token {
                 Token::EOF | Token::Alternation | Token::GroupEnd => break,
+                Token::FlagToggle { .. } => {
+                    // Non-scoped inline flag toggle: (?i), (?im), etc.
+                    // Consume the toggle and wrap the remaining sequence in a FlagGroup.
+                    let flags = match self.peek() {
+                        Some(Token::FlagToggle { flags }) => flags.clone(),
+                        _ => unreachable!(),
+                    };
+                    self.advance()?;
+                    let rest = self.parse_sequence()?;
+                    elements.push(Regex::FlagGroup {
+                        flags,
+                        expr: Box::new(rest),
+                    });
+                    break;
+                }
                 _ => {
                     let element = match self.parse_quantified() {
                         Ok(node) => node,
@@ -1349,6 +1364,115 @@ mod tests {
                 assert!(!negated);
             }
             _ => panic!("Expected digit character class"),
+        }
+    }
+
+    #[test]
+    fn test_parse_flag_toggle_simple() {
+        // (?i)abc should parse as FlagGroup { flags: "i", expr: Sequence([a,b,c]) }
+        let mut parser = Parser::new("(?i)abc").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::FlagGroup { flags, expr } => {
+                assert_eq!(flags, "i");
+                match *expr {
+                    Regex::Sequence(elements) => {
+                        assert_eq!(elements.len(), 3);
+                        assert!(matches!(elements[0], Regex::Char('a')));
+                        assert!(matches!(elements[1], Regex::Char('b')));
+                        assert!(matches!(elements[2], Regex::Char('c')));
+                    }
+                    _ => panic!("Expected sequence inside flag toggle"),
+                }
+            }
+            other => panic!("Expected FlagGroup, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_flag_toggle_combined() {
+        // (?im)abc should parse as FlagGroup { flags: "im", expr: Sequence([a,b,c]) }
+        let mut parser = Parser::new("(?im)abc").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::FlagGroup { flags, expr } => {
+                assert_eq!(flags, "im");
+                match *expr {
+                    Regex::Sequence(elements) => {
+                        assert_eq!(elements.len(), 3);
+                        assert!(matches!(elements[0], Regex::Char('a')));
+                    }
+                    _ => panic!("Expected sequence inside flag toggle"),
+                }
+            }
+            other => panic!("Expected FlagGroup, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_flag_toggle_scoped_to_group() {
+        // ((?i)abc)def should parse as Sequence([Group(FlagGroup("i", abc)), d, e, f])
+        let mut parser = Parser::new("((?i)abc)def").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Sequence(elements) => {
+                assert_eq!(elements.len(), 4); // Group + d + e + f
+                match &elements[0] {
+                    Regex::Group { expr, kind, .. } => {
+                        assert!(matches!(kind, GroupKind::Capturing));
+                        match expr.as_ref() {
+                            Regex::FlagGroup { flags, expr } => {
+                                assert_eq!(flags, "i");
+                                match expr.as_ref() {
+                                    Regex::Sequence(inner) => {
+                                        assert_eq!(inner.len(), 3);
+                                        assert!(matches!(inner[0], Regex::Char('a')));
+                                    }
+                                    _ => panic!("Expected sequence inside flag toggle in group"),
+                                }
+                            }
+                            _ => panic!("Expected FlagGroup inside group"),
+                        }
+                    }
+                    other => panic!("Expected Group, got: {other:?}"),
+                }
+                assert!(matches!(elements[1], Regex::Char('d')));
+                assert!(matches!(elements[2], Regex::Char('e')));
+                assert!(matches!(elements[3], Regex::Char('f')));
+            }
+            other => panic!("Expected Sequence, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_flag_toggle_mid_sequence() {
+        // a(?i)bc should parse as Sequence([a, FlagGroup("i", Sequence([b, c]))])
+        let mut parser = Parser::new("a(?i)bc").unwrap();
+        let ast = parser.parse().unwrap();
+
+        match ast {
+            Regex::Sequence(elements) => {
+                assert_eq!(elements.len(), 2); // a + FlagGroup
+                assert!(matches!(elements[0], Regex::Char('a')));
+                match &elements[1] {
+                    Regex::FlagGroup { flags, expr } => {
+                        assert_eq!(flags, "i");
+                        match expr.as_ref() {
+                            Regex::Sequence(inner) => {
+                                assert_eq!(inner.len(), 2);
+                                assert!(matches!(inner[0], Regex::Char('b')));
+                                assert!(matches!(inner[1], Regex::Char('c')));
+                            }
+                            _ => panic!("Expected sequence inside mid-sequence flag toggle"),
+                        }
+                    }
+                    other => panic!("Expected FlagGroup, got: {other:?}"),
+                }
+            }
+            other => panic!("Expected Sequence, got: {other:?}"),
         }
     }
 }

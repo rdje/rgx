@@ -501,6 +501,7 @@ impl Compiler {
             self.mode
         );
         let ast = Self::assign_capture_indices(ast);
+        let ast = Self::lower_flag_toggles(ast);
         let ast = Self::lower_extended_char_classes(ast)?;
         debug_log!("compiler", "AST: {:?}", ast);
         if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
@@ -607,6 +608,106 @@ impl Compiler {
 
     fn extended_char_class_subset_error() -> RgxError {
         RgxError::Compile(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
+    }
+
+    /// Rewrite non-scoped flag toggles so that `FlagGroup { expr: Empty }` in a
+    /// sequence absorbs the remaining siblings.
+    ///
+    /// For example, `Sequence([FlagGroup("i", Empty), Char('a'), Char('b')])`
+    /// becomes `Sequence([FlagGroup("i", Sequence([Char('a'), Char('b')]))])`,
+    /// which collapses to `FlagGroup("i", Sequence([Char('a'), Char('b')]))`.
+    fn lower_flag_toggles(ast: RegexAst) -> RegexAst {
+        // First, recurse into children.
+        let ast = match ast {
+            RegexAst::Sequence(items) => {
+                RegexAst::Sequence(items.into_iter().map(Self::lower_flag_toggles).collect())
+            }
+            RegexAst::Alternation(items) => {
+                RegexAst::Alternation(items.into_iter().map(Self::lower_flag_toggles).collect())
+            }
+            RegexAst::Quantified { expr, quantifier } => RegexAst::Quantified {
+                expr: Box::new(Self::lower_flag_toggles(*expr)),
+                quantifier,
+            },
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => RegexAst::Group {
+                expr: Box::new(Self::lower_flag_toggles(*expr)),
+                kind,
+                index,
+                name,
+            },
+            RegexAst::Lookahead { expr, positive } => RegexAst::Lookahead {
+                expr: Box::new(Self::lower_flag_toggles(*expr)),
+                positive,
+            },
+            RegexAst::Lookbehind { expr, positive } => RegexAst::Lookbehind {
+                expr: Box::new(Self::lower_flag_toggles(*expr)),
+                positive,
+            },
+            RegexAst::FlagGroup { flags, expr } => RegexAst::FlagGroup {
+                flags,
+                expr: Box::new(Self::lower_flag_toggles(*expr)),
+            },
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => RegexAst::Conditional {
+                condition,
+                true_branch: Box::new(Self::lower_flag_toggles(*true_branch)),
+                false_branch: false_branch.map(|fb| Box::new(Self::lower_flag_toggles(*fb))),
+            },
+            other => other,
+        };
+
+        // Now handle the rewrite: scan sequences for FlagGroup { expr: Empty }.
+        match ast {
+            RegexAst::Sequence(items) => {
+                // Check if any element is a FlagGroup with Empty body.
+                let has_toggle = items.iter().any(|item| {
+                    matches!(item, RegexAst::FlagGroup { expr, .. } if matches!(expr.as_ref(), RegexAst::Empty))
+                });
+                if !has_toggle {
+                    return match items.len() {
+                        0 => RegexAst::Empty,
+                        1 => items.into_iter().next().unwrap(),
+                        _ => RegexAst::Sequence(items),
+                    };
+                }
+                // Rewrite: when we find a FlagGroup { flags, Empty }, absorb
+                // all subsequent siblings into its body.
+                let mut result = Vec::new();
+                let mut iter = items.into_iter().peekable();
+                while let Some(item) = iter.next() {
+                    if let RegexAst::FlagGroup { flags, expr } = &item {
+                        if matches!(expr.as_ref(), RegexAst::Empty) {
+                            let rest: Vec<RegexAst> = iter.collect();
+                            let body = match rest.len() {
+                                0 => RegexAst::Empty,
+                                1 => rest.into_iter().next().unwrap(),
+                                _ => RegexAst::Sequence(rest),
+                            };
+                            result.push(RegexAst::FlagGroup {
+                                flags: flags.clone(),
+                                expr: Box::new(body),
+                            });
+                            break;
+                        }
+                    }
+                    result.push(item);
+                }
+                match result.len() {
+                    0 => RegexAst::Empty,
+                    1 => result.into_iter().next().unwrap(),
+                    _ => RegexAst::Sequence(result),
+                }
+            }
+            other => other,
+        }
     }
 
     fn lower_extended_char_classes(ast: RegexAst) -> Result<RegexAst> {

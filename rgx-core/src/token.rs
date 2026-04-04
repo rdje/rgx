@@ -152,6 +152,11 @@ pub enum Token {
         /// Flag characters (e.g., `i`, `m`, `s`, `x`)
         flags: String,
     },
+    /// (?flags) - Non-scoped inline flag toggle (?i), (?m), (?im), etc.
+    FlagToggle {
+        /// Flag characters (e.g., `i`, `m`, `s`, `x`)
+        flags: String,
+    },
 
     // End of input
     /// End of the input stream
