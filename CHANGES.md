@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Resolve cast-truncation and doc-section warnings
+- Scope: targeted clippy warning cleanup in codegen paths and public API docs.
+- Changes:
+  - Added `#[allow(clippy::cast_possible_truncation)]` to 9 VM codegen functions that intentionally write compact u8/u16 bytecode operands.
+  - Added `#[allow(clippy::cast_sign_loss)]` and `#[allow(clippy::cast_possible_wrap)]` to 2 conditional-group index conversions in `compiler.rs` and `parsing.rs`.
+  - Added missing `# Errors` sections to 11 public functions across `compiler.rs`, `engine.rs`, `execution.rs`, `vm.rs`, and `log.rs`.
+  - Added missing `# Panics` sections to 10 public functions across `execution.rs` and `log.rs`.
+- Validation:
+  - `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli` (10 pass)
+  - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --lib` (35 RGX-owned warnings, down from 88)
+- Notes/impact:
+  - RGX-owned warnings now at 35 (88% reduction from original 296); remaining backlog is function-length limits (12), intentional `#[inline(always)]` (5), and a small tail of structural suggestions.
+
 ### 2026-04-04 - Remove dead opcodes and memoization scaffolding from VM
 - Scope: dead code cleanup in `vm.rs` opcode surface and execution context.
 - Changes:

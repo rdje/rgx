@@ -45,6 +45,11 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Latest warning-debt pass resolved all cast-truncation and doc-section warnings:
+  - added `#[allow(clippy::cast_possible_truncation)]` to 9 VM codegen functions (intentional compact bytecode encoding)
+  - added missing `# Errors` (11) and `# Panics` (10) sections across public API surfaces
+  - RGX-owned warnings now at 35 (88% reduction from original 296)
+  - remaining backlog: 12 function-length limits (architectural), 5 `#[inline(always)]` (intentional), small tail of structural suggestions
 - Latest dead-code cleanup removed 11 superseded opcodes and the dead `memo_cache` field from `vm.rs`:
   - removed: String, CharNoCase, StringNoCase, Range, RangeNeg, Return, SaveStartCond, RestoreCaptures, RepeatRange, RepeatExact
   - hex slot values preserved via tombstone comments so remaining opcodes don't shift

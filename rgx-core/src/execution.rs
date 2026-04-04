@@ -202,6 +202,9 @@ impl ExecContext {
     }
 
     /// Get a host-provided execution variable by name.
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
     #[must_use]
     pub fn variable(&self, name: &str) -> Option<String> {
         let variable_slots = self.variables.read().unwrap().len();
@@ -229,6 +232,9 @@ impl ExecContext {
     }
 
     /// Clone the current execution-variable snapshot into an owned map.
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
     #[must_use]
     pub fn variables_snapshot(&self) -> HashMap<String, String> {
         let variable_slots = self.variables.read().unwrap().len();
@@ -1793,6 +1799,9 @@ impl NativeCallbackRegistry {
     }
 
     /// Register a native callback function
+    ///
+    /// # Panics
+    /// Panics if the internal callbacks `RwLock` is poisoned.
     pub fn register<F>(&self, name: String, callback: F)
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
@@ -1821,6 +1830,9 @@ impl NativeCallbackRegistry {
     }
 
     /// Call a registered callback
+    ///
+    /// # Panics
+    /// Panics if the internal callbacks `RwLock` is poisoned.
     pub fn call(&self, name: &str, context: &ExecContext) -> ExecResult {
         trace_enter!(
             "execution",
@@ -1865,6 +1877,9 @@ impl NativeCallbackRegistry {
     }
 
     /// Check if a callback is registered
+    ///
+    /// # Panics
+    /// Panics if the internal callbacks `RwLock` is poisoned.
     pub fn has(&self, name: &str) -> bool {
         trace_enter!(
             "execution",
@@ -1884,6 +1899,9 @@ impl NativeCallbackRegistry {
     }
 
     /// Count registered callbacks.
+    ///
+    /// # Panics
+    /// Panics if the internal callbacks `RwLock` is poisoned.
     pub fn len(&self) -> usize {
         self.callbacks.read().unwrap().len()
     }
@@ -1922,6 +1940,9 @@ impl ExecutionVariableRegistry {
     }
 
     /// Register or replace a host-provided execution variable.
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
     pub fn set(&self, name: String, value: String) {
         trace_enter!(
             "execution",
@@ -1948,6 +1969,9 @@ impl ExecutionVariableRegistry {
     }
 
     /// Clone the current execution-variable state into an owned map.
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
     pub fn snapshot(&self) -> HashMap<String, String> {
         trace_enter!(
             "execution",
@@ -1966,6 +1990,9 @@ impl ExecutionVariableRegistry {
     }
 
     /// Count registered variables.
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
     pub fn len(&self) -> usize {
         self.variables.read().unwrap().len()
     }
@@ -2289,6 +2316,9 @@ impl ExecutionManager {
     }
 
     /// Register a named wasm module.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if the WASM engine is unavailable or the module is invalid.
     pub fn register_wasm_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
         trace_enter!(
             "execution",

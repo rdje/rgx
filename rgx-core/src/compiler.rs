@@ -423,6 +423,9 @@ impl Compiler {
     }
 
     /// Compile regex pattern into optimized bytecode program
+    ///
+    /// # Errors
+    /// Returns `RgxError::Compile` if the pattern is empty or contains invalid syntax.
     pub fn compile(&self, pattern: &str) -> Result<CompiledPattern> {
         trace_enter!(
             "compiler",
@@ -471,6 +474,9 @@ impl Compiler {
     ///
     /// This enables parser-independent development of VM/compiler/engine
     /// while parser work progresses in parallel.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Compile` if bytecode generation fails for the given AST.
     pub fn compile_ast(&self, ast: RegexAst) -> Result<CompiledPattern> {
         trace_enter!(
             "compiler",
@@ -1859,6 +1865,7 @@ impl Compiler {
         }
 
         let resolved = if offset > 0 {
+            #[allow(clippy::cast_sign_loss)] // Sign is validated positive above.
             opened_groups.checked_add(offset as u32)
         } else {
             let distance = offset.unsigned_abs();

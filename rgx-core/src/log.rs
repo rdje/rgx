@@ -188,6 +188,12 @@ pub fn is_verbosity_enabled(min_level: Verbosity) -> bool {
 }
 
 /// Route logging output to the given file path.
+///
+/// # Errors
+/// Returns an `io::Error` if the file at the given path cannot be created or opened.
+///
+/// # Panics
+/// Panics if the internal output-state mutex is poisoned.
 pub fn set_output_file(path: &str) -> std::io::Result<()> {
     let file = File::create(path)?;
     let mut output = output_state().lock().expect("output mutex poisoned");

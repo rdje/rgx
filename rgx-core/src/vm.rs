@@ -233,8 +233,9 @@ impl Instruction {
         }
     }
 
-    /// Create instruction with character operand  
+    /// Create instruction with character operand
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // UTF-8 length fits in u8.
     pub fn with_char(op: OpCode, ch: char) -> Self {
         let mut operands = Vec::new();
         let mut buf = [0; 4];
@@ -2043,6 +2044,9 @@ impl RegexVM {
     }
 
     /// Register a native callback on the attached execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
     pub fn register_native<F>(&self, name: String, callback: F) -> crate::error::Result<()>
     where
         F: Fn(&CodeExecContext) -> ExecResult + Send + Sync + 'static,
@@ -2057,6 +2061,9 @@ impl RegexVM {
     }
 
     /// Register a named wasm module on the attached execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached or the WASM module is invalid.
     pub fn register_wasm_module(
         &self,
         name: String,
@@ -2071,6 +2078,9 @@ impl RegexVM {
     }
 
     /// Register or replace a host-provided execution variable on the attached execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
     pub fn set_variable(&self, name: String, value: String) -> crate::error::Result<()> {
         let Some(execution_manager) = &self.execution_manager else {
             return Err(crate::error::RgxError::Engine(
@@ -3401,6 +3411,7 @@ impl OptimizingCompiler {
     }
 
     /// Code generation pass - emit optimized bytecode
+    #[allow(clippy::cast_possible_truncation)] // Bytecode operands are intentionally stored as compact u8/u16 values.
     fn codegen_pass(&mut self, ast: &Regex, is_top_level: bool) {
         match ast {
             Regex::Char(ch) => {
@@ -3788,6 +3799,7 @@ impl OptimizingCompiler {
     }
 
     /// Emit an opcode followed by an inlined compiled sub-expression.
+    #[allow(clippy::cast_possible_truncation)] // Bytecode operands are intentionally stored as compact u8/u16 values.
     fn emit_subexpr_opcode(&mut self, op: OpCode, expr: &Regex) {
         self.emit_op(op);
 
@@ -3797,6 +3809,7 @@ impl OptimizingCompiler {
         self.code.extend(sub_code);
     }
 
+    #[allow(clippy::cast_possible_truncation)] // Bytecode operands are intentionally stored as compact u8/u16 values.
     fn emit_conditional_jump(&mut self, op: OpCode, condition: &ConditionalTest) {
         self.emit_op(op);
         match condition {
@@ -3865,6 +3878,7 @@ impl OptimizingCompiler {
     }
 
     /// Emit an inline code-block operand payload.
+    #[allow(clippy::cast_possible_truncation)] // Bytecode operands are intentionally stored as compact u8/u16 values.
     fn emit_code_block(&mut self, lang: &str, code: &str) {
         self.emit_op(OpCode::CodeBlock);
         debug_assert!(u8::try_from(lang.len()).is_ok());
@@ -3876,6 +3890,7 @@ impl OptimizingCompiler {
         self.code.extend_from_slice(code.as_bytes());
     }
 
+    #[allow(clippy::cast_possible_truncation)] // Bytecode jump offsets are intentionally stored as u16.
     fn patch_u16_offset(&mut self, offset_pos: usize, target_pos: usize) {
         let offset = target_pos - (offset_pos + 2);
         let offset_bytes = (offset as u16).to_le_bytes();
@@ -4006,6 +4021,7 @@ impl OptimizingCompiler {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)] // Char-class IDs are single-byte operands.
     fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
         if char_class_base == 0 || code.is_empty() {
             return;
@@ -4134,6 +4150,7 @@ impl OptimizingCompiler {
     }
 
     /// Emit opcode with character operand
+    #[allow(clippy::cast_possible_truncation)] // UTF-8 length fits in u8.
     fn emit_char_op(&mut self, op: OpCode, ch: char) {
         self.code.push(op as u8);
 
@@ -4149,6 +4166,7 @@ impl OptimizingCompiler {
     }
 
     /// Compile a custom character class and return its ID
+    #[allow(clippy::cast_possible_truncation)] // ASCII range values are bounded to 0..=127.
     fn compile_char_class(&mut self, ranges: &[CharRange]) -> usize {
         // Build an optimized character class representation
         let mut ascii_bitmap = [0u16; 8]; // 128 bits for ASCII

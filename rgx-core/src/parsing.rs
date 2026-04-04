@@ -889,6 +889,7 @@ impl<'a> PgenAstAdapter<'a> {
                     "invalid positive conditional group reference '{text}'"
                 ))
             })?;
+            #[allow(clippy::cast_possible_wrap)] // Positive group refs are small enough for i32.
             return Ok(ConditionalTest::RelativeGroupExists(group as i32));
         }
         if text.starts_with('-') {

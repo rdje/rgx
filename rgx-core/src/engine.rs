@@ -44,6 +44,9 @@ pub struct Engine {
 
 impl Engine {
     /// Create new engine from compiled pattern
+    ///
+    /// # Errors
+    /// Returns an error if engine initialization fails for the given compiled pattern.
     pub fn new(pattern: &CompiledPattern) -> Result<Self> {
         trace_enter!(
             "engine",
@@ -235,6 +238,9 @@ impl Engine {
     }
 
     /// Register a native callback on the engine's execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
     pub fn register_native<F>(&self, name: String, callback: F) -> Result<()>
     where
         F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
@@ -243,11 +249,17 @@ impl Engine {
     }
 
     /// Register a named wasm module on the engine's execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached or the WASM module is invalid.
     pub fn register_wasm_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
         self.vm.register_wasm_module(name, module_bytes)
     }
 
     /// Register or replace a host-provided execution variable on the engine's execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
     pub fn set_variable(&self, name: String, value: String) -> Result<()> {
         self.vm.set_variable(name, value)
     }
