@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Fix empty-string match compilation bug
+- Scope: accuracy fix for zero-width pattern matching.
+- Changes:
+  - Added an explicit `Regex::Empty => {}` arm to the compiler's `codegen_pass`, preventing the empty AST node from falling through to the catch-all `_ => Fail` arm.
+  - Previously, patterns like `()`, `|a`, and `a||b` that should match the empty string at every position produced no matches because the empty node compiled to `OpCode::Fail`.
+  - Added 4 differential parity regression tests: `empty_capture_group`, `empty_first_alternative`, `empty_middle_alternative`, `optional_zero_width`.
+- Validation:
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core` (240 pass)
+  - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-bench` (37 pass)
+  - 0 clippy warnings
+- Notes/impact:
+  - This is a **semantic accuracy fix**. The empty-string pattern is fundamental to regex semantics — it appears in `()?`, `()*`, `|alt`, and `DEFINE` blocks.
+  - Total parity case count now 217.
+
 ### 2026-04-04 - Fix ^ and $ to match PCRE2 single-line default semantics
 - Scope: accuracy fix for anchor behavior in default mode.
 - Changes:

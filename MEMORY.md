@@ -49,7 +49,8 @@ Live continuity memory for `rgx` sessions.
   - previously `^` matched after `\n` and `$` matched before `\n` without `(?m)` — incorrect
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
-- Accuracy probing found 3 real bugs: anchor defaults (fixed), empty-string match suppression (open), lookahead+alternation find_all (open)
+- **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- Accuracy probing found 3 real bugs: anchor defaults (fixed), empty-string match suppression (fixed), lookahead+alternation find_all (open, low severity)
 - Fourth VM optimization: extended prefix filter from single-byte literals to character classes (`\d`, `\w`, `\s`), dramatically improving digit/word/space-prefixed patterns
   - capture_groups find_all 10K: 1437x → 22x vs PCRE2 (65x faster total session improvement)
   - uses a cached `PrefixFilter` enum with `memchr` for bytes and inline predicates for classes

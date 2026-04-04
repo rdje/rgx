@@ -1482,6 +1482,27 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "a$",
             input: "a\n",
         },
+        // Empty-match regressions: patterns that match the empty string
+        ParityCase {
+            name: "empty_capture_group",
+            pattern: "()",
+            input: "ab",
+        },
+        ParityCase {
+            name: "empty_first_alternative",
+            pattern: "|a",
+            input: "b",
+        },
+        ParityCase {
+            name: "empty_middle_alternative",
+            pattern: "a||b",
+            input: "c",
+        },
+        ParityCase {
+            name: "optional_zero_width",
+            pattern: "a?",
+            input: "bbb",
+        },
     ];
 
     for case in cases {

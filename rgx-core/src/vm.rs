@@ -3933,6 +3933,12 @@ impl OptimizingCompiler {
                 }
             }
 
+            Regex::Empty => {
+                // Empty/epsilon — trivially matches without consuming input.
+                // No bytecode needed; execution simply falls through to the
+                // next instruction.
+            }
+
             _ => {
                 // TODO: Implement remaining AST nodes
                 self.emit_op(OpCode::Fail);
