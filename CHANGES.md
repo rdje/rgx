@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Bump PGEN to 1.1.3 with braced octal fix (closes PGEN-RGX-0006)
+- Scope: PGEN submodule upgrade verifying the upstream fix for the braced octal bug.
+- Changes:
+  - Bumped `subs/pgen` from `f97e0fe` (PGEN 1.1.2) to `962acfd` (PGEN 1.1.3) — "Release regex 1.1.3 braced octal fix".
+  - Verified `\o{101}` now produces the correct `octal_escape` AST with three `octal_digit` children (was misparsed as `simple_escape(o) + counted_quantifier{101}`).
+  - Added 2 RGX regression tests (`braced_octal_escape_matches_codepoint`, `braced_octal_escape_various_values`) and 1 PCRE2 parity case (`braced_octal_escape_all`).
+  - Closed `pgen-issues/PGEN-RGX-0006.yaml` as `verified-fixed-upstream`, with verification notes and the fixed AST dump archived under `pgen-issues/artifacts/PGEN-RGX-0006/`.
+  - Updated pinned-commit references in README.md, RUST_CODEBASE_ANALYSIS.md, MEMORY.md, and DEVELOPMENT_NOTES.md.
+- Validation:
+  - `cargo test -p rgx-core` (233 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (38 pass)
+  - Parse probe confirms AST now contains `octal_escape` with `octal_digits` structured child tree
+- Notes/impact:
+  - First successful round-trip of the local PGEN issue reporting protocol: bug filed → fix upstream → submodule bump → regression tests added → issue closed.
+  - Parity case count now 240.
+
 ### 2026-04-05 - Use PGEN's structured AST natively for escapes and char classes
 - Scope: eliminate secondary parsing in the PGEN adapter by traversing PGEN's structured child trees.
 - Changes:

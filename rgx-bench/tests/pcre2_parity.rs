@@ -181,6 +181,11 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
             input: "abab xx abab",
         },
         ParityCase {
+            name: "braced_octal_escape_all",
+            pattern: r"\o{101}",
+            input: "AaA oo AA",
+        },
+        ParityCase {
             name: "branch_reset_backreference_all",
             pattern: r"(?|(a)|(b))\1",
             input: "aa bb ab ba",

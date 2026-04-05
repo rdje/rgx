@@ -175,7 +175,7 @@ Pipeline in `rgx-core`:
   - named recursion-condition syntax `(?(R&name)...)` is now available on the default RGX path after the `subs/pgen` submodule bump to the verified standalone `1.1.2` fix commit,
   - and the current embedded code-block contract is now structurally specified for opaque generic / `lua` / `js` / `javascript` payloads, while RGX now also ships a local `rhai` backend on top of generic tag transport pending explicit upstream marker publication; the published contract still excludes `native` / `wasm` support.
 - The current PGEN-backed integration now depends on the committed `subs/pgen` submodule:
-  - the pinned fix commit is `f97e0fe31750885f4fc48a67ed7660110cd20271`
+  - the pinned fix commit is `962acfd9004326011efde5c0a3ba91e10e260aac` (PGEN 1.1.3, includes braced octal fix)
   - fresh clones must initialize submodules before building (`git submodule update --init --recursive`)
   - hosted CI for the private submodule may need an explicit token such as `RGX_SUBMODULES_TOKEN` if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
 - The current forwardable recommendation for PGEN lives in `PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`:

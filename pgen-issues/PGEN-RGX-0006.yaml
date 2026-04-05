@@ -1,10 +1,10 @@
 id: PGEN-RGX-0006
 summary: |
   Braced octal escape (?\o{101}) is misparsed as a simple_escape for \o followed by a counted_quantifier {101}, instead of an octal_escape that decodes to character U+0041
-status: open
+status: closed
 opened_at: 2026-04-05T21:43:30Z
 first_seen_at: 2026-04-05T21:43:30Z
-last_updated_at: 2026-04-05T21:43:30Z
+last_updated_at: 2026-04-06T00:00:00Z
 parser_backend: pgen
 parser_backend_version: 1.1.2
 rgx_commit: 735e2146edd911b0f37fdb933ab1290b16aca61a
@@ -90,10 +90,33 @@ impact: |
   the published regex flavor summary in PGEN_USER_GUIDE.md claims octal
   escape support as part of the accepted forms.
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: pending
+  verified_at: 2026-04-06T00:00:00Z
   verification_notes: |
-    When fixed upstream, verify by re-running the probe commands above and
-    confirming the AST dump contains an octal_escape node with three
-    octal_digit children transporting the digits 1, 0, 1.
+    Fixed upstream in PGEN 1.1.3 commit
+    962acfd9004326011efde5c0a3ba91e10e260aac ("Release regex 1.1.3 braced
+    octal fix"). RGX submodule bumped from f97e0fe (1.1.2) to 962acfd (1.1.3).
+
+    Verification after submodule bump:
+      cargo run --manifest-path subs/pgen/rust/Cargo.toml \
+        --features generated_parsers --bin parseability_probe -- \
+        --parse-dump-ast-pretty regex \
+        pgen-issues/artifacts/PGEN-RGX-0006/repro_input.txt \
+        /tmp/pgen_ast_verify.json --profile regex_default
+
+    Result: parse_full passed. AST dump now contains:
+      - 1 octal_escape node (was 0)
+      - 0 counted_quantifier nodes (was 2)
+      - octal_digits Quantified+ with three octal_digit children (1, 0, 1)
+
+    RGX-side regression tests added:
+      - tests::braced_octal_escape_matches_codepoint verifies \o{101}
+        matches "A" and rejects "o" / "ooooo"
+      - tests::braced_octal_escape_various_values verifies \o{60}→'0' and
+        \o{141}→'a'
+      - pcre2_parity_supported_syntax_find_all_spans "braced_octal_escape_all"
+        verifies PCRE2 span parity on `\o{101}` against input "AaA oo AA"
+
+    All 283 tests pass (231 rgx-core lib + 2 doc + 10 rgx-cli + 37 rgx-bench +
+    3 new).

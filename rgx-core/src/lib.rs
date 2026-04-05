@@ -4005,4 +4005,24 @@ mod tests {
         let re = Regex::compile(r"(?P<w>\w+)\s+\k<w>").unwrap();
         assert!(re.is_match("the the"));
     }
+
+    #[test]
+    fn braced_octal_escape_matches_codepoint() {
+        // PGEN-RGX-0006 regression: \o{101} should decode to 'A' (U+0041),
+        // not misparse as literal 'o' followed by {101} counted quantifier.
+        let re = Regex::compile(r"\o{101}").unwrap();
+        assert!(re.is_match("A"));
+        assert!(!re.is_match("o"));
+        assert!(!re.is_match("ooooo"));
+    }
+
+    #[test]
+    fn braced_octal_escape_various_values() {
+        // \o{60} = 0o60 = 48 = '0'
+        let re = Regex::compile(r"\o{60}").unwrap();
+        assert!(re.is_match("0"));
+        // \o{141} = 0o141 = 97 = 'a'
+        let re = Regex::compile(r"\o{141}").unwrap();
+        assert!(re.is_match("a"));
+    }
 }
