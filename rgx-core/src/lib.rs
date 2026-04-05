@@ -59,6 +59,8 @@ pub mod execution;
 /// Regex pattern tokenization.
 pub mod lexer;
 /// Recursive-descent parser implementation.
+/// Recursive-descent parser — deprecated; retained only for non-PGEN builds.
+#[cfg(not(feature = "pgen-parser"))]
 pub mod parser;
 /// Zero-cost parser abstraction and backend selection.
 pub mod parsing;

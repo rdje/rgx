@@ -1561,19 +1561,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let mut parser = match crate::parser::Parser::new(&expr_text) {
-            Ok(parser) => parser,
-            Err(err) => {
-                trace_exit!(
-                    "lexer",
-                    "Lexer::parse_conditional_subexpression_ast",
-                    "ok=false,error={}",
-                    err
-                );
-                return Err(err);
-            }
-        };
-        let result = parser.parse();
+        let result = Self::parse_subexpression_text(&expr_text);
         match &result {
             Ok(_) => trace_exit!(
                 "lexer",
@@ -1589,6 +1577,21 @@ impl<'a> Lexer<'a> {
             ),
         }
         result
+    }
+
+    /// Parse a sub-expression text fragment into an AST using the active parser.
+    #[cfg(feature = "pgen-parser")]
+    fn parse_subexpression_text(text: &str) -> Result<Regex, LexError> {
+        crate::parsing::parse_pattern(text).map_err(|_err| LexError::InvalidGroupSyntax {
+            position: Position::new(0, 1, 1),
+        })
+    }
+
+    /// Parse a sub-expression text fragment into an AST using the recursive-descent parser.
+    #[cfg(not(feature = "pgen-parser"))]
+    fn parse_subexpression_text(text: &str) -> Result<Regex, LexError> {
+        let mut parser = crate::parser::Parser::new(text)?;
+        parser.parse()
     }
 
     /// Parse character class [abc], [^abc], [a-z], etc.
