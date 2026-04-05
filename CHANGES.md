@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Use PGEN's structured AST natively for escapes and char classes
+- Scope: eliminate secondary parsing in the PGEN adapter by traversing PGEN's structured child trees.
+- Changes:
+  - Removed the `crate::lexer::Lexer::new(fragment).next_token()` call that was tokenizing bracket expressions inside `convert_char_class`.
+  - Removed `convert_escape_complex` string-slicing dispatch that hand-parsed `\h`, `\H`, `\v`, `\V`, `\p`, `\P`, `\x`, `\c`.
+  - Added structured tree-walking handlers that use PGEN's native rule hierarchy:
+    - `convert_hex_escape` — walks `hex_digit` descendants
+    - `convert_property_escape` — walks `prop_name` subtree, reads `p{`/`P{` polarity
+    - `convert_control_escape` — reads `any_char` child
+    - `convert_octal_escape` — walks `octal_digit` descendants
+    - `convert_char_class` — uses `negation` child, iterates `class_body` children
+    - `convert_class_range` / `convert_class_escape` — traverse structured range/escape nodes
+  - Added tree-navigation helpers: `find_direct_child`, `find_first_terminal_text`, `collect_first_terminal_char`, `walk_collect_terminal_chars`, `collect_all_terminal_chars`.
+- Validation:
+  - `cargo test -p rgx-core` (233 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (37 pass)
+  - 0 clippy warnings
+  - `grep 'crate::lexer\|crate::parser::Parser' parsing.rs` returns zero matches
+- Notes/impact:
+  - The adapter now uses PGEN's grammar structure directly for escapes and character classes instead of re-parsing span text.
+  - Remaining string parsing is limited to short prefixes/suffixes for constructs where PGEN coarsely flattens (flag chars in `(?i:...)`, code block `lang:code` splits, subroutine targets, backreference names) — these are single-character discriminations, not full parsers.
+  - The shorthand escape inspection (`\d` vs `\D`) still reads the terminal letter because PGEN flattens all shorthands through `simple_escape -> any_char -> letter`.
+
 ### 2026-04-05 - Retire builtin recursive-descent parser — PGEN is now the sole parser
 - Scope: major integration refactor eliminating all use of the builtin parser from the PGEN adapter.
 - Changes:

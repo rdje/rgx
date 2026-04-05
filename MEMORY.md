@@ -50,6 +50,7 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- PGEN adapter now uses PGEN's structured AST natively for escapes (hex/property/control/octal) and character classes (ranges, negation, class_escape) — no more Lexer::new() or string-parsing fallback for these; remaining string-parsing is limited to short coarse-flattened constructs (flag chars, code block delimiters, subroutine targets, backref names)
 - **CRITICAL**: Builtin recursive-descent parser fully retired from PGEN integration path — `parse_leaf_fragment`, `RecursiveDescentParser`, `PgenFeatureBackend` all removed; PGEN is now the sole parser with native converters for all atom rule names; any PGEN issue will surface as an explicit error instead of being masked by fallback
 - **New feature**: Python-style `(?P<name>...)` named groups and `(?P=name)` named backreferences shipped — reuse existing tokens, no new AST needed instead of falling through to recursive-descent fallback — no PGEN bugs found, the gap was in RGX's adapter code
 - **New feature**: named backreferences `\k<name>` and `\k'name'` shipped — resolve to numbered backref at compile time; missing names produce compile errors

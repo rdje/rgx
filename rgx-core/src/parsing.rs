@@ -552,17 +552,43 @@ impl<'a> PgenAstAdapter<'a> {
 
     /// Convert an `escape` node — `\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\.`, `\n`, `\t`,
     /// `\r`, `\p{L}`, `\P{Greek}`, `\x41`, `\cA`, `\h`, `\H`, `\v`, `\V`, `\1`, etc.
+    ///
+    /// Dispatches on the structured child variant of `escape_unit` rather than
+    /// re-scanning the span text.
     fn convert_escape(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        // Strip leading backslash
-        let rest = fragment.strip_prefix('\\').unwrap_or(fragment);
-
-        if rest.is_empty() {
-            return Err(self.contract_error("pgen escape node has no content after backslash"));
+        // Walk the `escape` Sequence[Terminal("\\"), escape_unit-wrapper]. Find
+        // the concrete escape variant (simple_escape, hex_escape, property_escape,
+        // control_escape, or octal_escape) and dispatch to the matching handler.
+        if let Some(simple) = self.first_descendant(node, "simple_escape") {
+            return self.convert_simple_escape(simple);
         }
+        if let Some(hex) = self.first_descendant(node, "hex_escape") {
+            return self.convert_hex_escape(hex);
+        }
+        if let Some(property) = self.first_descendant(node, "property_escape") {
+            return self.convert_property_escape(property);
+        }
+        if let Some(control) = self.first_descendant(node, "control_escape") {
+            return self.convert_control_escape(control);
+        }
+        if let Some(octal) = self.first_descendant(node, "octal_escape") {
+            return self.convert_octal_escape(octal);
+        }
+        Err(self.contract_error(&format!(
+            "pgen escape node '{}' has no recognized escape_unit child",
+            node.rule_name
+        )))
+    }
 
-        let first = rest.chars().next().unwrap();
-        match first {
+    /// Convert a `simple_escape` node — the single character after `\` resolves
+    /// to a shorthand class, anchor, literal control char, or metachar. This is
+    /// the only escape handler that legitimately inspects the terminal character
+    /// value because PGEN flattens all shorthand escapes through `any_char`.
+    fn convert_simple_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        let ch = self.collect_first_terminal_char(node).ok_or_else(|| {
+            self.contract_error("pgen simple_escape is missing its trailing character")
+        })?;
+        match ch {
             // Predefined character classes (wrapped in CharClass to match VM expectations)
             'd' => Ok(Regex::CharClass(CharClass::Digit { negated: false })),
             'D' => Ok(Regex::CharClass(CharClass::Digit { negated: true })),
@@ -571,50 +597,6 @@ impl<'a> PgenAstAdapter<'a> {
             's' => Ok(Regex::CharClass(CharClass::Space { negated: false })),
             'S' => Ok(Regex::CharClass(CharClass::Space { negated: true })),
 
-            // Word boundaries (if PGEN routes them through escape instead of anchor)
-            'b' => Ok(Regex::WordBoundary { positive: true }),
-            'B' => Ok(Regex::WordBoundary { positive: false }),
-
-            // Anchors (if PGEN routes them through escape instead of anchor)
-            'A' => Ok(Regex::Anchor(AnchorType::AbsStart)),
-            'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
-            'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
-
-            // Whitespace shorthands and complex escapes
-            'h' | 'H' | 'v' | 'V' | 'p' | 'P' | 'x' | 'c' => {
-                self.convert_escape_complex(first, rest, fragment)
-            }
-
-            // Literal escapes: \n, \t, \r, \f, \a, \e
-            'n' => Ok(Regex::Char('\n')),
-            't' => Ok(Regex::Char('\t')),
-            'r' => Ok(Regex::Char('\r')),
-            'f' => Ok(Regex::Char('\u{0C}')),
-            'a' => Ok(Regex::Char('\u{07}')),
-            'e' => Ok(Regex::Char('\u{1B}')),
-
-            // Numeric backreferences \1, \2, etc.
-            c if c.is_ascii_digit() => {
-                let n: u32 = rest.parse().map_err(|_| {
-                    self.contract_error(&format!(
-                        "invalid numeric backreference in escape '{fragment}'"
-                    ))
-                })?;
-                Ok(Regex::Backreference(n))
-            }
-
-            // Escaped metacharacters: \., \*, \+, \?, \(, \), \[, \], \{, \}, \|, \\, \^, \$, \-, \/
-            c if ".*+?()[]{}|\\^$-/".contains(c) => Ok(Regex::Char(c)),
-
-            other => Err(self.contract_error(&format!(
-                "unrecognized escape character '{other}' in '{fragment}'"
-            ))),
-        }
-    }
-
-    /// Handle complex escape sequences that require multi-character parsing.
-    fn convert_escape_complex(&self, first: char, rest: &str, fragment: &str) -> Result<Regex> {
-        match first {
             // Horizontal whitespace
             'h' => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: horizontal_whitespace_ranges(),
@@ -635,83 +617,235 @@ impl<'a> PgenAstAdapter<'a> {
                 negated: true,
             })),
 
-            // Unicode property classes \p{Name} / \P{Name}
-            'p' | 'P' => {
-                let negated = first == 'P';
-                let after_letter = &rest[1..];
-                let name = after_letter
-                    .strip_prefix('{')
-                    .and_then(|s| s.strip_suffix('}'))
-                    .ok_or_else(|| {
-                        self.contract_error(&format!(
-                            "pgen escape unicode class has malformed braces: '{fragment}'"
-                        ))
-                    })?;
-                Ok(Regex::UnicodeClass {
-                    name: name.to_string(),
-                    negated,
-                })
+            // Word boundaries (if PGEN routes them through simple_escape).
+            'b' => Ok(Regex::WordBoundary { positive: true }),
+            'B' => Ok(Regex::WordBoundary { positive: false }),
+
+            // Anchors (if PGEN routes them through simple_escape).
+            'A' => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+
+            // Literal control-character escapes: \n, \t, \r, \f, \a, \e
+            'n' => Ok(Regex::Char('\n')),
+            't' => Ok(Regex::Char('\t')),
+            'r' => Ok(Regex::Char('\r')),
+            'f' => Ok(Regex::Char('\u{0C}')),
+            'a' => Ok(Regex::Char('\u{07}')),
+            'e' => Ok(Regex::Char('\u{1B}')),
+
+            // Numeric backreferences \1, \2, etc. are captured as a single
+            // digit under simple_escape by PGEN.
+            c if c.is_ascii_digit() => {
+                let n = c.to_digit(10).unwrap_or(0);
+                Ok(Regex::Backreference(n))
             }
 
-            // Hex escapes \xNN or \x{NNNN}
-            'x' => {
-                let after_x = &rest[1..];
-                let hex_str = if let Some(braced) =
-                    after_x.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
-                {
-                    braced
-                } else {
-                    after_x
-                };
-                let code_point = u32::from_str_radix(hex_str, 16).map_err(|_| {
-                    self.contract_error(&format!("invalid hex escape digits in '{fragment}'"))
-                })?;
-                let ch = char::from_u32(code_point).ok_or_else(|| {
-                    self.contract_error(&format!(
-                        "hex escape '{fragment}' is not a valid Unicode code point"
-                    ))
-                })?;
-                Ok(Regex::Char(ch))
-            }
+            // Escaped metacharacters: \., \*, \+, \?, \(, \), \[, \], \{, \}, \|, \\, \^, \$, \-, \/
+            c if ".*+?()[]{}|\\^$-/".contains(c) => Ok(Regex::Char(c)),
 
-            // Control escape \cA
-            'c' => {
-                let ctrl_char = rest.chars().nth(1).ok_or_else(|| {
-                    self.contract_error(&format!(
-                        "pgen escape \\c is missing its control letter in '{fragment}'"
-                    ))
-                })?;
-                let code = (ctrl_char.to_ascii_uppercase() as u32).wrapping_sub('@' as u32) & 0x1F;
-                let ch = char::from_u32(code).ok_or_else(|| {
-                    self.contract_error(&format!(
-                        "control escape '{fragment}' is not a valid character"
-                    ))
-                })?;
-                Ok(Regex::Char(ch))
+            other => {
+                Err(self.contract_error(&format!("unrecognized simple_escape character '{other}'")))
             }
-
-            _ => unreachable!("convert_escape_complex called with unexpected char '{first}'"),
         }
+    }
+
+    /// Convert a `hex_escape` node — `\xNN` (Sequence of `x` + two
+    /// `hex_digit`s) or `\x{NNNN}` (Sequence of `x{` + `hex_digits` list +
+    /// `}`).
+    fn convert_hex_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        let mut hex_str = String::new();
+        self.walk_collect_terminal_chars(node, "hex_digit", &mut hex_str);
+        if hex_str.is_empty() {
+            return Err(self.contract_error("pgen hex_escape has no hex_digit children"));
+        }
+        let code = u32::from_str_radix(&hex_str, 16)
+            .map_err(|_| self.contract_error(&format!("invalid hex_escape digits '{hex_str}'")))?;
+        let ch = char::from_u32(code).ok_or_else(|| {
+            self.contract_error(&format!(
+                "hex_escape value U+{code:X} is not a valid Unicode code point"
+            ))
+        })?;
+        Ok(Regex::Char(ch))
+    }
+
+    /// Convert a `property_escape` node — `\p{Name}` / `\P{Name}`. Polarity is
+    /// derived from the opening terminal (`p{` vs `P{`) and the property name
+    /// is rebuilt by walking the `prop_name` subtree terminals.
+    fn convert_property_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        // Locate the leading brace terminal ("p{" or "P{") under the
+        // property_escape Sequence to determine polarity.
+        let children = self.sequence_children(node)?;
+        let opener = children
+            .first()
+            .and_then(|child| self.find_first_terminal_text(child))
+            .ok_or_else(|| {
+                self.contract_error("pgen property_escape is missing its opening terminal")
+            })?;
+        let negated = opener.starts_with('P');
+
+        // Walk the prop_name subtree and collect every terminal character.
+        let name_node = self.first_descendant(node, "prop_name").ok_or_else(|| {
+            self.contract_error("pgen property_escape is missing its prop_name child")
+        })?;
+        let mut name = String::new();
+        self.collect_all_terminal_chars(name_node, &mut name);
+        if name.is_empty() {
+            return Err(self.contract_error("pgen property_escape has empty prop_name"));
+        }
+        Ok(Regex::UnicodeClass { name, negated })
+    }
+
+    /// Convert a `control_escape` node — `\cA` → control character. The letter
+    /// following `c` is taken from the `any_char` subtree.
+    fn convert_control_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        let any_char = self.first_descendant(node, "any_char").ok_or_else(|| {
+            self.contract_error("pgen control_escape is missing its any_char child")
+        })?;
+        let ctrl_char = self.collect_first_terminal_char(any_char).ok_or_else(|| {
+            self.contract_error("pgen control_escape any_char has no terminal character")
+        })?;
+        let code = (ctrl_char.to_ascii_uppercase() as u32).wrapping_sub('@' as u32) & 0x1F;
+        let ch = char::from_u32(code)
+            .ok_or_else(|| self.contract_error("pgen control_escape produced invalid char"))?;
+        Ok(Regex::Char(ch))
+    }
+
+    /// Convert an `octal_escape` node — 1..3 `octal_digit` terminals.
+    fn convert_octal_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        let mut oct_str = String::new();
+        self.walk_collect_terminal_chars(node, "octal_digit", &mut oct_str);
+        if oct_str.is_empty() {
+            return Err(self.contract_error("pgen octal_escape has no octal_digit children"));
+        }
+        let code = u32::from_str_radix(&oct_str, 8).map_err(|_| {
+            self.contract_error(&format!("invalid octal_escape digits '{oct_str}'"))
+        })?;
+        let ch = char::from_u32(code).ok_or_else(|| {
+            self.contract_error(&format!(
+                "octal_escape value {code} is not a valid Unicode code point"
+            ))
+        })?;
+        Ok(Regex::Char(ch))
     }
 
     /// Convert a `char_class` node — `[a-z]`, `[^0-9]`, `[\d\w]`, etc.
     ///
-    /// Uses the Lexer to tokenize a single character class token, which handles
-    /// all the bracket expression parsing (ranges, escapes, negation).
+    /// Walks PGEN's structured children (negation slot, optional
+    /// `class_initial_close` for leading `]`, then each `class_item` in
+    /// `class_body`) rather than relexing the span text.
     fn convert_char_class(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        let mut lexer = crate::lexer::Lexer::new(fragment);
-        let token_with_pos = lexer.next_token().map_err(|err| {
-            RgxError::Compile(format!("failed to lex character class '{fragment}': {err}"))
-        })?;
-        match token_with_pos.token {
-            crate::token::Token::CharClass { ranges, negated } => {
-                Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
+        let negated = self
+            .first_descendant(node, "negation")
+            .is_some_and(|n| !self.is_empty_wrapper(n));
+
+        let mut ranges = Vec::new();
+
+        // `class_initial_close` captures a `]` literal right after `[` or
+        // `[^`, keeping it as a class member instead of the closing bracket.
+        if let Some(initial_close) = self.first_descendant(node, "class_initial_close") {
+            if !self.is_empty_wrapper(initial_close) {
+                ranges.push(CharRange::single(']'));
             }
-            other => Err(self.contract_error(&format!(
-                "expected CharClass token from lexer for '{fragment}', got {other:?}"
-            ))),
         }
+
+        if let Some(body) = self.first_descendant(node, "class_body") {
+            // `class_body` is a Quantified* list of wrappers each holding a
+            // concrete `class_item`.
+            for wrapper in self.quantified_children(body)? {
+                let item = self
+                    .first_descendant(wrapper, "class_item")
+                    .ok_or_else(|| {
+                        self.contract_error("pgen class_body entry is missing class_item")
+                    })?;
+                self.convert_class_item(item, &mut ranges)?;
+            }
+        }
+
+        Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
+    }
+
+    /// Convert a single `class_item` — either a `class_range`, a bare
+    /// `class_literal`, or a `class_escape` — into one or more `CharRange`s.
+    fn convert_class_item(&self, item: &PgenAstNode, ranges: &mut Vec<CharRange>) -> Result<()> {
+        if let Some(range_node) = self.find_direct_child(item, "class_range") {
+            return self.convert_class_range(range_node, ranges);
+        }
+        if let Some(escape_node) = self.find_direct_child(item, "class_escape") {
+            return self.convert_class_escape(escape_node, ranges);
+        }
+        if let Some(literal_node) = self.find_direct_child(item, "class_literal") {
+            let ch = self
+                .collect_first_terminal_char(literal_node)
+                .ok_or_else(|| {
+                    self.contract_error("pgen class_literal has no terminal character")
+                })?;
+            ranges.push(CharRange::single(ch));
+            return Ok(());
+        }
+        Err(self.contract_error(&format!(
+            "pgen class_item has no known variant under '{}'",
+            item.rule_name
+        )))
+    }
+
+    /// Convert a `class_range` node — `class_atom "-" class_atom` — into a
+    /// single `CharRange`. Escape endpoints must resolve to a single `CharRange`.
+    fn convert_class_range(&self, range: &PgenAstNode, ranges: &mut Vec<CharRange>) -> Result<()> {
+        let children = self.sequence_children(range)?;
+        let start_atom = children
+            .first()
+            .ok_or_else(|| self.contract_error("pgen class_range is missing its start atom"))?;
+        let end_atom = children
+            .get(2)
+            .ok_or_else(|| self.contract_error("pgen class_range is missing its end atom"))?;
+        let start = self.class_atom_char(start_atom)?;
+        let end = self.class_atom_char(end_atom)?;
+        ranges.push(CharRange::range(start, end));
+        Ok(())
+    }
+
+    /// Resolve a `class_atom` wrapper (or a raw `class_literal`/`class_escape`)
+    /// to the single character it represents, for use as a range endpoint.
+    fn class_atom_char(&self, node: &PgenAstNode) -> Result<char> {
+        let atom = self.first_descendant(node, "class_atom").unwrap_or(node);
+        if let Some(escape_node) = self.find_direct_child(atom, "class_escape") {
+            // For range endpoints an escape must resolve to a single character
+            // (hex/octal/control/metachar literal). Shorthand classes are not
+            // allowed as endpoints by the grammar.
+            let mut tmp = Vec::new();
+            self.convert_class_escape(escape_node, &mut tmp)?;
+            if tmp.len() == 1 && tmp[0].start == tmp[0].end {
+                return Ok(tmp[0].start);
+            }
+            return Err(
+                self.contract_error("pgen class_range endpoint must resolve to a single character")
+            );
+        }
+        if let Some(literal_node) = self.find_direct_child(atom, "class_literal") {
+            return self
+                .collect_first_terminal_char(literal_node)
+                .ok_or_else(|| {
+                    self.contract_error("pgen class_literal has no terminal character")
+                });
+        }
+        self.collect_first_terminal_char(atom)
+            .ok_or_else(|| self.contract_error("pgen class_atom has no terminal character"))
+    }
+
+    /// Convert a `class_escape` node (an `escape` subtree used as a class
+    /// member) into `CharRange`s appended to `ranges`.
+    fn convert_class_escape(
+        &self,
+        class_escape: &PgenAstNode,
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        let escape_node = self
+            .first_descendant(class_escape, "escape")
+            .ok_or_else(|| self.contract_error("pgen class_escape is missing its escape child"))?;
+        let regex = self.convert_escape(escape_node)?;
+        extend_ranges_from_regex(regex, ranges, |msg| self.contract_error(msg))?;
+        Ok(())
     }
 
     /// Convert a `code_block` node — `(?{lua:...})`, `(?{native:cb})`.
@@ -1218,6 +1352,82 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
+    /// Return the first immediate (or wrapped-alternative) descendant of
+    /// `node` whose rule matches `name`. Unlike `first_descendant`, this does
+    /// not return `node` itself — it walks children.
+    #[allow(clippy::only_used_in_recursion)]
+    fn find_direct_child<'b>(
+        &'b self,
+        node: &'b PgenAstNode,
+        name: &str,
+    ) -> Option<&'b PgenAstNode> {
+        for child in node.children() {
+            if child.rule_name == name {
+                return Some(child);
+            }
+            if let Some(found) = self.find_direct_child(child, name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Return the first `Terminal`/`TransformedTerminal` text reached while
+    /// walking the subtree rooted at `node`.
+    #[allow(clippy::only_used_in_recursion)]
+    fn find_first_terminal_text<'b>(&'b self, node: &'b PgenAstNode) -> Option<&'b str> {
+        match &node.content {
+            PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
+                Some(text.as_str())
+            }
+            PgenAstContent::Alternative(child) => self.find_first_terminal_text(child),
+            PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {
+                children
+                    .iter()
+                    .find_map(|child| self.find_first_terminal_text(child))
+            }
+        }
+    }
+
+    /// Return the first character of the first terminal reached under `node`.
+    fn collect_first_terminal_char(&self, node: &PgenAstNode) -> Option<char> {
+        self.find_first_terminal_text(node)
+            .and_then(|text| text.chars().next())
+    }
+
+    /// Walk the subtree rooted at `node`, and for every descendant whose
+    /// rule name equals `rule`, append that node's first terminal character
+    /// to `out`.
+    fn walk_collect_terminal_chars(&self, node: &PgenAstNode, rule: &str, out: &mut String) {
+        if node.rule_name == rule {
+            if let Some(ch) = self.collect_first_terminal_char(node) {
+                out.push(ch);
+                return;
+            }
+        }
+        for child in node.children() {
+            self.walk_collect_terminal_chars(child, rule, out);
+        }
+    }
+
+    /// Walk the subtree rooted at `node` and append every terminal string
+    /// reached (in depth-first order) to `out`. Used for assembling names or
+    /// multi-character terminal concatenations like property names.
+    #[allow(clippy::only_used_in_recursion)]
+    fn collect_all_terminal_chars(&self, node: &PgenAstNode, out: &mut String) {
+        match &node.content {
+            PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
+                out.push_str(text);
+            }
+            PgenAstContent::Alternative(child) => self.collect_all_terminal_chars(child, out),
+            PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {
+                for child in children {
+                    self.collect_all_terminal_chars(child, out);
+                }
+            }
+        }
+    }
+
     #[allow(clippy::only_used_in_recursion)]
     fn first_descendant<'b>(
         &'b self,
@@ -1318,6 +1528,58 @@ fn version_at_least(actual: &str, minimum: (u32, u32, u32)) -> bool {
         parts.next().and_then(|part| part.parse::<u32>().ok()),
     );
     matches!(parsed, (Some(major), Some(minor), Some(patch)) if (major, minor, patch) >= minimum)
+}
+
+/// Merge ranges derived from converting an escape into a sequence of
+/// `CharRange`s suitable for a `Custom` char class body. Only outputs that
+/// reduce cleanly to a list of ranges are accepted.
+#[cfg(feature = "pgen-parser")]
+fn extend_ranges_from_regex<F>(
+    regex: Regex,
+    ranges: &mut Vec<CharRange>,
+    make_error: F,
+) -> Result<()>
+where
+    F: Fn(&str) -> RgxError,
+{
+    match regex {
+        Regex::Char(ch) => {
+            ranges.push(CharRange::single(ch));
+            Ok(())
+        }
+        Regex::CharClass(CharClass::Custom { ranges: custom, .. }) => {
+            ranges.extend(custom);
+            Ok(())
+        }
+        Regex::CharClass(CharClass::Digit { negated: false }) => {
+            ranges.push(CharRange::range('0', '9'));
+            Ok(())
+        }
+        Regex::CharClass(CharClass::Digit { negated: true }) => {
+            ranges.push(CharRange::range('\0', '/'));
+            ranges.push(CharRange::range(':', char::MAX));
+            Ok(())
+        }
+        Regex::CharClass(CharClass::Word { negated: false }) => {
+            ranges.push(CharRange::range('0', '9'));
+            ranges.push(CharRange::range('A', 'Z'));
+            ranges.push(CharRange::single('_'));
+            ranges.push(CharRange::range('a', 'z'));
+            Ok(())
+        }
+        Regex::CharClass(CharClass::Space { negated: false }) => {
+            ranges.push(CharRange::single('\t'));
+            ranges.push(CharRange::single('\n'));
+            ranges.push(CharRange::single('\u{0B}'));
+            ranges.push(CharRange::single('\u{0C}'));
+            ranges.push(CharRange::single('\r'));
+            ranges.push(CharRange::single(' '));
+            Ok(())
+        }
+        other => Err(make_error(&format!(
+            "class_escape resolved to unsupported variant '{other:?}' for char class"
+        ))),
+    }
 }
 
 /// Unicode code points for horizontal whitespace (\h).
