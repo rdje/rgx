@@ -14,6 +14,28 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-05 - Retire builtin recursive-descent parser — PGEN is now the sole parser
+- Scope: major integration refactor eliminating all use of the builtin parser from the PGEN adapter.
+- Changes:
+  - Removed `RecursiveDescentParser` struct and its `RegexParser` impl entirely.
+  - Removed `PgenFeatureBackend` enum and `PGEN_FEATURE_BACKEND` const — no backend switch remains.
+  - Removed `parse_leaf_fragment` method — the core fallback that delegated to `crate::parser::Parser`.
+  - Removed all `#[cfg(not(feature = "pgen-parser"))]` code paths for `parse_pattern`, `parser_name`, `parser_capabilities`.
+  - Added native PGEN atom converters for all 8 confirmed leaf rule names: `literal`, `dot`, `anchor`, `escape`, `char_class`, `code_block`, `subroutine_call`, `python_named_backreference`.
+  - Added unsupported-error paths for 4 grammar-defined but unimplemented rule names: `callout`, `comment_group`, `directive_verb`, `whitespace_literal`.
+  - The `escape` handler covers: `\d/\D/\w/\W/\s/\S`, `\b/\B`, `\A/\Z/\z`, `\h/\H/\v/\V`, `\p{}/\P{}`, `\xNN/\x{NNNN}`, `\cA`, `\n/\t/\r/\f/\a/\e`, `\1/\2`, and escaped metacharacters.
+  - The `char_class` handler uses the Lexer (tokenizer) to parse bracket expressions — the Lexer is a tokenizer, not the parser.
+  - The wildcard `_ =>` in `convert_atom` now returns a contract error instead of silently falling back.
+  - Fixed `convert_scoped_inline_modifiers` to traverse PGEN's child nodes instead of re-parsing the body.
+  - Fixed `convert_named_backreference` to handle numeric backreferences natively.
+- Validation:
+  - `cargo test -p rgx-core` (266 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+  - `grep -c 'parse_leaf_fragment|crate::parser::Parser' parsing.rs` = 0
+  - `grep -c 'RecursiveDescentParser|PgenFeatureBackend' parsing.rs` = 0
+- Notes/impact:
+  - **The builtin recursive-descent parser is now fully retired from the PGEN integration path.** Any PGEN parse issue or missing atom rule will surface as an explicit error instead of being silently masked by the fallback.
+  - The `parser.rs` and `lexer.rs` modules still exist in the codebase but are no longer called from the default parsing path.
+
 ### 2026-04-05 - Ship Python-style named groups (?P<name>...) and (?P=name)
 - Scope: new regex feature — Python-compatible named group syntax.
 - Changes:

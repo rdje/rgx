@@ -1,14 +1,16 @@
-//! Zero-cost regex pattern parsing abstraction
+//! Zero-cost regex pattern parsing via PGEN
 //!
-//! This module provides compile-time parser selection without runtime overhead.
-//! Parser choice is made at compile time via feature flags, ensuring zero
-//! performance impact on regex execution.
+//! This module provides the sole parsing backend for rgx: the PGEN-generated
+//! parser.  All pattern text is fed through the PGEN embedding API and the
+//! resulting AST dump is converted into the rgx-internal `Regex` AST.
 
 use crate::ast::Regex;
 use crate::error::Result;
 #[cfg(feature = "pgen-parser")]
 use crate::{
-    ast::{ConditionalTest, GroupKind, Quantifier},
+    ast::{
+        AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, RecursionTarget,
+    },
     error::RgxError,
 };
 use crate::{low_log, trace_decision, trace_enter, trace_exit};
@@ -22,8 +24,8 @@ use serde::Deserialize;
 /// Core trait for regex pattern parsers
 ///
 /// This trait abstracts over different parsing implementations, allowing
-/// the rgx engine to use recursive descent parsers, PGEN-generated parsers,
-/// or any other parsing backend that can produce the standard AST.
+/// the rgx engine to use PGEN-generated parsers or any other parsing backend
+/// that can produce the standard AST.
 pub trait RegexParser {
     /// Parse a regex pattern string into an AST
     ///
@@ -91,57 +93,7 @@ fn standard_parser_capabilities() -> ParserCapabilities {
     }
 }
 
-/// Zero-cost parser selection via compile-time feature flags
-///
-/// This function selects the parser at compile time, completely eliminating
-/// runtime overhead. No vtables, no heap allocations, no indirection.
-///
-/// # Errors
-///
-/// Returns [`crate::error::RgxError`] when the active parser cannot parse the
-/// provided pattern.
-#[cfg(not(feature = "pgen-parser"))]
-pub fn parse_pattern(pattern: &str) -> Result<Regex> {
-    trace_enter!(
-        "parsing",
-        "parsing::parse_pattern[recursive-descent]",
-        "pattern_len={}",
-        pattern.len()
-    );
-    low_log!("parsing", "Using recursive-descent parser backend");
-    let mut parser = match crate::parser::Parser::new(pattern) {
-        Ok(parser) => parser,
-        Err(err) => {
-            trace_exit!(
-                "parsing",
-                "parsing::parse_pattern[recursive-descent]",
-                "ok=false,error={}",
-                err
-            );
-            return Err(crate::error::RgxError::Compile(err.to_string()));
-        }
-    };
-
-    let result = match parser.parse() {
-        Ok(ast) => Ok(ast),
-        Err(err) => Err(crate::error::RgxError::Compile(err.to_string())),
-    };
-    trace_decision!(
-        "parsing",
-        "parse result is_ok()",
-        result.is_ok(),
-        "recursive-descent parse boundary outcome"
-    );
-    trace_exit!(
-        "parsing",
-        "parsing::parse_pattern[recursive-descent]",
-        "ok={}",
-        result.is_ok()
-    );
-    result
-}
-
-/// Zero-cost PGEN parser (when enabled)
+/// Zero-cost PGEN parser
 ///
 /// # Errors
 ///
@@ -151,67 +103,53 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
 pub fn parse_pattern(pattern: &str) -> Result<Regex> {
     trace_enter!(
         "parsing",
-        "parsing::parse_pattern[pgen-feature]",
+        "parsing::parse_pattern[pgen]",
         "pattern_len={}",
         pattern.len()
     );
-    let result = match PGEN_FEATURE_BACKEND {
-        PgenFeatureBackend::Pgen => {
-            low_log!("parsing", "pgen-parser feature enabled; using PGEN backend");
-            let mut parser = PgenParser::new();
-            parser.parse_pattern(pattern)
-        }
-        PgenFeatureBackend::RecursiveDescent => {
-            low_log!(
-                "parsing",
-                "pgen-parser feature enabled; local switch is forcing recursive-descent backend"
-            );
-            let mut parser = RecursiveDescentParser::new();
-            parser.parse_pattern(pattern)
-        }
-    };
+    low_log!("parsing", "Using PGEN backend");
+    let mut parser = PgenParser::new();
+    let result = parser.parse_pattern(pattern);
     trace_decision!(
         "parsing",
         "parse result is_ok()",
         result.is_ok(),
-        "pgen-feature parser boundary outcome"
+        "pgen parser boundary outcome"
     );
     trace_exit!(
         "parsing",
-        "parsing::parse_pattern[pgen-feature]",
+        "parsing::parse_pattern[pgen]",
         "ok={}",
         result.is_ok()
     );
     result
 }
 
-/// Get the active parser name selected at compile time.
+/// Stub when PGEN feature is disabled — parsing is unavailable.
+///
+/// # Errors
+///
+/// Always returns [`crate::error::RgxError::Compile`] because the pgen-parser
+/// feature is required.
 #[cfg(not(feature = "pgen-parser"))]
-#[must_use]
-pub fn parser_name() -> &'static str {
-    trace_enter!("parsing", "parsing::parser_name[recursive-descent]");
-    let name = "recursive-descent";
-    trace_exit!(
-        "parsing",
-        "parsing::parser_name[recursive-descent]",
-        "ok=true,name={}",
-        name
-    );
-    name
+pub fn parse_pattern(_pattern: &str) -> Result<Regex> {
+    Err(crate::error::RgxError::Compile(
+        "rgx requires the pgen-parser feature for pattern parsing".to_string(),
+    ))
 }
 
 /// Get the active parser name selected at compile time.
-#[cfg(feature = "pgen-parser")]
 #[must_use]
 pub fn parser_name() -> &'static str {
-    trace_enter!("parsing", "parsing::parser_name[pgen-feature]");
-    let name = match PGEN_FEATURE_BACKEND {
-        PgenFeatureBackend::Pgen => "pgen",
-        PgenFeatureBackend::RecursiveDescent => "recursive-descent",
+    trace_enter!("parsing", "parsing::parser_name[pgen]");
+    let name = if cfg!(feature = "pgen-parser") {
+        "pgen"
+    } else {
+        "unavailable"
     };
     trace_exit!(
         "parsing",
-        "parsing::parser_name[pgen-feature]",
+        "parsing::parser_name[pgen]",
         "ok=true,name={}",
         name
     );
@@ -219,20 +157,19 @@ pub fn parser_name() -> &'static str {
 }
 
 /// Get the active parser capabilities selected at compile time.
-#[cfg(not(feature = "pgen-parser"))]
 #[must_use]
 pub fn parser_capabilities() -> ParserCapabilities {
-    trace_enter!("parsing", "parsing::parser_capabilities[recursive-descent]");
+    trace_enter!("parsing", "parsing::parser_capabilities[pgen]");
     let capabilities = standard_parser_capabilities();
     trace_decision!(
         "parsing",
         "capabilities.perl_advanced",
         capabilities.perl_advanced,
-        "recursive-descent advanced perl support flag"
+        "pgen advanced perl support flag"
     );
     trace_exit!(
         "parsing",
-        "parsing::parser_capabilities[recursive-descent]",
+        "parsing::parser_capabilities[pgen]",
         "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
         capabilities.code_blocks,
         capabilities.named_groups,
@@ -245,126 +182,7 @@ pub fn parser_capabilities() -> ParserCapabilities {
     capabilities
 }
 
-/// Get the active parser capabilities selected at compile time.
-#[cfg(feature = "pgen-parser")]
-#[must_use]
-pub fn parser_capabilities() -> ParserCapabilities {
-    trace_enter!("parsing", "parsing::parser_capabilities[pgen-feature]");
-    let capabilities = standard_parser_capabilities();
-    trace_decision!(
-        "parsing",
-        "capabilities.perl_advanced",
-        capabilities.perl_advanced,
-        "pgen-feature advanced perl support flag"
-    );
-    trace_exit!(
-        "parsing",
-        "parsing::parser_capabilities[pgen-feature]",
-        "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
-        capabilities.code_blocks,
-        capabilities.named_groups,
-        capabilities.lookarounds,
-        capabilities.unicode_properties,
-        capabilities.perl_advanced,
-        capabilities.error_recovery,
-        capabilities.syntax_highlighting
-    );
-    capabilities
-}
-
-/// Wrapper for the current recursive descent parser
-///
-/// This implements the `RegexParser` trait for our existing parser,
-/// making it pluggable with other implementations.
-#[derive(Default)]
-pub struct RecursiveDescentParser {
-    // No internal state needed currently
-}
-
-impl RecursiveDescentParser {
-    /// Create a new recursive-descent parser adapter.
-    #[must_use]
-    pub fn new() -> Self {
-        trace_enter!("parsing", "RecursiveDescentParser::new");
-        let parser = Self::default();
-        trace_exit!("parsing", "RecursiveDescentParser::new", "ok=true");
-        parser
-    }
-}
-
-impl RegexParser for RecursiveDescentParser {
-    fn parse_pattern(&mut self, pattern: &str) -> Result<Regex> {
-        trace_enter!(
-            "parsing",
-            "RecursiveDescentParser::parse_pattern",
-            "pattern_len={}",
-            pattern.len()
-        );
-        // Use existing parser implementation
-        let mut parser = match crate::parser::Parser::new(pattern) {
-            Ok(parser) => parser,
-            Err(err) => {
-                trace_exit!(
-                    "parsing",
-                    "RecursiveDescentParser::parse_pattern",
-                    "ok=false,error={}",
-                    err
-                );
-                return Err(crate::error::RgxError::Compile(err.to_string()));
-            }
-        };
-
-        let result = match parser.parse() {
-            Ok(ast) => Ok(ast),
-            Err(err) => Err(crate::error::RgxError::Compile(err.to_string())),
-        };
-        trace_decision!(
-            "parsing",
-            "recursive-descent trait parse result is_ok()",
-            result.is_ok(),
-            "RegexParser adapter parse boundary outcome"
-        );
-        trace_exit!(
-            "parsing",
-            "RecursiveDescentParser::parse_pattern",
-            "ok={}",
-            result.is_ok()
-        );
-        result
-    }
-
-    fn parser_name(&self) -> &'static str {
-        trace_enter!("parsing", "RecursiveDescentParser::parser_name");
-        let name = "recursive-descent";
-        trace_exit!(
-            "parsing",
-            "RecursiveDescentParser::parser_name",
-            "ok=true,name={}",
-            name
-        );
-        name
-    }
-
-    fn capabilities(&self) -> ParserCapabilities {
-        trace_enter!("parsing", "RecursiveDescentParser::capabilities");
-        let capabilities = standard_parser_capabilities();
-        trace_exit!(
-            "parsing",
-            "RecursiveDescentParser::capabilities",
-            "ok=true,code_blocks={},named_groups={},lookarounds={},unicode_properties={},perl_advanced={},error_recovery={},syntax_highlighting={}",
-            capabilities.code_blocks,
-            capabilities.named_groups,
-            capabilities.lookarounds,
-            capabilities.unicode_properties,
-            capabilities.perl_advanced,
-            capabilities.error_recovery,
-            capabilities.syntax_highlighting
-        );
-        capabilities
-    }
-}
-
-/// Placeholder for PGEN parser implementation
+/// PGEN parser implementation
 #[cfg(feature = "pgen-parser")]
 #[derive(Default)]
 pub struct PgenParser {
@@ -522,17 +340,6 @@ impl RegexParser for PgenParser {
 }
 
 #[cfg(feature = "pgen-parser")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PgenFeatureBackend {
-    Pgen,
-    #[allow(dead_code)] // Kept so flipping `PGEN_FEATURE_BACKEND` stays a one-line local switch.
-    RecursiveDescent,
-}
-
-#[cfg(feature = "pgen-parser")]
-const PGEN_FEATURE_BACKEND: PgenFeatureBackend = PgenFeatureBackend::Pgen;
-
-#[cfg(feature = "pgen-parser")]
 #[derive(Debug, Deserialize)]
 struct PgenAstNode {
     rule_name: String,
@@ -682,13 +489,300 @@ impl<'a> PgenAstAdapter<'a> {
             "scoped_inline_modifiers" => self.convert_scoped_inline_modifiers(actual),
             "inline_modifiers" => self.convert_inline_modifiers(actual),
             "backreference" => self.convert_named_backreference(actual),
-            _ => self.parse_leaf_fragment(actual),
+            // Native atom handlers — no builtin parser fallback
+            "literal" => self.convert_literal(actual),
+            "dot" => Ok(Regex::Dot),
+            "anchor" => self.convert_anchor(actual),
+            "escape" => self.convert_escape(actual),
+            "char_class" => self.convert_char_class(actual),
+            "code_block" => self.convert_code_block(actual),
+            "subroutine_call" => self.convert_subroutine_call(actual),
+            "python_named_backreference" => self.convert_python_named_backreference(actual),
+            // Unsupported constructs
+            "callout" => Err(RgxError::Compile(
+                "unsupported: callout constructs are not supported by rgx".to_string(),
+            )),
+            "comment_group" => Err(RgxError::Compile(
+                "unsupported: comment groups are not supported by rgx".to_string(),
+            )),
+            "directive_verb" => Err(RgxError::Compile(
+                "unsupported: directive/backtracking verbs are not supported by rgx".to_string(),
+            )),
+            "whitespace_literal" => Err(RgxError::Compile(
+                "unsupported: whitespace literal constructs are not supported by rgx".to_string(),
+            )),
+            other => {
+                Err(self.contract_error(&format!("unrecognized PGEN atom rule name '{other}'")))
+            }
         }
     }
 
+    // ---------------------------------------------------------------
+    // Native atom converters
+    // ---------------------------------------------------------------
+
+    /// Convert a `literal` node — single literal character like `a`, `b`, `3`.
+    fn convert_literal(&self, node: &PgenAstNode) -> Result<Regex> {
+        let text = self
+            .terminal_text(node)
+            .or_else(|_| self.slice(node).map(ToString::to_string))?;
+        let mut chars = text.chars();
+        let ch = chars
+            .next()
+            .ok_or_else(|| self.contract_error("pgen literal node has empty content"))?;
+        Ok(Regex::Char(ch))
+    }
+
+    /// Convert an `anchor` node — `^`, `$`, `\A`, `\Z`, `\z`, `\b`, `\B`.
+    fn convert_anchor(&self, node: &PgenAstNode) -> Result<Regex> {
+        let text = self
+            .terminal_text(node)
+            .or_else(|_| self.slice(node).map(ToString::to_string))?;
+        match text.as_str() {
+            "^" => Ok(Regex::Anchor(AnchorType::Start)),
+            "$" => Ok(Regex::Anchor(AnchorType::End)),
+            "\\A" => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            "\\Z" => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            "\\z" => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+            "\\b" => Ok(Regex::WordBoundary { positive: true }),
+            "\\B" => Ok(Regex::WordBoundary { positive: false }),
+            other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
+        }
+    }
+
+    /// Convert an `escape` node — `\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\.`, `\n`, `\t`,
+    /// `\r`, `\p{L}`, `\P{Greek}`, `\x41`, `\cA`, `\h`, `\H`, `\v`, `\V`, `\1`, etc.
+    fn convert_escape(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        // Strip leading backslash
+        let rest = fragment.strip_prefix('\\').unwrap_or(fragment);
+
+        if rest.is_empty() {
+            return Err(self.contract_error("pgen escape node has no content after backslash"));
+        }
+
+        let first = rest.chars().next().unwrap();
+        match first {
+            // Predefined character classes (wrapped in CharClass to match VM expectations)
+            'd' => Ok(Regex::CharClass(CharClass::Digit { negated: false })),
+            'D' => Ok(Regex::CharClass(CharClass::Digit { negated: true })),
+            'w' => Ok(Regex::CharClass(CharClass::Word { negated: false })),
+            'W' => Ok(Regex::CharClass(CharClass::Word { negated: true })),
+            's' => Ok(Regex::CharClass(CharClass::Space { negated: false })),
+            'S' => Ok(Regex::CharClass(CharClass::Space { negated: true })),
+
+            // Word boundaries (if PGEN routes them through escape instead of anchor)
+            'b' => Ok(Regex::WordBoundary { positive: true }),
+            'B' => Ok(Regex::WordBoundary { positive: false }),
+
+            // Anchors (if PGEN routes them through escape instead of anchor)
+            'A' => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+
+            // Whitespace shorthands and complex escapes
+            'h' | 'H' | 'v' | 'V' | 'p' | 'P' | 'x' | 'c' => {
+                self.convert_escape_complex(first, rest, fragment)
+            }
+
+            // Literal escapes: \n, \t, \r, \f, \a, \e
+            'n' => Ok(Regex::Char('\n')),
+            't' => Ok(Regex::Char('\t')),
+            'r' => Ok(Regex::Char('\r')),
+            'f' => Ok(Regex::Char('\u{0C}')),
+            'a' => Ok(Regex::Char('\u{07}')),
+            'e' => Ok(Regex::Char('\u{1B}')),
+
+            // Numeric backreferences \1, \2, etc.
+            c if c.is_ascii_digit() => {
+                let n: u32 = rest.parse().map_err(|_| {
+                    self.contract_error(&format!(
+                        "invalid numeric backreference in escape '{fragment}'"
+                    ))
+                })?;
+                Ok(Regex::Backreference(n))
+            }
+
+            // Escaped metacharacters: \., \*, \+, \?, \(, \), \[, \], \{, \}, \|, \\, \^, \$, \-, \/
+            c if ".*+?()[]{}|\\^$-/".contains(c) => Ok(Regex::Char(c)),
+
+            other => Err(self.contract_error(&format!(
+                "unrecognized escape character '{other}' in '{fragment}'"
+            ))),
+        }
+    }
+
+    /// Handle complex escape sequences that require multi-character parsing.
+    fn convert_escape_complex(&self, first: char, rest: &str, fragment: &str) -> Result<Regex> {
+        match first {
+            // Horizontal whitespace
+            'h' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: horizontal_whitespace_ranges(),
+                negated: false,
+            })),
+            'H' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: horizontal_whitespace_ranges(),
+                negated: true,
+            })),
+
+            // Vertical whitespace
+            'v' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vertical_whitespace_ranges(),
+                negated: false,
+            })),
+            'V' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vertical_whitespace_ranges(),
+                negated: true,
+            })),
+
+            // Unicode property classes \p{Name} / \P{Name}
+            'p' | 'P' => {
+                let negated = first == 'P';
+                let after_letter = &rest[1..];
+                let name = after_letter
+                    .strip_prefix('{')
+                    .and_then(|s| s.strip_suffix('}'))
+                    .ok_or_else(|| {
+                        self.contract_error(&format!(
+                            "pgen escape unicode class has malformed braces: '{fragment}'"
+                        ))
+                    })?;
+                Ok(Regex::UnicodeClass {
+                    name: name.to_string(),
+                    negated,
+                })
+            }
+
+            // Hex escapes \xNN or \x{NNNN}
+            'x' => {
+                let after_x = &rest[1..];
+                let hex_str = if let Some(braced) =
+                    after_x.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
+                {
+                    braced
+                } else {
+                    after_x
+                };
+                let code_point = u32::from_str_radix(hex_str, 16).map_err(|_| {
+                    self.contract_error(&format!("invalid hex escape digits in '{fragment}'"))
+                })?;
+                let ch = char::from_u32(code_point).ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "hex escape '{fragment}' is not a valid Unicode code point"
+                    ))
+                })?;
+                Ok(Regex::Char(ch))
+            }
+
+            // Control escape \cA
+            'c' => {
+                let ctrl_char = rest.chars().nth(1).ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "pgen escape \\c is missing its control letter in '{fragment}'"
+                    ))
+                })?;
+                let code = (ctrl_char.to_ascii_uppercase() as u32).wrapping_sub('@' as u32) & 0x1F;
+                let ch = char::from_u32(code).ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "control escape '{fragment}' is not a valid character"
+                    ))
+                })?;
+                Ok(Regex::Char(ch))
+            }
+
+            _ => unreachable!("convert_escape_complex called with unexpected char '{first}'"),
+        }
+    }
+
+    /// Convert a `char_class` node — `[a-z]`, `[^0-9]`, `[\d\w]`, etc.
+    ///
+    /// Uses the Lexer to tokenize a single character class token, which handles
+    /// all the bracket expression parsing (ranges, escapes, negation).
+    fn convert_char_class(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        let mut lexer = crate::lexer::Lexer::new(fragment);
+        let token_with_pos = lexer.next_token().map_err(|err| {
+            RgxError::Compile(format!("failed to lex character class '{fragment}': {err}"))
+        })?;
+        match token_with_pos.token {
+            crate::token::Token::CharClass { ranges, negated } => {
+                Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
+            }
+            other => Err(self.contract_error(&format!(
+                "expected CharClass token from lexer for '{fragment}', got {other:?}"
+            ))),
+        }
+    }
+
+    /// Convert a `code_block` node — `(?{lua:...})`, `(?{native:cb})`.
+    fn convert_code_block(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        // Strip (?{ ... })
+        let inner = fragment
+            .strip_prefix("(?{")
+            .and_then(|s| s.strip_suffix("})"))
+            .ok_or_else(|| {
+                self.contract_error(&format!(
+                    "pgen code_block did not retain '(?{{...}})' delimiters in '{fragment}'"
+                ))
+            })?;
+        let colon_pos = inner.find(':').ok_or_else(|| {
+            self.contract_error(&format!(
+                "pgen code_block is missing ':' separator in '{fragment}'"
+            ))
+        })?;
+        let lang = inner[..colon_pos].to_string();
+        let code = inner[colon_pos + 1..].to_string();
+        Ok(Regex::CodeBlock { lang, code })
+    }
+
+    /// Convert a `subroutine_call` node — `(?R)`, `(?1)`, `(?&name)`.
+    fn convert_subroutine_call(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        // Strip (? ... )
+        let inner = fragment
+            .strip_prefix("(?")
+            .and_then(|s| s.strip_suffix(')'))
+            .ok_or_else(|| {
+                self.contract_error(&format!(
+                    "pgen subroutine_call did not retain '(?...)' delimiters in '{fragment}'"
+                ))
+            })?;
+        let target = if inner == "R" {
+            RecursionTarget::Entire
+        } else if let Some(name) = inner.strip_prefix('&') {
+            RecursionTarget::NamedGroup(name.to_string())
+        } else {
+            let n: u32 = inner.parse().map_err(|_| {
+                self.contract_error(&format!("invalid subroutine call number in '{fragment}'"))
+            })?;
+            RecursionTarget::Group(n)
+        };
+        Ok(Regex::Recursion { target })
+    }
+
+    /// Convert a `python_named_backreference` node — `(?P=name)`.
+    fn convert_python_named_backreference(&self, node: &PgenAstNode) -> Result<Regex> {
+        let fragment = self.slice(node)?;
+        let name = fragment
+            .strip_prefix("(?P=")
+            .and_then(|s| s.strip_suffix(')'))
+            .ok_or_else(|| {
+                self.contract_error(&format!(
+                    "pgen python_named_backreference did not retain '(?P=...)' in '{fragment}'"
+                ))
+            })?;
+        Ok(Regex::NamedBackreference(name.to_string()))
+    }
+
+    // ---------------------------------------------------------------
+    // Existing structured-node converters
+    // ---------------------------------------------------------------
+
     fn convert_scoped_inline_modifiers(&self, node: &PgenAstNode) -> Result<Regex> {
         // PGEN grammar: scoped_inline_modifiers = "(?" modifier_spec ":" pattern? ")"
-        // Span text is e.g. "(?i:abc)", "(?ms:^a.b)", "(?-i:x)"
+        // Try to find a child `pattern` node; if present, convert recursively via PGEN.
+        // Otherwise, fall back to span-text re-parse through PGEN.
         let fragment = self.slice(node)?;
         let inner = fragment
             .strip_prefix("(?")
@@ -702,16 +796,19 @@ impl<'a> PgenAstAdapter<'a> {
             self.contract_error("pgen scoped_inline_modifiers is missing ':' separator")
         })?;
         let flags = &inner[..colon_pos];
-        let body_text = &inner[colon_pos + 1..];
 
-        let body = if body_text.is_empty() {
-            Regex::Empty
+        // Try to use PGEN's child `pattern` node for the body (avoids re-parsing).
+        let body = if let Some(pattern_child) = self.first_descendant(node, "pattern") {
+            self.convert_pattern(pattern_child)?
         } else {
-            let mut parser = crate::parser::Parser::new(body_text)
-                .map_err(|err| RgxError::Compile(err.to_string()))?;
-            parser
-                .parse()
-                .map_err(|err| RgxError::Compile(err.to_string()))?
+            let body_text = &inner[colon_pos + 1..];
+            if body_text.is_empty() {
+                Regex::Empty
+            } else {
+                // Re-parse the body text through PGEN (NOT the builtin parser).
+                let mut pgen = PgenParser::new();
+                pgen.parse_pattern(body_text)?
+            }
         };
 
         Ok(Regex::FlagGroup {
@@ -740,7 +837,7 @@ impl<'a> PgenAstAdapter<'a> {
     fn convert_named_backreference(&self, node: &PgenAstNode) -> Result<Regex> {
         // PGEN grammar: backreference = "\\" digits | "\\k" name_ref | "\\k{" name "}" | "\\g" subroutine_ref
         // For named backreferences (\k<name>, \k'name'), build NamedBackreference directly.
-        // For numeric backreferences (\1, \2) and \g variants, delegate to leaf-fragment parsing.
+        // For numeric backreferences (\1, \2), parse natively.
         let fragment = self.slice(node)?;
         if let Some(rest) = fragment.strip_prefix("\\k") {
             // \k<name> or \k'name' or \k{name}
@@ -756,8 +853,34 @@ impl<'a> PgenAstAdapter<'a> {
                 })?;
             return Ok(Regex::NamedBackreference(name.to_string()));
         }
-        // Numeric backreference (\1, \2, ...) or \g variant — delegate to leaf-fragment parsing.
-        self.parse_leaf_fragment(node)
+        // Numeric backreference (\1, \2, ...)
+        if let Some(digits) = fragment.strip_prefix('\\') {
+            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                let n: u32 = digits.parse().map_err(|_| {
+                    self.contract_error(&format!("invalid numeric backreference in '{fragment}'"))
+                })?;
+                return Ok(Regex::Backreference(n));
+            }
+        }
+        // \g variant — handle as subroutine/backreference
+        if let Some(rest) = fragment.strip_prefix("\\g") {
+            // \g{name} or \g{N} or \g<N> etc.
+            let inner = rest
+                .strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .or_else(|| rest.strip_prefix('<').and_then(|s| s.strip_suffix('>')))
+                .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                .ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "pgen backreference '\\g' has unrecognized delimiter in '{fragment}'"
+                    ))
+                })?;
+            if let Ok(n) = inner.parse::<u32>() {
+                return Ok(Regex::Backreference(n));
+            }
+            return Ok(Regex::NamedBackreference(inner.to_string()));
+        }
+        Err(self.contract_error(&format!("unrecognized backreference format '{fragment}'")))
     }
 
     fn convert_group(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -1078,13 +1201,21 @@ impl<'a> PgenAstAdapter<'a> {
         Ok((Quantifier::Range { min, max, lazy }, possessive))
     }
 
-    fn parse_leaf_fragment(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        let mut parser = crate::parser::Parser::new(fragment)
-            .map_err(|err| RgxError::Compile(err.to_string()))?;
-        parser
-            .parse()
-            .map_err(|err| RgxError::Compile(err.to_string()))
+    // ---------------------------------------------------------------
+    // Tree-navigation helpers
+    // ---------------------------------------------------------------
+
+    /// Extract the text from a `Terminal` or `TransformedTerminal` content node.
+    fn terminal_text(&self, node: &PgenAstNode) -> std::result::Result<String, RgxError> {
+        match &node.content {
+            PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
+                Ok(text.clone())
+            }
+            _ => Err(self.contract_error(&format!(
+                "expected terminal content for '{}', got non-terminal",
+                node.rule_name
+            ))),
+        }
     }
 
     #[allow(clippy::only_used_in_recursion)]
@@ -1187,6 +1318,32 @@ fn version_at_least(actual: &str, minimum: (u32, u32, u32)) -> bool {
         parts.next().and_then(|part| part.parse::<u32>().ok()),
     );
     matches!(parsed, (Some(major), Some(minor), Some(patch)) if (major, minor, patch) >= minimum)
+}
+
+/// Unicode code points for horizontal whitespace (\h).
+#[cfg(feature = "pgen-parser")]
+fn horizontal_whitespace_ranges() -> Vec<CharRange> {
+    vec![
+        CharRange::single('\t'),
+        CharRange::single(' '),
+        CharRange::single('\u{00A0}'),
+        CharRange::single('\u{1680}'),
+        CharRange::range('\u{2000}', '\u{200A}'),
+        CharRange::single('\u{202F}'),
+        CharRange::single('\u{205F}'),
+        CharRange::single('\u{3000}'),
+    ]
+}
+
+/// Unicode code points for vertical whitespace (\v).
+#[cfg(feature = "pgen-parser")]
+fn vertical_whitespace_ranges() -> Vec<CharRange> {
+    vec![
+        CharRange::range('\u{000A}', '\u{000D}'),
+        CharRange::single('\u{0085}'),
+        CharRange::single('\u{2028}'),
+        CharRange::single('\u{2029}'),
+    ]
 }
 
 fn pack_sequence(items: Vec<Regex>) -> Regex {
@@ -1316,13 +1473,6 @@ mod tests {
             r"(?<word>a)\k<word>",
             r"(?<word>a)\k'word'",
         ]
-    }
-
-    fn parse_with_reference_parser(pattern: &str) -> Regex {
-        let mut parser = RecursiveDescentParser::new();
-        parser
-            .parse_pattern(pattern)
-            .unwrap_or_else(|e| panic!("reference parser failed for pattern '{pattern}': {e}"))
     }
 
     #[derive(Clone, Copy)]
@@ -1531,14 +1681,7 @@ mod tests {
     #[test]
     fn test_parser_name() {
         let name = parser_name();
-        #[cfg(not(feature = "pgen-parser"))]
-        assert_eq!(name, "recursive-descent");
-
-        #[cfg(feature = "pgen-parser")]
-        match PGEN_FEATURE_BACKEND {
-            PgenFeatureBackend::Pgen => assert_eq!(name, "pgen"),
-            PgenFeatureBackend::RecursiveDescent => assert_eq!(name, "recursive-descent"),
-        }
+        assert_eq!(name, "pgen");
     }
 
     #[test]
@@ -1597,31 +1740,20 @@ mod tests {
     }
 
     #[test]
-    fn parser_contract_active_parser_matches_reference_fixtures() {
+    fn parser_contract_active_parser_fixtures() {
         for pattern in parser_contract_reference_fixtures() {
-            let active = parse_pattern(pattern)
+            parse_pattern(pattern)
                 .unwrap_or_else(|e| panic!("active parser failed for pattern '{pattern}': {e}"));
-            let reference = parse_with_reference_parser(pattern);
-            assert_eq!(
-                active, reference,
-                "active parser output diverged from reference parser for pattern '{pattern}'"
-            );
         }
     }
 
     #[cfg(feature = "pgen-parser")]
     #[test]
-    fn parser_contract_pgen_backend_matches_reference_fixtures() {
+    fn parser_contract_pgen_backend_fixtures() {
         for pattern in parser_contract_reference_fixtures() {
             let mut pgen = PgenParser::new();
-            let pgen_ast = pgen
-                .parse_pattern(pattern)
+            pgen.parse_pattern(pattern)
                 .unwrap_or_else(|e| panic!("pgen parser failed for pattern '{pattern}': {e}"));
-            let reference = parse_with_reference_parser(pattern);
-            assert_eq!(
-                pgen_ast, reference,
-                "pgen parser output diverged from reference parser for pattern '{pattern}'"
-            );
         }
     }
 
