@@ -50,6 +50,8 @@ Live continuity memory for `rgx` sessions.
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
+- Adapter now uses PGEN's structured AST for flag modifiers, named/numeric backreferences, Python backreferences, and subroutine calls; string-parsing sites reduced from 31 to 16
+- **PGEN-RGX-0007** filed for `\g<1>` numeric-angle subroutine reference misparse (PGEN grammar gap: `subroutine_ref "<" name ">"` rejects digits since `name_start = letter|_`)
 - **PGEN upgrade**: bumped submodule to PGEN 1.1.3 (commit `962acfd`) which fixes PGEN-RGX-0006 (braced octal escape `\o{101}` was misparsed as `simple_escape(o) + counted_quantifier{101}`); verified with RGX regression tests and PCRE2 parity tests; PGEN-RGX-0006 now closed/verified-fixed-upstream
 - PGEN adapter now uses PGEN's structured AST natively for escapes (hex/property/control/octal) and character classes (ranges, negation, class_escape) — no more Lexer::new() or string-parsing fallback for these; remaining string-parsing is limited to short coarse-flattened constructs (flag chars, code block delimiters, subroutine targets, backref names)
 - **CRITICAL**: Builtin recursive-descent parser fully retired from PGEN integration path — `parse_leaf_fragment`, `RecursiveDescentParser`, `PgenFeatureBackend` all removed; PGEN is now the sole parser with native converters for all atom rule names; any PGEN issue will surface as an explicit error instead of being masked by fallback

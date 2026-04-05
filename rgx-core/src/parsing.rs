@@ -849,6 +849,11 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Convert a `code_block` node — `(?{lua:...})`, `(?{native:cb})`.
+    ///
+    /// NOTE: PGEN's PEG ordering always selects `code_block_plain` for the
+    /// payload, so the language prefix (`lua:`, `native:`, etc.) is NOT split
+    /// out as a structured child node — it's fused into the opaque code text.
+    /// We therefore keep span-text parsing here intentionally.
     fn convert_code_block(&self, node: &PgenAstNode) -> Result<Regex> {
         let fragment = self.slice(node)?;
         // Strip (?{ ... })
@@ -870,43 +875,68 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::CodeBlock { lang, code })
     }
 
-    /// Convert a `subroutine_call` node — `(?R)`, `(?1)`, `(?&name)`.
+    /// Convert a `subroutine_call` node — `(?R)`, `(?1)`, `(?&name)`,
+    /// `(?P>name)`.
+    ///
+    /// PGEN grammar: `subroutine_call = "(?" subroutine_target ")"`, where
+    /// `subroutine_target` has variants:
+    ///   - `"&" name`           → named recursion
+    ///   - `"P>" name`          → Python-style named recursion
+    ///   - `"R" digits?`        → entire-pattern recursion (digits ignored)
+    ///   - `signed_digits`      → group-index recursion
+    ///
+    /// We inspect the structured `subroutine_target` child to build the
+    /// `Recursion` AST node.
     fn convert_subroutine_call(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        // Strip (? ... )
-        let inner = fragment
-            .strip_prefix("(?")
-            .and_then(|s| s.strip_suffix(')'))
+        let target_node = self
+            .first_descendant(node, "subroutine_target")
             .ok_or_else(|| {
-                self.contract_error(&format!(
-                    "pgen subroutine_call did not retain '(?...)' delimiters in '{fragment}'"
-                ))
+                self.contract_error("pgen subroutine_call is missing subroutine_target")
             })?;
-        let target = if inner == "R" {
-            RecursionTarget::Entire
-        } else if let Some(name) = inner.strip_prefix('&') {
-            RecursionTarget::NamedGroup(name.to_string())
-        } else {
-            let n: u32 = inner.parse().map_err(|_| {
-                self.contract_error(&format!("invalid subroutine call number in '{fragment}'"))
-            })?;
-            RecursionTarget::Group(n)
+
+        // Unwrap the immediate Alternative wrapper if present.
+        let inner = self.alternative_child(target_node).unwrap_or(target_node);
+
+        // Variant 1: signed_digits (e.g. `(?1)`, `(?-1)`).
+        if let Some(signed) = self.first_descendant(inner, "signed_digits") {
+            let text = self.slice(signed)?;
+            let n: u32 = text
+                .trim_start_matches('+')
+                .trim_start_matches('-')
+                .parse()
+                .map_err(|_| {
+                    self.contract_error(&format!("invalid subroutine call number '{text}'"))
+                })?;
+            return Ok(Regex::Recursion {
+                target: RecursionTarget::Group(n),
+            });
+        }
+
+        // Variants 2–4 all shape as Sequence[Terminal prefix, payload].
+        // Inspect the first terminal to dispatch.
+        let prefix_text = self.find_first_terminal_text(inner).unwrap_or("");
+        let target = match prefix_text {
+            "&" | "P>" => {
+                let name = self.name_text(inner)?;
+                RecursionTarget::NamedGroup(name)
+            }
+            "R" => RecursionTarget::Entire,
+            other => {
+                return Err(self.contract_error(&format!(
+                    "unrecognized pgen subroutine_target prefix '{other}'"
+                )));
+            }
         };
         Ok(Regex::Recursion { target })
     }
 
     /// Convert a `python_named_backreference` node — `(?P=name)`.
+    ///
+    /// PGEN grammar: `python_named_backreference = "(?P=" name ")"`. We read
+    /// the `name` child's span text directly.
     fn convert_python_named_backreference(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        let name = fragment
-            .strip_prefix("(?P=")
-            .and_then(|s| s.strip_suffix(')'))
-            .ok_or_else(|| {
-                self.contract_error(&format!(
-                    "pgen python_named_backreference did not retain '(?P=...)' in '{fragment}'"
-                ))
-            })?;
-        Ok(Regex::NamedBackreference(name.to_string()))
+        let name = self.name_text(node)?;
+        Ok(Regex::NamedBackreference(name))
     }
 
     // ---------------------------------------------------------------
@@ -915,106 +945,144 @@ impl<'a> PgenAstAdapter<'a> {
 
     fn convert_scoped_inline_modifiers(&self, node: &PgenAstNode) -> Result<Regex> {
         // PGEN grammar: scoped_inline_modifiers = "(?" modifier_spec ":" pattern? ")"
-        // Try to find a child `pattern` node; if present, convert recursively via PGEN.
-        // Otherwise, fall back to span-text re-parse through PGEN.
-        let fragment = self.slice(node)?;
-        let inner = fragment
-            .strip_prefix("(?")
-            .and_then(|s| s.strip_suffix(')'))
-            .ok_or_else(|| {
-                self.contract_error(
-                    "pgen scoped_inline_modifiers did not retain '(?...:..)' delimiters",
-                )
-            })?;
-        let colon_pos = inner.find(':').ok_or_else(|| {
-            self.contract_error("pgen scoped_inline_modifiers is missing ':' separator")
-        })?;
-        let flags = &inner[..colon_pos];
+        // Walk the structured `modifier_spec` subtree for flag characters and
+        // convert the nested `pattern` child recursively via PGEN.
+        let flags = if let Some(spec) = self.first_descendant(node, "modifier_spec") {
+            self.collect_modifier_flags(spec)
+        } else {
+            String::new()
+        };
 
-        // Try to use PGEN's child `pattern` node for the body (avoids re-parsing).
         let body = if let Some(pattern_child) = self.first_descendant(node, "pattern") {
             self.convert_pattern(pattern_child)?
         } else {
-            let body_text = &inner[colon_pos + 1..];
-            if body_text.is_empty() {
-                Regex::Empty
-            } else {
-                // Re-parse the body text through PGEN (NOT the builtin parser).
-                let mut pgen = PgenParser::new();
-                pgen.parse_pattern(body_text)?
-            }
+            Regex::Empty
         };
 
         Ok(Regex::FlagGroup {
-            flags: flags.to_string(),
+            flags,
             expr: Box::new(body),
         })
     }
 
+    #[allow(clippy::unnecessary_wraps)] // keeps dispatch signature uniform with sibling converters
     fn convert_inline_modifiers(&self, node: &PgenAstNode) -> Result<Regex> {
         // PGEN grammar: inline_modifiers = "(?" modifier_spec? ")"
-        // Span text is e.g. "(?i)", "(?ms)", "(?-i)", "(?)"
-        let fragment = self.slice(node)?;
-        let flags = fragment
-            .strip_prefix("(?")
-            .and_then(|s| s.strip_suffix(')'))
-            .ok_or_else(|| {
-                self.contract_error("pgen inline_modifiers did not retain '(?...)' delimiters")
-            })?;
+        // Walk the structured `modifier_spec` subtree for flag characters.
+        let flags = if let Some(spec) = self.first_descendant(node, "modifier_spec") {
+            self.collect_modifier_flags(spec)
+        } else {
+            String::new()
+        };
 
         Ok(Regex::FlagGroup {
-            flags: flags.to_string(),
+            flags,
             expr: Box::new(Regex::Empty),
         })
     }
 
     fn convert_named_backreference(&self, node: &PgenAstNode) -> Result<Regex> {
-        // PGEN grammar: backreference = "\\" digits | "\\k" name_ref | "\\k{" name "}" | "\\g" subroutine_ref
-        // For named backreferences (\k<name>, \k'name'), build NamedBackreference directly.
-        // For numeric backreferences (\1, \2), parse natively.
-        let fragment = self.slice(node)?;
-        if let Some(rest) = fragment.strip_prefix("\\k") {
-            // \k<name> or \k'name' or \k{name}
-            let name = rest
-                .strip_prefix('<')
-                .and_then(|s| s.strip_suffix('>'))
-                .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                .or_else(|| rest.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
-                .ok_or_else(|| {
-                    self.contract_error(&format!(
-                        "pgen backreference '\\k' has unrecognized delimiter in '{fragment}'"
-                    ))
-                })?;
-            return Ok(Regex::NamedBackreference(name.to_string()));
-        }
-        // Numeric backreference (\1, \2, ...)
-        if let Some(digits) = fragment.strip_prefix('\\') {
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+        // PGEN grammar:
+        //   backreference = "\" backreference_digits
+        //                 | "\k" name_ref
+        //                 | "\k{" name "}"
+        //                 | "\g" subroutine_ref
+        //
+        // Walk the structured children to build the appropriate AST node
+        // instead of re-splitting the span text.
+        //
+        // Note: `\g<1>` is misparsed by PGEN as escape + literal sequence, so
+        // it never actually reaches this handler. See PGEN-RGX-0007.
+        let children = self.sequence_children(node)?;
+        let prefix = children
+            .first()
+            .ok_or_else(|| self.contract_error("pgen backreference has no prefix terminal"))?;
+        let prefix_text = self.find_first_terminal_text(prefix).unwrap_or("");
+
+        match prefix_text {
+            "\\" => {
+                // Numeric backreference: \1, \12, ... via `backreference_digits`.
+                let digits_node = self
+                    .first_descendant(node, "backreference_digits")
+                    .ok_or_else(|| {
+                        self.contract_error(
+                            "pgen numeric backreference is missing backreference_digits",
+                        )
+                    })?;
+                let mut digits = String::new();
+                self.walk_collect_terminal_chars(digits_node, "nonzero_digit", &mut digits);
+                self.walk_collect_terminal_chars(digits_node, "digit", &mut digits);
+                if digits.is_empty() {
+                    return Err(self
+                        .contract_error("pgen backreference_digits produced no digit characters"));
+                }
                 let n: u32 = digits.parse().map_err(|_| {
-                    self.contract_error(&format!("invalid numeric backreference in '{fragment}'"))
+                    self.contract_error(&format!("invalid numeric backreference '{digits}'"))
                 })?;
-                return Ok(Regex::Backreference(n));
+                Ok(Regex::Backreference(n))
+            }
+            "\\k" => {
+                // \k<name>, \k'name': element_1 is a `name_ref` wrapper.
+                let name = self.name_text(node)?;
+                Ok(Regex::NamedBackreference(name))
+            }
+            "\\k{" => {
+                // \k{name}: element_1 is directly a `name` node.
+                let name = self.name_text(node)?;
+                Ok(Regex::NamedBackreference(name))
+            }
+            "\\g" => {
+                // \g{name} or \g{N}: element_1 is a `subroutine_ref` with a
+                // `signed_digits_or_name` payload (either `name` or
+                // `signed_digits`). `\g<1>` is currently misparsed by PGEN
+                // (TODO: PGEN-RGX-0007) so we fall back to span-text parsing
+                // for any `\g` form not producing a structured child below.
+                if let Some(name_node) = self.first_descendant(node, "name") {
+                    return Ok(Regex::NamedBackreference(
+                        self.slice(name_node)?.to_string(),
+                    ));
+                }
+                if let Some(digits_node) = self.first_descendant(node, "digits") {
+                    let mut digits = String::new();
+                    self.walk_collect_terminal_chars(digits_node, "digit", &mut digits);
+                    if !digits.is_empty() {
+                        let n: u32 = digits.parse().map_err(|_| {
+                            self.contract_error(&format!(
+                                "invalid numeric backreference '{digits}'"
+                            ))
+                        })?;
+                        return Ok(Regex::Backreference(n));
+                    }
+                }
+                // TODO(PGEN-RGX-0007): `\g<1>` is currently misparsed by
+                // PGEN as an escape followed by literal chars, so the
+                // structured path above cannot resolve it. Retain the
+                // span-text fallback until PGEN ships a fix.
+                let fragment = self.slice(node)?;
+                if let Some(rest) = fragment.strip_prefix("\\g") {
+                    let inner = rest
+                        .strip_prefix('{')
+                        .and_then(|s| s.strip_suffix('}'))
+                        .or_else(|| rest.strip_prefix('<').and_then(|s| s.strip_suffix('>')))
+                        .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                        .ok_or_else(|| {
+                            self.contract_error(&format!(
+                                "pgen backreference '\\g' has unrecognized delimiter in '{fragment}'"
+                            ))
+                        })?;
+                    if let Ok(n) = inner.parse::<u32>() {
+                        return Ok(Regex::Backreference(n));
+                    }
+                    return Ok(Regex::NamedBackreference(inner.to_string()));
+                }
+                Err(self
+                    .contract_error(&format!("unrecognized '\\g' backreference in '{fragment}'")))
+            }
+            other => {
+                Err(self
+                    .contract_error(&format!("unrecognized pgen backreference prefix '{other}'")))
             }
         }
-        // \g variant — handle as subroutine/backreference
-        if let Some(rest) = fragment.strip_prefix("\\g") {
-            // \g{name} or \g{N} or \g<N> etc.
-            let inner = rest
-                .strip_prefix('{')
-                .and_then(|s| s.strip_suffix('}'))
-                .or_else(|| rest.strip_prefix('<').and_then(|s| s.strip_suffix('>')))
-                .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                .ok_or_else(|| {
-                    self.contract_error(&format!(
-                        "pgen backreference '\\g' has unrecognized delimiter in '{fragment}'"
-                    ))
-                })?;
-            if let Ok(n) = inner.parse::<u32>() {
-                return Ok(Regex::Backreference(n));
-            }
-            return Ok(Regex::NamedBackreference(inner.to_string()));
-        }
-        Err(self.contract_error(&format!("unrecognized backreference format '{fragment}'")))
     }
 
     fn convert_group(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -1498,6 +1566,49 @@ impl<'a> PgenAstAdapter<'a> {
                     self.pattern.len()
                 ))
             })
+    }
+
+    /// Find the first `name` descendant of `node` and return its span text.
+    /// Used for extracting identifiers from `name_ref`, `python_named_backreference`,
+    /// `subroutine_target`, and similar structured nodes.
+    fn name_text(&self, node: &PgenAstNode) -> Result<String> {
+        let name_node = self
+            .first_descendant(node, "name")
+            .ok_or_else(|| self.contract_error("pgen node is missing its 'name' child"))?;
+        Ok(self.slice(name_node)?.to_string())
+    }
+
+    /// Walk a `modifier_spec` subtree (or `modifier_seq`/`modifier_group`) and
+    /// collect the flag characters in order. A leading or mid-sequence `-`
+    /// terminal is emitted as a `-` char to mark the transition to disable
+    /// flags, mirroring what the span-text form produced.
+    fn collect_modifier_flags(&self, node: &PgenAstNode) -> String {
+        let mut out = String::new();
+        self.walk_modifier_flags(node, &mut out);
+        out
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn walk_modifier_flags(&self, node: &PgenAstNode, out: &mut String) {
+        // `modifier_char` is a terminal leaf; capture its char directly.
+        if node.rule_name == "modifier_char" {
+            if let Some(ch) = self.collect_first_terminal_char(node) {
+                out.push(ch);
+            }
+            return;
+        }
+        // A raw `-` terminal at a `modifier_seq` boundary marks disable.
+        if let PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) =
+            &node.content
+        {
+            if text == "-" {
+                out.push('-');
+            }
+            return;
+        }
+        for child in node.children() {
+            self.walk_modifier_flags(child, out);
+        }
     }
 
     fn contract_error(&self, message: &str) -> RgxError {

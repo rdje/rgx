@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Use PGEN structured AST for flags, backrefs, subroutines; file PGEN-RGX-0007
+- Scope: deeper PGEN adapter integration using structured child nodes instead of span-text string-parsing.
+- Changes:
+  - `convert_scoped_inline_modifiers` now walks `modifier_spec` → `modifier_group` for flag chars and calls `convert_pattern()` directly on the nested body, no more delimiter splitting or body re-parsing.
+  - `convert_inline_modifiers` now walks `modifier_spec` natively.
+  - `convert_named_backreference` dispatches on prefix terminal and uses structured `backreference_digits`/`name_ref`/`name` children for `\1`, `\k<name>`, `\k'name'`, `\k{name}`, `\g{name}`.
+  - `convert_python_named_backreference` uses `name_text` helper on the `name` descendant.
+  - `convert_subroutine_call` inspects `subroutine_target` structure for `(?R)`, `(?1)`, `(?&name)`, `(?P>name)` — adds `P>` support.
+  - Added `name_text()` and `collect_modifier_flags()` helpers for structured extraction.
+  - Code blocks retain span-text parsing (PGEN's PEG ordering fuses language prefix into `code_block_plain`).
+  - Filed `PGEN-RGX-0007` for the `\g<1>` numeric-angle subroutine reference misparse.
+- Validation:
+  - `cargo test -p rgx-core` (235 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (38 pass), 0 clippy warnings
+  - `strip_prefix`/`strip_suffix` count reduced from **31 → 16** in `parsing.rs`
+  - Remaining: 2 for code blocks (intentional), 5 for `\g<1>` fallback, 9 in extended char class / conditional / counted quantifier
+- Notes/impact:
+  - Over half of the remaining string-parsing sites eliminated by walking PGEN's native AST structure.
+
 ### 2026-04-06 - Bump PGEN to 1.1.3 with braced octal fix (closes PGEN-RGX-0006)
 - Scope: PGEN submodule upgrade verifying the upstream fix for the braced octal bug.
 - Changes:

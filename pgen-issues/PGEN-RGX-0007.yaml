@@ -1,0 +1,118 @@
+id: PGEN-RGX-0007
+summary: |
+  Numeric \g<N> subroutine reference (e.g. \g<1>) is misparsed as simple_escape(g) followed by three separate literal atoms ('<', '1', '>'), instead of as a backreference containing a subroutine_ref to the numeric group
+status: open
+opened_at: 2026-04-05T22:58:56Z
+first_seen_at: 2026-04-05T22:58:56Z
+last_updated_at: 2026-04-05T22:58:56Z
+parser_backend: pgen
+parser_backend_version: 1.1.3
+rgx_commit: 3d848050800e2287e71efb66d39ca791e37cf9ac
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    PGEN_TRACE_VERBOSITY=debug cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse regex pgen-issues/artifacts/PGEN-RGX-0007/repro_input.txt --profile regex_default --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0007/pgen_trace.log
+
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0007/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0007/pgen_ast_dump.json --profile regex_default
+  pattern: '\g<1>'
+  input: '\g<1>'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 962acfd9004326011efde5c0a3ba91e10e260aac
+    Regex parser release version: 1.1.3
+    Regex integration contract version: 1.1.3
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+
+    Root cause (from regex.ebnf inspection):
+      subroutine_ref = "{" ... "}" | "<" name ">" | "'" name "'" | signed_digits
+
+    The "<" name ">" branch uses the `name` rule, which requires
+    `name_start = letter | "_"` — so `<1>` fails to match because `1` is
+    not a valid name_start. The bare `signed_digits` alternative has no
+    surrounding delimiters. As a result, `\g<1>` falls through the
+    backreference rule entirely and is parsed as `\g` (simple_escape via
+    any_char) followed by three separate literal atoms `<`, `1`, `>`.
+
+    The companion forms that DO work correctly:
+      - \g{name}  → backreference / subroutine_ref / name
+      - \g{1}     → backreference / subroutine_ref / signed_digits
+      - \g<name>  → backreference / subroutine_ref / "<" name ">"
+
+    Fix suggestion: add a numeric-angle branch to subroutine_ref:
+      subroutine_ref = "{" signed_digits_or_name "}"
+                     | "<" (name | signed_digits) ">"
+                     | "'" (name | signed_digits) "'"
+                     | signed_digits
+expected_behavior: |
+  The pattern \g<1> should parse as a backreference (subroutine reference)
+  transporting the numeric digit 1 via a subroutine_ref structure, analogous
+  to how \g{1} parses today. The accepted-tree shape should be approximately:
+
+    atom -> backreference -> Terminal("\\g"), subroutine_ref [Sequence]
+      element_0: Terminal("<")
+      element_1: signed_digits -> nonzero_digit: Terminal("1")
+      element_2: Terminal(">")
+
+  This would match the symmetric structure of the already-working \g{1}
+  and \g<name> forms.
+actual_behavior: |
+  The parser succeeds (parse_full passed) but misparses \g<1> as:
+    - escape(\g) via escape -> escape_unit -> simple_escape -> any_char -> letter("g")
+    - literal("<") via literal -> literal_char
+    - literal("1") via literal -> literal_char
+    - literal(">") via literal -> literal_char
+
+  Evidence from pgen_ast_dump.json:
+    - 0 occurrences of rule_name "backreference"
+    - 0 occurrences of rule_name "subroutine_ref"
+    - simple_escape node containing letter "g" at span [1, 2]
+    - three separate literal atoms at spans [2, 3], [3, 4], [4, 5]
+
+  Downstream consumers that expect \g<1> to be a subroutine reference will
+  silently get a literal-concatenation AST that matches the 5-character
+  string "\g<1>" against the letter 'g' followed by literal '<1>'.
+reproduction: |
+  Smallest reproducer:
+    pattern: \g<1>
+    input file: pgen-issues/artifacts/PGEN-RGX-0007/repro_input.txt (5 bytes)
+
+  Commands: see context.command above.
+
+  Artifacts bundle: pgen-issues/artifacts/PGEN-RGX-0007/
+    repro_input.txt    - the 5-byte pattern
+    pgen_ast_dump.json - AST showing the misparsing
+    pgen_trace.log     - debug trace
+    pgen_contract.json - PGEN 1.1.3 version snapshot
+impact: |
+  This is a silent accepted-tree correctness bug (class: "parses but returns
+  the wrong AST/dump"). Downstream consumers trusting rule_name dispatch on
+  PGEN's output will build an incorrect AST for \g<N> numeric subroutine
+  reference patterns.
+
+  The \g<N> angle-bracket form is standard PCRE2 / Perl / Ruby syntax and
+  is the companion to \g{N} braced form. Applications converting regex
+  patterns between engines will encounter this.
+
+  RGX-side workaround (currently in place): the PGEN adapter's
+  convert_named_backreference falls back to span-text parsing for any
+  \g<...> form that reaches it without a subroutine_ref descendant. This
+  means numeric \g<1> is currently handled via string parsing in RGX until
+  upstream PGEN fixes the grammar.
+
+  See src/parsing.rs convert_named_backreference "PGEN-RGX-0007" comment.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    When fixed upstream, verify by re-running the probe commands above and
+    confirming the AST dump contains a backreference node with a
+    subroutine_ref child for \g<1>. Then the RGX adapter's span-text
+    workaround can be removed.
