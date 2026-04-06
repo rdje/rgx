@@ -155,9 +155,39 @@ Live forward-looking tracker for rgx.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 5
 
 ## Later (strategic)
-### Broader feature coverage
+
+### Remaining PCRE2 feature gaps (low to very low priority)
+These are the last 6 `rgx-gap` rows in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. They are deferred because they are either very rarely used, very new, or not syntax features.
+
+#### `\X` extended grapheme cluster
+- Priority: `low`
 - Status: `planned`
-- Scope: deeper advanced regex features beyond current verified set.
+- Rationale: `\X` matches a full Unicode grapheme cluster (base character + combining marks). Real-world usage is rare outside Unicode-heavy text processing. Implementation requires a grapheme segmentation library such as `unicode-segmentation`. The effort is meaningful and the benefit is narrow.
+
+#### Returned-capture subroutines `(?1(grouplist))`
+- Priority: `very low`
+- Status: `planned`
+- Rationale: this is a PCRE2 10.47+ feature (released 2024). It extends subroutine calls to return captures from the called group into specified slots. Adoption in the wild is minimal. RGX already supports the standard `(?1)` / `(?&name)` forms; the returned-capture extension is niche.
+
+#### VERSION conditionals `(?(VERSION>=...)...)`
+- Priority: `very low`
+- Status: `planned`
+- Rationale: allows patterns to branch on the PCRE2 engine version. This is a PCRE2-specific construct with no semantic equivalent in other engines. Almost never seen in real-world patterns.
+
+#### `(*SKIP:name)` named skip
+- Priority: `low`
+- Status: `planned`
+- Rationale: `(*SKIP)` (without name) is already shipped. The named form `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to the position of a specific mark. This requires wiring the mark name registry into the skip logic. The unnamed form covers the vast majority of use cases.
+
+#### Partial matching API
+- Priority: `low`
+- Status: `planned`
+- Rationale: PCRE2's `PCRE2_PARTIAL_SOFT` and `PCRE2_PARTIAL_HARD` flags report partial matches when the input ends in the middle of a potential match. Useful for streaming/incremental matching. This is an API concern (not a pattern syntax feature) and is better addressed as part of Layer 6 file-backed matching.
+
+#### JIT compilation
+- Priority: `deferred to speed phase`
+- Status: `planned`
+- Rationale: PCRE2's JIT compiles regex bytecode to native machine code for ~5-10x speedup. This is purely a performance feature. RGX's priority is to close the speed gap through engineering optimizations first (text copy elimination, trace gating, opcode fusion); JIT is a later-stage investment if the gap remains significant after those optimizations.
 
 ### Binding/runtime expansion
 - Status: `planned`
