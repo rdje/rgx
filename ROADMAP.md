@@ -102,6 +102,36 @@ Live forward-looking tracker for rgx.
   - treat wasm and native as advanced reference-style backends rather than the primary model for new inline language growth
   - shared execution contracts, resource limits, and sandbox controls
 
+## Next (near-term) — continued
+
+### Host integration Layer 3: Match Steering
+- Status: `planned`
+- Goal: extend callback return values so the host can steer match execution (continue, fail, accept, skip, retry, abort).
+- Scope:
+  - add `SteerResult` enum and `ExecResult::Steer` variant
+  - update VM code-block dispatch to handle steering actions
+  - expose through native callback API and inline-language bindings
+- Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 3
+
+### Host integration Layer 4: Structured Events
+- Status: `planned`
+- Goal: emit structured events (branch entered/exited, capture completed, backtrack occurred) to host observers during matching.
+- Scope:
+  - add `MatchEvent` enum and `Regex::on_event(...)` observer API
+  - insert event emission at key VM execution points
+  - zero overhead when no observer is registered
+- Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 4
+
+### Host integration Layer 5: Async/External I/O
+- Status: `planned`
+- Goal: allow callbacks to suspend the match, perform async I/O, and resume via continuation-passing.
+- Scope:
+  - add `MatchContinuation` struct for VM state capture
+  - add `ExecResult::Suspend` and `Regex::resume(...)` API
+  - add async convenience wrappers for common runtimes
+  - zero overhead on synchronous paths
+- Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 5
+
 ## Later (strategic)
 ### Broader feature coverage
 - Status: `planned`

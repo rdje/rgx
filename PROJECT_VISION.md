@@ -15,6 +15,7 @@ Build a fast, safe regex engine with a VM core that targets practical parity wit
 - Competitive performance with PCRE2 on representative benchmark workloads
 - High-confidence matching accuracy validated against differential and integration tests
 - Mature multi-language code-block execution story where sandbox guarantees are explicit
+- Deep host integration: match steering, structured events, and async I/O callbacks that make the engine a programmable matching substrate, not just a pattern matcher (see `docs/HOST_INTEGRATION_ARCHITECTURE.md`)
 - Robust language bindings and production-focused tooling
 
 ## Non-goals for the near term
