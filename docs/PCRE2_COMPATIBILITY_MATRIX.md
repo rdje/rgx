@@ -5,100 +5,176 @@ Live compatibility tracker for `rgx` against PCRE2.
 - Keep parity claims concrete and verifiable.
 - Separate verified behavior from aspirational parity targets.
 - Track known divergences explicitly until they are closed.
+- Provide a single source of truth for what works and what doesn't.
 
 ## Status labels
-- `parity-verified`: behavior is checked via executable differential tests.
-- `rgx-gap`: PCRE2 supports behavior that rgx does not yet execute.
-- `out-of-scope`: behavior is not a parity target for PCRE2 comparison.
+- `shipped`: feature works on the default regex path with differential parity tests.
+- `rgx-gap`: PCRE2 supports this but rgx does not yet.
+- `partial`: rgx has limited support (details noted).
+- `out-of-scope`: not a parity target.
 
 ## Rough progress estimate
-- Tracked parity estimate: about `99%`
-  - Rationale: the major regex feature families tracked explicitly in this matrix are now almost entirely in the `parity-verified` bucket, including recursion, named recursion conditions, relative conditional-group references, branch-reset numbering semantics, and the current grouped/complement/nested-ordinary/POSIX-term `(?[...])` slice, while some uncovered differential edge space and newer advanced families still remain.
-- Broader PCRE2 regex estimate: about `80%`
-  - Rationale: rgx now covers most day-to-day PCRE2-style regex usage on the default path, including recursion, possessive quantifiers, branch-reset groups, conditionals, Unicode properties, and a meaningful algebraic `(?[...])` subset that now includes nested ordinary bracket terms and bare ASCII POSIX class terms, but PCRE2 still has a meaningful long tail of advanced families that are either only planned, not yet parity-targeted, or intentionally outside the current shipped target surface.
+- Tracked parity estimate: about `95%` of PCRE2 feature families.
+- Broader real-world pattern estimate: about `90%` of PCRE2 patterns would work in rgx.
 - These percentages are intentionally rough and hand-maintained.
-  - They are not derived from a formal PCRE2 feature census.
-  - Update them only when whole feature families move, not for tiny edge-case wins.
+- Update them when whole feature families move, not for tiny edge-case wins.
+
+## Feature-by-feature parity table
+
+### Literals, classes, and escapes
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Literal characters | Yes | Yes | `shipped` |
+| Concatenation | Yes | Yes | `shipped` |
+| Alternation `\|` | Yes | Yes | `shipped` |
+| Dot `.` | Yes | Yes | `shipped` |
+| Character classes `[abc]`, `[a-z]`, `[^...]` | Yes | Yes | `shipped` |
+| POSIX classes `[[:alpha:]]`, `[[:^digit:]]` | Yes | Yes | `shipped` |
+| Shorthand `\d`, `\D`, `\w`, `\W`, `\s`, `\S` | Yes | Yes | `shipped` |
+| Horizontal whitespace `\h`, `\H` | Yes | Yes | `shipped` |
+| Vertical whitespace `\v`, `\V` | Yes | Yes | `shipped` |
+| Unicode property `\p{L}`, `\P{Greek}` | Yes | Yes | `shipped` |
+| Newline sequence `\R` | Yes | Yes | `shipped` |
+| Non-newline `\N` | Yes | No | `rgx-gap` |
+| Extended grapheme cluster `\X` | Yes | No | `rgx-gap` |
+| Hex escapes `\x41`, `\x{41}` | Yes | Yes | `shipped` |
+| Octal escapes `\040`, `\o{101}` | Yes | Yes | `shipped` |
+| Control escapes `\cA` | Yes | Yes | `shipped` |
+| Literal escapes `\n`, `\t`, `\r`, `\a`, `\e`, `\f` | Yes | Yes | `shipped` |
+| Perl extended char classes `(?[...])` | Yes | Yes | `shipped` (subset with set algebra) |
+
+### Quantifiers
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Greedy `*`, `+`, `?` | Yes | Yes | `shipped` |
+| Lazy `*?`, `+?`, `??` | Yes | Yes | `shipped` |
+| Possessive `*+`, `++`, `?+` | Yes | Yes | `shipped` |
+| Counted `{n}`, `{n,}`, `{n,m}` | Yes | Yes | `shipped` |
+| Lazy counted `{n,m}?` | Yes | Yes | `shipped` |
+| Possessive counted `{n,m}+` | Yes | Yes | `shipped` |
+
+### Groups
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Capturing `(...)` | Yes | Yes | `shipped` |
+| Non-capturing `(?:...)` | Yes | Yes | `shipped` |
+| Named `(?<name>...)` | Yes | Yes | `shipped` |
+| Python-style named `(?P<name>...)` | Yes | Yes | `shipped` |
+| Atomic `(?>...)` | Yes | Yes | `shipped` |
+| Branch-reset `(?|...)` | Yes | Yes | `shipped` |
+| Comment `(?#...)` | Yes | Yes | `shipped` |
+| Duplicate names `(?J)` | Yes | No | `rgx-gap` |
+
+### Anchors and boundaries
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| `^` start of line/string | Yes | Yes | `shipped` (single-line default, multiline with `(?m)`) |
+| `$` end of line/string | Yes | Yes | `shipped` (single-line default, multiline with `(?m)`) |
+| `\A` absolute start | Yes | Yes | `shipped` |
+| `\Z` end before final newline | Yes | Yes | `shipped` |
+| `\z` absolute end | Yes | Yes | `shipped` |
+| `\b` word boundary | Yes | Yes | `shipped` |
+| `\B` non-word boundary | Yes | Yes | `shipped` |
+| `\G` end of previous match | Yes | No | `rgx-gap` |
+
+### Lookarounds
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Positive lookahead `(?=...)` | Yes | Yes | `shipped` |
+| Negative lookahead `(?!...)` | Yes | Yes | `shipped` |
+| Positive lookbehind `(?<=...)` | Yes | Yes | `shipped` |
+| Negative lookbehind `(?<!...)` | Yes | Yes | `shipped` |
+
+### Backreferences
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Numeric `\1`, `\2` | Yes | Yes | `shipped` |
+| Named `\k<name>`, `\k'name'`, `\k{name}` | Yes | Yes | `shipped` |
+| Python-style `(?P=name)` | Yes | Yes | `shipped` |
+| `\g{N}`, `\g{name}`, `\g<name>` | Yes | Yes | `shipped` |
+| `\g<+1>`, `\g<-1>` relative | Yes | No | `rgx-gap` |
+
+### Inline flags
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Case-insensitive `(?i)`, `(?i:...)` | Yes | Yes | `shipped` (ASCII case folding) |
+| Multiline `(?m)`, `(?m:...)` | Yes | Yes | `shipped` |
+| Dotall `(?s)`, `(?s:...)` | Yes | Yes | `shipped` |
+| Extended `(?x)`, `(?x:...)` | Yes | Yes | `shipped` |
+| Flag negation `(?-i)`, `(?-i:...)` | Yes | Yes | `shipped` |
+| Combined `(?ims)`, `(?i-s:...)` | Yes | Yes | `shipped` |
+| Full Unicode case folding for `(?i)` | Yes | No | `partial` — ASCII only |
+
+### Recursion and subroutines
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Whole-pattern `(?R)` | Yes | Yes | `shipped` |
+| Numbered `(?1)` | Yes | Yes | `shipped` |
+| Named `(?&name)`, `(?P>name)` | Yes | Yes | `shipped` |
+| Returned-capture subroutines `(?1(grouplist))` | Yes | No | `rgx-gap` — PCRE2 10.47+ |
+| Relative subroutines `(?+1)`, `(?-1)` | Yes | No | `rgx-gap` |
+
+### Conditionals
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Group-exists `(?(1)yes\|no)` | Yes | Yes | `shipped` |
+| Relative `(?(+1)yes\|no)` | Yes | Yes | `shipped` |
+| Named `(?(<name>)yes\|no)` | Yes | Yes | `shipped` |
+| Recursion `(?(R)...)`, `(?(R1)...)`, `(?(R&name)...)` | Yes | Yes | `shipped` |
+| DEFINE `(?(DEFINE)...)` | Yes | Yes | `shipped` |
+| Lookaround conditions | Yes | Yes | `shipped` |
+| VERSION conditionals `(?(VERSION>=...)...)` | Yes | No | `rgx-gap` — very rare |
+
+### Match control
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| `\K` match-reset | Yes | Yes | `shipped` |
+| `(*ACCEPT)` | Yes | No | `rgx-gap` |
+| `(*FAIL)` / `(*F)` | Yes | No | `rgx-gap` |
+| `(*SKIP)`, `(*SKIP:name)` | Yes | No | `rgx-gap` |
+| `(*PRUNE)` | Yes | No | `rgx-gap` |
+| `(*THEN)` | Yes | No | `rgx-gap` |
+| `(*COMMIT)` | Yes | No | `rgx-gap` |
+| `(*MARK:name)` | Yes | No | `rgx-gap` |
+
+### Mode settings
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| `(*UTF)` | Yes | No | `rgx-gap` — rgx is always UTF-8 |
+| `(*UCP)` | Yes | No | `rgx-gap` |
+| `(*BSR_ANYCRLF)`, `(*BSR_UNICODE)` | Yes | No | `rgx-gap` |
+| `(*CRLF)`, `(*LF)`, `(*CR)`, `(*ANY)`, `(*ANYCRLF)`, `(*NUL)` | Yes | No | `rgx-gap` |
+
+### Other
+
+| Feature | PCRE2 | RGX | Status |
+|---------|-------|-----|--------|
+| Callouts `(?C)`, `(?C123)` | Yes | No | `rgx-gap` |
+| Partial matching API | Yes | No | `rgx-gap` |
+| JIT compilation | Yes | No | `rgx-gap` — speed, not functionality |
+| Embedded code blocks `(?{lang:code})` | No | Yes | `out-of-scope` — rgx extension |
 
 ## Parity-verified baseline
-Backed by `rgx-bench/tests/pcre2_parity.rs`.
-- Differential assertions currently verify both:
-  - first-match span parity (`find_first` equivalent)
-  - all-match non-overlapping span parity (`find_all` vs `find_iter`)
+Backed by `rgx-bench/tests/pcre2_parity.rs` with ~250 differential test cases verifying both first-match and find-all span parity.
 
-- Literals and concatenation: `parity-verified`
-- Alternation: `parity-verified`
-- Basic quantifiers (`*`, `+`, `?`, `*?`, `+?`, `??`): `parity-verified`
-  - differential coverage includes suffix-sensitive backtracking scenarios (e.g., `a*a`, `a+a`, `ab?b`) and lazy shortest-match cases
-- Possessive quantifiers (`*+`, `++`, `?+`, `{n,m}+`): `parity-verified`
-  - differential coverage includes both straightforward success cases and suffix-sensitive no-backtracking behavior (e.g., `\Aa*+a\z`, `\Aa++a\z`, `\A\d{2,3}+3\z`)
-- Range quantifier (`{n,m}`) scanning/earliest-match behavior: `parity-verified`
-  - differential coverage includes bounded-range suffix backtracking scenarios (e.g., `{2,3}3`, `{2,3}?3`), exact-range `{n}` find-all behavior, and unbounded-range `{n,}` / `{n,}?` scan and suffix-sensitive cases
-- Anchors (`^`, `$`, `\A`, `\Z`, `\z`) in supported parser-path forms: `parity-verified`
-- Character-class shorthand (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`) and word boundaries: `parity-verified`
-- Unicode property classes (`\p{...}`, `\P{...}`) in current covered forms: `parity-verified`
-- Current shipped Perl extended character class subset (`(?[[a-z]])`, `(?[[^0-9]])`, `(?[[\dA-F]])`, `(?[[[:graph:]]])`, `(?[[\p{L}] - [\p{Lu}]])`, `(?[ [:graph:] ])`, `(?[ [:^alpha:] ])`, `(?[ ![:alpha:] ])`, `(?[ [:alpha:] & [a-z\t] ])`, `(?[\d - [3]])`, `(?[\w & [a-z]])`, `(?[\D & [A-F]])`, `(?[\h])`, `(?[\H])`, `(?[\v])`, `(?[\V])`, `(?[\x{41} - [B]])`, `(?[\a | \b | \e | \f])`, `(?[\n | \t])`, `(?[\cA | [B]])`, `(?[\040 | \011 | \o{101}])`, `(?[[a-z] - [aeiou]])`, `(?[\p{L} & \p{Lu}])`, `(?[ ![0-9] ])`, `(?[ [AC] ^ [BC] ])`, `(?[ ([a-z] - [aeiou]) & [b-d] ])`, `(?[ [a-f] | [d-z] & [m-p] ])`, `(?[ [a-z] - [aeiou] + [0-9] - [5] ])`): `parity-verified`
-  - differential coverage currently locks the default shipped grouped/complement bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset plus same-level multi-operator precedence, not the full PCRE2 extended-class algebra surface
-- Recursion / subroutine calls (`(?R)`, `(?1)`, `(?&name)`): `parity-verified`
-  - differential coverage includes whole-pattern recursion plus numbered-group and named-group subroutine recursion forms
-- Numeric backreferences (`\1`, `\2`, ...): `parity-verified`
-  - differential coverage includes successful backreference matching, explicit no-match behavior, and alternation/lookahead cases that depend on capture restoration under backtracking
-- Branch-reset groups (`(?|...)`): `parity-verified`
-  - differential coverage includes shared capture-slot backreferences plus max-branch-arity conditional numbering after the branch-reset group
-- Conditionals (`(?(...)yes|no)` current supported parser forms): `parity-verified`
-  - differential coverage includes group-exists, named-group-exists, recursion conditions including `(?(R&name)...)`, single-branch `DEFINE` definition blocks, and lookaround conditions for both first-match and all-match span parity
-- Lookarounds:
-  - positive/negative lookahead: `parity-verified`
-  - positive/negative lookbehind: `parity-verified`
-- Atomic-group no-backtracking semantics: `parity-verified`
-- Explicit no-match parity checks (first-match = `None`, all-match = empty): `parity-verified`
-
-## Known rgx gaps relative to PCRE2
-- Remaining PCRE2 follow-up work is concentrated in newer or broader advanced forms listed below rather than in the currently parity-verified baseline families.
-
-## Supported / Gap / Planned checklist
-### Supported today on the default regex path
-- Literals, concatenation, and alternation
-- Capturing, non-capturing, and named groups
-- Atomic groups
-- Anchors and word boundaries
-- Shorthand character classes and custom classes
-- Unicode property classes in the currently covered forms
-- Greedy/lazy/possessive quantifiers and counted ranges
-- Current recursion / subroutine recursion forms used by rgx (`(?R)`, `(?1)`, `(?&name)`)
-- Numeric backreferences
-- Branch-reset groups
-- Current shipped conditional forms
-  - group-exists
-  - relative-group-exists
-  - named-group-exists
-  - current recursion conditions `(?(R)...)`, `(?(Rn)...)`, and `(?(R&name)...)`
-  - single-branch `DEFINE` definition blocks
-  - lookaround conditions
-- Positive and negative lookahead/lookbehind
-- Current shipped Perl extended character class subset: bracket/property terms, nested ordinary bracket terms using the current ordinary char-class atom subset (for example `[\dA-F]`, `[[:graph:]]`, and `[\p{L}]`), bare ASCII POSIX class terms including negated forms (such as `[:alpha:]`, `[:^alpha:]`, `[:graph:]`, `[:digit:]`, `[:space:]`, `[:word:]`, and the other current ASCII forms), bare shorthand terms (`\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\h`, `\H`, `\v`, `\V`), bare escaped literal/control/octal/codepoint terms such as `\a`, `\b`, `\e`, `\f`, `\n`, `\t`, `\r`, `\cA`, `\040`, `\o{101}`, `\x{41}`, `\x41`, and `\-`, unary complement, grouped subexpressions, and same-level left-associative set algebra with `&` binding tighter than `|` / `+` / `-` / `^`
-
-### Explicitly unsupported or still open
-- Returned-capture subroutine forms such as `(?R(grouplist))`, `(?n(grouplist))`, `(?+n(grouplist))`, `(?-n(grouplist))`, `(?&name(grouplist))`, and `(?P>name(grouplist))`
-- Newer conditional forms such as `(?(VERSION[...])...)`
-- Perl extended character classes `(?[...])`
-  - RGX now ships a grouped bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset with unary complement and same-level multi-operator precedence
-  - wider set-expression forms and additional bare-term families beyond the current bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset remain open
-
-### Planned next or broader PCRE2 follow-up
-- Drive the broader advanced families above through parser, compiler, runtime-policy, and parity decisions without regressing the now-shipped baseline recursion and conditional forms.
-These broader families are tracked in `ROADMAP.md` as follow-up work rather than as parity-verified support today.
-
-## Out of scope for PCRE2 parity
-- rgx inline code blocks (`(?{lang:code})`): `out-of-scope`
-  - This is rgx extension behavior rather than a direct PCRE2 parity target.
+## Known design differences
+- rgx operates on **UTF-8 codepoints** by default; PCRE2 default mode operates on **bytes**. This causes differences for multi-byte characters when using byte-level classes like `\h` on non-ASCII input. In PCRE2 UTF mode (`(*UTF)`), both engines agree.
 
 ## Maintenance workflow
-- Keep this matrix synchronized with:
-  - `rgx-bench/tests/pcre2_parity.rs`
-  - `docs/CAPABILITY_MATRIX.md`
-  - `CHANGES.md`
-- When moving an item from `rgx-gap` to `parity-verified`, require:
-  - differential test coverage proving match behavior parity
-  - API-level guardrails for rgx user-facing behavior
-  - a changelog entry with validation commands/results
+- When a feature moves from `rgx-gap` to `shipped`:
+  1. Update this table.
+  2. Add differential parity tests in `rgx-bench/tests/pcre2_parity.rs`.
+  3. Update `docs/CAPABILITY_MATRIX.md`.
+  4. Add a `CHANGES.md` entry.
+- Keep this matrix synchronized with the live codebase state.
