@@ -917,7 +917,9 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    /// Convert a `directive_verb` node — `(*ACCEPT)`, `(*FAIL)`, `(*F)`, etc.
+    /// Convert a `directive_verb` node — `(*ACCEPT)`, `(*FAIL)`, `(*F)`,
+    /// `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*MARK:name)`,
+    /// `(*:name)`, etc.
     fn convert_directive_verb(&self, node: &PgenAstNode) -> Result<Regex> {
         let name = self
             .first_descendant(node, "directive_name")
@@ -931,10 +933,54 @@ impl<'a> PgenAstAdapter<'a> {
             })),
             // (*ACCEPT): force immediate match at current position
             "ACCEPT" => Ok(Regex::Accept),
+            // (*COMMIT): abort entire search on failure after this point
+            "COMMIT" => Ok(Regex::Commit),
+            // (*PRUNE): fail the entire attempt at this start position
+            "PRUNE" => Ok(Regex::Prune),
+            // (*SKIP): advance to the skip position on failure
+            "SKIP" => Ok(Regex::Skip),
+            // (*THEN): skip to the next alternative on failure
+            "THEN" => Ok(Regex::Then),
+            // (*MARK:name): set a named mark (no-op for match behavior)
+            "MARK" => {
+                let mark_name = self.extract_directive_payload(node);
+                Ok(Regex::Mark(mark_name))
+            }
+            // (*:name): shorthand for (*MARK:name)
+            "" => {
+                // Empty directive_name means this is the (*:name) shorthand form.
+                // The PGEN rule `directive_mark_shorthand = ":" payload` handles
+                // this case — the full span after "(*" starts with ":".
+                let mark_name = self.extract_directive_payload(node);
+                Ok(Regex::Mark(mark_name))
+            }
             other => Err(RgxError::Compile(format!(
                 "unsupported backtracking verb '(*{other})'"
             ))),
         }
+    }
+
+    /// Extract the payload text from a directive verb node.
+    ///
+    /// Looks for a `directive_payload_simple` descendant. If not found,
+    /// falls back to extracting the text after the first `:` in the span.
+    fn extract_directive_payload(&self, node: &PgenAstNode) -> String {
+        // Try to find a directive_payload_simple descendant first
+        if let Some(payload_node) = self.first_descendant(node, "directive_payload_simple") {
+            if let Ok(text) = self.slice(payload_node) {
+                return text.to_string();
+            }
+        }
+        // Fallback: extract from the full span text after the first ':'
+        if let Ok(span_text) = self.slice(node) {
+            if let Some(colon_pos) = span_text.find(':') {
+                let payload = &span_text[colon_pos + 1..];
+                // Strip trailing ')'
+                let payload = payload.trim_end_matches(')');
+                return payload.to_string();
+            }
+        }
+        String::new()
     }
 
     /// Convert a `callout` node — `(?C)` or `(?C123)`.
@@ -2616,5 +2662,52 @@ mod tests {
         // (*ACCEPT) immediately matches, so any input matches
         assert!(re.is_match(""));
         assert!(re.is_match("anything"));
+    }
+
+    // --- Backtracking control verb parsing tests ---
+
+    #[test]
+    fn commit_verb_parses() {
+        let ast = parse_pattern("(*COMMIT)").expect("(*COMMIT) should parse");
+        assert!(
+            matches!(ast, Regex::Commit),
+            "expected Commit, got: {ast:?}"
+        );
+    }
+
+    #[test]
+    fn prune_verb_parses() {
+        let ast = parse_pattern("(*PRUNE)").expect("(*PRUNE) should parse");
+        assert!(matches!(ast, Regex::Prune), "expected Prune, got: {ast:?}");
+    }
+
+    #[test]
+    fn skip_verb_parses() {
+        let ast = parse_pattern("(*SKIP)").expect("(*SKIP) should parse");
+        assert!(matches!(ast, Regex::Skip), "expected Skip, got: {ast:?}");
+    }
+
+    #[test]
+    fn then_verb_parses() {
+        let ast = parse_pattern("(*THEN)").expect("(*THEN) should parse");
+        assert!(matches!(ast, Regex::Then), "expected Then, got: {ast:?}");
+    }
+
+    #[test]
+    fn mark_verb_parses() {
+        let ast = parse_pattern("(*MARK:foo)").expect("(*MARK:foo) should parse");
+        assert!(
+            matches!(ast, Regex::Mark(ref name) if name == "foo"),
+            "expected Mark(\"foo\"), got: {ast:?}"
+        );
+    }
+
+    #[test]
+    fn mark_shorthand_parses() {
+        let ast = parse_pattern("(*:bar)").expect("(*:bar) should parse");
+        assert!(
+            matches!(ast, Regex::Mark(ref name) if name == "bar"),
+            "expected Mark(\"bar\"), got: {ast:?}"
+        );
     }
 }

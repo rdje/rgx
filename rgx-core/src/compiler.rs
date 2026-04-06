@@ -1585,6 +1585,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => (ast, next_group),
         }
@@ -1840,6 +1845,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => Ok((ast, opened_groups)),
         }
@@ -1987,6 +1997,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2445,6 +2460,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2598,6 +2618,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => 0,
         }
@@ -2680,6 +2705,11 @@ impl Compiler {
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
+            | RegexAst::Commit
+            | RegexAst::Prune
+            | RegexAst::Skip
+            | RegexAst::Then
+            | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => {}
         }

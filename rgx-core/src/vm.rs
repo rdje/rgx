@@ -157,6 +157,18 @@ pub enum OpCode {
     /// Set the current alternative index (for match reporting)
     SetAlternative = 0x90,
 
+    // === BACKTRACKING CONTROL VERBS (0xA0-0xAF) ===
+    /// (*COMMIT) - set committed flag; if match fails, abort entire search
+    Commit = 0xA0,
+    /// (*PRUNE) - clear backtrack stack; if match fails, fail this attempt
+    Prune = 0xA1,
+    /// (*SKIP) - record skip position; if match fails, advance to this position
+    VerbSkip = 0xA2,
+    /// (*THEN) - clear backtrack stack (simplified); skip to next alternative
+    Then = 0xA3,
+    /// (*MARK:name) - no-op; mark name is set but not queryable
+    Mark = 0xA4,
+
     // === TERMINATION (0xF0-0xFF) ===
     /// Successful match - capture current position
     Match = 0xF0,
@@ -197,6 +209,11 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::MatchReset => "MatchReset",
         Regex::NewlineSequence => "NewlineSequence",
         Regex::Accept => "Accept",
+        Regex::Commit => "Commit",
+        Regex::Prune => "Prune",
+        Regex::Skip => "Skip",
+        Regex::Then => "Then",
+        Regex::Mark(_) => "Mark",
         Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
     }
 }
@@ -361,6 +378,13 @@ pub struct ExecContext {
     /// End position of the previous match, used by the `\G` anchor.
     /// `None` means no previous match (only position 0 satisfies `\G`).
     pub previous_match_end: Option<usize>,
+    /// Set to `true` by `(*COMMIT)`. When the current match attempt fails,
+    /// the scanning loop aborts the entire search.
+    pub committed: bool,
+    /// Set by `(*SKIP)` to the text position where it was encountered.
+    /// On match failure, the scanning loop advances to this position instead
+    /// of `start + 1`.
+    pub skip_position: Option<usize>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -582,6 +606,8 @@ impl RegexVM {
             code_result: None,
             match_start_override: None,
             previous_match_end: None,
+            committed: false,
+            skip_position: None,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -701,6 +727,12 @@ impl RegexVM {
 
         // Try full pattern match at each candidate position
         for candidate_pos in candidates {
+            // (*SKIP): skip candidates before the skip position
+            if let Some(skip_pos) = ctx.skip_position.take() {
+                if candidate_pos < skip_pos {
+                    continue;
+                }
+            }
             ctx.pos = candidate_pos;
             Self::reset_captures(ctx);
 
@@ -721,6 +753,10 @@ impl RegexVM {
                     ctx.pos
                 );
                 return matched;
+            }
+            // (*COMMIT): abort entire search on failure
+            if ctx.committed {
+                break;
             }
         }
 
@@ -834,13 +870,25 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     });
                 }
-                offset = start + 1;
+                // (*COMMIT): abort entire search on failure
+                if ctx.committed {
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
+                    return None;
+                }
+                // (*SKIP): advance to the skip position instead of start+1
+                if let Some(skip_pos) = ctx.skip_position.take() {
+                    offset = skip_pos;
+                } else {
+                    offset = start + 1;
+                }
             }
         } else {
             // Class-filter or full-scan path
             let filter = self.prefix_filter;
-            for start in 0..ctx.text.len() {
+            let mut start = 0;
+            while start < ctx.text.len() {
                 if !filter.matches(ctx.text[start]) {
+                    start += 1;
                     continue;
                 }
                 ctx.pos = start;
@@ -855,6 +903,17 @@ impl RegexVM {
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
                     });
+                }
+                // (*COMMIT): abort entire search on failure
+                if ctx.committed {
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
+                    return None;
+                }
+                // (*SKIP): advance to the skip position instead of start+1
+                if let Some(skip_pos) = ctx.skip_position.take() {
+                    start = skip_pos;
+                } else {
+                    start += 1;
                 }
             }
         }
@@ -940,6 +999,8 @@ impl RegexVM {
             code_result: ctx.code_result.clone(),
             match_start_override: ctx.match_start_override,
             previous_match_end: ctx.previous_match_end,
+            committed: ctx.committed,
+            skip_position: ctx.skip_position,
         }
     }
 
@@ -994,6 +1055,8 @@ impl RegexVM {
         ctx.match_start = start;
         ctx.code_result = None;
         ctx.match_start_override = None;
+        ctx.committed = false;
+        ctx.skip_position = None;
         let mut ip = 0;
         let code = &self.program.code;
 
@@ -1294,6 +1357,49 @@ impl RegexVM {
                 OpCode::MatchReset => {
                     debug_log!("vm", "  \\K match reset at pos={}", ctx.pos);
                     ctx.match_start_override = Some(ctx.pos);
+                }
+
+                // --- Backtracking control verbs ---
+                OpCode::Commit => {
+                    // (*COMMIT): set flag so that if this attempt fails,
+                    // the scanning loop aborts the entire search.
+                    ctx.committed = true;
+                }
+
+                OpCode::Prune => {
+                    // (*PRUNE): clear backtrack stack so that if the
+                    // current path fails, the entire attempt at this
+                    // start position fails immediately.
+                    ctx.backtrack_stack.clear();
+                }
+
+                OpCode::VerbSkip => {
+                    // (*SKIP): record the current text position. On
+                    // match failure the scanning loop will advance
+                    // to this position instead of start+1.
+                    ctx.skip_position = Some(ctx.pos);
+                    // Also prune: do not backtrack past (*SKIP).
+                    ctx.backtrack_stack.clear();
+                }
+
+                OpCode::Then => {
+                    // (*THEN): simplified as (*PRUNE) — clear backtrack
+                    // stack. Full alternation-aware behavior is not yet
+                    // implemented.
+                    // TODO: implement full alternation-aware (*THEN)
+                    // semantics that skip to the next alternative in the
+                    // innermost enclosing alternation.
+                    ctx.backtrack_stack.clear();
+                }
+
+                OpCode::Mark => {
+                    // (*MARK:name): The mark name was encoded as a
+                    // length-prefixed UTF-8 string operand. Skip it.
+                    // Mark is a no-op for match behavior.
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1 + name_len;
+                    }
                 }
 
                 OpCode::WordBoundary => {
@@ -2226,6 +2332,7 @@ impl RegexVM {
 
     /// Find all non-overlapping matches
     #[must_use]
+    #[allow(clippy::too_many_lines)] // Scanning loop with PCRE2 verb support — splitting would fragment the scan state machine
     pub fn find_all(&self, text: &str) -> Vec<Match> {
         trace_enter!(
             "vm",
@@ -2249,6 +2356,8 @@ impl RegexVM {
             code_result: None,
             match_start_override: None,
             previous_match_end: None,
+            committed: false,
+            skip_position: None,
         };
 
         let mut matches = Vec::new();
@@ -2284,7 +2393,16 @@ impl RegexVM {
                     start = m_end.max(candidate + 1);
                     matches.push(m);
                 } else {
-                    start = candidate + 1;
+                    // (*COMMIT): abort entire search on failure
+                    if ctx.committed {
+                        break;
+                    }
+                    // (*SKIP): advance to the skip position instead of candidate+1
+                    if let Some(skip_pos) = ctx.skip_position.take() {
+                        start = skip_pos;
+                    } else {
+                        start = candidate + 1;
+                    }
                 }
             }
         } else {
@@ -2318,7 +2436,16 @@ impl RegexVM {
                     start = m_end.max(start + 1);
                     matches.push(m);
                 } else {
-                    start += 1;
+                    // (*COMMIT): abort entire search on failure
+                    if ctx.committed {
+                        break;
+                    }
+                    // (*SKIP): advance to the skip position instead of start+1
+                    if let Some(skip_pos) = ctx.skip_position.take() {
+                        start = skip_pos;
+                    } else {
+                        start += 1;
+                    }
                 }
             }
         }
@@ -3022,6 +3149,27 @@ impl RegexVM {
 
                 OpCode::MatchReset => {
                     ctx.match_start_override = Some(ctx.pos);
+                }
+
+                OpCode::Commit => {
+                    ctx.committed = true;
+                }
+
+                OpCode::Prune | OpCode::Then => {
+                    backtrack_stack.clear();
+                }
+
+                OpCode::VerbSkip => {
+                    ctx.skip_position = Some(ctx.pos);
+                    backtrack_stack.clear();
+                }
+
+                OpCode::Mark => {
+                    // Skip the length-prefixed mark name (no-op)
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1 + name_len;
+                    }
                 }
 
                 _ => {
@@ -4236,6 +4384,31 @@ impl OptimizingCompiler {
                 self.emit_op(OpCode::Match);
             }
 
+            Regex::Commit => {
+                self.emit_op(OpCode::Commit);
+            }
+
+            Regex::Prune => {
+                self.emit_op(OpCode::Prune);
+            }
+
+            Regex::Skip => {
+                self.emit_op(OpCode::VerbSkip);
+            }
+
+            Regex::Then => {
+                self.emit_op(OpCode::Then);
+            }
+
+            Regex::Mark(name) => {
+                // Encode as Mark opcode followed by length-prefixed name.
+                self.emit_op(OpCode::Mark);
+                let name_bytes = name.as_bytes();
+                let len = name_bytes.len().min(255);
+                self.code.push(len as u8);
+                self.code.extend_from_slice(&name_bytes[..len]);
+            }
+
             Regex::Empty => {
                 // Empty/epsilon — trivially matches without consuming input.
                 // No bytecode needed; execution simply falls through to the
@@ -4494,6 +4667,11 @@ impl OptimizingCompiler {
             | Regex::MatchReset
             | Regex::NewlineSequence
             | Regex::Accept
+            | Regex::Commit
+            | Regex::Prune
+            | Regex::Skip
+            | Regex::Then
+            | Regex::Mark(_)
             | Regex::WhitespaceLiteral(_)
             | Regex::Empty => {}
         }
@@ -4600,10 +4778,21 @@ impl OptimizingCompiler {
                 | OpCode::AtomicEnd
                 | OpCode::MatchReset
                 | OpCode::PreviousMatchEnd
+                | OpCode::Commit
+                | OpCode::Prune
+                | OpCode::VerbSkip
+                | OpCode::Then
                 | OpCode::Match
                 | OpCode::Fail
                 | OpCode::Accept
                 | OpCode::Halt => {}
+                OpCode::Mark => {
+                    // Skip the length-prefixed mark name
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1 + name_len;
+                    }
+                }
                 _ => return,
             }
         }
@@ -4758,12 +4947,12 @@ impl TryFrom<u8> for OpCode {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
             Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
-            CodeBlock, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump,
-            JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
-            MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, QuestionGreedy,
-            QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split,
-            SplitLazy, StarGreedy, StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg,
-            WordBoundary,
+            CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
+            Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg,
+            Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd,
+            Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
+            SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
+            VerbSkip, WordAscii, WordAsciiNeg, WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -4809,6 +4998,11 @@ impl TryFrom<u8> for OpCode {
             0x84 => Ok(PlusGreedy),
             0x85 => Ok(PlusLazy),
             0x90 => Ok(SetAlternative),
+            0xA0 => Ok(Commit),
+            0xA1 => Ok(Prune),
+            0xA2 => Ok(VerbSkip),
+            0xA3 => Ok(Then),
+            0xA4 => Ok(Mark),
             0xF0 => Ok(Match),
             0xF1 => Ok(Fail),
             _ => Err(()),
@@ -5154,5 +5348,137 @@ mod tests {
         } else {
             panic!("Should match 'dog' in larger text");
         }
+    }
+
+    // --- Backtracking control verb tests ---
+
+    #[test]
+    fn test_commit_verb_aborts_search() {
+        // (*COMMIT) means: if this attempt fails, don't try other positions.
+        // Pattern: a(*COMMIT)b — must match "ab" as a pair; if the 'b' fails
+        // after 'a', the entire search aborts.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Commit, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        // "ab" matches normally
+        assert!(vm.is_match("ab"));
+        // "xab" should still match — the 'a' at position 1 matches before commit fires
+        assert!(vm.is_match("xab"));
+        // "axb" — the 'a' at position 0 matches, (*COMMIT) fires, then 'x' != 'b'
+        // fails. Because committed, no retry at position 1. No match.
+        assert!(!vm.find_first("axb").is_some_and(|m| m.start == 0));
+    }
+
+    #[test]
+    fn test_prune_verb_clears_backtrack() {
+        // (*PRUNE) clears the backtrack stack. In a|b pattern with (*PRUNE)
+        // after 'a', if 'a' path fails, backtracking to 'b' is prevented.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Prune, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        assert!(vm.is_match("ab"));
+        // "ac" — 'a' matches, (*PRUNE) fires, 'c' != 'b' fails.
+        // At position 0 the attempt fails. But scanning tries position 1 next.
+        assert!(!vm.is_match("ac"));
+    }
+
+    #[test]
+    fn test_skip_verb_advances_search_position() {
+        // (*SKIP) tells the scanning loop to jump to the skip position
+        // instead of start+1 when the current attempt fails.
+        let mut compiler = OptimizingCompiler::new();
+        // Pattern: a(*SKIP)b — if 'b' fails after 'a(*SKIP)', next attempt
+        // starts at the position after where (*SKIP) was encountered.
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        assert!(vm.is_match("ab"));
+        // "aXab" — first 'a' at 0, (*SKIP) at pos 1, 'X' != 'b' fails.
+        // Skip advances to pos 1, tries pos 1 'X' (no match), then pos 2 'a'
+        // matches, (*SKIP) at pos 3, 'b' at pos 3 matches.
+        let m = vm.find_first("aXab");
+        assert!(m.is_some());
+        let m = m.unwrap();
+        assert_eq!(m.start, 2);
+        assert_eq!(m.end, 4);
+    }
+
+    #[test]
+    fn test_then_verb_behaves_like_prune() {
+        // (*THEN) is currently implemented as (*PRUNE) — clears backtrack stack.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Then, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        assert!(vm.is_match("ab"));
+        assert!(!vm.is_match("ac"));
+    }
+
+    #[test]
+    fn test_mark_verb_is_noop_for_matching() {
+        // (*MARK:name) should not affect match behavior
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Char('a'),
+            Regex::Mark("test".to_string()),
+            Regex::Char('b'),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        assert!(vm.is_match("ab"));
+        assert!(!vm.is_match("ac"));
+        // Mark with empty name
+        let mut compiler2 = OptimizingCompiler::new();
+        let ast2 = Regex::Sequence(vec![
+            Regex::Char('x'),
+            Regex::Mark(String::new()),
+            Regex::Char('y'),
+        ]);
+        let program2 = compiler2.compile(&ast2);
+        let vm2 = RegexVM::new(program2);
+        assert!(vm2.is_match("xy"));
+    }
+
+    #[test]
+    fn test_commit_verb_find_all_stops_after_failure() {
+        // After (*COMMIT) fires and the attempt fails, find_all should stop.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Commit, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        // "ab_ab" — first "ab" matches. After that, scanning continues from pos 2.
+        // "a" at pos 3, (*COMMIT), "b" at pos 4 matches.
+        let matches = vm.find_all("ab_ab");
+        assert_eq!(matches.len(), 2);
+
+        // "ac_ab" — first "a" at 0, commit, "c" fails, search aborts.
+        // The "ab" at position 3 is never tried.
+        let matches = vm.find_all("ac_ab");
+        assert_eq!(matches.len(), 0);
+    }
+
+    #[test]
+    fn test_skip_verb_find_all_advances_position() {
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip, Regex::Char('b')]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        // "aab" — first 'a' at 0, (*SKIP) at 1, 'a' != 'b' fails.
+        // Skip jumps to pos 1 (not pos 1 which is the same, so effectively
+        // tries 'a' at 1, (*SKIP) at 2, 'b' at 2 matches).
+        let m = vm.find_first("aab");
+        assert!(m.is_some());
+        let m = m.unwrap();
+        assert_eq!(m.start, 1);
+        assert_eq!(m.end, 3);
     }
 }

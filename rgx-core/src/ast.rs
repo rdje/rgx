@@ -153,6 +153,16 @@ pub enum Regex {
     // Match control
     /// (*ACCEPT) - Force immediate match acceptance
     Accept,
+    /// (*COMMIT) - If the match fails after this point, abort the entire search
+    Commit,
+    /// (*PRUNE) - If the match fails after this point, fail the current attempt immediately
+    Prune,
+    /// (*SKIP) - If the match fails after this point, restart search at the skip position
+    Skip,
+    /// (*THEN) - If the current alternative fails after this point, skip to the next alternative
+    Then,
+    /// (*MARK:name) / (*:name) - Set a named mark (no-op for match behavior)
+    Mark(String),
 
     // Special
     /// Empty pattern (epsilon)
