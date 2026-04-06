@@ -110,7 +110,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` code blocks are still Rust-API-only; wasm now has a file-backed CLI registration surface but still no broader external plugin/config story
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
-  - the real PGEN backend is green locally through pinned submodule commit `11821c49a935bff28bcf72a8e63aacf3c2be3fd7` (PGEN 1.1.5)
+  - the real PGEN backend is green locally through pinned submodule commit `f876a609b22dad349572cf9421de8bf0af0e5183` (PGEN 1.1.6)
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
   - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, emits a cross-mode `overview.*` for latest quick/full state, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
   - the first VM performance optimization (literal-prefix skip in scanning loop) improved literal find_first by ~2x; the scanning loop now skips positions where the first required byte cannot match, which is cached once at VM construction
@@ -171,7 +171,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ParserConfig` still remains unused scaffolding even after the real PGEN backend rollout, but the older dead `PatternAnalysis` helper has now been removed.
 - The default local CI path now validates the default PGEN-backed RGX-scoped `fmt`, explicit package tests for `rgx-core`, `rgx-cli`, `rgx-bench`, and `rgx-wasm`, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`), combined-language build coverage (`all-languages`), `clippy`, and a quick benchmark-trend capture summary under `target/benchmark-trends/`.
 - The explicit package matrix is intentional because `cargo test --workspace` has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent RGX package coverage remains stable.
-- The PGEN dependency is now pinned as `subs/pgen` at commit `11821c49a935bff28bcf72a8e63aacf3c2be3fd7` (PGEN 1.1.5).
+- The PGEN dependency is now pinned as `subs/pgen` at commit `f876a609b22dad349572cf9421de8bf0af0e5183` (PGEN 1.1.6).
 - The root Cargo workspace explicitly excludes `subs/pgen/rust`, which keeps RGX validation scoped to RGX even though the parser dependency now lives under the repository tree.
 - Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure now has two tiers:

@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Bump PGEN to 1.1.6, close PGEN-RGX-0009
+- Scope: PGEN submodule upgrade verifying the code_content span fix.
+- Changes:
+  - Bumped `subs/pgen` from `11821c4` (1.1.5) to `f876a60` (1.1.6).
+  - PGEN 1.1.6 fixes the `ws?` rule that consumed the first byte of the code body in `code_block_lang`.
+  - Adapter `convert_code_block` now reads `code_content` span directly — the span-text workaround is removed.
+  - `strip_prefix`/`strip_suffix` count in parsing.rs reduced from 16 to 11.
+  - Closed `PGEN-RGX-0009` as `verified-fixed-upstream`.
+- Validation:
+  - All 282 tests pass, 0 clippy warnings.
+  - code_content span verified: [10, 23] → "validate_word" (was [11, 23] → "alidate_word").
+- Notes/impact:
+  - All 5 RGX-filed PGEN issues (0005-0009) now closed. PGEN 1.1.6 is the current pin.
+
 ### 2026-04-06 - Bump PGEN to 1.1.5, close PGEN-RGX-0007 and PGEN-RGX-0008
 - Scope: PGEN submodule upgrade, adapter cleanup, issue closure.
 - Changes:

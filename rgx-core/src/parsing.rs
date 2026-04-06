@@ -855,23 +855,20 @@ impl<'a> PgenAstAdapter<'a> {
     /// out as a structured child node — it's fused into the opaque code text.
     /// We therefore keep span-text parsing here intentionally.
     fn convert_code_block(&self, node: &PgenAstNode) -> Result<Regex> {
-        // PGEN 1.1.5+ produces code_block_lang for language-tagged code blocks.
-        // Use the code_lang child for the language tag, but extract the body
-        // from the span text because PGEN's ws? rule can cause a 1-byte offset
-        // in the code_content span.
+        // PGEN 1.1.6+ produces code_block_lang with correct code_lang and
+        // code_content spans for language-tagged code blocks.
         if let Some(lang_node) = self.first_descendant(node, "code_block_lang") {
-            if let Some(code_lang) = self.first_descendant(lang_node, "code_lang") {
-                let lang = self.slice(code_lang)?.to_string();
-                // Extract body from the span text after "(?{lang:"
-                let fragment = self.slice(lang_node)?;
-                let prefix = format!("(?{{{lang}:");
-                let code = fragment
-                    .strip_prefix(&prefix)
-                    .and_then(|s| s.strip_suffix("})"))
-                    .unwrap_or_default()
-                    .to_string();
-                return Ok(Regex::CodeBlock { lang, code });
-            }
+            let lang = self
+                .first_descendant(lang_node, "code_lang")
+                .and_then(|n| self.slice(n).ok())
+                .unwrap_or_default()
+                .to_string();
+            let code = self
+                .first_descendant(lang_node, "code_content")
+                .and_then(|n| self.slice(n).ok())
+                .unwrap_or_default()
+                .to_string();
+            return Ok(Regex::CodeBlock { lang, code });
         }
         // Fallback for code_block_plain (untagged) or older PGEN versions
         let fragment = self.slice(node)?;

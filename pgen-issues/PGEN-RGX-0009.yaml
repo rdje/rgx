@@ -1,7 +1,7 @@
 id: PGEN-RGX-0009
 summary: |
   code_block_lang ws? rule consumes the first byte of the code body, causing code_content span to start 1 byte late
-status: open
+status: closed
 opened_at: 2026-04-06T00:28:33Z
 first_seen_at: 2026-04-06T00:28:33Z
 last_updated_at: 2026-04-06T00:28:33Z
@@ -85,11 +85,13 @@ impact: |
   the full code_block_lang span text using string slicing instead of
   trusting code_content.span. This works but defeats the structured AST.
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: pending
+  verified_at: 2026-04-06T01:00:00Z
   verification_notes: |
-    When fixed upstream, verify that code_content.span.start equals
-    code_lang.span.end + 1 (the byte after ":") for patterns with no
-    whitespace after the colon. Then update RGX's convert_code_block to
-    read code_content.span directly instead of falling back to span text.
+    Fixed in PGEN 1.1.6 (commit f876a60). code_content span now correctly
+    starts at position 10 (immediately after ":") instead of 11.
+    Verified: code_content span [10, 23] → "validate_word" (was [11, 23]
+    → "alidate_word"). RGX adapter convert_code_block now reads
+    code_content span directly instead of span-text workaround. Fixed AST
+    dump archived at pgen-issues/artifacts/PGEN-RGX-0009/pgen_ast_dump_fixed.json.
