@@ -345,9 +345,9 @@ pub struct CompilationStats {
 
 /// Execution context with performance optimizations
 #[derive(Debug)]
-pub struct ExecContext {
-    /// Input text as UTF-8 bytes for SIMD processing
-    pub text: Vec<u8>,
+pub struct ExecContext<'a> {
+    /// Input text as UTF-8 bytes for SIMD processing (borrowed, never copied)
+    pub text: &'a [u8],
     /// Current position in bytes (not characters!)
     pub pos: usize,
     /// Current match-attempt start position in bytes
@@ -593,7 +593,7 @@ impl RegexVM {
 
         let bytes = text.as_bytes();
         let mut ctx = ExecContext {
-            text: bytes.to_vec(),
+            text: bytes,
             pos: 0,
             match_start: 0,
             end: bytes.len(),
@@ -644,9 +644,10 @@ impl RegexVM {
             self.find_first_scanning(&mut ctx)
         };
 
-        match &result {
-            Some(m) => debug_log!("vm", "=== MATCH FOUND: {}..{} ===", m.start, m.end),
-            None => debug_log!("vm", "=== NO MATCH FOUND ==="),
+        if let Some(_m) = &result {
+            debug_log!("vm", "=== MATCH FOUND: {}..{} ===", _m.start, _m.end);
+        } else {
+            debug_log!("vm", "=== NO MATCH FOUND ===");
         }
         low_log!("vm", "=== FIND_FIRST PIPELINE COMPLETE ===");
         low_log!("vm", "");
@@ -656,7 +657,7 @@ impl RegexVM {
     }
 
     /// Determine if SIMD pre-filtering would be beneficial
-    fn should_use_simd_search(&self, ctx: &ExecContext) -> bool {
+    fn should_use_simd_search(&self, ctx: &ExecContext<'_>) -> bool {
         // SIMD candidate collection followed by per-candidate VM execution is
         // only a net win when the first literal is rare in the input.  For now
         // keep this gated on x86 SSE2 where it was originally benchmarked;
@@ -684,7 +685,7 @@ impl RegexVM {
     }
 
     /// SIMD-accelerated first match search using state-of-the-art algorithms
-    fn find_first_simd(&self, ctx: &mut ExecContext) -> Option<Match> {
+    fn find_first_simd(&self, ctx: &mut ExecContext<'_>) -> Option<Match> {
         trace_enter!(
             "vm",
             "RegexVM::find_first_simd",
@@ -765,7 +766,7 @@ impl RegexVM {
     }
 
     /// Optimized search for anchored patterns
-    fn find_first_anchored(&self, ctx: &mut ExecContext) -> Option<Match> {
+    fn find_first_anchored(&self, ctx: &mut ExecContext<'_>) -> Option<Match> {
         trace_enter!(
             "vm",
             "RegexVM::find_first_anchored",
@@ -838,7 +839,7 @@ impl RegexVM {
     /// When the compiled program begins with a single-byte literal, uses
     /// `memchr` to jump directly to candidate positions instead of testing
     /// every byte offset.
-    fn find_first_scanning(&self, ctx: &mut ExecContext) -> Option<Match> {
+    fn find_first_scanning(&self, ctx: &mut ExecContext<'_>) -> Option<Match> {
         trace_enter!(
             "vm",
             "RegexVM::find_first_scanning",
@@ -939,7 +940,7 @@ impl RegexVM {
     /// Write a single capture slot, recording the old value in the trail log
     /// so that the modification can be undone on backtrack.
     #[inline]
-    fn set_capture(ctx: &mut ExecContext, index: usize, value: Option<usize>) {
+    fn set_capture(ctx: &mut ExecContext<'_>, index: usize, value: Option<usize>) {
         let old = ctx.captures[index];
         ctx.capture_trail.push((index, old));
         ctx.captures[index] = value;
@@ -948,7 +949,7 @@ impl RegexVM {
     /// Undo capture-trail entries back to `mark`, restoring capture slots to
     /// their state at the time the mark was taken.
     #[inline]
-    fn undo_trail(ctx: &mut ExecContext, mark: usize) {
+    fn undo_trail(ctx: &mut ExecContext<'_>, mark: usize) {
         while ctx.capture_trail.len() > mark {
             let (index, old_value) = ctx.capture_trail.pop().unwrap();
             ctx.captures[index] = old_value;
@@ -957,7 +958,7 @@ impl RegexVM {
 
     /// Restore a backtrack frame's capture + call-stack state onto `ctx`.
     #[inline]
-    fn restore_frame(ctx: &mut ExecContext, frame: &BacktrackFrame) {
+    fn restore_frame(ctx: &mut ExecContext<'_>, frame: &BacktrackFrame) {
         if let Some(ref snapshot) = frame.capture_snapshot {
             // Probe-based frame: discard trail entries and apply the snapshot.
             ctx.capture_trail.truncate(frame.trail_mark);
@@ -971,7 +972,7 @@ impl RegexVM {
 
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
-    fn try_backtrack(ctx: &mut ExecContext, ip: &mut usize) -> bool {
+    fn try_backtrack(ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
         if let Some(frame) = ctx.backtrack_stack.pop() {
             *ip = frame.ip;
             ctx.pos = frame.pos;
@@ -984,9 +985,9 @@ impl RegexVM {
     }
 
     /// Clone the current execution state for speculative sub-expression execution.
-    fn clone_exec_context(ctx: &ExecContext) -> ExecContext {
+    fn clone_exec_context<'a>(ctx: &ExecContext<'a>) -> ExecContext<'a> {
         ExecContext {
-            text: ctx.text.clone(),
+            text: ctx.text,
             pos: ctx.pos,
             match_start: ctx.match_start,
             end: ctx.end,
@@ -1005,7 +1006,7 @@ impl RegexVM {
     }
 
     /// Invoke a compiled recursion/subroutine target with basic cycle protection.
-    fn invoke_subroutine(&self, ctx: &mut ExecContext, target: usize) -> bool {
+    fn invoke_subroutine(&self, ctx: &mut ExecContext<'_>, target: usize) -> bool {
         let Some(code) = self.program.subroutines.get(target) else {
             return false;
         };
@@ -1044,7 +1045,7 @@ impl RegexVM {
 
     /// Execute bytecode starting at given position
     #[allow(clippy::too_many_lines)] // Main VM dispatch loop — splitting would fragment the opcode state machine
-    fn execute_at(&self, ctx: &mut ExecContext, start: usize) -> bool {
+    fn execute_at(&self, ctx: &mut ExecContext<'_>, start: usize) -> bool {
         debug_log!(
             "vm",
             "Execute at text_pos={}, code_len={}",
@@ -1204,8 +1205,8 @@ impl RegexVM {
                     return false;
                 }
                 OpCode::AnyDotAll => {
-                    if let Some(ch) = Self::current_char(ctx) {
-                        trace_log!("vm", "  ✓ AnyDotAll: matched '{}'", ch);
+                    if let Some(_ch) = Self::current_char(ctx) {
+                        trace_log!("vm", "  ✓ AnyDotAll: matched '{}'", _ch);
                         Self::advance_char(ctx);
                         continue;
                     }
@@ -1967,7 +1968,7 @@ impl RegexVM {
     }
 
     /// Probe whether a sub-expression can match once while advancing the input.
-    fn probe_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> Option<ExecContext> {
+    fn probe_subexpr<'a>(&self, ctx: &ExecContext<'a>, code: &[u8]) -> Option<ExecContext<'a>> {
         let mut probe_ctx = Self::clone_exec_context(ctx);
         if self.execute_subexpr(&mut probe_ctx, code) && probe_ctx.pos != ctx.pos {
             Some(probe_ctx)
@@ -1989,7 +1990,7 @@ impl RegexVM {
     /// Decode and execute an inline code-block operand.
     fn execute_inline_code_block(
         &self,
-        ctx: &mut ExecContext,
+        ctx: &mut ExecContext<'_>,
         code: &[u8],
         ip: &mut usize,
     ) -> Option<bool> {
@@ -2006,7 +2007,7 @@ impl RegexVM {
     }
 
     /// Execute a code-block predicate using the shared execution manager.
-    fn evaluate_code_block(&self, ctx: &mut ExecContext, language: &str, code: &str) -> bool {
+    fn evaluate_code_block(&self, ctx: &mut ExecContext<'_>, language: &str, code: &str) -> bool {
         let Some(execution_manager) = &self.execution_manager else {
             debug_log!(
                 "vm",
@@ -2044,9 +2045,9 @@ impl RegexVM {
     }
 
     /// Materialize the current VM state into the execution-layer context.
-    fn build_code_exec_context(&self, ctx: &ExecContext) -> CodeExecContext {
+    fn build_code_exec_context(&self, ctx: &ExecContext<'_>) -> CodeExecContext {
         let mut exec_ctx =
-            CodeExecContext::new(String::from_utf8_lossy(&ctx.text).into_owned(), ctx.pos);
+            CodeExecContext::new(String::from_utf8_lossy(ctx.text).into_owned(), ctx.pos);
         exec_ctx.match_start = ctx.match_start;
         exec_ctx.match_end = ctx.pos;
         exec_ctx.matched_branch_number = ctx.current_alternative.map(|id| id + 1);
@@ -2077,7 +2078,7 @@ impl RegexVM {
     }
 
     /// Convert a capture byte range into owned UTF-8 text.
-    fn capture_text(ctx: &ExecContext, start: usize, end: usize) -> Option<String> {
+    fn capture_text(ctx: &ExecContext<'_>, start: usize, end: usize) -> Option<String> {
         if start > end || end > ctx.text.len() {
             return None;
         }
@@ -2085,7 +2086,7 @@ impl RegexVM {
     }
 
     /// Match the current position against the bytes captured by a numbered group.
-    fn match_backreference(&self, ctx: &mut ExecContext, group_id: usize) -> bool {
+    fn match_backreference(&self, ctx: &mut ExecContext<'_>, group_id: usize) -> bool {
         let start_idx = group_id * 2;
         let end_idx = start_idx + 1;
         let (Some(capture_start), Some(capture_end)) = (
@@ -2141,7 +2142,7 @@ impl RegexVM {
     ///
     /// Decodes only the minimal UTF-8 bytes at the current position instead of
     /// validating the entire remaining text.
-    fn current_char(ctx: &ExecContext) -> Option<char> {
+    fn current_char(ctx: &ExecContext<'_>) -> Option<char> {
         if ctx.pos >= ctx.end {
             return None;
         }
@@ -2168,7 +2169,7 @@ impl RegexVM {
     ///
     /// Determines the character width directly from the leading byte without
     /// decoding the full character.
-    fn advance_char(ctx: &mut ExecContext) {
+    fn advance_char(ctx: &mut ExecContext<'_>) {
         if ctx.pos >= ctx.end {
             return;
         }
@@ -2187,7 +2188,7 @@ impl RegexVM {
     }
 
     /// Reset capture groups for new match attempt
-    fn reset_captures(ctx: &mut ExecContext) {
+    fn reset_captures(ctx: &mut ExecContext<'_>) {
         for capture in &mut ctx.captures {
             *capture = None;
         }
@@ -2204,13 +2205,13 @@ impl RegexVM {
     }
 
     /// Check if current position is at the absolute end of the input text.
-    fn is_at_absolute_end(ctx: &ExecContext) -> bool {
+    fn is_at_absolute_end(ctx: &ExecContext<'_>) -> bool {
         ctx.pos == ctx.text.len()
     }
 
     /// Check if current position is at the absolute end of the input text,
     /// or immediately before one final trailing newline sequence.
-    fn is_at_absolute_end_or_before_final_newline(ctx: &ExecContext) -> bool {
+    fn is_at_absolute_end_or_before_final_newline(ctx: &ExecContext<'_>) -> bool {
         let len = ctx.text.len();
         ctx.pos == len
             || (ctx.pos + 1 == len && ctx.text.get(ctx.pos) == Some(&b'\n'))
@@ -2222,7 +2223,7 @@ impl RegexVM {
     /// Extract capture groups with explicit overall match (group 0)
     fn extract_captures_with_match(
         &self,
-        ctx: &ExecContext,
+        ctx: &ExecContext<'_>,
         match_start: usize,
         match_end: usize,
     ) -> Vec<Option<(usize, usize)>> {
@@ -2250,7 +2251,7 @@ impl RegexVM {
     }
 
     /// Check if we're at a word boundary (\b)
-    fn is_at_word_boundary(ctx: &ExecContext) -> bool {
+    fn is_at_word_boundary(ctx: &ExecContext<'_>) -> bool {
         let is_word_char = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
 
         let prev_is_word = if ctx.pos == 0 {
@@ -2343,7 +2344,7 @@ impl RegexVM {
         );
         let bytes = text.as_bytes();
         let mut ctx = ExecContext {
-            text: bytes.to_vec(),
+            text: bytes,
             pos: 0,
             match_start: 0,
             end: bytes.len(),
@@ -2520,7 +2521,7 @@ impl RegexVM {
 
     /// Execute a sub-expression (used for quantifiers)
     #[allow(clippy::too_many_lines)] // Subexpression dispatch mirrors execute_at — same architectural constraint
-    fn execute_subexpr(&self, ctx: &mut ExecContext, code: &[u8]) -> bool {
+    fn execute_subexpr(&self, ctx: &mut ExecContext<'_>, code: &[u8]) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
         let mut call_stack = Vec::new();
@@ -3181,7 +3182,7 @@ impl RegexVM {
 
     /// Execute an assertion sub-expression without consuming input
     /// or mutating the parent execution context.
-    fn execute_assertion_subexpr(&self, ctx: &ExecContext, code: &[u8]) -> bool {
+    fn execute_assertion_subexpr(&self, ctx: &ExecContext<'_>, code: &[u8]) -> bool {
         let mut assertion_ctx = Self::clone_exec_context(ctx);
 
         self.execute_subexpr(&mut assertion_ctx, code)
@@ -3189,7 +3190,7 @@ impl RegexVM {
 
     fn evaluate_conditional_operand(
         &self,
-        ctx: &ExecContext,
+        ctx: &ExecContext<'_>,
         code: &[u8],
         ip: &mut usize,
     ) -> Option<bool> {
@@ -3265,7 +3266,7 @@ impl RegexVM {
         }
     }
 
-    fn capture_group_exists(ctx: &ExecContext, group_id: usize) -> bool {
+    fn capture_group_exists(ctx: &ExecContext<'_>, group_id: usize) -> bool {
         if group_id == 0 {
             return false;
         }
@@ -3283,7 +3284,7 @@ impl RegexVM {
 
     /// Execute a lookbehind assertion by finding a sub-expression match
     /// that ends exactly at the current position.
-    fn execute_lookbehind_assertion(&self, ctx: &ExecContext, code: &[u8]) -> bool {
+    fn execute_lookbehind_assertion(&self, ctx: &ExecContext<'_>, code: &[u8]) -> bool {
         let assertion_end = ctx.pos;
 
         for start in (0..=assertion_end).rev() {
@@ -3391,7 +3392,7 @@ impl RegexVM {
     /// - Throughput: ~30-50 GB/s on modern CPUs
     /// - Latency: 1-2 cycles per 32 bytes
     /// - Cache-friendly: Sequential memory access pattern
-    fn simd_find_byte(&self, ctx: &ExecContext, needle: u8) -> Vec<usize> {
+    fn simd_find_byte(&self, ctx: &ExecContext<'_>, needle: u8) -> Vec<usize> {
         let mut positions = Vec::new();
         let haystack = &ctx.text;
 
@@ -3554,7 +3555,7 @@ impl RegexVM {
     /// - Minimizes memory bandwidth by keeping pattern in registers
     ///
     /// **Performance:** ~10-20 GB/s for 2-4 byte patterns
-    fn simd_find_short_string(&self, ctx: &ExecContext, needle: &[u8]) -> Vec<usize> {
+    fn simd_find_short_string(&self, ctx: &ExecContext<'_>, needle: &[u8]) -> Vec<usize> {
         let mut positions = Vec::new();
         let haystack = &ctx.text;
         let needle_len = needle.len();
@@ -3597,7 +3598,7 @@ impl RegexVM {
     /// - Prefetching hints for the CPU to load ahead
     ///
     /// **Performance:** ~5-15 GB/s for patterns > 4 bytes
-    fn simd_find_long_string(&self, ctx: &ExecContext, needle: &[u8]) -> Vec<usize> {
+    fn simd_find_long_string(&self, ctx: &ExecContext<'_>, needle: &[u8]) -> Vec<usize> {
         let mut positions = Vec::new();
         let haystack = &ctx.text;
         let needle_len = needle.len();

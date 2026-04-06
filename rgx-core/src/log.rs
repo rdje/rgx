@@ -403,7 +403,16 @@ pub fn emit_external_at(
     );
 }
 
+// ---------------------------------------------------------------------------
+// Feature-gated logging macros
+//
+// When the `trace` feature is enabled, the macros forward to the emit_*
+// functions.  Without it they expand to nothing, giving the compiler the
+// opportunity to eliminate all format-string construction from hot loops.
+// ---------------------------------------------------------------------------
+
 /// Debug logging macro - detailed operational flow.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! debug_log {
     ($module:expr, $($arg:tt)*) => {
@@ -413,7 +422,15 @@ macro_rules! debug_log {
     };
 }
 
+/// Debug logging macro - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! debug_log {
+    ($module:expr, $($arg:tt)*) => {{}};
+}
+
 /// Trace logging macro - exhaustive details.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! trace_log {
     ($module:expr, $($arg:tt)*) => {
@@ -423,7 +440,15 @@ macro_rules! trace_log {
     };
 }
 
+/// Trace logging macro - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! trace_log {
+    ($module:expr, $($arg:tt)*) => {{}};
+}
+
 /// Low verbosity macro - coarse milestones.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! low_log {
     ($module:expr, $($arg:tt)*) => {
@@ -433,7 +458,15 @@ macro_rules! low_log {
     };
 }
 
+/// Low verbosity macro - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! low_log {
+    ($module:expr, $($arg:tt)*) => {{}};
+}
+
 /// Medium verbosity macro - decisions and branch summaries.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! medium_log {
     ($module:expr, $($arg:tt)*) => {
@@ -443,7 +476,15 @@ macro_rules! medium_log {
     };
 }
 
+/// Medium verbosity macro - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! medium_log {
+    ($module:expr, $($arg:tt)*) => {{}};
+}
+
 /// High verbosity macro - detailed flow.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! high_log {
     ($module:expr, $($arg:tt)*) => {
@@ -453,7 +494,15 @@ macro_rules! high_log {
     };
 }
 
+/// High verbosity macro - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! high_log {
+    ($module:expr, $($arg:tt)*) => {{}};
+}
+
 /// Function entry tracing helper.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! trace_enter {
     ($module:expr, $function_name:expr) => {
@@ -468,7 +517,16 @@ macro_rules! trace_enter {
     };
 }
 
+/// Function entry tracing helper - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! trace_enter {
+    ($module:expr, $function_name:expr) => {{}};
+    ($module:expr, $function_name:expr, $($arg:tt)*) => {{}};
+}
+
 /// Function exit tracing helper.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! trace_exit {
     ($module:expr, $function_name:expr) => {
@@ -483,7 +541,16 @@ macro_rules! trace_exit {
     };
 }
 
+/// Function exit tracing helper - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! trace_exit {
+    ($module:expr, $function_name:expr) => {{}};
+    ($module:expr, $function_name:expr, $($arg:tt)*) => {{}};
+}
+
 /// Decision tracing helper with rationale.
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! trace_decision {
     ($module:expr, $decision:expr, $taken:expr, $($arg:tt)*) => {
@@ -501,11 +568,28 @@ macro_rules! trace_decision {
     };
 }
 
+/// Decision tracing helper - zero-cost no-op when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! trace_decision {
+    ($module:expr, $decision:expr, $taken:expr, $($arg:tt)*) => {{}};
+}
+
 /// Log a value and return it (useful for debugging intermediate values).
+#[cfg(feature = "trace")]
 #[macro_export]
 macro_rules! debug_val {
     ($module:expr, $name:expr, $val:expr) => {{
         $crate::debug_log!($module, "{} = {:?}", $name, $val);
+        $val
+    }};
+}
+
+/// Log a value and return it - pass-through when `trace` feature is disabled.
+#[cfg(not(feature = "trace"))]
+#[macro_export]
+macro_rules! debug_val {
+    ($module:expr, $name:expr, $val:expr) => {{
         $val
     }};
 }

@@ -36,6 +36,7 @@ pgen = { path = "../subs/pgen/rust", default-features = false, features = ["gene
 [features]
 default = ["std", "pgen-parser"]
 std = []
+trace = []
 pgen-parser = ["dep:pgen", "dep:serde", "dep:serde_json"]
 wasm = ["wasmtime"]
 lua = ["mlua"]
