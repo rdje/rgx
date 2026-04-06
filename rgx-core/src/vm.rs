@@ -4107,14 +4107,31 @@ impl OptimizingCompiler {
                 let saved_multiline = self.multiline;
                 let saved_dotall = self.dotall;
                 let saved_case_insensitive = self.case_insensitive;
-                if flags.contains('m') {
+                // Parse flag string: chars before '-' are enabled, after '-' disabled.
+                // Examples: "i" → enable i; "-i" → disable i; "im" → enable both;
+                // "i-m" → enable i, disable m.
+                let (enable, disable) = if let Some(pos) = flags.find('-') {
+                    (&flags[..pos], &flags[pos + 1..])
+                } else {
+                    (flags.as_str(), "")
+                };
+                if enable.contains('m') {
                     self.multiline = true;
                 }
-                if flags.contains('s') {
+                if disable.contains('m') {
+                    self.multiline = false;
+                }
+                if enable.contains('s') {
                     self.dotall = true;
                 }
-                if flags.contains('i') {
+                if disable.contains('s') {
+                    self.dotall = false;
+                }
+                if enable.contains('i') {
                     self.case_insensitive = true;
+                }
+                if disable.contains('i') {
+                    self.case_insensitive = false;
                 }
                 self.codegen_pass(expr, false);
                 self.multiline = saved_multiline;

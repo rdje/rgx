@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship flag negation (?-i:...), (?-m:...), (?-s:...) and combined forms
+- Scope: new regex feature — scoped and inline flag disabling.
+- Changes:
+  - Flag strings now properly parse the `-` separator: characters before `-` are enabled, after `-` are disabled.
+  - `(?-i:ABC)` disables case-insensitive within scope; `(?i-s:...)` enables case-insensitive and disables dotall.
+  - Inline `(?-i)`, `(?-m)`, `(?-s)` also work.
+  - Added 4 unit tests covering disable for each flag and combined enable+disable.
+- Validation:
+  - `cargo test -p rgx-core` (239 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - Completes the inline flag system: enable, disable, scoped, inline, combined — all working.
+
 ### 2026-04-06 - Bump PGEN to 1.1.7, close PGEN-RGX-0010
 - Scope: PGEN submodule upgrade, R1 workaround removal.
 - Changes:

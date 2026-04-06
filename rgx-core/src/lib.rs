@@ -4025,4 +4025,35 @@ mod tests {
         let re = Regex::compile(r"\o{141}").unwrap();
         assert!(re.is_match("a"));
     }
+
+    #[test]
+    fn flag_negation_disables_case_insensitive() {
+        let re = Regex::compile("(?i:a)(?-i:B)").unwrap();
+        assert!(re.is_match("aB")); // a case-insensitive, B case-sensitive
+        assert!(re.is_match("AB")); // A matches case-insensitive, B exact
+        assert!(!re.is_match("ab")); // b does not match B case-sensitively
+    }
+
+    #[test]
+    fn flag_negation_disables_multiline() {
+        let re = Regex::compile("(?m:^a)").unwrap();
+        assert!(re.is_match("x\na")); // multiline: ^ matches after newline
+        let re2 = Regex::compile("(?-m:^a)").unwrap();
+        assert!(!re2.is_match("x\na")); // non-multiline: ^ only matches at text start
+        assert!(re2.is_match("abc")); // matches at text start
+    }
+
+    #[test]
+    fn flag_negation_disables_dotall() {
+        let re = Regex::compile("(?s:a.b)(?-s:c.d)").unwrap();
+        assert!(re.is_match("a\nbcxd")); // a.b dotall matches \n, c.d normal
+        assert!(!re.is_match("a\nbc\nd")); // c.d in non-dotall won't match \n
+    }
+
+    #[test]
+    fn flag_enable_and_disable_combined() {
+        let re = Regex::compile("(?i-s:a.b)").unwrap();
+        assert!(re.is_match("Axb")); // case-insensitive
+        assert!(!re.is_match("A\nb")); // dotall disabled, . won't match \n
+    }
 }
