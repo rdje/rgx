@@ -188,6 +188,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Conditional { .. } => "Conditional",
         Regex::Recursion { .. } => "Recursion",
         Regex::FlagGroup { .. } => "FlagGroup",
+        Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
     }
 }
 
@@ -4392,6 +4393,7 @@ impl OptimizingCompiler {
             | Regex::NamedBackreference(_)
             | Regex::Recursion { .. }
             | Regex::CodeBlock { .. }
+            | Regex::WhitespaceLiteral(_)
             | Regex::Empty => {}
         }
     }

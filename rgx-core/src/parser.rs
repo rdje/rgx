@@ -113,6 +113,7 @@ impl<'a> Parser<'a> {
             Regex::Conditional { .. } => "Conditional",
             Regex::Recursion { .. } => "Recursion",
             Regex::FlagGroup { .. } => "FlagGroup",
+            Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
         };
         trace_exit!("parser", "Parser::regex_kind", "ok=true,kind={}", kind);
         kind

@@ -140,6 +140,13 @@ pub enum Regex {
     // Special
     /// Empty pattern (epsilon)
     Empty,
+    /// Unescaped whitespace from a `whitespace_literal` PGEN node.
+    ///
+    /// Inside `(?x:...)` extended-mode groups the compiler strips these.
+    /// Outside extended mode the compiler lowers them to `Char(c)`.
+    /// Escaped whitespace (`\ `, `\t`, etc.) never uses this variant; it
+    /// arrives as a normal `Char` via the `escape` rule.
+    WhitespaceLiteral(char),
 }
 
 /// Type of grouping construct

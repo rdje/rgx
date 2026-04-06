@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship extended/verbose mode (?x:...)
+- Scope: new regex feature — extended mode where unescaped whitespace is ignored and `#` starts comments.
+- Changes:
+  - Added `WhitespaceLiteral(char)` AST variant to distinguish unescaped whitespace (strippable in x-mode) from escaped whitespace (`\ `, always preserved).
+  - PGEN adapter `convert_whitespace_literal` produces `WhitespaceLiteral` for PGEN's `whitespace_literal` rule.
+  - Added `strip_extended_mode` compiler pass that removes `WhitespaceLiteral` nodes and `#`-comments inside `FlagGroup` scopes containing `x`.
+  - Outside x-mode, `WhitespaceLiteral` is lowered to regular `Char`.
+  - Escaped space `\ ` recognized as valid escape in the PGEN adapter.
+  - Added 5 unit tests (whitespace, comments, escaped space, class space, scoping) and 3 PCRE2 parity tests.
+- Validation:
+  - `cargo test -p rgx-core` (244 pass), `-p rgx-bench` (37 pass), 0 clippy warnings
+- Notes/impact:
+  - `(?x)` is the fourth and final inline flag. The flag system is now complete: `(?i)`, `(?m)`, `(?s)`, `(?x)`, with enable, disable, scoped, inline, and combined forms all working.
+  - Parity case count now 243.
+
 ### 2026-04-06 - Ship flag negation (?-i:...), (?-m:...), (?-s:...) and combined forms
 - Scope: new regex feature — scoped and inline flag disabling.
 - Changes:

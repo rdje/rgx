@@ -508,9 +508,7 @@ impl<'a> PgenAstAdapter<'a> {
             "directive_verb" => Err(RgxError::Compile(
                 "unsupported: directive/backtracking verbs are not supported by rgx".to_string(),
             )),
-            "whitespace_literal" => Err(RgxError::Compile(
-                "unsupported: whitespace literal constructs are not supported by rgx".to_string(),
-            )),
+            "whitespace_literal" => self.convert_whitespace_literal(actual),
             other => {
                 Err(self.contract_error(&format!("unrecognized PGEN atom rule name '{other}'")))
             }
@@ -531,6 +529,26 @@ impl<'a> PgenAstAdapter<'a> {
             .next()
             .ok_or_else(|| self.contract_error("pgen literal node has empty content"))?;
         Ok(Regex::Char(ch))
+    }
+
+    /// Convert a `whitespace_literal` node — unescaped whitespace from PGEN.
+    ///
+    /// PGEN emits `whitespace_literal` for bare (unescaped) whitespace
+    /// characters.  Inside `(?x:...)` extended-mode groups these represent
+    /// insignificant whitespace that should be stripped; outside extended mode
+    /// they are ordinary literal characters.
+    ///
+    /// We produce `Regex::WhitespaceLiteral(c)` so the compiler's
+    /// `strip_extended_mode` pass can distinguish unescaped whitespace (which
+    /// should be stripped in x-mode) from escaped whitespace (`\ ` etc.) which
+    /// goes through the `escape` rule and produces a normal `Regex::Char`.
+    fn convert_whitespace_literal(&self, node: &PgenAstNode) -> Result<Regex> {
+        let text = self.slice(node)?;
+        let ch = text
+            .chars()
+            .next()
+            .ok_or_else(|| self.contract_error("pgen whitespace_literal node has empty content"))?;
+        Ok(Regex::WhitespaceLiteral(ch))
     }
 
     /// Convert an `anchor` node — `^`, `$`, `\A`, `\Z`, `\z`, `\b`, `\B`.
@@ -642,7 +660,8 @@ impl<'a> PgenAstAdapter<'a> {
             }
 
             // Escaped metacharacters: \., \*, \+, \?, \(, \), \[, \], \{, \}, \|, \\, \^, \$, \-, \/
-            c if ".*+?()[]{}|\\^$-/".contains(c) => Ok(Regex::Char(c)),
+            // Also covers escaped space (`\ `) used in (?x) extended mode.
+            c if ".*+?()[]{}|\\^$-/ ".contains(c) => Ok(Regex::Char(c)),
 
             other => {
                 Err(self.contract_error(&format!("unrecognized simple_escape character '{other}'")))

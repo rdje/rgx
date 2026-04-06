@@ -4056,4 +4056,39 @@ mod tests {
         assert!(re.is_match("Axb")); // case-insensitive
         assert!(!re.is_match("A\nb")); // dotall disabled, . won't match \n
     }
+
+    // ---- Extended / verbose mode (`(?x:...)`) ----------------------------
+
+    #[test]
+    fn extended_mode_ignores_whitespace() {
+        let re = Regex::compile("(?x: a b c )").unwrap();
+        assert!(re.is_match("abc"));
+        assert!(!re.is_match("a b c"));
+    }
+
+    #[test]
+    fn extended_mode_ignores_comments() {
+        let re = Regex::compile("(?x: a  # match letter a\n b)").unwrap();
+        assert!(re.is_match("ab"));
+    }
+
+    #[test]
+    fn extended_mode_escaped_space_preserved() {
+        let re = Regex::compile(r"(?x: a\ b )").unwrap();
+        assert!(re.is_match("a b"));
+        assert!(!re.is_match("ab"));
+    }
+
+    #[test]
+    fn extended_mode_class_space_preserved() {
+        let re = Regex::compile("(?x: a[ ]b )").unwrap();
+        assert!(re.is_match("a b"));
+    }
+
+    #[test]
+    fn extended_mode_scoped() {
+        let re = Regex::compile("(?x: a b ) c d").unwrap();
+        assert!(re.is_match("ab c d")); // ab from x-mode, " c d" literal outside
+        assert!(!re.is_match("abc d")); // space before c is required
+    }
 }

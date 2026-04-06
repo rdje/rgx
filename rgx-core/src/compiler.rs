@@ -502,6 +502,7 @@ impl Compiler {
         );
         let ast = Self::assign_capture_indices(ast);
         let ast = Self::lower_flag_toggles(ast);
+        let ast = Self::strip_extended_mode(ast);
         let ast = Self::lower_extended_char_classes(ast)?;
         debug_log!("compiler", "AST: {:?}", ast);
         if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
@@ -708,6 +709,169 @@ impl Compiler {
             }
             other => other,
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Extended / verbose mode (`(?x:...)`) whitespace & comment stripping
+    // ------------------------------------------------------------------
+
+    /// Strip unescaped whitespace and `#`-comments from `(?x:...)` scopes.
+    ///
+    /// In PCRE2 extended mode:
+    /// * Unescaped ASCII whitespace (`Char(c)` where `c.is_ascii_whitespace()`)
+    ///   is ignored.
+    /// * `#` starts a comment that runs to the end of the line (or the end of the
+    ///   sequence, whichever comes first).
+    /// * Escaped whitespace (`\ `, `\t`, etc.) is preserved — PGEN already
+    ///   converts those to `Char` via the `escape` rule, not `whitespace_literal`,
+    ///   so they are never subject to stripping here.
+    /// * Character classes (`[...]`) are parsed into `CharClass` AST nodes by
+    ///   PGEN, so their internal whitespace is naturally unaffected.
+    ///
+    /// This pass runs after `lower_flag_toggles` (which lifts non-scoped `(?x)`
+    /// toggles into `FlagGroup` wrappers) so that both `(?x:...)` and standalone
+    /// `(?x)` forms are handled uniformly.
+    fn strip_extended_mode(ast: RegexAst) -> RegexAst {
+        Self::strip_extended_inner(ast, false)
+    }
+
+    /// Recursively process the AST. `in_x_mode` tracks whether the current
+    /// subtree is inside a `(?x:...)` scope.
+    ///
+    /// `WhitespaceLiteral(c)` nodes (from PGEN's `whitespace_literal` rule)
+    /// represent unescaped whitespace.  Inside x-mode they are stripped;
+    /// outside x-mode they are lowered to ordinary `Char(c)`.
+    ///
+    /// Escaped whitespace (`\ `) goes through the `escape` rule and produces
+    /// normal `Char(' ')` nodes that are always preserved.
+    fn strip_extended_inner(ast: RegexAst, in_x_mode: bool) -> RegexAst {
+        match ast {
+            RegexAst::FlagGroup { flags, expr } => {
+                let x_active = in_x_mode || flags.contains('x');
+                RegexAst::FlagGroup {
+                    flags,
+                    expr: Box::new(Self::strip_extended_inner(*expr, x_active)),
+                }
+            }
+            RegexAst::Sequence(items) => {
+                // First recurse into children (propagating x-mode context into
+                // sub-expressions like groups and alternations), then handle
+                // whitespace / comment stripping at the sequence level.
+                //
+                // IMPORTANT: we do NOT convert WhitespaceLiteral to Empty
+                // inside the per-item recursion for sequences. We must keep
+                // them intact so that `strip_x_mode_sequence` can see newline
+                // WhitespaceLiteral nodes when terminating `#`-comments.
+                let items: Vec<RegexAst> = items
+                    .into_iter()
+                    .map(|item| match &item {
+                        // Keep WhitespaceLiteral as-is for sequence-level processing.
+                        RegexAst::WhitespaceLiteral(_) => item,
+                        _ => Self::strip_extended_inner(item, in_x_mode),
+                    })
+                    .collect();
+                let items = if in_x_mode {
+                    Self::strip_x_mode_sequence(items)
+                } else {
+                    // Outside x-mode, lower WhitespaceLiteral to Char.
+                    items
+                        .into_iter()
+                        .map(|item| match item {
+                            RegexAst::WhitespaceLiteral(c) => RegexAst::Char(c),
+                            other => other,
+                        })
+                        .collect()
+                };
+                match items.len() {
+                    0 => RegexAst::Empty,
+                    1 => items.into_iter().next().unwrap(),
+                    _ => RegexAst::Sequence(items),
+                }
+            }
+            RegexAst::Alternation(items) => {
+                let items: Vec<RegexAst> = items
+                    .into_iter()
+                    .map(|item| Self::strip_extended_inner(item, in_x_mode))
+                    .collect();
+                RegexAst::Alternation(items)
+            }
+            RegexAst::Quantified { expr, quantifier } => RegexAst::Quantified {
+                expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
+                quantifier,
+            },
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => RegexAst::Group {
+                expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
+                kind,
+                index,
+                name,
+            },
+            RegexAst::Lookahead { expr, positive } => RegexAst::Lookahead {
+                expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
+                positive,
+            },
+            RegexAst::Lookbehind { expr, positive } => RegexAst::Lookbehind {
+                expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
+                positive,
+            },
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => RegexAst::Conditional {
+                condition,
+                true_branch: Box::new(Self::strip_extended_inner(*true_branch, in_x_mode)),
+                false_branch: false_branch
+                    .map(|fb| Box::new(Self::strip_extended_inner(*fb, in_x_mode))),
+            },
+            // WhitespaceLiteral outside a Sequence: lower or strip directly.
+            RegexAst::WhitespaceLiteral(c) => {
+                if in_x_mode {
+                    RegexAst::Empty
+                } else {
+                    RegexAst::Char(c)
+                }
+            }
+            // All other nodes pass through unchanged.
+            other => other,
+        }
+    }
+
+    /// Strip `WhitespaceLiteral` nodes and `#`-comments from a sequence
+    /// inside an extended-mode scope.
+    ///
+    /// This operates on the *raw* sequence items (before `WhitespaceLiteral`
+    /// is lowered) so that newline whitespace literals can correctly terminate
+    /// `#`-comments.
+    fn strip_x_mode_sequence(items: Vec<RegexAst>) -> Vec<RegexAst> {
+        let mut result = Vec::with_capacity(items.len());
+        let mut iter = items.into_iter();
+        while let Some(item) = iter.next() {
+            match &item {
+                // Drop unescaped whitespace.
+                RegexAst::WhitespaceLiteral(_) | RegexAst::Empty => {}
+                // `#` starts a comment — skip until a newline or end of
+                // sequence. Both Char('\n') and WhitespaceLiteral('\n') count
+                // as the newline terminator.
+                RegexAst::Char('#') => {
+                    for rest in iter.by_ref() {
+                        let is_newline = matches!(
+                            &rest,
+                            RegexAst::Char('\n') | RegexAst::WhitespaceLiteral('\n')
+                        );
+                        if is_newline {
+                            break;
+                        }
+                    }
+                }
+                _ => result.push(item),
+            }
+        }
+        result
     }
 
     fn lower_extended_char_classes(ast: RegexAst) -> Result<RegexAst> {
@@ -1416,6 +1580,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => (ast, next_group),
         }
     }
@@ -1649,6 +1814,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => Ok((ast, opened_groups)),
         }
     }
@@ -1790,6 +1956,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
     }
@@ -2238,6 +2405,7 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
     }
@@ -2385,6 +2553,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => 0,
         }
     }
@@ -2461,6 +2630,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => {}
         }
     }

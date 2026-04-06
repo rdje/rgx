@@ -1620,6 +1620,22 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: r"(?<x>ab)\k<x>",
             input: "abab xx",
         },
+        // Extended / verbose mode
+        ParityCase {
+            name: "extended_mode_whitespace_stripped",
+            pattern: "(?x: a b c )",
+            input: "xxabcyy",
+        },
+        ParityCase {
+            name: "extended_mode_comment_stripped",
+            pattern: "(?x: a  # match a\n b)",
+            input: "xxabyy",
+        },
+        ParityCase {
+            name: "extended_mode_class_space_kept",
+            pattern: "(?x: a[ ]b )",
+            input: "xxa byy",
+        },
     ];
 
     for case in cases {
