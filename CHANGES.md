@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship Layer 3: Match Steering
+- Scope: new host integration layer — callbacks can steer match execution.
+- Changes:
+  - Added `SteerResult` enum with 5 variants: `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort`.
+  - Added `ExecResult::Steer(SteerResult)` to the callback return type.
+  - VM code-block dispatch handles all steering actions: `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure to stop the scanning loop.
+  - Internal `CodeBlockOutcome` enum replaces `Option<bool>` for clearer VM dispatch.
+  - `SteerResult` re-exported from `rgx-core` public API.
+  - Added 5 unit tests covering each steering action.
+  - Updated `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 3 status to `shipped`.
+- Validation:
+  - `cargo test -p rgx-core` (306 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass), 0 new clippy warnings.
+- Notes/impact:
+  - This is the first host integration layer beyond basic predicates. Callbacks can now actively control match behavior, enabling use cases like early termination, position skipping for log scanning, and forced acceptance based on domain logic.
+  - Inline-language steering (Lua/JS/Rhai helpers) is planned as a follow-up.
+
 ### 2026-04-06 - Close PCRE2 speed gap: text copy elimination and trace gating
 - Scope: major performance optimization targeting per-call overhead.
 - Changes:

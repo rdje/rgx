@@ -80,6 +80,12 @@ Live continuity memory for `rgx` sessions.
 - `Regex::Empty` codegen fixed (was emitting `Fail`)
 - `find_all` zero-width suppression matches PCRE2 iteration semantics
 
+### Host integration
+- **Layer 3 Match Steering shipped**: `SteerResult` enum with `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort` — callbacks can now actively control match execution
+- `ExecResult::Steer(SteerResult)` extends the callback return type; VM dispatches all actions
+- `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
+- Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
+
 ### Architecture documents
 - `docs/HOST_INTEGRATION_ARCHITECTURE.md` — 6-layer host integration design (2 shipped, 4 planned)
 - `docs/PCRE2_COMPATIBILITY_MATRIX.md` — feature-by-feature parity table

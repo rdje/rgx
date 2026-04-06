@@ -267,6 +267,24 @@ pub enum CodeBlockValue {
     Numeric(f64),
 }
 
+/// Match steering actions returned by host callbacks.
+///
+/// These extend the basic pass/fail predicate model to let the host
+/// actively control how matching proceeds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SteerResult {
+    /// Continue matching normally from the current position.
+    Continue,
+    /// Fail this path and backtrack.
+    Fail,
+    /// Force-accept the match at the current position.
+    Accept,
+    /// Advance the input position by `n` bytes before continuing.
+    Skip(usize),
+    /// Abort the entire match search (no more positions will be tried).
+    Abort,
+}
+
 /// Result of code execution within a regex pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecResult {
@@ -280,6 +298,8 @@ pub enum ExecResult {
     Numeric(f64),
     /// Code execution error - treated as failure
     Error(String),
+    /// Host steering action — controls how matching proceeds.
+    Steer(SteerResult),
 }
 
 fn exec_result_kind(result: &ExecResult) -> &'static str {
@@ -289,6 +309,7 @@ fn exec_result_kind(result: &ExecResult) -> &'static str {
         ExecResult::Replacement(_) => "Replacement",
         ExecResult::Numeric(_) => "Numeric",
         ExecResult::Error(_) => "Error",
+        ExecResult::Steer(_) => "Steer",
     }
 }
 

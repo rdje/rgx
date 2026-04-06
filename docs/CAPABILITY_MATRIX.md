@@ -132,6 +132,14 @@ Representative test anchors:
   - `(?(?<=expr)yes|no)`
   - `(?(?<!expr)yes|no)`
   (`shipped`)
+## Host integration layers
+- Layer 1 — Data Exchange: `shipped` (variables, numeric/replacement results, branch numbers)
+- Layer 2 — Predicate Callbacks: `shipped` (Lua, JS, Rhai, native, WASM)
+- Layer 3 — Match Steering: `shipped` (SteerResult: Continue, Fail, Accept, Skip, Abort via native callbacks)
+- Layer 4 — Structured Events: `planned`
+- Layer 5 — Async I/O: `planned`
+- Layer 6 — File-Backed Matching: `planned`
+
 ## Notes for roadmap usage
 - This matrix is implementation-facing and must reflect verified behavior only.
 - Aspirational goals (broader code-block language support, richer wasm ABI, richer result semantics, full PCRE2 parity) belong in `ROADMAP.md` and `PROJECT_VISION.md`.

@@ -124,7 +124,7 @@ Engine calls host-provided code at predicate checkpoints during matching. The ca
 
 ### Layer 3 — Match Steering
 
-**Status: `planned`**
+**Status: `shipped`**
 
 Host tells the engine HOW to proceed after a callback, not just pass/fail. This transforms callbacks from passive predicates into active match controllers.
 

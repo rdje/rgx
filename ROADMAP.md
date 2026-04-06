@@ -127,12 +127,9 @@ Live forward-looking tracker for rgx.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 6
 
 ### Host integration Layer 3: Match Steering
-- Status: `planned`
-- Goal: extend callback return values so the host can steer match execution (continue, fail, accept, skip, retry, abort).
-- Scope:
-  - add `SteerResult` enum and `ExecResult::Steer` variant
-  - update VM code-block dispatch to handle steering actions
-  - expose through native callback API and inline-language bindings
+- Status: `done`
+- Shipped: `SteerResult` enum with `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort`; `ExecResult::Steer` variant; VM dispatch for all actions; native callback API support; 5 tests.
+- Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 3
 
 ### Host integration Layer 4: Structured Events

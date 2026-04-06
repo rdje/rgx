@@ -99,7 +99,7 @@ pub mod log;
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
-pub use execution::{CodeBlockValue, ExecContext, ExecResult};
+pub use execution::{CodeBlockValue, ExecContext, ExecResult, SteerResult};
 pub use pattern::{CompiledPattern, Pattern};
 
 /// High-performance regex matcher with optional code execution capabilities.
@@ -4365,5 +4365,56 @@ mod tests {
         let all = re.find_all("abc def ghi");
         assert_eq!(all.len(), 3);
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
+    }
+
+    // ====================================================================
+    // Layer 3 — Match Steering tests
+    // ====================================================================
+
+    #[test]
+    fn steer_continue_acts_like_success() {
+        let re = Regex::with_mode(r"(?<x>cat)(?{native:check})", ExecutionMode::Full).unwrap();
+        re.register_native("check", |_ctx| ExecResult::Steer(SteerResult::Continue))
+            .unwrap();
+        assert!(re.is_match("cat"));
+    }
+
+    #[test]
+    fn steer_fail_acts_like_failure() {
+        let re = Regex::with_mode(r"cat(?{native:reject})", ExecutionMode::Full).unwrap();
+        re.register_native("reject", |_ctx| ExecResult::Steer(SteerResult::Fail))
+            .unwrap();
+        assert!(!re.is_match("cat"));
+    }
+
+    #[test]
+    fn steer_accept_forces_match() {
+        let re = Regex::with_mode(r"cat(?{native:accept_now})dog", ExecutionMode::Full).unwrap();
+        re.register_native("accept_now", |_ctx| ExecResult::Steer(SteerResult::Accept))
+            .unwrap();
+        // Should match "cat" even though "dog" hasn't been seen
+        let m = re.find_first("catdog").unwrap();
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3); // ends at position after "cat", before "dog"
+    }
+
+    #[test]
+    fn steer_skip_advances_position() {
+        let re = Regex::with_mode(r"(?{native:skip3})abc", ExecutionMode::Full).unwrap();
+        re.register_native("skip3", |_ctx| ExecResult::Steer(SteerResult::Skip(3)))
+            .unwrap();
+        // Pattern starts at pos 0, skip3 advances to pos 3, then "abc" tries from pos 3
+        let m = re.find_first("xxxabc").unwrap();
+        assert_eq!((m.start, m.end), (0, 6));
+    }
+
+    #[test]
+    fn steer_abort_stops_search() {
+        let re = Regex::with_mode(r"cat(?{native:abort_search})", ExecutionMode::Full).unwrap();
+        re.register_native("abort_search", |_ctx| ExecResult::Steer(SteerResult::Abort))
+            .unwrap();
+        // "cat" matches but abort prevents the match from being reported
+        // AND prevents trying further positions
+        assert!(!re.is_match("cat dog cat"));
     }
 }

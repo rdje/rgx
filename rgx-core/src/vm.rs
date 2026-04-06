@@ -13,13 +13,27 @@ use crate::ast::{
     Regex,
 };
 use crate::execution::{
-    CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager,
+    CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager, SteerResult,
 };
 use crate::unicode_support::resolve_unicode_property_class;
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 use memchr::memchr;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+/// Outcome of evaluating an inline code-block during VM execution.
+///
+/// This enriches the simple pass/fail model with steering actions so that host
+/// callbacks can actively direct how the match proceeds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CodeBlockOutcome {
+    /// Code block passed — continue matching the next opcode.
+    Pass,
+    /// Code block failed — try backtracking.
+    Fail,
+    /// Host forced immediate match acceptance at the current position.
+    Accept,
+}
 
 /// High-performance bytecode instruction optimized for cache efficiency
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1280,12 +1294,15 @@ impl RegexVM {
                 }
 
                 OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
-                    Some(true) => {}
-                    Some(false) => {
+                    Some(CodeBlockOutcome::Pass) => {}
+                    Some(CodeBlockOutcome::Fail) => {
                         if Self::try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
+                    }
+                    Some(CodeBlockOutcome::Accept) => {
+                        return true;
                     }
                     None => return false,
                 },
@@ -2091,12 +2108,15 @@ impl RegexVM {
     }
 
     /// Decode and execute an inline code-block operand.
+    ///
+    /// Returns `None` on decode error, otherwise a `CodeBlockOutcome` describing
+    /// how the VM should proceed.
     fn execute_inline_code_block(
         &self,
         ctx: &mut ExecContext<'_>,
         code: &[u8],
         ip: &mut usize,
-    ) -> Option<bool> {
+    ) -> Option<CodeBlockOutcome> {
         if *ip >= code.len() {
             return None;
         }
@@ -2110,21 +2130,26 @@ impl RegexVM {
     }
 
     /// Execute a code-block predicate using the shared execution manager.
-    fn evaluate_code_block(&self, ctx: &mut ExecContext<'_>, language: &str, code: &str) -> bool {
+    fn evaluate_code_block(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        language: &str,
+        code: &str,
+    ) -> CodeBlockOutcome {
         let Some(execution_manager) = &self.execution_manager else {
             debug_log!(
                 "vm",
                 "CodeBlock execution requested without an attached execution manager"
             );
-            return false;
+            return CodeBlockOutcome::Fail;
         };
         let exec_ctx = self.build_code_exec_context(ctx);
         match execution_manager.execute(language, code, &exec_ctx) {
-            ExecResult::Success => true,
-            ExecResult::Failure => false,
+            ExecResult::Success => CodeBlockOutcome::Pass,
+            ExecResult::Failure => CodeBlockOutcome::Fail,
             ExecResult::Error(error) => {
                 debug_log!("vm", "CodeBlock {} execution error: {}", language, error);
-                false
+                CodeBlockOutcome::Fail
             }
             ExecResult::Replacement(value) => {
                 debug_log!(
@@ -2133,7 +2158,7 @@ impl RegexVM {
                     language,
                 );
                 ctx.code_result = Some(CodeBlockValue::Replacement(value));
-                true
+                CodeBlockOutcome::Pass
             }
             ExecResult::Numeric(value) => {
                 debug_log!(
@@ -2142,8 +2167,21 @@ impl RegexVM {
                     language,
                 );
                 ctx.code_result = Some(CodeBlockValue::Numeric(value));
-                true
+                CodeBlockOutcome::Pass
             }
+            ExecResult::Steer(steer) => match steer {
+                SteerResult::Continue => CodeBlockOutcome::Pass,
+                SteerResult::Fail => CodeBlockOutcome::Fail,
+                SteerResult::Accept => CodeBlockOutcome::Accept,
+                SteerResult::Skip(n) => {
+                    ctx.pos += n;
+                    CodeBlockOutcome::Pass
+                }
+                SteerResult::Abort => {
+                    ctx.committed = true;
+                    CodeBlockOutcome::Fail
+                }
+            },
         }
     }
 
@@ -2885,9 +2923,12 @@ impl RegexVM {
                 }
 
                 OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
-                    Some(true) => {}
-                    Some(false) => {
+                    Some(CodeBlockOutcome::Pass) => {}
+                    Some(CodeBlockOutcome::Fail) => {
                         local_backtrack_or_return_false!();
+                    }
+                    Some(CodeBlockOutcome::Accept) => {
+                        return true;
                     }
                     None => return false,
                 },
