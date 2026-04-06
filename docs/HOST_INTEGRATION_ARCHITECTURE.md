@@ -267,15 +267,111 @@ let result = re.find_first_async("input text").await;
 | **ML/AI** | `(?<entity>...)(?{native:classify})` | Inline classification during extraction |
 | **Distributed systems** | `(?<route>...)(?{native:service_health})` | Route validation with live health checks |
 
+---
+
+### Layer 6 — File-Backed Matching
+
+**Status: `planned`**
+
+Engine connects directly to filesystem files, matching against contents that may be static or still being written. Combined with host callbacks, this creates a reactive file-processing pipeline.
+
+**Proposed API:**
+```rust
+// Match against an existing file
+let matches = re.match_file("access.log")?;
+
+// Match with callback on each hit
+re.register_native("on_error", |ctx| { alert(ctx); ExecResult::Success })?;
+re.scan_file("access.log")?;  // triggers on_error for each match
+
+// Tail a file (streaming — watches for new content)
+let handle = re.tail_file("app.log", TailOptions {
+    follow: true,          // keep watching after EOF
+    from: FilePosition::End, // start from current end
+    on_match: |m| { process(m); },
+})?;
+
+// Stop tailing
+handle.stop();
+```
+
+**Key design decisions:**
+
+1. **Memory management**: Do NOT read the entire file into memory. Use memory-mapped I/O (`mmap`) for existing files, or chunked reading with overlap for streaming files. The overlap region must be at least as large as the maximum possible match to avoid splitting matches across chunks.
+
+2. **Streaming/tailing**: For files still being written, the engine watches for new content (via `inotify` on Linux, `kqueue` on macOS, or polling as fallback). New content is appended to the active scan buffer. Matches that span the old/new boundary are handled correctly.
+
+3. **Line-oriented mode**: For log-style files, offer a line-oriented scan where each line is matched independently. This avoids cross-line buffer management and is the common case for log monitoring.
+
+4. **Callback integration**: When scanning a file, each match can trigger registered callbacks (native, Lua, JS, etc.) with the full `ExecContext` including captures, variables, and branch number. This is the key integration point — the engine becomes a reactive file processor.
+
+5. **Performance target**: File scanning must be I/O-bound, not CPU-bound. The regex matching per line/chunk should be fast enough that disk read speed is the bottleneck, not pattern matching. This means the scanning optimizations (memchr prefix skip, class filter) are critical.
+
+**Modes:**
+
+| Mode | Description | Use case |
+|------|-------------|----------|
+| `match_file` | Scan entire file, return all matches | Batch processing |
+| `scan_file` | Scan entire file, trigger callbacks per match | Reactive processing |
+| `tail_file` | Watch file for new content, trigger callbacks | Live monitoring |
+| `match_file_lines` | Line-oriented scan, return matches per line | Log analysis |
+| `scan_file_lines` | Line-oriented scan, trigger callbacks per line | Log monitoring |
+
+**Implementation plan:**
+1. Add `rgx-core/src/file.rs` module with file-backed matching API.
+2. Implement `match_file` using memory-mapped I/O for static files.
+3. Implement `match_file_lines` using buffered line reading.
+4. Implement `scan_file` / `scan_file_lines` with per-match callback dispatch.
+5. Implement `tail_file` with platform-specific file watching (kqueue/inotify/polling).
+6. Expose through the CLI: `rgx-cli --file path [--follow] [--line-mode] pattern`.
+7. Add integration tests with temporary files.
+
+---
+
+## Performance target
+
+The engine will never match PCRE2 cycle-for-cycle on raw pattern matching — PCRE2 is a C library with decades of optimization and an optional JIT compiler. But the gap should be small enough that the extra capabilities (host callbacks, code blocks, match steering, file integration) justify the cost.
+
+**Current state (as of this session):**
+
+| Benchmark | RGX vs PCRE2 |
+|-----------|-------------|
+| find_first literal 1K | ~51x slower |
+| find_all literal 1K | ~30x slower |
+| find_first capture 1K | ~31x slower |
+| find_all capture 1K | ~22x slower |
+| find_first email 1K | ~68x slower |
+
+**Target:**
+
+| Benchmark | Target | Rationale |
+|-----------|--------|-----------|
+| find_first literal | <10x | memchr + VM overhead |
+| find_all literal | <10x | scanning loop is tight |
+| find_first capture | <10x | class filter eliminates most positions |
+| find_all capture | <10x | in-place scanning helps |
+| find_first email | <15x | complex pattern, more VM work |
+
+**How to close the gap:**
+1. **Reduce per-position VM overhead**: the main dispatch loop still has trace logging calls (even when disabled, the macro evaluation has some cost), and each opcode does bounds checking that could be hoisted.
+2. **Eliminate the text copy**: `ExecContext.text` is still `Vec<u8>` — changing to a borrowed `&[u8]` reference eliminates a major allocation per `find_first`.
+3. **Pre-allocate capture and backtrack structures**: reuse them across match attempts instead of creating fresh vectors.
+4. **Compile-time elimination of trace macros**: gate trace/debug logging behind `#[cfg(feature = "trace")]` so release builds have zero tracing overhead.
+5. **Opcode fusion**: combine common sequences (e.g., `Char` + `Char` → string compare) to reduce dispatch overhead.
+
+These are engineering optimizations, not algorithmic changes. The algorithms (memchr scanning, trail-based backtracking, binary search Unicode lookup) are already SOTA.
+
 ## Implementation priority
 
 | Layer | Priority | Effort | Depends on |
 |-------|----------|--------|------------|
+| Performance — close the PCRE2 gap | **Critical** | Medium | — |
 | Layer 3 — Match Steering | **High** | Medium | Layers 1-2 (shipped) |
 | Layer 4 — Structured Events | **High** | Medium | Layer 1 (shipped) |
+| Layer 6 — File-Backed Matching | **High** | Medium | Layers 1-2 + performance |
 | Layer 5 — Async I/O | **Medium** | Hard | Layers 1-3 |
 
-Layer 3 should be built first — it extends the existing callback interface with minimal VM changes. Layer 4 can be built in parallel. Layer 5 depends on Layers 1-3 being stable.
+Performance work should run in parallel with feature layers — it's critical for file-backed matching to be practical. Layer 3 should be built first among the feature layers. Layer 6 depends on adequate performance plus Layers 1-2. Layer 5 is the capstone.
 
 ## Quality requirements
 - Every layer must have comprehensive unit tests and integration tests.

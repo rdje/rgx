@@ -104,6 +104,28 @@ Live forward-looking tracker for rgx.
 
 ## Next (near-term) — continued
 
+### Performance: close the PCRE2 gap to <10x
+- Status: `planned`
+- Goal: reduce the matching speed gap from ~20-60x to <10x for common patterns.
+- Scope:
+  - eliminate `ExecContext.text` Vec copy (switch to borrowed `&[u8]`)
+  - pre-allocate and reuse capture and backtrack structures across match attempts
+  - compile-time eliminate trace macros behind `#[cfg(feature = "trace")]`
+  - opcode fusion for common sequences (Char+Char → string compare)
+  - reduce per-opcode bounds checking overhead
+- Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Performance target section
+
+### Host integration Layer 6: File-Backed Matching
+- Status: `planned`
+- Goal: match against filesystem files (static or actively written) with integrated callback dispatch.
+- Scope:
+  - `match_file` / `scan_file` for batch and reactive file processing
+  - `tail_file` for live monitoring of files still being written
+  - line-oriented mode for log analysis
+  - memory-mapped I/O for large files, chunked reading for streams
+  - CLI exposure: `rgx-cli --file path [--follow] [--line-mode]`
+- Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 6
+
 ### Host integration Layer 3: Match Steering
 - Status: `planned`
 - Goal: extend callback return values so the host can steer match execution (continue, fail, accept, skip, retry, abort).
