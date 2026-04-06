@@ -4191,4 +4191,31 @@ mod tests {
         let re = Regex::compile(r"\R").unwrap();
         assert!(!re.is_match("abc"));
     }
+
+    #[test]
+    fn non_newline_escape() {
+        let re = Regex::compile(r"\N+").unwrap();
+        let m = re.find_first("abc\ndef").unwrap();
+        assert_eq!((m.start, m.end), (0, 3)); // stops at \n
+    }
+
+    #[test]
+    fn non_newline_does_not_match_newline() {
+        let re = Regex::compile(r"\N").unwrap();
+        assert!(!re.is_match("\n"));
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn fail_verb_causes_no_match() {
+        let re = Regex::compile("a(*FAIL)").unwrap();
+        assert!(!re.is_match("a"));
+    }
+
+    #[test]
+    fn fail_verb_in_alternation() {
+        let re = Regex::compile("a(*FAIL)|b").unwrap();
+        assert!(re.is_match("b"));
+        assert!(!re.is_match("a"));
+    }
 }

@@ -503,9 +503,7 @@ impl<'a> PgenAstAdapter<'a> {
                 "unsupported: callout constructs are not supported by rgx".to_string(),
             )),
             "comment_group" => Ok(Regex::Empty), // (?#...) is a zero-width comment, ignored
-            "directive_verb" => Err(RgxError::Compile(
-                "unsupported: directive/backtracking verbs are not supported by rgx".to_string(),
-            )),
+            "directive_verb" => self.convert_directive_verb(actual),
             "whitespace_literal" => self.convert_whitespace_literal(actual),
             other => {
                 Err(self.contract_error(&format!("unrecognized PGEN atom rule name '{other}'")))
@@ -647,6 +645,9 @@ impl<'a> PgenAstAdapter<'a> {
 
             // PCRE2 newline sequence (\R)
             'R' => Ok(Regex::NewlineSequence),
+
+            // PCRE2 non-newline (\N) — matches any char except newline, same as . in non-dotall
+            'N' => Ok(Regex::Dot),
 
             // Literal control-character escapes: \n, \t, \r, \f, \a, \e
             'n' => Ok(Regex::Char('\n')),
@@ -912,6 +913,28 @@ impl<'a> PgenAstAdapter<'a> {
                 lang: String::new(),
                 code: inner.to_string(),
             })
+        }
+    }
+
+    /// Convert a `directive_verb` node — `(*ACCEPT)`, `(*FAIL)`, `(*F)`, etc.
+    fn convert_directive_verb(&self, node: &PgenAstNode) -> Result<Regex> {
+        let name = self
+            .first_descendant(node, "directive_name")
+            .and_then(|n| self.slice(n).ok())
+            .unwrap_or_default();
+        match name {
+            // (*FAIL) / (*F): unconditionally fail — compile as empty char class (never matches)
+            "FAIL" | "F" => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vec![],
+                negated: false,
+            })),
+            // (*ACCEPT): force immediate match at current position — not yet implemented
+            "ACCEPT" => Err(RgxError::Compile(
+                "(*ACCEPT) is not yet supported by rgx".to_string(),
+            )),
+            other => Err(RgxError::Compile(format!(
+                "unsupported backtracking verb '(*{other})'"
+            ))),
         }
     }
 

@@ -36,7 +36,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Vertical whitespace `\v`, `\V` | Yes | Yes | `shipped` |
 | Unicode property `\p{L}`, `\P{Greek}` | Yes | Yes | `shipped` |
 | Newline sequence `\R` | Yes | Yes | `shipped` |
-| Non-newline `\N` | Yes | No | `rgx-gap` |
+| Non-newline `\N` | Yes | Yes | `shipped` |
 | Extended grapheme cluster `\X` | Yes | No | `rgx-gap` |
 | Hex escapes `\x41`, `\x{41}` | Yes | Yes | `shipped` |
 | Octal escapes `\040`, `\o{101}` | Yes | Yes | `shipped` |
@@ -140,7 +140,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 |---------|-------|-----|--------|
 | `\K` match-reset | Yes | Yes | `shipped` |
 | `(*ACCEPT)` | Yes | No | `rgx-gap` |
-| `(*FAIL)` / `(*F)` | Yes | No | `rgx-gap` |
+| `(*FAIL)` / `(*F)` | Yes | Yes | `shipped` |
 | `(*SKIP)`, `(*SKIP:name)` | Yes | No | `rgx-gap` |
 | `(*PRUNE)` | Yes | No | `rgx-gap` |
 | `(*THEN)` | Yes | No | `rgx-gap` |
