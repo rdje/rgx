@@ -48,10 +48,12 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized and the explicit RGX package test matrix enabled)
 - Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 4626 lines
-  - `rgx-core/src/lib.rs`: 3886 lines
-  - `rgx-core/src/compiler.rs`: 2936 lines
-  - `rgx-core/src/execution.rs`: 2407 lines
+  - `rgx-core/src/vm.rs`: 5049 lines
+  - `rgx-core/src/lib.rs`: 4059 lines
+  - `rgx-core/src/compiler.rs`: 3124 lines
+  - `rgx-core/src/execution.rs`: 2382 lines
+  - `rgx-core/src/lexer.rs`: 2383 lines
+  - `rgx-core/src/parsing.rs`: 2331 lines
   - `rgx-core/src/lexer.rs`: 2146 lines
   - `rgx-core/src/parsing.rs`: 1619 lines
   - `rgx-core/src/parser.rs`: 1389 lines
