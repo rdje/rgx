@@ -1,7 +1,7 @@
 id: PGEN-RGX-0008
 summary: |
   Language-tagged code blocks (?{lua:...}) always parse as code_block_plain instead of code_block_lang due to PEG ordering, and code_lang is missing rhai/native/wasm tags
-status: open
+status: closed
 opened_at: 2026-04-06T00:00:00Z
 first_seen_at: 2026-04-06T00:00:00Z
 last_updated_at: 2026-04-06T00:00:00Z
@@ -105,14 +105,13 @@ impact: |
   span text and splits on the first ":" to separate lang from body. This
   works but defeats the purpose of having a structured grammar.
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: pending
+  verified_at: 2026-04-06T00:23:17Z
   verification_notes: |
-    When fixed upstream, verify:
-    1. (?{lua:return true}) produces code_block_lang with code_lang="lua"
-    2. (?{rhai:foo}) produces code_block_lang with code_lang="rhai"
-    3. (?{native:cb}) produces code_block_lang with code_lang="native"
-    4. (?{wasm:mod:fn}) produces code_block_lang with code_lang="wasm"
-    5. (?{plain body}) still produces code_block_plain (no tag)
-    Then remove the span-text string-parsing from RGX's convert_code_block.
+    Fixed in PGEN 1.1.5 (commit 11821c4). AST dump now contains
+    code_block_lang with code_lang child (was code_block_plain only).
+    RGX adapter now reads code_lang structurally. Note: the code_content
+    span has a 1-byte offset due to ws? rule, so the adapter still
+    extracts the body from span text for correctness. Fixed AST dump
+    archived at pgen-issues/artifacts/PGEN-RGX-0008/pgen_ast_dump_fixed.json.

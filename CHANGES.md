@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Bump PGEN to 1.1.5, close PGEN-RGX-0007 and PGEN-RGX-0008
+- Scope: PGEN submodule upgrade, adapter cleanup, issue closure.
+- Changes:
+  - Bumped `subs/pgen` from `962acfd` (1.1.3) to `11821c4` (1.1.5).
+  - PGEN 1.1.4 fixes `\g<1>` numeric-angle subroutine reference (PGEN-RGX-0007).
+  - PGEN 1.1.5 fixes `code_block_lang` PEG ordering and adds `rhai`/`native`/`wasm` to `code_lang` (PGEN-RGX-0008).
+  - Adapter `convert_code_block` now reads `code_lang` structurally from `code_block_lang` child; body extracted from span text due to ws? offset.
+  - Adapter `convert_named_backreference` removed `\g<1>` span-text workaround since PGEN now produces proper `subroutine_ref` for all `\g` forms.
+  - Both issues closed as `verified-fixed-upstream` with fixed AST dumps archived.
+- Validation:
+  - `cargo test -p rgx-core` (235 pass), `-p rgx-bench` (38 pass), 0 clippy warnings
+- Notes/impact:
+  - All 4 RGX-filed PGEN issues (0005-0008) are now closed. PGEN 1.1.5 is the current pin.
+
 ### 2026-04-06 - Use PGEN structured AST for flags, backrefs, subroutines; file PGEN-RGX-0007
 - Scope: deeper PGEN adapter integration using structured child nodes instead of span-text string-parsing.
 - Changes:

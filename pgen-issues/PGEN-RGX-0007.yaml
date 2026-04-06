@@ -1,7 +1,7 @@
 id: PGEN-RGX-0007
 summary: |
   Numeric \g<N> subroutine reference (e.g. \g<1>) is misparsed as simple_escape(g) followed by three separate literal atoms ('<', '1', '>'), instead of as a backreference containing a subroutine_ref to the numeric group
-status: open
+status: closed
 opened_at: 2026-04-05T22:58:56Z
 first_seen_at: 2026-04-05T22:58:56Z
 last_updated_at: 2026-04-05T22:58:56Z
@@ -108,11 +108,11 @@ impact: |
 
   See src/parsing.rs convert_named_backreference "PGEN-RGX-0007" comment.
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: pending
+  verified_at: 2026-04-06T00:23:17Z
   verification_notes: |
-    When fixed upstream, verify by re-running the probe commands above and
-    confirming the AST dump contains a backreference node with a
-    subroutine_ref child for \g<1>. Then the RGX adapter's span-text
-    workaround can be removed.
+    Fixed in PGEN 1.1.4 (commit 0cd8296). AST dump now contains 1
+    backreference node and 1 subroutine_ref node (was 0/0). RGX adapter
+    span-text workaround for \g<1> removed. Fixed AST dump archived at
+    pgen-issues/artifacts/PGEN-RGX-0007/pgen_ast_dump_fixed.json.

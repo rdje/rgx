@@ -855,8 +855,26 @@ impl<'a> PgenAstAdapter<'a> {
     /// out as a structured child node — it's fused into the opaque code text.
     /// We therefore keep span-text parsing here intentionally.
     fn convert_code_block(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN 1.1.5+ produces code_block_lang for language-tagged code blocks.
+        // Use the code_lang child for the language tag, but extract the body
+        // from the span text because PGEN's ws? rule can cause a 1-byte offset
+        // in the code_content span.
+        if let Some(lang_node) = self.first_descendant(node, "code_block_lang") {
+            if let Some(code_lang) = self.first_descendant(lang_node, "code_lang") {
+                let lang = self.slice(code_lang)?.to_string();
+                // Extract body from the span text after "(?{lang:"
+                let fragment = self.slice(lang_node)?;
+                let prefix = format!("(?{{{lang}:");
+                let code = fragment
+                    .strip_prefix(&prefix)
+                    .and_then(|s| s.strip_suffix("})"))
+                    .unwrap_or_default()
+                    .to_string();
+                return Ok(Regex::CodeBlock { lang, code });
+            }
+        }
+        // Fallback for code_block_plain (untagged) or older PGEN versions
         let fragment = self.slice(node)?;
-        // Strip (?{ ... })
         let inner = fragment
             .strip_prefix("(?{")
             .and_then(|s| s.strip_suffix("})"))
@@ -865,14 +883,16 @@ impl<'a> PgenAstAdapter<'a> {
                     "pgen code_block did not retain '(?{{...}})' delimiters in '{fragment}'"
                 ))
             })?;
-        let colon_pos = inner.find(':').ok_or_else(|| {
-            self.contract_error(&format!(
-                "pgen code_block is missing ':' separator in '{fragment}'"
-            ))
-        })?;
-        let lang = inner[..colon_pos].to_string();
-        let code = inner[colon_pos + 1..].to_string();
-        Ok(Regex::CodeBlock { lang, code })
+        if let Some(colon_pos) = inner.find(':') {
+            let lang = inner[..colon_pos].to_string();
+            let code = inner[colon_pos + 1..].to_string();
+            Ok(Regex::CodeBlock { lang, code })
+        } else {
+            Ok(Regex::CodeBlock {
+                lang: String::new(),
+                code: inner.to_string(),
+            })
+        }
     }
 
     /// Convert a `subroutine_call` node — `(?R)`, `(?1)`, `(?&name)`,
@@ -990,9 +1010,6 @@ impl<'a> PgenAstAdapter<'a> {
         //
         // Walk the structured children to build the appropriate AST node
         // instead of re-splitting the span text.
-        //
-        // Note: `\g<1>` is misparsed by PGEN as escape + literal sequence, so
-        // it never actually reaches this handler. See PGEN-RGX-0007.
         let children = self.sequence_children(node)?;
         let prefix = children
             .first()
@@ -1032,11 +1049,10 @@ impl<'a> PgenAstAdapter<'a> {
                 Ok(Regex::NamedBackreference(name))
             }
             "\\g" => {
-                // \g{name} or \g{N}: element_1 is a `subroutine_ref` with a
-                // `signed_digits_or_name` payload (either `name` or
-                // `signed_digits`). `\g<1>` is currently misparsed by PGEN
-                // (TODO: PGEN-RGX-0007) so we fall back to span-text parsing
-                // for any `\g` form not producing a structured child below.
+                // \g{name}, \g{N}, \g<N>, \g<name>, \g'name':
+                // element_1 is a `subroutine_ref` with a `signed_digits_or_name`
+                // payload (either `name` or `signed_digits`).
+                // PGEN 1.1.4+ correctly parses all \g forms including \g<1>.
                 if let Some(name_node) = self.first_descendant(node, "name") {
                     return Ok(Regex::NamedBackreference(
                         self.slice(name_node)?.to_string(),
@@ -1054,27 +1070,7 @@ impl<'a> PgenAstAdapter<'a> {
                         return Ok(Regex::Backreference(n));
                     }
                 }
-                // TODO(PGEN-RGX-0007): `\g<1>` is currently misparsed by
-                // PGEN as an escape followed by literal chars, so the
-                // structured path above cannot resolve it. Retain the
-                // span-text fallback until PGEN ships a fix.
                 let fragment = self.slice(node)?;
-                if let Some(rest) = fragment.strip_prefix("\\g") {
-                    let inner = rest
-                        .strip_prefix('{')
-                        .and_then(|s| s.strip_suffix('}'))
-                        .or_else(|| rest.strip_prefix('<').and_then(|s| s.strip_suffix('>')))
-                        .or_else(|| rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                        .ok_or_else(|| {
-                            self.contract_error(&format!(
-                                "pgen backreference '\\g' has unrecognized delimiter in '{fragment}'"
-                            ))
-                        })?;
-                    if let Ok(n) = inner.parse::<u32>() {
-                        return Ok(Regex::Backreference(n));
-                    }
-                    return Ok(Regex::NamedBackreference(inner.to_string()));
-                }
                 Err(self
                     .contract_error(&format!("unrecognized '\\g' backreference in '{fragment}'")))
             }
