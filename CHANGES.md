@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship Layer 4: Structured Events
+- Scope: new host integration layer — engine emits typed events at key execution points.
+- Changes:
+  - Created `rgx-core/src/events.rs` with `MatchEvent` enum (6 variants).
+  - Added `Regex::on_event(observer)` API; zero overhead when no observer registered.
+  - Instrumented all scanning strategies and key VM opcodes with event emission.
+  - 3 unit tests covering match attempts, backtracking, and zero-overhead verification.
+- Validation:
+  - `cargo test -p rgx-core` (309 pass), 0 new clippy warnings.
+
 ### 2026-04-06 - Ship Layer 3: Match Steering
 - Scope: new host integration layer — callbacks can steer match execution.
 - Changes:

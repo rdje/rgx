@@ -133,12 +133,8 @@ Live forward-looking tracker for rgx.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 3
 
 ### Host integration Layer 4: Structured Events
-- Status: `planned`
-- Goal: emit structured events (branch entered/exited, capture completed, backtrack occurred) to host observers during matching.
-- Scope:
-  - add `MatchEvent` enum and `Regex::on_event(...)` observer API
-  - insert event emission at key VM execution points
-  - zero overhead when no observer is registered
+- Status: `done`
+- Shipped: `MatchEvent` enum with 6 variants; `Regex::on_event(observer)` API; zero overhead when no observer; instrumented all scanning strategies, `SetAlternative`, `SaveEnd`, `try_backtrack`, `execute_inline_code_block`.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 4
 
 ### Host integration Layer 5: Async/External I/O

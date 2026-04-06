@@ -171,7 +171,7 @@ pub enum SteerResult {
 
 ### Layer 4 — Structured Events
 
-**Status: `planned`**
+**Status: `shipped`**
 
 Engine emits structured events to the host at defined points during matching, without blocking the match. This enables debugging, profiling, coverage analysis, and telemetry.
 

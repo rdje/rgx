@@ -81,6 +81,7 @@ Live continuity memory for `rgx` sessions.
 - `find_all` zero-width suppression matches PCRE2 iteration semantics
 
 ### Host integration
+- **Layer 4 Structured Events shipped**: `MatchEvent` enum with 6 variants; `Regex::on_event(observer)` API; zero overhead when no observer; instrumented all scanning strategies and key VM opcodes
 - **Layer 3 Match Steering shipped**: `SteerResult` enum with `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort` — callbacks can now actively control match execution
 - `ExecResult::Steer(SteerResult)` extends the callback return type; VM dispatches all actions
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure

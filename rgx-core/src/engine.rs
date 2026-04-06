@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::events::MatchEvent;
 use crate::execution::{CodeBlockValue, ExecContext, ExecResult, ExecutionManager};
 use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
@@ -262,5 +263,17 @@ impl Engine {
     /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
     pub fn set_variable(&self, name: &str, value: String) -> Result<()> {
         self.vm.set_variable(name, value)
+    }
+
+    /// Register an event observer for structured match events.
+    ///
+    /// The observer receives [`MatchEvent`] values at key execution points.
+    /// Only one observer may be active; calling this again replaces any
+    /// previous observer.
+    pub fn set_event_observer<F>(&self, observer: F)
+    where
+        F: Fn(&MatchEvent) + Send + Sync + 'static,
+    {
+        self.vm.set_event_observer(observer);
     }
 }

@@ -136,7 +136,7 @@ Representative test anchors:
 - Layer 1 — Data Exchange: `shipped` (variables, numeric/replacement results, branch numbers)
 - Layer 2 — Predicate Callbacks: `shipped` (Lua, JS, Rhai, native, WASM)
 - Layer 3 — Match Steering: `shipped` (SteerResult: Continue, Fail, Accept, Skip, Abort via native callbacks)
-- Layer 4 — Structured Events: `planned`
+- Layer 4 — Structured Events: `shipped` (MatchEvent: 6 event types, on_event observer API, zero overhead)
 - Layer 5 — Async I/O: `planned`
 - Layer 6 — File-Backed Matching: `planned`
 

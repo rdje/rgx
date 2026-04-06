@@ -54,6 +54,8 @@ pub mod ast;
 pub mod compiler;
 /// Execution-engine entry points.
 pub mod engine;
+/// Structured match events for debugging, profiling, and observability.
+pub mod events;
 /// Code-block execution runtime support.
 pub mod execution;
 /// Regex pattern tokenization.
@@ -99,6 +101,7 @@ pub mod log;
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
+pub use events::MatchEvent;
 pub use execution::{CodeBlockValue, ExecContext, ExecResult, SteerResult};
 pub use pattern::{CompiledPattern, Pattern};
 
@@ -499,6 +502,30 @@ impl Regex {
         let result = self.engine.set_variable(&name, value);
         trace_exit!("api", "Regex::set_variable", "ok={}", result.is_ok());
         result
+    }
+
+    /// Register an event observer for structured match events.
+    ///
+    /// The observer receives [`MatchEvent`] values at key execution points
+    /// such as match-attempt start/completion, backtrack, capture completion,
+    /// and code-block evaluation. Events are fire-and-forget and do not
+    /// affect match behavior.
+    ///
+    /// Only one observer may be active; calling this again replaces any
+    /// previous observer.
+    ///
+    /// # Errors
+    ///
+    /// This method is infallible; the `Result` wrapper is retained for
+    /// forward-compatibility with future observer validation.
+    pub fn on_event<F>(&self, observer: F) -> Result<()>
+    where
+        F: Fn(&MatchEvent) + Send + Sync + 'static,
+    {
+        trace_enter!("api", "Regex::on_event");
+        self.engine.set_event_observer(observer);
+        trace_exit!("api", "Regex::on_event", "ok=true");
+        Ok(())
     }
 
     fn apply_code_replacements<I>(text: &str, matches: I) -> String
@@ -4416,5 +4443,52 @@ mod tests {
         // "cat" matches but abort prevents the match from being reported
         // AND prevents trying further positions
         assert!(!re.is_match("cat dog cat"));
+    }
+
+    #[test]
+    fn event_observer_receives_match_attempt_events() {
+        use std::sync::{Arc, Mutex};
+        // Use a non-literal pattern so the VM path is exercised (pure literals
+        // bypass the VM via memmem and therefore skip event emission).
+        let re = Regex::compile(r"c.t").unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        re.on_event(move |event| {
+            events_clone.lock().unwrap().push(event.clone());
+        })
+        .unwrap();
+        re.find_first("dog cat");
+        let collected = events.lock().unwrap();
+        // Should have MatchAttemptStarted and MatchAttemptCompleted events
+        assert!(collected
+            .iter()
+            .any(|e| matches!(e, MatchEvent::MatchAttemptStarted { .. })));
+        assert!(collected
+            .iter()
+            .any(|e| matches!(e, MatchEvent::MatchAttemptCompleted { matched: true, .. })));
+    }
+
+    #[test]
+    fn event_observer_zero_overhead_when_none() {
+        // Just verify no crash/overhead when no observer is set
+        let re = Regex::compile("cat").unwrap();
+        assert!(re.is_match("cat"));
+    }
+
+    #[test]
+    fn event_observer_receives_backtrack_events() {
+        use std::sync::{Arc, Mutex};
+        let re = Regex::compile("a*ab").unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        re.on_event(move |event| {
+            events_clone.lock().unwrap().push(event.clone());
+        })
+        .unwrap();
+        re.find_first("aab");
+        let collected = events.lock().unwrap();
+        assert!(collected
+            .iter()
+            .any(|e| matches!(e, MatchEvent::BacktrackOccurred { .. })));
     }
 }

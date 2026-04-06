@@ -12,6 +12,7 @@ use crate::ast::{
     AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, RecursionTarget,
     Regex,
 };
+use crate::events::MatchEvent;
 use crate::execution::{
     CodeBlockValue, ExecContext as CodeExecContext, ExecResult, ExecutionManager, SteerResult,
 };
@@ -488,6 +489,9 @@ impl PrefixFilter {
     }
 }
 
+/// A thread-safe, shared event-observer callback.
+type EventObserver = Arc<dyn Fn(&MatchEvent) + Send + Sync>;
+
 /// High-performance regex execution engine
 pub struct RegexVM {
     /// Compiled program
@@ -500,6 +504,8 @@ pub struct RegexVM {
     prefix_filter: PrefixFilter,
     /// Pre-computed substring finder for pure-literal patterns (bypasses VM entirely)
     literal_finder: Option<memchr::memmem::Finder<'static>>,
+    /// Optional event observer for structured match events.
+    event_observer: RwLock<Option<EventObserver>>,
 }
 
 /// Runtime SIMD capability detection
@@ -554,6 +560,7 @@ impl RegexVM {
             simd_support,
             prefix_filter: PrefixFilter::None,
             literal_finder: None,
+            event_observer: RwLock::new(None),
         };
         vm.prefix_filter = vm.extract_prefix_filter();
         vm.literal_finder = vm.extract_literal_finder();
@@ -595,6 +602,34 @@ impl RegexVM {
             support.neon
         );
         support
+    }
+
+    /// Register an event observer for structured match events.
+    ///
+    /// The observer receives [`MatchEvent`] values at key execution points.
+    /// Only one observer may be active; calling this again replaces any
+    /// previous observer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    pub fn set_event_observer<F>(&self, observer: F)
+    where
+        F: Fn(&MatchEvent) + Send + Sync + 'static,
+    {
+        *self.event_observer.write().unwrap() = Some(Arc::new(observer));
+    }
+
+    /// Emit a structured match event to the registered observer (if any).
+    ///
+    /// When no observer is registered the read-lock + `is_none` check compiles
+    /// down to a single well-predicted branch, giving near-zero effective
+    /// overhead.
+    #[inline]
+    fn emit_event(&self, event: &MatchEvent) {
+        if let Some(ref observer) = *self.event_observer.read().unwrap() {
+            observer(event);
+        }
     }
 
     /// Find first match using adaptive execution strategy
@@ -772,7 +807,15 @@ impl RegexVM {
             ctx.pos = candidate_pos;
             Self::reset_captures(ctx);
 
-            if self.execute_at(ctx, candidate_pos) {
+            self.emit_event(&MatchEvent::MatchAttemptStarted {
+                position: candidate_pos,
+            });
+            let attempt_matched = self.execute_at(ctx, candidate_pos);
+            self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                position: candidate_pos,
+                matched: attempt_matched,
+            });
+            if attempt_matched {
                 let effective_start = ctx.match_start_override.unwrap_or(candidate_pos);
                 let matched = Some(Match {
                     start: effective_start,
@@ -809,7 +852,13 @@ impl RegexVM {
             ctx.text.len()
         );
         // Only try match at start for ^ anchor
-        if self.execute_at(ctx, 0) {
+        self.emit_event(&MatchEvent::MatchAttemptStarted { position: 0 });
+        let attempt_matched = self.execute_at(ctx, 0);
+        self.emit_event(&MatchEvent::MatchAttemptCompleted {
+            position: 0,
+            matched: attempt_matched,
+        });
+        if attempt_matched {
             let effective_start = ctx.match_start_override.unwrap_or(0);
             let matched = Some(Match {
                 start: effective_start,
@@ -956,6 +1005,7 @@ impl RegexVM {
     /// When the compiled program begins with a single-byte literal, uses
     /// `memchr` to jump directly to candidate positions instead of testing
     /// every byte offset.
+    #[allow(clippy::too_many_lines)] // Event emission added modest length to existing scanning loop
     fn find_first_scanning(&self, ctx: &mut ExecContext<'_>) -> Option<Match> {
         trace_enter!(
             "vm",
@@ -977,7 +1027,13 @@ impl RegexVM {
                 let start = offset + pos;
                 ctx.pos = start;
                 Self::reset_captures(ctx);
-                if self.execute_at(ctx, start) {
+                self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+                let matched = self.execute_at(ctx, start);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched,
+                });
+                if matched {
                     let effective_start = ctx.match_start_override.unwrap_or(start);
                     trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
@@ -1011,7 +1067,13 @@ impl RegexVM {
                 }
                 ctx.pos = start;
                 Self::reset_captures(ctx);
-                if self.execute_at(ctx, start) {
+                self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+                let matched = self.execute_at(ctx, start);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched,
+                });
+                if matched {
                     let effective_start = ctx.match_start_override.unwrap_or(start);
                     trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
@@ -1039,7 +1101,13 @@ impl RegexVM {
         let start = ctx.text.len();
         ctx.pos = start;
         Self::reset_captures(ctx);
-        if self.execute_at(ctx, start) {
+        self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+        let matched = self.execute_at(ctx, start);
+        self.emit_event(&MatchEvent::MatchAttemptCompleted {
+            position: start,
+            matched,
+        });
+        if matched {
             let effective_start = ctx.match_start_override.unwrap_or(start);
             trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
             return Some(Match {
@@ -1089,12 +1157,17 @@ impl RegexVM {
 
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
-    fn try_backtrack(ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
+    fn try_backtrack(&self, ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
         if let Some(frame) = ctx.backtrack_stack.pop() {
+            let stack_depth = ctx.backtrack_stack.len() + 1; // depth before pop
             *ip = frame.ip;
             ctx.pos = frame.pos;
             Self::restore_frame(ctx, &frame);
             ctx.code_result = frame.saved_code_result;
+            self.emit_event(&MatchEvent::BacktrackOccurred {
+                position: ctx.pos,
+                stack_depth,
+            });
             true
         } else {
             false
@@ -1162,6 +1235,7 @@ impl RegexVM {
 
     /// Execute bytecode starting at given position
     #[allow(clippy::too_many_lines)] // Main VM dispatch loop — splitting would fragment the opcode state machine
+    #[allow(clippy::cast_possible_truncation)] // Bytecode operands are stored as u8; group/branch IDs fit in u32
     fn execute_at(&self, ctx: &mut ExecContext<'_>, start: usize) -> bool {
         debug_log!(
             "vm",
@@ -1230,6 +1304,7 @@ impl RegexVM {
                     }
                     // Character didn't match - try backtracking
                     if let Some(frame) = ctx.backtrack_stack.pop() {
+                        let stack_depth = ctx.backtrack_stack.len() + 1;
                         trace_log!(
                             "vm",
                             "  Backtrack: IP {} -> {}, pos {} -> {}",
@@ -1243,6 +1318,10 @@ impl RegexVM {
                         ctx.pos = frame.pos;
                         Self::restore_frame(ctx, &frame);
                         ctx.code_result = frame.saved_code_result;
+                        self.emit_event(&MatchEvent::BacktrackOccurred {
+                            position: ctx.pos,
+                            stack_depth,
+                        });
                         continue;
                     }
                     trace_log!("vm", "  ✗ Char match failed, no backtrack available");
@@ -1283,7 +1362,7 @@ impl RegexVM {
                     };
 
                     if !assertion_holds {
-                        if Self::try_backtrack(ctx, &mut ip) {
+                        if self.try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1296,7 +1375,7 @@ impl RegexVM {
                 OpCode::CodeBlock => match self.execute_inline_code_block(ctx, code, &mut ip) {
                     Some(CodeBlockOutcome::Pass) => {}
                     Some(CodeBlockOutcome::Fail) => {
-                        if Self::try_backtrack(ctx, &mut ip) {
+                        if self.try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1319,7 +1398,7 @@ impl RegexVM {
                     } else {
                         trace_log!("vm", "  ✗ Any: EOF");
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1331,7 +1410,7 @@ impl RegexVM {
                         continue;
                     }
                     trace_log!("vm", "  ✗ AnyDotAll: EOF");
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1343,7 +1422,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1356,7 +1435,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1368,7 +1447,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1381,7 +1460,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1393,7 +1472,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1406,7 +1485,7 @@ impl RegexVM {
                             continue;
                         }
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1416,7 +1495,7 @@ impl RegexVM {
                     if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1425,7 +1504,7 @@ impl RegexVM {
                     if ctx.pos == 0 {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1435,7 +1514,7 @@ impl RegexVM {
                     if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1444,7 +1523,7 @@ impl RegexVM {
                     if Self::is_at_absolute_end(ctx) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1453,7 +1532,7 @@ impl RegexVM {
                     if Self::is_at_absolute_end_or_before_final_newline(ctx) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1464,7 +1543,7 @@ impl RegexVM {
                     if ctx.pos == target {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1528,7 +1607,7 @@ impl RegexVM {
                     if Self::is_at_word_boundary(ctx) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1539,7 +1618,7 @@ impl RegexVM {
                     if !Self::is_at_word_boundary(ctx) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1622,7 +1701,7 @@ impl RegexVM {
                     } else {
                         trace_log!("vm", "  ✗ EOF, can't match char class");
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -1660,7 +1739,7 @@ impl RegexVM {
                         ctx.call_stack.truncate(first_cs_mark);
                         ctx.code_result = first_saved_code_result;
                         trace_log!("vm", "  ✗ PlusGreedy: first match failed");
-                        if Self::try_backtrack(ctx, &mut ip) {
+                        if self.try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1900,7 +1979,7 @@ impl RegexVM {
                         Self::undo_trail(ctx, trail_mark);
                         ctx.call_stack.truncate(cs_mark);
                         ctx.code_result = saved_code_result;
-                        if Self::try_backtrack(ctx, &mut ip) {
+                        if self.try_backtrack(ctx, &mut ip) {
                             continue;
                         }
                         return false;
@@ -1954,6 +2033,17 @@ impl RegexVM {
                     if end_idx < ctx.captures.len() {
                         Self::set_capture(ctx, end_idx, Some(ctx.pos));
                     }
+                    // Emit capture-completed event when both start and end are known
+                    let start_idx = group_id * 2;
+                    if let (Some(Some(cap_start)), Some(Some(_cap_end))) =
+                        (ctx.captures.get(start_idx), ctx.captures.get(end_idx))
+                    {
+                        self.emit_event(&MatchEvent::CaptureCompleted {
+                            group: group_id as u32,
+                            start: *cap_start,
+                            end: ctx.pos,
+                        });
+                    }
                 }
 
                 OpCode::Backref => {
@@ -1966,7 +2056,7 @@ impl RegexVM {
                     if self.match_backreference(ctx, group_id) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -2001,7 +2091,7 @@ impl RegexVM {
                     if self.invoke_subroutine(ctx, target) {
                         continue;
                     }
-                    if Self::try_backtrack(ctx, &mut ip) {
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -2047,6 +2137,10 @@ impl RegexVM {
 
                     // Set the current alternative being tested
                     ctx.current_alternative = Some(alternative_index);
+                    self.emit_event(&MatchEvent::BranchEntered {
+                        branch: alternative_index as u32,
+                        position: ctx.pos,
+                    });
                 }
 
                 OpCode::AtomicStart => {
@@ -2126,7 +2220,13 @@ impl RegexVM {
         let body_len_bytes = Self::read_bytes_operand(code, ip, 2)?;
         let body_len = u16::from_le_bytes([body_len_bytes[0], body_len_bytes[1]]) as usize;
         let body = std::str::from_utf8(Self::read_bytes_operand(code, ip, body_len)?).ok()?;
-        Some(self.evaluate_code_block(ctx, lang, body))
+        let outcome = self.evaluate_code_block(ctx, lang, body);
+        self.emit_event(&MatchEvent::CodeBlockEvaluated {
+            language: lang.to_string(),
+            succeeded: matches!(outcome, CodeBlockOutcome::Pass | CodeBlockOutcome::Accept),
+            position: ctx.pos,
+        });
+        Some(outcome)
     }
 
     /// Execute a code-block predicate using the shared execution manager.
@@ -2537,7 +2637,15 @@ impl RegexVM {
                 ctx.pos = candidate;
                 ctx.match_start = candidate;
                 Self::reset_captures(&mut ctx);
-                if self.execute_at(&mut ctx, candidate) {
+                self.emit_event(&MatchEvent::MatchAttemptStarted {
+                    position: candidate,
+                });
+                let attempt_matched = self.execute_at(&mut ctx, candidate);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: candidate,
+                    matched: attempt_matched,
+                });
+                if attempt_matched {
                     let m_start = ctx.match_start_override.unwrap_or(candidate);
                     let m_end = ctx.pos;
                     // Suppress zero-width match at the exact end of a previous consuming match
@@ -2582,7 +2690,13 @@ impl RegexVM {
                 ctx.pos = start;
                 ctx.match_start = start;
                 Self::reset_captures(&mut ctx);
-                if self.execute_at(&mut ctx, start) {
+                self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+                let attempt_matched = self.execute_at(&mut ctx, start);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched: attempt_matched,
+                });
+                if attempt_matched {
                     let m_start = ctx.match_start_override.unwrap_or(start);
                     let m_end = ctx.pos;
                     // Suppress zero-width match at the exact end of a previous consuming match
