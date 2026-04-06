@@ -586,40 +586,12 @@ impl RegexVM {
     /// Find first match using adaptive execution strategy
     #[must_use]
     #[allow(clippy::too_many_lines)] // Literal fast-path + adaptive strategy selection
+    #[inline]
     pub fn find_first(&self, text: &str) -> Option<Match> {
-        trace_enter!(
-            "vm",
-            "RegexVM::find_first",
-            "text_len={}, code_len={}",
-            text.len(),
-            self.program.code.len()
-        );
-        low_log!("vm", "");
-        low_log!("vm", "=== FIND_FIRST PIPELINE START ===");
-        debug_log!("vm", "=== VM FIND_FIRST STARTED ===");
-        debug_log!(
-            "vm",
-            "Text: '{}' ({} bytes)",
-            if text.len() <= 100 {
-                text
-            } else {
-                &text[..100]
-            },
-            text.len()
-        );
-        debug_log!(
-            "vm",
-            "Bytecode: {} bytes, {} char classes, {} capture groups",
-            self.program.code.len(),
-            self.program.char_classes.len(),
-            self.program.num_groups
-        );
-
-        let bytes = text.as_bytes();
-
-        // Fast path: pure-literal patterns bypass the VM entirely via memmem
+        // Fast path: pure-literal patterns bypass the VM entirely via memmem.
+        // This check is first, before any setup, for minimum overhead.
         if let Some(ref finder) = self.literal_finder {
-            debug_log!("vm", "Strategy: literal memmem fast path");
+            let bytes = text.as_bytes();
             let needle_len = finder.needle().len();
             let result = finder.find(bytes).map(|pos| Match {
                 start: pos,
@@ -628,9 +600,18 @@ impl RegexVM {
                 matched_alternative: None,
                 code_result: None,
             });
-            trace_exit!("vm", "RegexVM::find_first", "matched={}", result.is_some());
             return result;
         }
+
+        // Non-literal path: full VM execution
+        trace_enter!(
+            "vm",
+            "RegexVM::find_first",
+            "text_len={}, code_len={}",
+            text.len(),
+            self.program.code.len()
+        );
+        let bytes = text.as_bytes();
 
         let mut ctx = ExecContext {
             text: bytes,
@@ -2603,19 +2584,11 @@ impl RegexVM {
 
     /// Test if pattern matches text
     #[must_use]
+    #[inline]
     pub fn is_match(&self, text: &str) -> bool {
-        trace_enter!(
-            "vm",
-            "RegexVM::is_match",
-            "text_len={}, code_len={}",
-            text.len(),
-            self.program.code.len()
-        );
         // Fast path: pure-literal patterns bypass the VM entirely via memmem
         if let Some(ref finder) = self.literal_finder {
-            let matched = finder.find(text.as_bytes()).is_some();
-            trace_exit!("vm", "RegexVM::is_match", "matched={}", matched);
-            return matched;
+            return finder.find(text.as_bytes()).is_some();
         }
         let matched = self.find_first(text).is_some();
         trace_exit!("vm", "RegexVM::is_match", "matched={}", matched);
