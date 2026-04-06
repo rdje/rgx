@@ -89,6 +89,9 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
+### Documentation
+- `docs/HOST_INTEGRATION_GUIDE.md` — user-facing guide with examples for all 6 layers, combined example, and quick reference table
+
 ### Architecture documents
 - `docs/HOST_INTEGRATION_ARCHITECTURE.md` — 6-layer host integration design (2 shipped, 4 planned)
 - `docs/PCRE2_COMPATIBILITY_MATRIX.md` — feature-by-feature parity table

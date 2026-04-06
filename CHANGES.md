@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Add comprehensive host integration guide with examples
+- Scope: user-facing documentation for all 6 host integration layers.
+- Changes:
+  - Created `docs/HOST_INTEGRATION_GUIDE.md` with practical examples for every layer:
+    - Layer 1: variables, results, branch identification
+    - Layer 2: native/Lua/JS/Rhai callbacks with context reference table
+    - Layer 3: all 5 steering actions with code examples
+    - Layer 4: event observer, backtrack counting, event type reference
+    - Layer 5: suspendable matching, async resolver, continuation-passing walkthrough
+    - Layer 6: file matching, line-oriented mode, reactive scanning
+    - Combined example: log monitor using all layers together
+    - Quick reference table for common tasks
+  - Added link to README docs index.
+- Notes/impact:
+  - This is the user-facing companion to `docs/HOST_INTEGRATION_ARCHITECTURE.md` (which is implementation-facing).
+
 ### 2026-04-06 - Ship Layer 5: Async/External I/O via continuation-passing
 - Scope: the hardest host integration layer — callbacks can suspend the match, do async work, and resume.
 - Changes:
