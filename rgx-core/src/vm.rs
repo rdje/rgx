@@ -439,18 +439,37 @@ enum PrefixFilter {
     Word,
     /// Pattern starts with `\s` (ASCII whitespace).
     Space,
+    /// Pattern starts with a compiled character class (bitmap copied from program).
+    CharClass(usize),
 }
 
 impl PrefixFilter {
     /// Test whether a byte could match this filter.
     #[inline]
-    fn matches(self, b: u8) -> bool {
+    fn matches(self, b: u8, char_classes: &[CompiledCharClass]) -> bool {
         match self {
             Self::None => true,
             Self::Byte(expected) => b == expected,
             Self::Digit => b.is_ascii_digit(),
             Self::Word => b.is_ascii_alphanumeric() || b == b'_',
             Self::Space => b.is_ascii_whitespace(),
+            Self::CharClass(id) => {
+                // Non-ASCII bytes might match Unicode ranges — can't reject
+                if b >= 0x80 {
+                    return true;
+                }
+                if let Some(cc) = char_classes.get(id) {
+                    let byte_idx = (b as usize) / 16;
+                    let bit_idx = (b as usize) % 16;
+                    if byte_idx < cc.ascii_bitmap.len() {
+                        (cc.ascii_bitmap[byte_idx] & (1u16 << bit_idx)) != 0
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            }
         }
     }
 }
@@ -823,6 +842,26 @@ impl RegexVM {
                 OpCode::DigitAscii => return PrefixFilter::Digit,
                 OpCode::WordAscii => return PrefixFilter::Word,
                 OpCode::SpaceAscii => return PrefixFilter::Space,
+                // Zero-width assertions: skip past them to find the first consuming atom
+                OpCode::WordBoundary
+                | OpCode::NonWordBoundary
+                | OpCode::StartText
+                | OpCode::EndTextOrNL
+                | OpCode::EndText
+                | OpCode::StartLine
+                | OpCode::EndLine
+                | OpCode::PreviousMatchEnd
+                | OpCode::MatchReset => continue,
+                OpCode::CharClass => {
+                    // Extract the class ID and use the ASCII bitmap for filtering
+                    if ip < code.len() {
+                        let class_id = code[ip] as usize;
+                        if class_id < self.program.char_classes.len() {
+                            return PrefixFilter::CharClass(class_id);
+                        }
+                    }
+                    return PrefixFilter::None;
+                }
                 OpCode::SaveStart | OpCode::SaveEnd => {
                     if ip < code.len() {
                         ip += 1; // skip group ID operand
@@ -888,7 +927,7 @@ impl RegexVM {
             let filter = self.prefix_filter;
             let mut start = 0;
             while start < ctx.text.len() {
-                if !filter.matches(ctx.text[start]) {
+                if !filter.matches(ctx.text[start], &self.program.char_classes) {
                     start += 1;
                     continue;
                 }
@@ -2410,7 +2449,9 @@ impl RegexVM {
             // Class-filter or full-scan path
             let filter = self.prefix_filter;
             while start <= bytes.len() {
-                if start < bytes.len() && !filter.matches(ctx.text[start]) {
+                if start < bytes.len()
+                    && !filter.matches(ctx.text[start], &self.program.char_classes)
+                {
                     start += 1;
                     continue;
                 }
