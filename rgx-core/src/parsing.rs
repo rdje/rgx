@@ -502,9 +502,7 @@ impl<'a> PgenAstAdapter<'a> {
             "callout" => Err(RgxError::Compile(
                 "unsupported: callout constructs are not supported by rgx".to_string(),
             )),
-            "comment_group" => Err(RgxError::Compile(
-                "unsupported: comment groups are not supported by rgx".to_string(),
-            )),
+            "comment_group" => Ok(Regex::Empty), // (?#...) is a zero-width comment, ignored
             "directive_verb" => Err(RgxError::Compile(
                 "unsupported: directive/backtracking verbs are not supported by rgx".to_string(),
             )),
