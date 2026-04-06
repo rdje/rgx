@@ -152,10 +152,10 @@ Live compatibility tracker for `rgx` against PCRE2.
 
 | Feature | PCRE2 | RGX | Status |
 |---------|-------|-----|--------|
-| `(*UTF)` | Yes | No | `rgx-gap` — rgx is always UTF-8 |
-| `(*UCP)` | Yes | No | `rgx-gap` |
-| `(*BSR_ANYCRLF)`, `(*BSR_UNICODE)` | Yes | No | `rgx-gap` |
-| `(*CRLF)`, `(*LF)`, `(*CR)`, `(*ANY)`, `(*ANYCRLF)`, `(*NUL)` | Yes | No | `rgx-gap` |
+| `(*UTF)` | Yes | N/A | `out-of-scope` — rgx is always UTF-8 |
+| `(*UCP)` | Yes | N/A | `out-of-scope` — rgx uses Unicode properties by default |
+| `(*BSR_ANYCRLF)`, `(*BSR_UNICODE)` | Yes | Yes | `shipped` — accepted and ignored (rgx `\R` always uses Unicode) |
+| `(*CRLF)`, `(*LF)`, `(*CR)`, `(*ANY)`, `(*ANYCRLF)`, `(*NUL)` | Yes | Yes | `shipped` — accepted and ignored (rgx always uses Unicode newlines) |
 
 ### Other
 

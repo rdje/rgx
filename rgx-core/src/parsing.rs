@@ -954,6 +954,11 @@ impl<'a> PgenAstAdapter<'a> {
                 let mark_name = self.extract_directive_payload(node);
                 Ok(Regex::Mark(mark_name))
             }
+            // Mode/newline/BSR settings: accept and ignore — rgx is always UTF-8
+            // with Unicode properties and Unicode newline semantics.
+            "UTF" | "UTF8" | "UTF16" | "UTF32" | "UCP" | "CR" | "LF" | "CRLF" | "ANY"
+            | "ANYCRLF" | "NUL" | "BSR_ANYCRLF" | "BSR_UNICODE" => Ok(Regex::Empty),
+            // Unrecognized verb
             other => Err(RgxError::Compile(format!(
                 "unsupported backtracking verb '(*{other})'"
             ))),
