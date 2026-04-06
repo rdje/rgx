@@ -184,6 +184,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Group { .. } => "Group",
         Regex::Backreference(_) => "Backreference",
         Regex::NamedBackreference(_) => "NamedBackreference",
+        Regex::RelativeBackreference(_) => "RelativeBackreference",
         Regex::Lookahead { .. } => "Lookahead",
         Regex::Lookbehind { .. } => "Lookbehind",
         Regex::CodeBlock { .. } => "CodeBlock",
@@ -192,6 +193,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::FlagGroup { .. } => "FlagGroup",
         Regex::MatchReset => "MatchReset",
         Regex::NewlineSequence => "NewlineSequence",
+        Regex::Accept => "Accept",
         Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
     }
 }
@@ -4001,6 +4003,9 @@ impl OptimizingCompiler {
                         .copied()
                         .expect("named recursion target should be validated before codegen")
                         as u8,
+                    RecursionTarget::RelativeGroup(_) => {
+                        panic!("relative recursion target should be resolved before codegen")
+                    }
                 };
                 self.code.push(target_id);
             }
@@ -4188,6 +4193,11 @@ impl OptimizingCompiler {
                     name: None,
                 };
                 self.codegen_pass(&expanded, false);
+            }
+
+            Regex::Accept => {
+                // (*ACCEPT): force immediate match at current position.
+                self.emit_op(OpCode::Match);
             }
 
             Regex::Empty => {
@@ -4441,10 +4451,12 @@ impl OptimizingCompiler {
             | Regex::WordBoundary { .. }
             | Regex::Backreference(_)
             | Regex::NamedBackreference(_)
+            | Regex::RelativeBackreference(_)
             | Regex::Recursion { .. }
             | Regex::CodeBlock { .. }
             | Regex::MatchReset
             | Regex::NewlineSequence
+            | Regex::Accept
             | Regex::WhitespaceLiteral(_)
             | Regex::Empty => {}
         }

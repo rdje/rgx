@@ -1578,10 +1578,12 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
+            | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => (ast, next_group),
         }
@@ -1802,6 +1804,23 @@ impl Compiler {
                 opened_groups,
                 total_groups,
             ),
+            RegexAst::Recursion {
+                target: crate::ast::RecursionTarget::RelativeGroup(offset),
+            } => {
+                let resolved =
+                    Self::resolve_relative_group_reference(offset, opened_groups, total_groups)?;
+                Ok((
+                    RegexAst::Recursion {
+                        target: crate::ast::RecursionTarget::Group(resolved),
+                    },
+                    opened_groups,
+                ))
+            }
+            RegexAst::RelativeBackreference(offset) => {
+                let resolved =
+                    Self::resolve_relative_group_reference(offset, opened_groups, total_groups)?;
+                Ok((RegexAst::Backreference(resolved), opened_groups))
+            }
             RegexAst::Char(_)
             | RegexAst::CharClass(_)
             | RegexAst::Dot
@@ -1818,6 +1837,7 @@ impl Compiler {
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => Ok((ast, opened_groups)),
         }
@@ -1958,10 +1978,12 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
+            | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2243,6 +2265,10 @@ impl Compiler {
                         ))
                     }
                 }
+                crate::ast::RecursionTarget::RelativeGroup(_) => {
+                    // Should already be resolved by resolve_relative_conditionals
+                    None
+                }
             },
             RegexAst::NamedBackreference(name) => {
                 if named_groups.contains_key(name) {
@@ -2399,6 +2425,7 @@ impl Compiler {
             }
             RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
+            | RegexAst::RelativeBackreference(_)
             | RegexAst::Char(_)
             | RegexAst::CharClass(_)
             | RegexAst::Dot
@@ -2413,6 +2440,7 @@ impl Compiler {
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2559,10 +2587,12 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
+            | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => 0,
         }
@@ -2638,10 +2668,12 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
+            | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::Accept
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => {}
         }

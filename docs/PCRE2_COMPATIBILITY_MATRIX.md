@@ -66,7 +66,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Atomic `(?>...)` | Yes | Yes | `shipped` |
 | Branch-reset `(?|...)` | Yes | Yes | `shipped` |
 | Comment `(?#...)` | Yes | Yes | `shipped` |
-| Duplicate names `(?J)` | Yes | No | `rgx-gap` |
+| Duplicate names `(?J)` | Yes | Yes | `shipped` |
 
 ### Anchors and boundaries
 
@@ -98,7 +98,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Named `\k<name>`, `\k'name'`, `\k{name}` | Yes | Yes | `shipped` |
 | Python-style `(?P=name)` | Yes | Yes | `shipped` |
 | `\g{N}`, `\g{name}`, `\g<name>` | Yes | Yes | `shipped` |
-| `\g<+1>`, `\g<-1>` relative | Yes | No | `rgx-gap` |
+| `\g<+1>`, `\g<-1>` relative | Yes | Yes | `shipped` |
 
 ### Inline flags
 
@@ -120,7 +120,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Numbered `(?1)` | Yes | Yes | `shipped` |
 | Named `(?&name)`, `(?P>name)` | Yes | Yes | `shipped` |
 | Returned-capture subroutines `(?1(grouplist))` | Yes | No | `rgx-gap` — PCRE2 10.47+ |
-| Relative subroutines `(?+1)`, `(?-1)` | Yes | No | `rgx-gap` |
+| Relative subroutines `(?+1)`, `(?-1)` | Yes | Yes | `shipped` |
 
 ### Conditionals
 
@@ -139,7 +139,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Feature | PCRE2 | RGX | Status |
 |---------|-------|-----|--------|
 | `\K` match-reset | Yes | Yes | `shipped` |
-| `(*ACCEPT)` | Yes | No | `rgx-gap` |
+| `(*ACCEPT)` | Yes | Yes | `shipped` |
 | `(*FAIL)` / `(*F)` | Yes | Yes | `shipped` |
 | `(*SKIP)`, `(*SKIP:name)` | Yes | No | `rgx-gap` |
 | `(*PRUNE)` | Yes | No | `rgx-gap` |

@@ -928,10 +928,8 @@ impl<'a> PgenAstAdapter<'a> {
                 ranges: vec![],
                 negated: false,
             })),
-            // (*ACCEPT): force immediate match at current position — not yet implemented
-            "ACCEPT" => Err(RgxError::Compile(
-                "(*ACCEPT) is not yet supported by rgx".to_string(),
-            )),
+            // (*ACCEPT): force immediate match at current position
+            "ACCEPT" => Ok(Regex::Accept),
             other => Err(RgxError::Compile(format!(
                 "unsupported backtracking verb '(*{other})'"
             ))),
@@ -960,16 +958,27 @@ impl<'a> PgenAstAdapter<'a> {
         // Unwrap the immediate Alternative wrapper if present.
         let inner = self.alternative_child(target_node).unwrap_or(target_node);
 
-        // Variant 1: signed_digits (e.g. `(?1)`, `(?-1)`).
+        // Variant 1: signed_digits (e.g. `(?1)`, `(?+1)`, `(?-1)`).
         if let Some(signed) = self.first_descendant(inner, "signed_digits") {
             let text = self.slice(signed)?;
-            let n: u32 = text
-                .trim_start_matches('+')
-                .trim_start_matches('-')
-                .parse()
-                .map_err(|_| {
-                    self.contract_error(&format!("invalid subroutine call number '{text}'"))
-                })?;
+            let has_plus = text.starts_with('+');
+            let has_minus = text.starts_with('-');
+            let abs_text = text.trim_start_matches('+').trim_start_matches('-');
+            let n: u32 = abs_text.parse().map_err(|_| {
+                self.contract_error(&format!("invalid subroutine call number '{text}'"))
+            })?;
+            if has_plus {
+                #[allow(clippy::cast_possible_wrap)]
+                return Ok(Regex::Recursion {
+                    target: RecursionTarget::RelativeGroup(n as i32),
+                });
+            }
+            if has_minus {
+                #[allow(clippy::cast_possible_wrap)]
+                return Ok(Regex::Recursion {
+                    target: RecursionTarget::RelativeGroup(-(n as i32)),
+                });
+            }
             return Ok(Regex::Recursion {
                 target: RecursionTarget::Group(n),
             });
@@ -1092,7 +1101,7 @@ impl<'a> PgenAstAdapter<'a> {
                 Ok(Regex::NamedBackreference(name))
             }
             "\\g" => {
-                // \g{name}, \g{N}, \g<N>, \g<name>, \g'name':
+                // \g{name}, \g{N}, \g<N>, \g<name>, \g'name', \g<+N>, \g<-N>:
                 // element_1 is a `subroutine_ref` with a `signed_digits_or_name`
                 // payload (either `name` or `signed_digits`).
                 // PGEN 1.1.4+ correctly parses all \g forms including \g<1>.
@@ -1101,6 +1110,36 @@ impl<'a> PgenAstAdapter<'a> {
                         self.slice(name_node)?.to_string(),
                     ));
                 }
+                // Check for signed_digits first (handles +N, -N, and plain N).
+                if let Some(signed_node) = self.first_descendant(node, "signed_digits") {
+                    let sign_text = self
+                        .first_descendant(signed_node, "sign")
+                        .and_then(|n| self.slice(n).ok())
+                        .unwrap_or("");
+                    let mut digits = String::new();
+                    self.walk_collect_terminal_chars(signed_node, "digit", &mut digits);
+                    if !digits.is_empty() {
+                        let n: u32 = digits.parse().map_err(|_| {
+                            self.contract_error(&format!(
+                                "invalid numeric backreference '{digits}'"
+                            ))
+                        })?;
+                        return match sign_text {
+                            "+" =>
+                            {
+                                #[allow(clippy::cast_possible_wrap)]
+                                Ok(Regex::RelativeBackreference(n as i32))
+                            }
+                            "-" =>
+                            {
+                                #[allow(clippy::cast_possible_wrap)]
+                                Ok(Regex::RelativeBackreference(-(n as i32)))
+                            }
+                            _ => Ok(Regex::Backreference(n)),
+                        };
+                    }
+                }
+                // Fallback: plain digits node (no sign).
                 if let Some(digits_node) = self.first_descendant(node, "digits") {
                     let mut digits = String::new();
                     self.walk_collect_terminal_chars(digits_node, "digit", &mut digits);
@@ -1992,6 +2031,12 @@ mod tests {
             "(?ms)",
             r"(?<word>a)\k<word>",
             r"(?<word>a)\k'word'",
+            "(?+1)(a)",
+            "(a)(?-1)",
+            r"(a)\g<+1>(b)",
+            r"(a)\g<-1>",
+            "(?J)(?<x>a)(?<x>b)",
+            "(*ACCEPT)",
         ]
     }
 
@@ -2373,5 +2418,182 @@ mod tests {
     fn inline_flag_combined() {
         let re = crate::Regex::compile("(?im)^abc").unwrap();
         assert!(re.is_match("x\nABC"));
+    }
+
+    // ---------------------------------------------------------------
+    // Feature: Relative subroutines (?+1), (?-1)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn relative_subroutine_forward_parses() {
+        let ast = parse_pattern("(?+1)(a)").expect("(?+1)(a) should parse");
+        match &ast {
+            Regex::Sequence(items) => {
+                assert!(
+                    matches!(
+                        &items[0],
+                        Regex::Recursion {
+                            target: crate::ast::RecursionTarget::RelativeGroup(1),
+                        }
+                    ),
+                    "expected RelativeGroup(1), got: {:?}",
+                    items[0]
+                );
+            }
+            other => panic!("expected Sequence, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relative_subroutine_backward_parses() {
+        let ast = parse_pattern("(a)(?-1)").expect("(a)(?-1) should parse");
+        match &ast {
+            Regex::Sequence(items) => {
+                assert!(
+                    matches!(
+                        &items[1],
+                        Regex::Recursion {
+                            target: crate::ast::RecursionTarget::RelativeGroup(-1),
+                        }
+                    ),
+                    "expected RelativeGroup(-1), got: {:?}",
+                    items[1]
+                );
+            }
+            other => panic!("expected Sequence, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relative_subroutine_forward_executes() {
+        // (?+1)(a) = call group 1 (forward), then define group 1 as 'a'
+        // On "a", subroutine (?+1) calls group 1 which matches 'a', then
+        // the literal group (a) also matches 'a'. So "aa" should match.
+        let re = crate::Regex::compile(r"\A(?+1)(a)\z")
+            .expect("relative subroutine forward should compile");
+        assert!(re.is_match("aa"));
+        assert!(!re.is_match("a"));
+    }
+
+    #[test]
+    fn relative_subroutine_backward_executes() {
+        // (a)(?-1) = define group 1 as 'a', then call group 1 again
+        // On "aa", group 1 matches first 'a', then (?-1) calls group 1
+        // again to match second 'a'.
+        let re = crate::Regex::compile(r"\A(a)(?-1)\z")
+            .expect("relative subroutine backward should compile");
+        assert!(re.is_match("aa"));
+        assert!(!re.is_match("a"));
+    }
+
+    // ---------------------------------------------------------------
+    // Feature: Relative backreferences \g<+1>, \g<-1>
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn relative_backreference_forward_parses() {
+        let ast = parse_pattern(r"(a)\g<+1>(b)").expect(r"\g<+1> should parse");
+        match &ast {
+            Regex::Sequence(items) => {
+                assert!(
+                    matches!(&items[1], Regex::RelativeBackreference(1)),
+                    "expected RelativeBackreference(1), got: {:?}",
+                    items[1]
+                );
+            }
+            other => panic!("expected Sequence, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relative_backreference_backward_parses() {
+        let ast = parse_pattern(r"(a)\g<-1>").expect(r"\g<-1> should parse");
+        match &ast {
+            Regex::Sequence(items) => {
+                assert!(
+                    matches!(&items[1], Regex::RelativeBackreference(-1)),
+                    "expected RelativeBackreference(-1), got: {:?}",
+                    items[1]
+                );
+            }
+            other => panic!("expected Sequence, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relative_backreference_backward_executes() {
+        // (a)\g<-1> = capture 'a' in group 1, then backreference group 1
+        let re = crate::Regex::compile(r"\A(a)\g<-1>\z")
+            .expect("relative backreference backward should compile");
+        assert!(re.is_match("aa"));
+        assert!(!re.is_match("ab"));
+        assert!(!re.is_match("a"));
+    }
+
+    #[test]
+    fn relative_backreference_forward_executes() {
+        // (a)(b)\g<-2> = capture 'a' in group 1, capture 'b' in group 2,
+        // then \g<-2> resolves to group 1, backreferences 'a'.
+        // On "aba": match. On "abb": no match.
+        let re = crate::Regex::compile(r"\A(a)(b)\g<-2>\z")
+            .expect("relative backreference with -2 should compile");
+        assert!(re.is_match("aba"));
+        assert!(!re.is_match("abb"));
+    }
+
+    // ---------------------------------------------------------------
+    // Feature: (?J) duplicate group names
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn duplicate_group_names_with_j_flag_parses() {
+        parse_pattern("(?J)(?<x>a)(?<x>b)").expect("(?J) with duplicate names should parse");
+    }
+
+    #[test]
+    fn duplicate_group_names_with_j_flag_executes() {
+        let re = crate::Regex::compile(r"\A(?J)(?<x>a)(?<x>b)\z")
+            .expect("(?J) with duplicate names should compile");
+        assert!(re.is_match("ab"));
+        assert!(!re.is_match("aa"));
+    }
+
+    #[test]
+    fn duplicate_group_names_with_j_scoped_executes() {
+        // (?J:...) scoped form
+        let re = crate::Regex::compile(r"\A(?J:(?<x>a)|(?<x>b))\z")
+            .expect("(?J:...) with duplicate names should compile");
+        assert!(re.is_match("a"));
+        assert!(re.is_match("b"));
+    }
+
+    // ---------------------------------------------------------------
+    // Feature: (*ACCEPT)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn accept_verb_parses() {
+        let ast = parse_pattern("(*ACCEPT)").expect("(*ACCEPT) should parse");
+        assert!(
+            matches!(ast, Regex::Accept),
+            "expected Accept, got: {ast:?}"
+        );
+    }
+
+    #[test]
+    fn accept_verb_matches_immediately() {
+        let re = crate::Regex::compile(r"a(*ACCEPT)b").expect("(*ACCEPT) should compile");
+        // (*ACCEPT) forces match after 'a', 'b' is never tested
+        assert!(re.is_match("a"));
+        assert!(re.is_match("ax"));
+    }
+
+    #[test]
+    fn accept_verb_in_alternation() {
+        let re = crate::Regex::compile(r"\A(?:(*ACCEPT)|b)\z")
+            .expect("(*ACCEPT) in alternation should compile");
+        // (*ACCEPT) immediately matches, so any input matches
+        assert!(re.is_match(""));
+        assert!(re.is_match("anything"));
     }
 }

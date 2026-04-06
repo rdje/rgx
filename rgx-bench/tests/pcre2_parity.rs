@@ -1755,6 +1755,45 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: "(?x: a[ ]b )",
             input: "xxa byy",
         },
+        // Relative subroutines
+        ParityCase {
+            name: "relative_subroutine_forward",
+            pattern: r"\A(?+1)(a)\z",
+            input: "aa",
+        },
+        ParityCase {
+            name: "relative_subroutine_backward",
+            pattern: r"\A(a)(?-1)\z",
+            input: "aa",
+        },
+        // Relative backreferences
+        ParityCase {
+            name: "relative_backref_backward",
+            pattern: r"\A(a)\g<-1>\z",
+            input: "aa",
+        },
+        ParityCase {
+            name: "relative_backref_backward_two",
+            pattern: r"\A(a)(b)\g<-2>\z",
+            input: "aba",
+        },
+        // (?J) duplicate group names
+        ParityCase {
+            name: "duplicate_names_j_flag",
+            pattern: r"\A(?J)(?<x>a)(?<x>b)\z",
+            input: "ab",
+        },
+        ParityCase {
+            name: "duplicate_names_j_scoped",
+            pattern: r"\A(?J:(?<x>a)|(?<x>b))\z",
+            input: "a",
+        },
+        // (*ACCEPT)
+        ParityCase {
+            name: "accept_verb_truncates_match",
+            pattern: r"a(*ACCEPT)b",
+            input: "axyz",
+        },
     ];
 
     for case in cases {

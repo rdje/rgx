@@ -104,6 +104,8 @@ pub enum Regex {
     Backreference(u32),
     /// Named backreference \k<name> or \k'name'
     NamedBackreference(String),
+    /// Relative backreference \g<+1> or \g<-1> (resolved at compile time)
+    RelativeBackreference(i32),
     /// Conditional patterns (?(condition)yes|no)
     Conditional {
         /// The condition to evaluate
@@ -142,6 +144,10 @@ pub enum Regex {
     MatchReset,
     /// \R — Newline sequence: matches \r\n, \r, \n, \x0B, \x0C, \x85, \u{2028}, \u{2029}
     NewlineSequence,
+
+    // Match control
+    /// (*ACCEPT) - Force immediate match acceptance
+    Accept,
 
     // Special
     /// Empty pattern (epsilon)
@@ -347,6 +353,8 @@ pub enum RecursionTarget {
     Group(u32),
     /// (?&name) - Recurse named group
     NamedGroup(String),
+    /// (?+1), (?-1) - Recurse relative group (resolved at compile time)
+    RelativeGroup(i32),
 }
 
 /// Context information during AST construction
