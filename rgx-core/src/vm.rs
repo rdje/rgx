@@ -484,6 +484,8 @@ pub struct RegexVM {
     simd_support: SimdSupport,
     /// Cached prefix filter for scanning skip optimization
     prefix_filter: PrefixFilter,
+    /// Pre-computed substring finder for pure-literal patterns (bypasses VM entirely)
+    literal_finder: Option<memchr::memmem::Finder<'static>>,
 }
 
 /// Runtime SIMD capability detection
@@ -537,8 +539,10 @@ impl RegexVM {
             execution_manager,
             simd_support,
             prefix_filter: PrefixFilter::None,
+            literal_finder: None,
         };
         vm.prefix_filter = vm.extract_prefix_filter();
+        vm.literal_finder = vm.extract_literal_finder();
         trace_exit!(
             "vm",
             "RegexVM::with_execution_manager",
@@ -581,6 +585,7 @@ impl RegexVM {
 
     /// Find first match using adaptive execution strategy
     #[must_use]
+    #[allow(clippy::too_many_lines)] // Literal fast-path + adaptive strategy selection
     pub fn find_first(&self, text: &str) -> Option<Match> {
         trace_enter!(
             "vm",
@@ -611,6 +616,22 @@ impl RegexVM {
         );
 
         let bytes = text.as_bytes();
+
+        // Fast path: pure-literal patterns bypass the VM entirely via memmem
+        if let Some(ref finder) = self.literal_finder {
+            debug_log!("vm", "Strategy: literal memmem fast path");
+            let needle_len = finder.needle().len();
+            let result = finder.find(bytes).map(|pos| Match {
+                start: pos,
+                end: pos + needle_len,
+                groups: vec![Some((pos, pos + needle_len))],
+                matched_alternative: None,
+                code_result: None,
+            });
+            trace_exit!("vm", "RegexVM::find_first", "matched={}", result.is_some());
+            return result;
+        }
+
         let mut ctx = ExecContext {
             text: bytes,
             pos: 0,
@@ -871,6 +892,68 @@ impl RegexVM {
             }
         }
         PrefixFilter::None
+    }
+
+    /// Extract the literal byte string if the compiled program is a pure-literal pattern.
+    ///
+    /// A pure-literal program contains only `Char` opcodes (with optional `SaveStart`/`SaveEnd`
+    /// capture markers for group 0) followed by a `Match` terminator.  When detected, the VM
+    /// can be bypassed entirely in favour of a `memchr::memmem` substring search.
+    fn extract_literal_string(&self) -> Option<Vec<u8>> {
+        let code = &self.program.code;
+        let mut ip = 0;
+        let mut literal = Vec::new();
+
+        while ip < code.len() {
+            let Ok(op) = OpCode::try_from(code[ip]) else {
+                return None;
+            };
+            ip += 1;
+            match op {
+                OpCode::Char => {
+                    if ip >= code.len() {
+                        return None;
+                    }
+                    let char_len = code[ip] as usize;
+                    ip += 1;
+                    if ip + char_len > code.len() {
+                        return None;
+                    }
+                    literal.extend_from_slice(&code[ip..ip + char_len]);
+                    ip += char_len;
+                }
+                OpCode::Match => {
+                    return if literal.is_empty() {
+                        None
+                    } else {
+                        Some(literal)
+                    }
+                }
+                // Skip capture markers for group 0 only; patterns with higher
+                // capture groups need full VM execution to report sub-matches.
+                OpCode::SaveStart | OpCode::SaveEnd => {
+                    if ip >= code.len() {
+                        return None;
+                    }
+                    let group_id = code[ip];
+                    ip += 1;
+                    if group_id != 0 {
+                        return None;
+                    }
+                }
+                _ => return None, // Not a pure literal
+            }
+        }
+        None
+    }
+
+    /// Build an owned `memmem::Finder` when the pattern is a pure literal.
+    ///
+    /// The finder is cached on the VM so that its skip-table is computed once
+    /// rather than on every search call.
+    fn extract_literal_finder(&self) -> Option<memchr::memmem::Finder<'static>> {
+        self.extract_literal_string()
+            .map(|needle| memchr::memmem::Finder::new(&needle).into_owned())
     }
 
     /// Standard scanning approach - try match at each position.
@@ -2382,6 +2465,28 @@ impl RegexVM {
             self.program.code.len()
         );
         let bytes = text.as_bytes();
+
+        // Fast path: pure-literal patterns bypass the VM entirely via memmem
+        if let Some(ref finder) = self.literal_finder {
+            debug_log!("vm", "Strategy: literal memmem fast path (find_all)");
+            let needle_len = finder.needle().len();
+            let mut matches = Vec::new();
+            let mut start = 0;
+            while let Some(pos) = finder.find(&bytes[start..]) {
+                let abs_pos = start + pos;
+                matches.push(Match {
+                    start: abs_pos,
+                    end: abs_pos + needle_len,
+                    groups: vec![Some((abs_pos, abs_pos + needle_len))],
+                    matched_alternative: None,
+                    code_result: None,
+                });
+                start = abs_pos + needle_len.max(1);
+            }
+            trace_exit!("vm", "RegexVM::find_all", "match_count={}", matches.len());
+            return matches;
+        }
+
         let mut ctx = ExecContext {
             text: bytes,
             pos: 0,
@@ -2506,6 +2611,12 @@ impl RegexVM {
             text.len(),
             self.program.code.len()
         );
+        // Fast path: pure-literal patterns bypass the VM entirely via memmem
+        if let Some(ref finder) = self.literal_finder {
+            let matched = finder.find(text.as_bytes()).is_some();
+            trace_exit!("vm", "RegexVM::is_match", "matched={}", matched);
+            return matched;
+        }
         let matched = self.find_first(text).is_some();
         trace_exit!("vm", "RegexVM::is_match", "matched={}", matched);
         matched
