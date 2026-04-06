@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship Layer 6: File-Backed Matching (core API)
+- Scope: new host integration layer — match directly against filesystem files.
+- Changes:
+  - Created `rgx-core/src/file.rs` with `FileMatch` struct and 4 methods on `Regex`:
+    - `match_file(path)` — whole-file `find_all`, returns `Vec<MatchResult>`
+    - `match_file_lines(path)` — line-oriented scan, returns `Vec<FileMatch>` with 1-based line numbers
+    - `scan_file(path)` — whole-file scan returning match count (callbacks fire implicitly)
+    - `scan_file_lines(path)` — line-by-line scan returning match count
+  - `FileMatch` re-exported from `rgx-core` public API.
+  - 5 unit tests covering matches, line numbers, error handling, and scan variants.
+  - `tail_file` (streaming/watching) and CLI integration deferred to follow-up.
+- Validation:
+  - `cargo test -p rgx-core` (314 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass), 0 new clippy warnings.
+
 ### 2026-04-06 - Ship Layer 4: Structured Events
 - Scope: new host integration layer — engine emits typed events at key execution points.
 - Changes:

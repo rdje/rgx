@@ -116,14 +116,9 @@ Live forward-looking tracker for rgx.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Performance target section
 
 ### Host integration Layer 6: File-Backed Matching
-- Status: `planned`
-- Goal: match against filesystem files (static or actively written) with integrated callback dispatch.
-- Scope:
-  - `match_file` / `scan_file` for batch and reactive file processing
-  - `tail_file` for live monitoring of files still being written
-  - line-oriented mode for log analysis
-  - memory-mapped I/O for large files, chunked reading for streams
-  - CLI exposure: `rgx-cli --file path [--follow] [--line-mode]`
+- Status: `done` (core API); `tail_file` and CLI integration planned as follow-up
+- Shipped: `match_file`, `match_file_lines`, `scan_file`, `scan_file_lines` with `FileMatch` struct; 5 tests.
+- Remaining: `tail_file` (streaming/watching), mmap for large files, CLI `--file` / `--line-mode` flags.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 6
 
 ### Host integration Layer 3: Match Steering

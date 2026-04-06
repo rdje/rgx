@@ -37,6 +37,7 @@ If you are new to the repo, use this order:
 - [`rgx-core/src/vm.rs`](rgx-core/src/vm.rs) — VM bytecode execution engine
 - [`rgx-core/src/engine.rs`](rgx-core/src/engine.rs) — runtime dispatch on compiled patterns
 - [`rgx-core/src/events.rs`](rgx-core/src/events.rs) — structured match events for debugging/profiling
+- [`rgx-core/src/file.rs`](rgx-core/src/file.rs) — file-backed matching (match_file, scan_file, line-oriented)
 - [`rgx-core/src/execution.rs`](rgx-core/src/execution.rs) — execution/callback runtime layer
 - [`rgx-core/src/log.rs`](rgx-core/src/log.rs) — structured tracing and verbosity control
 - [`rgx-core/src/error.rs`](rgx-core/src/error.rs) — error types

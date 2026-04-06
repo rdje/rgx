@@ -90,6 +90,10 @@ pub mod rhai;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+// File-backed matching
+/// File-backed matching — scan files directly without loading into a String.
+pub mod file;
+
 // Error handling
 /// Shared error types and result aliases.
 pub mod error;
@@ -103,6 +107,7 @@ pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
 pub use events::MatchEvent;
 pub use execution::{CodeBlockValue, ExecContext, ExecResult, SteerResult};
+pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
 
 /// High-performance regex matcher with optional code execution capabilities.

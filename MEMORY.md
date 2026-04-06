@@ -81,6 +81,7 @@ Live continuity memory for `rgx` sessions.
 - `find_all` zero-width suppression matches PCRE2 iteration semantics
 
 ### Host integration
+- **Layer 6 File-Backed Matching shipped (core API)**: `match_file`, `match_file_lines`, `scan_file`, `scan_file_lines` — line-oriented mode with `FileMatch` struct carrying line numbers; `tail_file` and CLI integration deferred
 - **Layer 4 Structured Events shipped**: `MatchEvent` enum with 6 variants; `Regex::on_event(observer)` API; zero overhead when no observer; instrumented all scanning strategies and key VM opcodes
 - **Layer 3 Match Steering shipped**: `SteerResult` enum with `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort` — callbacks can now actively control match execution
 - `ExecResult::Steer(SteerResult)` extends the callback return type; VM dispatches all actions

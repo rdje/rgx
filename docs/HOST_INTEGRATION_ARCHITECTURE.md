@@ -288,7 +288,7 @@ let result = re.find_first_async("input text").await;
 
 ### Layer 6 — File-Backed Matching
 
-**Status: `planned`**
+**Status: `shipped` (core API; `tail_file` planned)**
 
 Engine connects directly to filesystem files, matching against contents that may be static or still being written. Combined with host callbacks, this creates a reactive file-processing pipeline.
 

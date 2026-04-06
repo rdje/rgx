@@ -138,7 +138,7 @@ Representative test anchors:
 - Layer 3 — Match Steering: `shipped` (SteerResult: Continue, Fail, Accept, Skip, Abort via native callbacks)
 - Layer 4 — Structured Events: `shipped` (MatchEvent: 6 event types, on_event observer API, zero overhead)
 - Layer 5 — Async I/O: `planned`
-- Layer 6 — File-Backed Matching: `planned`
+- Layer 6 — File-Backed Matching: `shipped` (core: match_file, match_file_lines, scan_file, scan_file_lines; tail_file planned)
 
 ## Notes for roadmap usage
 - This matrix is implementation-facing and must reflect verified behavior only.
