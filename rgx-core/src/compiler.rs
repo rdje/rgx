@@ -1580,6 +1580,8 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => (ast, next_group),
         }
@@ -1814,6 +1816,8 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => Ok((ast, opened_groups)),
         }
@@ -1956,6 +1960,8 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2405,6 +2411,8 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => None,
         }
@@ -2553,6 +2561,8 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => 0,
         }
@@ -2630,6 +2640,8 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::MatchReset
+            | RegexAst::NewlineSequence
             | RegexAst::WhitespaceLiteral(_)
             | RegexAst::Empty => {}
         }

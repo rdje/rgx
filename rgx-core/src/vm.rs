@@ -35,6 +35,8 @@ pub enum OpCode {
     // 0x04 removed: StringNoCase (never emitted)
     /// Match any character including newline (dotall / (?s) mode)
     AnyDotAll = 0x05,
+    /// \K — Reset the reported match start to the current position
+    MatchReset = 0x06,
 
     // === CHARACTER CLASSES (0x10-0x1F) ===
     /// ASCII digit [0-9]
@@ -188,6 +190,8 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Conditional { .. } => "Conditional",
         Regex::Recursion { .. } => "Recursion",
         Regex::FlagGroup { .. } => "FlagGroup",
+        Regex::MatchReset => "MatchReset",
+        Regex::NewlineSequence => "NewlineSequence",
         Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
     }
 }
@@ -345,6 +349,10 @@ pub struct ExecContext {
     pub recursion_stack: Vec<(usize, usize)>,
     /// Last non-boolean code-block value observed on the current path.
     pub code_result: Option<CodeBlockValue>,
+    /// Override for match start set by `\K` (`MatchReset` opcode).
+    /// When `Some(pos)`, the reported match start is `pos` instead of the
+    /// scanning-loop's `start` variable.
+    pub match_start_override: Option<usize>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -564,6 +572,7 @@ impl RegexVM {
             current_alternative: None,
             recursion_stack: Vec::new(),
             code_result: None,
+            match_start_override: None,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -687,10 +696,11 @@ impl RegexVM {
             Self::reset_captures(ctx);
 
             if self.execute_at(ctx, candidate_pos) {
+                let effective_start = ctx.match_start_override.unwrap_or(candidate_pos);
                 let matched = Some(Match {
-                    start: candidate_pos,
+                    start: effective_start,
                     end: ctx.pos,
-                    groups: self.extract_captures_with_match(ctx, candidate_pos, ctx.pos),
+                    groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                     code_result: ctx.code_result.clone(),
                 });
@@ -698,7 +708,7 @@ impl RegexVM {
                     "vm",
                     "RegexVM::find_first_simd",
                     "matched=true, start={}, end={}",
-                    candidate_pos,
+                    effective_start,
                     ctx.pos
                 );
                 return matched;
@@ -719,10 +729,11 @@ impl RegexVM {
         );
         // Only try match at start for ^ anchor
         if self.execute_at(ctx, 0) {
+            let effective_start = ctx.match_start_override.unwrap_or(0);
             let matched = Some(Match {
-                start: 0,
+                start: effective_start,
                 end: ctx.pos,
-                groups: self.extract_captures_with_match(ctx, 0, ctx.pos),
+                groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                 matched_alternative: ctx.current_alternative,
                 code_result: ctx.code_result.clone(),
             });
@@ -804,11 +815,12 @@ impl RegexVM {
                 ctx.pos = start;
                 Self::reset_captures(ctx);
                 if self.execute_at(ctx, start) {
+                    let effective_start = ctx.match_start_override.unwrap_or(start);
                     trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
-                        start,
+                        start: effective_start,
                         end: ctx.pos,
-                        groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                        groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
                     });
@@ -825,11 +837,12 @@ impl RegexVM {
                 ctx.pos = start;
                 Self::reset_captures(ctx);
                 if self.execute_at(ctx, start) {
+                    let effective_start = ctx.match_start_override.unwrap_or(start);
                     trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
                     return Some(Match {
-                        start,
+                        start: effective_start,
                         end: ctx.pos,
-                        groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                        groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
                     });
@@ -841,11 +854,12 @@ impl RegexVM {
         ctx.pos = start;
         Self::reset_captures(ctx);
         if self.execute_at(ctx, start) {
+            let effective_start = ctx.match_start_override.unwrap_or(start);
             trace_exit!("vm", "RegexVM::find_first_scanning", "matched=true");
             return Some(Match {
-                start,
+                start: effective_start,
                 end: ctx.pos,
-                groups: self.extract_captures_with_match(ctx, start, ctx.pos),
+                groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                 matched_alternative: ctx.current_alternative,
                 code_result: ctx.code_result.clone(),
             });
@@ -915,6 +929,7 @@ impl RegexVM {
             current_alternative: ctx.current_alternative,
             recursion_stack: ctx.recursion_stack.clone(),
             code_result: ctx.code_result.clone(),
+            match_start_override: ctx.match_start_override,
         }
     }
 
@@ -968,6 +983,7 @@ impl RegexVM {
         ctx.pos = start;
         ctx.match_start = start;
         ctx.code_result = None;
+        ctx.match_start_override = None;
         let mut ip = 0;
         let code = &self.program.code;
 
@@ -1252,6 +1268,11 @@ impl RegexVM {
                 OpCode::Match => {
                     debug_log!("vm", "  ✓✓ MATCH opcode reached at pos={}", ctx.pos);
                     return true;
+                }
+
+                OpCode::MatchReset => {
+                    debug_log!("vm", "  \\K match reset at pos={}", ctx.pos);
+                    ctx.match_start_override = Some(ctx.pos);
                 }
 
                 OpCode::WordBoundary => {
@@ -2205,6 +2226,7 @@ impl RegexVM {
             current_alternative: None,
             recursion_stack: Vec::new(),
             code_result: None,
+            match_start_override: None,
         };
 
         let mut matches = Vec::new();
@@ -2221,7 +2243,7 @@ impl RegexVM {
                 ctx.match_start = candidate;
                 Self::reset_captures(&mut ctx);
                 if self.execute_at(&mut ctx, candidate) {
-                    let m_start = candidate;
+                    let m_start = ctx.match_start_override.unwrap_or(candidate);
                     let m_end = ctx.pos;
                     // Suppress zero-width match at the exact end of a previous consuming match
                     if m_start == m_end && last_match_end == Some(m_start) {
@@ -2236,7 +2258,7 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     };
                     last_match_end = Some(m_end);
-                    start = m_end.max(m_start + 1);
+                    start = m_end.max(candidate + 1);
                     matches.push(m);
                 } else {
                     start = candidate + 1;
@@ -2254,7 +2276,7 @@ impl RegexVM {
                 ctx.match_start = start;
                 Self::reset_captures(&mut ctx);
                 if self.execute_at(&mut ctx, start) {
-                    let m_start = start;
+                    let m_start = ctx.match_start_override.unwrap_or(start);
                     let m_end = ctx.pos;
                     // Suppress zero-width match at the exact end of a previous consuming match
                     if m_start == m_end && last_match_end == Some(m_start) {
@@ -2269,7 +2291,7 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     };
                     last_match_end = Some(m_end);
-                    start = m_end.max(m_start + 1);
+                    start = m_end.max(start + 1);
                     matches.push(m);
                 } else {
                     start += 1;
@@ -2965,6 +2987,10 @@ impl RegexVM {
 
                 OpCode::Match => {
                     return true;
+                }
+
+                OpCode::MatchReset => {
+                    ctx.match_start_override = Some(ctx.pos);
                 }
 
                 _ => {
@@ -4140,6 +4166,30 @@ impl OptimizingCompiler {
                 self.case_insensitive = saved_case_insensitive;
             }
 
+            Regex::MatchReset => {
+                self.emit_op(OpCode::MatchReset);
+            }
+
+            Regex::NewlineSequence => {
+                // Expand \R into (?:\r\n|\r|\n|\x0B|\x0C|\x85|\u{2028}|\u{2029})
+                let expanded = Regex::Group {
+                    kind: GroupKind::NonCapturing,
+                    expr: Box::new(Regex::Alternation(vec![
+                        Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')]),
+                        Regex::Char('\r'),
+                        Regex::Char('\n'),
+                        Regex::Char('\x0B'),
+                        Regex::Char('\x0C'),
+                        Regex::Char('\u{0085}'),
+                        Regex::Char('\u{2028}'),
+                        Regex::Char('\u{2029}'),
+                    ])),
+                    index: None,
+                    name: None,
+                };
+                self.codegen_pass(&expanded, false);
+            }
+
             Regex::Empty => {
                 // Empty/epsilon — trivially matches without consuming input.
                 // No bytecode needed; execution simply falls through to the
@@ -4393,6 +4443,8 @@ impl OptimizingCompiler {
             | Regex::NamedBackreference(_)
             | Regex::Recursion { .. }
             | Regex::CodeBlock { .. }
+            | Regex::MatchReset
+            | Regex::NewlineSequence
             | Regex::WhitespaceLiteral(_)
             | Regex::Empty => {}
         }
@@ -4400,6 +4452,7 @@ impl OptimizingCompiler {
 
     #[allow(clippy::cast_possible_truncation)] // Char-class IDs are single-byte operands.
     #[allow(clippy::only_used_in_recursion)]
+    #[allow(clippy::too_many_lines)] // Opcode dispatch covers all variants in a single walk — splitting would scatter the iteration logic.
     fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
         if char_class_base == 0 || code.is_empty() {
             return;
@@ -4496,6 +4549,7 @@ impl OptimizingCompiler {
                 | OpCode::NonWordBoundary
                 | OpCode::AtomicStart
                 | OpCode::AtomicEnd
+                | OpCode::MatchReset
                 | OpCode::Match
                 | OpCode::Fail
                 | OpCode::Accept
@@ -4656,14 +4710,15 @@ impl TryFrom<u8> for OpCode {
             Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
             CodeBlock, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump,
             JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
-            NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy, SaveEnd,
-            SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
-            StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
+            MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy,
+            SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy,
+            StarGreedy, StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
             0x01 => Ok(Any),
             0x05 => Ok(AnyDotAll),
+            0x06 => Ok(MatchReset),
             0x10 => Ok(DigitAscii),
             0x11 => Ok(DigitAsciiNeg),
             0x12 => Ok(WordAscii),

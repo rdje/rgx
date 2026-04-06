@@ -644,6 +644,12 @@ impl<'a> PgenAstAdapter<'a> {
             'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
             'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
 
+            // PCRE2 match reset (\K)
+            'K' => Ok(Regex::MatchReset),
+
+            // PCRE2 newline sequence (\R)
+            'R' => Ok(Regex::NewlineSequence),
+
             // Literal control-character escapes: \n, \t, \r, \f, \a, \e
             'n' => Ok(Regex::Char('\n')),
             't' => Ok(Regex::Char('\t')),

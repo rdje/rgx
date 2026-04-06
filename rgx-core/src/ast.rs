@@ -137,6 +137,12 @@ pub enum Regex {
         expr: Box<Regex>,
     },
 
+    // PCRE2 special assertions
+    /// \K — Match reset: resets the reported match start to the current position
+    MatchReset,
+    /// \R — Newline sequence: matches \r\n, \r, \n, \x0B, \x0C, \x85, \u{2028}, \u{2029}
+    NewlineSequence,
+
     // Special
     /// Empty pattern (epsilon)
     Empty,

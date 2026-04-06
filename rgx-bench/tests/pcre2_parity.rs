@@ -1371,6 +1371,125 @@ fn pcre2_parity_supported_conditionals() {
 }
 
 #[test]
+fn pcre2_parity_supported_match_reset() {
+    let cases = [
+        ParityCase {
+            name: "match_reset_basic",
+            pattern: r"foo\Kbar",
+            input: "foobar",
+        },
+        ParityCase {
+            name: "match_reset_no_prefix",
+            pattern: r"foo\Kbar",
+            input: "bar",
+        },
+        ParityCase {
+            name: "match_reset_in_longer_text",
+            pattern: r"foo\Kbar",
+            input: "xxfoobarxx",
+        },
+        ParityCase {
+            name: "match_reset_find_all",
+            pattern: r"foo\Kbar",
+            input: "foobar foobar",
+        },
+        ParityCase {
+            name: "match_reset_with_quantifier",
+            pattern: r"\d+\K\w+",
+            input: "123abc",
+        },
+    ];
+
+    for case in cases {
+        let rgx_first = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2_first = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx_first, pcre2_first,
+            "match_reset first-match mismatch for '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+
+        let rgx_all = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2_all = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx_all, pcre2_all,
+            "match_reset find_all mismatch for '{}' (pattern '{}', input '{}')",
+            case.name, case.pattern, case.input
+        );
+    }
+}
+
+#[test]
+fn pcre2_parity_supported_newline_sequence() {
+    let cases = [
+        ParityCase {
+            name: "newline_sequence_lf",
+            pattern: r"\R",
+            input: "\n",
+        },
+        ParityCase {
+            name: "newline_sequence_cr",
+            pattern: r"\R",
+            input: "\r",
+        },
+        ParityCase {
+            name: "newline_sequence_crlf",
+            pattern: r"\R",
+            input: "\r\n",
+        },
+        ParityCase {
+            name: "newline_sequence_vt",
+            pattern: r"\R",
+            input: "\x0B",
+        },
+        ParityCase {
+            name: "newline_sequence_ff",
+            pattern: r"\R",
+            input: "\x0C",
+        },
+        // NEL (\u{0085}), LS (\u{2028}), PS (\u{2029}) are multi-byte in
+        // UTF-8 and PCRE2 byte-mode spans differ from our UTF-8 spans, so
+        // those are covered only in the rgx-core unit tests.
+        ParityCase {
+            name: "newline_sequence_find_all_mixed",
+            pattern: r"\R",
+            input: "a\r\nb\nc",
+        },
+        ParityCase {
+            name: "newline_sequence_no_match",
+            pattern: r"\R",
+            input: "abc",
+        },
+    ];
+
+    for case in cases {
+        let rgx_first = rgx_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
+        let pcre2_first = pcre2_first_span(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 first error: {e}", case.name));
+        assert_eq!(
+            rgx_first, pcre2_first,
+            "newline_sequence first-match mismatch for '{}' (pattern '{}', input '{:?}')",
+            case.name, case.pattern, case.input
+        );
+
+        let rgx_all = rgx_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] rgx all error: {e}", case.name));
+        let pcre2_all = pcre2_all_spans(case.pattern, case.input)
+            .unwrap_or_else(|e| panic!("[{}] pcre2 all error: {e}", case.name));
+        assert_eq!(
+            rgx_all, pcre2_all,
+            "newline_sequence find_all mismatch for '{}' (pattern '{}', input '{:?}')",
+            case.name, case.pattern, case.input
+        );
+    }
+}
+
+#[test]
 fn pcre2_parity_supported_combined_feature_patterns() {
     let cases = [
         // Nested lookarounds

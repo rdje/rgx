@@ -4091,4 +4091,104 @@ mod tests {
         assert!(re.is_match("ab c d")); // ab from x-mode, " c d" literal outside
         assert!(!re.is_match("abc d")); // space before c is required
     }
+
+    // ======================================================================
+    // \K (Match Reset) tests
+    // ======================================================================
+
+    #[test]
+    fn match_reset_basic() {
+        let re = Regex::compile(r"foo\Kbar").unwrap();
+        let m = re.find_first("foobar").unwrap();
+        assert_eq!((m.start, m.end), (3, 6)); // reports "bar" not "foobar"
+    }
+
+    #[test]
+    fn match_reset_no_match_without_prefix() {
+        let re = Regex::compile(r"foo\Kbar").unwrap();
+        assert!(!re.is_match("bar")); // "foo" prefix still required
+    }
+
+    #[test]
+    fn match_reset_in_longer_text() {
+        let re = Regex::compile(r"foo\Kbar").unwrap();
+        let m = re.find_first("xxfoobarxx").unwrap();
+        assert_eq!((m.start, m.end), (5, 8)); // "bar" within "xxfoobarxx"
+    }
+
+    #[test]
+    fn match_reset_find_all() {
+        let re = Regex::compile(r"foo\Kbar").unwrap();
+        let all = re.find_all("foobar foobar");
+        assert_eq!(all.len(), 2);
+        assert_eq!((all[0].start, all[0].end), (3, 6));
+        assert_eq!((all[1].start, all[1].end), (10, 13));
+    }
+
+    // ======================================================================
+    // \R (Newline Sequence) tests
+    // ======================================================================
+
+    #[test]
+    fn newline_sequence_crlf() {
+        let re = Regex::compile(r"\R").unwrap();
+        let m = re.find_first("\r\n").unwrap();
+        assert_eq!((m.start, m.end), (0, 2)); // CRLF is one \R match
+    }
+
+    #[test]
+    fn newline_sequence_lf() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\n"));
+    }
+
+    #[test]
+    fn newline_sequence_cr() {
+        let re = Regex::compile(r"\R").unwrap();
+        let m = re.find_first("\r").unwrap();
+        assert_eq!((m.start, m.end), (0, 1));
+    }
+
+    #[test]
+    fn newline_sequence_vertical_tab() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\x0B"));
+    }
+
+    #[test]
+    fn newline_sequence_form_feed() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\x0C"));
+    }
+
+    #[test]
+    fn newline_sequence_nel() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\u{0085}"));
+    }
+
+    #[test]
+    fn newline_sequence_line_separator() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\u{2028}"));
+    }
+
+    #[test]
+    fn newline_sequence_paragraph_separator() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(re.is_match("\u{2029}"));
+    }
+
+    #[test]
+    fn newline_sequence_find_all() {
+        let re = Regex::compile(r"\R").unwrap();
+        let all = re.find_all("a\r\nb\nc");
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn newline_sequence_no_match_on_regular_text() {
+        let re = Regex::compile(r"\R").unwrap();
+        assert!(!re.is_match("abc"));
+    }
 }

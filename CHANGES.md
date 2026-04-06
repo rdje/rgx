@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship \K match-reset and \R newline sequence escapes
+- Scope: two new PCRE2 escape sequences.
+- Changes:
+  - `\K` resets the reported match start without affecting what the engine matches. `foo\Kbar` on `foobar` reports match `bar` (span 3..6).
+  - `\R` matches any newline sequence: `\r\n` (CRLF tried first), `\r`, `\n`, `\x0B`, `\x0C`, `\x85`, `\u{2028}`, `\u{2029}`.
+  - `\K` implemented via new `MatchReset` opcode (0x06) and `match_start_override` field in ExecContext.
+  - `\R` expanded at codegen time into `(?:\r\n|\r|\n|...)` alternation.
+  - Added 14 unit tests and 12 PCRE2 parity tests across both features.
+- Validation:
+  - `cargo test -p rgx-core` (258 pass), `-p rgx-bench` (39 pass), 0 clippy warnings
+
 ### 2026-04-06 - Ship extended/verbose mode (?x:...)
 - Scope: new regex feature — extended mode where unescaped whitespace is ignored and `#` starts comments.
 - Changes:
