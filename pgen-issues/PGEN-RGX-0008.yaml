@@ -1,0 +1,118 @@
+id: PGEN-RGX-0008
+summary: |
+  Language-tagged code blocks (?{lua:...}) always parse as code_block_plain instead of code_block_lang due to PEG ordering, and code_lang is missing rhai/native/wasm tags
+status: open
+opened_at: 2026-04-06T00:00:00Z
+first_seen_at: 2026-04-06T00:00:00Z
+last_updated_at: 2026-04-06T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.3
+rgx_commit: 72045355b5a1e5a4bec15e53e2f63fdea3f51d6a
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0008/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0008/pgen_ast_dump.json --profile regex_default
+  pattern: '(?{lua:return true})'
+  input: '(?{lua:return true})'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 962acfd9004326011efde5c0a3ba91e10e260aac
+    Regex parser release version: 1.1.3
+    Regex integration contract version: 1.1.3
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+
+    Two sub-issues in the regex.ebnf grammar:
+
+    Issue A — PEG ordering:
+      Line 301: code_block = code_block_plain | code_block_lang
+      Since code_block_plain = "(?{" code_content "})" and code_content
+      matches any code_element* (including ":"), the plain alternative
+      always wins for language-tagged patterns like (?{lua:return true}).
+      The code_block_lang alternative is unreachable.
+
+    Issue B — Missing language tags:
+      Line 304: code_lang = "lua" | "js" | "javascript"
+      RGX ships rhai, native, and wasm code-block backends, all of which
+      use the (?{lang:code}) syntax. These are missing from code_lang.
+      Per the PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md,
+      rhai should be a source-body tag, and native/wasm should be
+      reference-style tags.
+expected_behavior: |
+  Fix A — Swap PEG ordering:
+    code_block = code_block_lang | code_block_plain
+
+  This way code_block_lang is tried first. If the content starts with a
+  recognized language tag followed by ":", PGEN produces a code_block_lang
+  node with a code_lang child identifying the language and a separate
+  code_content child for the body. If no known tag matches, PEG falls
+  through to code_block_plain.
+
+  Fix B — Expand code_lang:
+    code_lang = "lua" | "js" | "javascript" | "rhai" | "native" | "wasm"
+
+  This brings code_lang in line with the tag set documented in
+  PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md.
+
+  Expected AST for (?{lua:return true}):
+    atom -> code_block -> code_block_lang [Sequence]
+      element_0: Terminal("(?{")
+      element_1 -> code_lang: Terminal("lua")
+      element_2: Terminal(":")
+      element_3 -> code_content: [code_element*]
+      element_4: Terminal("})")
+actual_behavior: |
+  PGEN parses (?{lua:return true}) as code_block_plain:
+    atom -> code_block -> code_block_plain [Sequence]
+      element_0: Terminal("(?{")
+      element_1 -> code_content: [code_element*]  -- contains "lua:return true" as undifferentiated chars
+      element_2: Terminal("})")
+
+  Evidence from pgen_ast_dump.json:
+    - 0 occurrences of rule_name "code_block_lang"
+    - 0 occurrences of rule_name "code_lang"
+    - 1 occurrence of "code_block_plain"
+    - The ":" is consumed as code_safe_special inside code_content
+
+  Downstream consumers must string-parse the code_content span to
+  extract the language prefix, duplicating work PGEN's grammar was
+  designed to do.
+reproduction: |
+  Smallest reproducer:
+    pattern: (?{lua:return true})
+    input file: pgen-issues/artifacts/PGEN-RGX-0008/repro_input.txt (20 bytes)
+
+  Also affected: (?{rhai:foo}), (?{native:cb}), (?{wasm:mod:fn}),
+  (?{js:code}), (?{javascript:code})
+
+  Commands: see context.command above.
+
+  Artifacts: pgen-issues/artifacts/PGEN-RGX-0008/
+impact: |
+  This is a grammar design issue (class: "parses but returns the wrong
+  AST/dump"). Language-tagged code blocks are a key RGX feature — the
+  engine supports 5 code-block backends (lua, js/javascript, rhai,
+  native, wasm). Without code_block_lang, the adapter must string-parse
+  every code block to extract the language tag.
+
+  RGX-side workaround (currently in place): convert_code_block reads the
+  span text and splits on the first ":" to separate lang from body. This
+  works but defeats the purpose of having a structured grammar.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    When fixed upstream, verify:
+    1. (?{lua:return true}) produces code_block_lang with code_lang="lua"
+    2. (?{rhai:foo}) produces code_block_lang with code_lang="rhai"
+    3. (?{native:cb}) produces code_block_lang with code_lang="native"
+    4. (?{wasm:mod:fn}) produces code_block_lang with code_lang="wasm"
+    5. (?{plain body}) still produces code_block_plain (no tag)
+    Then remove the span-text string-parsing from RGX's convert_code_block.
