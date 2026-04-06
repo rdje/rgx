@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Use PGEN structured AST for remaining adapter sites; file PGEN-RGX-0010
+- Scope: eliminate remaining string-parsing in the PGEN adapter.
+- Changes:
+  - `convert_extended_char_class` now reads `extended_class_content` child structurally.
+  - `convert_condition` rewritten to dispatch on PGEN child rule names (`recursion_condition`, `name_ref`, `signed_digits`, `name`) instead of text parsing. Split into 5 focused methods.
+  - `parse_counted_quantifier` now walks `counted_quantifier_body` children.
+  - String-parsing sites reduced from 11 to **4** (2 untagged code block fallback, 2 R1 ambiguity workaround).
+  - Filed `PGEN-RGX-0010` for `(?(R1)...)` ambiguity: PGEN parses `R1` as a bare name instead of `recursion_condition` with group number.
+- Validation:
+  - All 282 tests pass, 0 clippy warnings.
+- Notes/impact:
+  - The adapter now uses PGEN's structured AST for virtually all constructs. The 4 remaining string-parsing sites are either intentional (untagged code blocks have no structure) or workarounds for open PGEN issues.
+
 ### 2026-04-06 - Bump PGEN to 1.1.6, close PGEN-RGX-0009
 - Scope: PGEN submodule upgrade verifying the code_content span fix.
 - Changes:

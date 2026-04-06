@@ -45,6 +45,8 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
+- Adapter string-parsing reduced from 31 → **4** sites; remaining 4 are untagged code block fallback (2) and PGEN-RGX-0010 R1 workaround (2)
+- **PGEN-RGX-0010** filed: `(?(R1)...)` parsed as bare `name("R1")` instead of `recursion_condition` with group 1
 - **Accuracy fix**: `^` and `$` now compile to single-line semantics by default (matching PCRE2), not multiline
   - previously `^` matched after `\n` and `$` matched before `\n` without `(?m)` — incorrect
   - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support

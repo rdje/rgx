@@ -1,0 +1,104 @@
+id: PGEN-RGX-0010
+summary: |
+  Conditional condition (?(R1)...) is ambiguous: PGEN produces `name` child with text "R1" instead of `recursion_condition` with group number 1
+status: open
+opened_at: 2026-04-04T00:00:00Z
+first_seen_at: 2026-04-04T00:00:00Z
+last_updated_at: 2026-04-04T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.6
+rgx_commit: 42b52a7cb5fa90ce83a2a36a0f920270e807a565
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0010/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0010/pgen_ast_dump.json --profile regex_default
+  pattern: '(a)(?(R1)b|c)'
+  input: '(a)(?(R1)b|c)'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: f876a609b22dad349572cf9421de8bf0af0e5183
+    Regex parser release version: 1.1.6
+    Regex integration contract version: 1.1.6
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+
+    Root cause (from regex.ebnf condition grammar):
+      The `condition` rule uses an ordered-choice (PEG alternation) for its
+      payload. The `name` alternative matches before `recursion_condition`
+      because "R1" is a valid identifier. In standard PCRE/Perl semantics,
+      (?(R1)...) means "test whether the current recursion is subroutine 1",
+      NOT "test whether a group named R1 was captured".
+
+      The grammar cannot distinguish R1-as-recursion from R1-as-name without
+      either:
+        (a) reordering the PEG alternatives so recursion_condition is tried
+            before name, or
+        (b) adding a negative lookahead in the name rule to exclude R-prefixed
+            identifiers that match the recursion syntax.
+
+    This also affects R2, R3, ..., R99, etc. The bare "R" case may or may
+    not be affected depending on whether a separate alternative handles it.
+expected_behavior: |
+  For (?(R1)b|c):
+    condition -> recursion_condition [Sequence]
+      element_0: Terminal("R")
+      element_1 -> digits: digit Terminal("1")
+
+  The `recursion_condition` alternative should be tried before `name` in the
+  PEG ordering, so that R followed by digits is always parsed as a recursion
+  condition rather than a bare name.
+
+  Alternatively, the `name` rule could exclude R-digit sequences via a
+  negative lookahead:
+    condition_name = !("R" digit+) name
+actual_behavior: |
+  For (?(R1)b|c):
+    condition -> name [Sequence]
+      element_0 -> letter: Terminal("R")
+      element_1 -> name_chars [Quantified*]
+        quantified -> name_char -> digit: Terminal("1")
+
+  Evidence from pgen_ast_dump.json:
+    - 0 occurrences of rule_name "recursion_condition"
+    - 1 occurrence of rule_name "name" under condition, with span [6, 8]
+    - The name node has terminals "R" + "1", producing the text "R1"
+    - Pattern[6..8] = "R1"
+
+  Downstream consumers must string-parse the `name` text to detect the
+  R-prefix pattern and disambiguate recursion conditions from named-group
+  existence tests.
+reproduction: |
+  Smallest reproducer:
+    pattern: (a)(?(R1)b|c)
+    input file: pgen-issues/artifacts/PGEN-RGX-0010/repro_input.txt (14 bytes)
+
+  Also affected: (?(R2)...), (?(R99)...), any (?(R<digits>)...) form.
+  NOT affected: (?(R)...) (bare R may use a separate alternative),
+                (?(R&name)...) (uses & delimiter).
+
+  Commands: see context.command above.
+
+  Artifacts: pgen-issues/artifacts/PGEN-RGX-0010/
+impact: |
+  This is a grammar ambiguity (class: "parses but returns the wrong AST
+  structure"). The condition `(?(R1)...)` is a recursion test (PCRE/Perl
+  semantics), but PGEN parses it as a named-group existence test. This
+  means the structured AST does not distinguish the two cases.
+
+  RGX-side workaround (currently in place): convert_condition_text_fallback
+  checks for a bare `name` child and inspects the name text for R-prefixed
+  patterns using strip_prefix. If the name matches R followed by digits,
+  it is reinterpreted as RecursionGroup. This works for all known cases
+  but relies on the assumption that no user-defined group is literally
+  named "R1", "R2", etc.
+resolution:
+  status: open
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: null

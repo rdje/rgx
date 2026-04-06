@@ -1176,12 +1176,13 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn convert_extended_char_class(&self, node: &PgenAstNode) -> Result<Regex> {
-        let fragment = self.slice(node)?;
-        let content = fragment
-            .strip_prefix("(?[")
-            .and_then(|value| value.strip_suffix("])"))
+        let content = self
+            .first_descendant(node, "extended_class_content")
+            .and_then(|n| self.slice(n).ok())
             .ok_or_else(|| {
-                self.contract_error("pgen extended_class did not retain '(?[...])' delimiters")
+                self.contract_error(
+                    "pgen extended_class is missing its extended_class_content child",
+                )
             })?;
         Ok(Regex::ExtendedCharClass {
             content: content.to_string(),
@@ -1210,99 +1211,138 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn convert_condition(&self, node: &PgenAstNode) -> Result<ConditionalTest> {
+        // Lookaround assertion (already structurally handled)
         if let Some(assertion) = self.first_descendant(node, "condition_assertion") {
-            let assertion_text = self.slice(assertion)?;
-            let pattern = self.first_descendant(assertion, "pattern").ok_or_else(|| {
-                self.contract_error("pgen condition assertion is missing its pattern")
-            })?;
-            let expr = self.convert_pattern(pattern)?;
-            return match assertion_text.get(..2) {
-                Some("?=") => Ok(ConditionalTest::Lookahead {
-                    expr: Box::new(expr),
-                    positive: true,
-                }),
-                Some("?!") => Ok(ConditionalTest::Lookahead {
-                    expr: Box::new(expr),
-                    positive: false,
-                }),
-                _ if assertion_text.starts_with("?<=") => Ok(ConditionalTest::Lookbehind {
-                    expr: Box::new(expr),
-                    positive: true,
-                }),
-                _ if assertion_text.starts_with("?<!") => Ok(ConditionalTest::Lookbehind {
-                    expr: Box::new(expr),
-                    positive: false,
-                }),
-                _ => Err(self.contract_error(&format!(
-                    "unsupported pgen condition assertion '{assertion_text}'"
-                ))),
-            };
+            return self.convert_condition_assertion(assertion);
         }
+        // Recursion condition: R, R&name, R<N> — structured child from PGEN
+        if let Some(rec) = self.first_descendant(node, "recursion_condition") {
+            return self.convert_condition_recursion(rec);
+        }
+        // Name reference: <name> or 'name' — structured child from PGEN
+        if let Some(name_ref) = self.first_descendant(node, "name_ref") {
+            let name = self.name_text(name_ref)?;
+            return Ok(ConditionalTest::NamedGroupExists(name));
+        }
+        // Signed digits: group number, +N, -N — structured child from PGEN
+        if let Some(sd) = self.first_descendant(node, "signed_digits") {
+            return self.convert_condition_signed_digits(sd);
+        }
+        // DEFINE keyword, bare name (R1 ambiguity PGEN-RGX-0010), or bare number
+        self.convert_condition_text_fallback(node)
+    }
 
-        let text = self.slice(node)?.trim();
-        if let Some(inner) = text
-            .strip_prefix('<')
-            .and_then(|value| value.strip_suffix('>'))
-        {
-            return Ok(ConditionalTest::NamedGroupExists(inner.to_string()));
+    fn convert_condition_assertion(&self, assertion: &PgenAstNode) -> Result<ConditionalTest> {
+        let assertion_text = self.slice(assertion)?;
+        let pattern = self.first_descendant(assertion, "pattern").ok_or_else(|| {
+            self.contract_error("pgen condition assertion is missing its pattern")
+        })?;
+        let expr = self.convert_pattern(pattern)?;
+        match assertion_text.get(..2) {
+            Some("?=") => Ok(ConditionalTest::Lookahead {
+                expr: Box::new(expr),
+                positive: true,
+            }),
+            Some("?!") => Ok(ConditionalTest::Lookahead {
+                expr: Box::new(expr),
+                positive: false,
+            }),
+            _ if assertion_text.starts_with("?<=") => Ok(ConditionalTest::Lookbehind {
+                expr: Box::new(expr),
+                positive: true,
+            }),
+            _ if assertion_text.starts_with("?<!") => Ok(ConditionalTest::Lookbehind {
+                expr: Box::new(expr),
+                positive: false,
+            }),
+            _ => Err(self.contract_error(&format!(
+                "unsupported pgen condition assertion '{assertion_text}'"
+            ))),
         }
-        if text == "R" {
-            return Ok(ConditionalTest::RecursionAny);
+    }
+
+    fn convert_condition_recursion(&self, rec: &PgenAstNode) -> Result<ConditionalTest> {
+        if let Some(name_node) = self.first_descendant(rec, "name") {
+            return Ok(ConditionalTest::RecursionNamed(
+                self.slice(name_node)?.to_string(),
+            ));
         }
-        if let Some(name) = text.strip_prefix("R&") {
-            if !name.is_empty()
-                && name
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-            {
-                return Ok(ConditionalTest::RecursionNamed(name.to_string()));
-            }
-            return Err(self.contract_error(&format!(
-                "invalid recursion conditional name reference '{text}'"
-            )));
-        }
-        if let Some(value) = text.strip_prefix('R') {
-            if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
-                let group = value.parse::<u32>().map_err(|_| {
-                    self.contract_error(&format!(
-                        "invalid recursion conditional group reference '{text}'"
-                    ))
-                })?;
-                if group == 0 {
-                    return Err(self.contract_error(&format!(
-                        "invalid recursion conditional group reference '{text}'"
-                    )));
-                }
-                return Ok(ConditionalTest::RecursionGroup(group));
-            }
-        }
-        if text == "DEFINE" {
-            return Ok(ConditionalTest::Define);
-        }
-        if let Some(value) = text.strip_prefix('+') {
-            let group = value.parse::<u32>().map_err(|_| {
+        // R with digits = RecursionGroup, R alone = RecursionAny
+        let mut digits = String::new();
+        self.walk_collect_terminal_chars(rec, "digit", &mut digits);
+        if !digits.is_empty() {
+            let group: u32 = digits.parse().map_err(|_| {
                 self.contract_error(&format!(
-                    "invalid positive conditional group reference '{text}'"
-                ))
-            })?;
-            #[allow(clippy::cast_possible_wrap)] // Positive group refs are small enough for i32.
-            return Ok(ConditionalTest::RelativeGroupExists(group as i32));
-        }
-        if text.starts_with('-') {
-            let group = text.parse::<i32>().map_err(|_| {
-                self.contract_error(&format!(
-                    "invalid negative conditional group reference '{text}'"
+                    "invalid recursion conditional group digits '{digits}'"
                 ))
             })?;
             if group == 0 {
-                return Err(self.contract_error(&format!(
-                    "invalid negative conditional group reference '{text}'"
-                )));
+                return Err(
+                    self.contract_error("invalid recursion conditional group reference 'R0'")
+                );
             }
-            return Ok(ConditionalTest::RelativeGroupExists(group));
+            return Ok(ConditionalTest::RecursionGroup(group));
         }
+        Ok(ConditionalTest::RecursionAny)
+    }
+
+    fn convert_condition_signed_digits(&self, sd: &PgenAstNode) -> Result<ConditionalTest> {
+        let sign_text = self
+            .first_descendant(sd, "sign")
+            .and_then(|n| self.slice(n).ok())
+            .unwrap_or("");
+        let mut digits = String::new();
+        self.walk_collect_terminal_chars(sd, "digit", &mut digits);
+        let n: u32 = digits.parse().map_err(|_| {
+            self.contract_error(&format!(
+                "invalid conditional group reference digits '{digits}'"
+            ))
+        })?;
+        match sign_text {
+            "+" =>
+            {
+                #[allow(clippy::cast_possible_wrap)]
+                Ok(ConditionalTest::RelativeGroupExists(n as i32))
+            }
+            "-" =>
+            {
+                #[allow(clippy::cast_possible_wrap)]
+                Ok(ConditionalTest::RelativeGroupExists(-(n as i32)))
+            }
+            _ => Ok(ConditionalTest::GroupExists(n)),
+        }
+    }
+
+    /// Handle DEFINE, bare name (including R1 ambiguity PGEN-RGX-0010), and
+    /// bare numeric fallback for condition nodes that lack structured children.
+    fn convert_condition_text_fallback(&self, node: &PgenAstNode) -> Result<ConditionalTest> {
+        let text = self.slice(node)?.trim();
+        if text == "DEFINE" {
+            return Ok(ConditionalTest::Define);
+        }
+        // Bare name — including R1 ambiguity (PGEN-RGX-0010).
+        // When PGEN cannot distinguish R1 as recursion-into-group-1 vs a
+        // name, it produces a flat `name` child. We disambiguate here.
+        if let Some(name_node) = self.first_descendant(node, "name") {
+            let name = self.slice(name_node)?.to_string();
+            if name == "R" {
+                return Ok(ConditionalTest::RecursionAny);
+            }
+            if let Some(rest) = name.strip_prefix("R&") {
+                return Ok(ConditionalTest::RecursionNamed(rest.to_string()));
+            }
+            if let Some(rest) = name.strip_prefix('R') {
+                if let Ok(group) = rest.parse::<u32>() {
+                    if group > 0 {
+                        return Ok(ConditionalTest::RecursionGroup(group));
+                    }
+                }
+            }
+            return Ok(ConditionalTest::NamedGroupExists(name));
+        }
+        // Fallback: try as bare number
         if !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit()) {
-            let group = text.parse::<u32>().map_err(|_| {
+            let group: u32 = text.parse().map_err(|_| {
                 self.contract_error(&format!("invalid numeric conditional reference '{text}'"))
             })?;
             return Ok(ConditionalTest::GroupExists(group));
@@ -1310,7 +1350,6 @@ impl<'a> PgenAstAdapter<'a> {
         if !text.is_empty() {
             return Ok(ConditionalTest::NamedGroupExists(text.to_string()));
         }
-
         Err(self.contract_error("unsupported empty pgen conditional condition"))
     }
 
@@ -1350,7 +1389,7 @@ impl<'a> PgenAstAdapter<'a> {
             "+" => Ok((Quantifier::OneOrMore { lazy }, possessive)),
             "?" => Ok((Quantifier::ZeroOrOne { lazy }, possessive)),
             _ if base_text.starts_with('{') => {
-                self.parse_counted_quantifier(base_text, lazy, possessive)
+                self.parse_counted_quantifier(base, lazy, possessive)
             }
             other => {
                 Err(self.contract_error(&format!("unsupported pgen quantifier base '{other}'")))
@@ -1360,13 +1399,62 @@ impl<'a> PgenAstAdapter<'a> {
 
     fn parse_counted_quantifier(
         &self,
-        text: &str,
+        base_node: &PgenAstNode,
         lazy: bool,
         possessive: bool,
     ) -> Result<(Quantifier, bool)> {
+        // Walk the `counted_quantifier_body` child structurally. It contains
+        // `digits` groups (min, optional max) and an optional comma terminal
+        // arranged as Sequence[element_0(digits), element_1, element_2(comma-group?)].
+        if let Some(body) = self.first_descendant(base_node, "counted_quantifier_body") {
+            // Collect all `digits` descendants in depth-first order.
+            let mut digit_groups = Vec::new();
+            self.collect_digit_groups(body, &mut digit_groups);
+
+            // Check for a comma terminal anywhere under the body to
+            // distinguish {N} from {N,} / {N,M}.
+            let has_comma = self.has_terminal_text(body, ",");
+
+            let (min, max) = if has_comma {
+                let min = if digit_groups.is_empty() || digit_groups[0].is_empty() {
+                    0
+                } else {
+                    digit_groups[0].parse::<u32>().map_err(|_| {
+                        self.contract_error(&format!(
+                            "invalid counted quantifier minimum '{}'",
+                            digit_groups[0]
+                        ))
+                    })?
+                };
+                let max = digit_groups
+                    .get(1)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| {
+                        s.parse::<u32>().map_err(|_| {
+                            self.contract_error(&format!(
+                                "invalid counted quantifier maximum '{s}'"
+                            ))
+                        })
+                    })
+                    .transpose()?;
+                (min, max)
+            } else {
+                let count_str = digit_groups.first().map_or("", String::as_str);
+                let count = count_str.parse::<u32>().map_err(|_| {
+                    self.contract_error(&format!("invalid counted quantifier value '{count_str}'"))
+                })?;
+                (count, Some(count))
+            };
+
+            return Ok((Quantifier::Range { min, max, lazy }, possessive));
+        }
+
+        // Fallback: no counted_quantifier_body child (older PGEN) — parse
+        // from span text. This is the only remaining text-parse path for
+        // the counted quantifier.
+        let text = self.slice(base_node)?;
         let inner = text
-            .strip_prefix('{')
-            .and_then(|value| value.strip_suffix('}'))
+            .get(1..text.len().saturating_sub(1))
             .ok_or_else(|| self.contract_error("invalid counted quantifier delimiters"))?
             .trim();
 
@@ -1485,6 +1573,40 @@ impl<'a> PgenAstAdapter<'a> {
                 for child in children {
                     self.collect_all_terminal_chars(child, out);
                 }
+            }
+        }
+    }
+
+    /// Walk the subtree rooted at `node` and collect all `digits` descendants
+    /// in depth-first order. Each `digits` node's digit terminals are assembled
+    /// into a single string and appended to `out`. Used for counted quantifier
+    /// parsing where the grammar produces `digits` children for min and max.
+    fn collect_digit_groups(&self, node: &PgenAstNode, out: &mut Vec<String>) {
+        if node.rule_name == "digits" {
+            let mut digits = String::new();
+            self.walk_collect_terminal_chars(node, "digit", &mut digits);
+            out.push(digits);
+            return;
+        }
+        for child in node.children() {
+            self.collect_digit_groups(child, out);
+        }
+    }
+
+    /// Return `true` if any terminal node in the subtree has text equal to
+    /// `target`. Used to detect comma presence in counted quantifier bodies
+    /// without relying on its position in the tree.
+    #[allow(clippy::only_used_in_recursion)]
+    fn has_terminal_text(&self, node: &PgenAstNode, target: &str) -> bool {
+        match &node.content {
+            PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
+                text == target
+            }
+            PgenAstContent::Alternative(child) => self.has_terminal_text(child, target),
+            PgenAstContent::Sequence(children) | PgenAstContent::Quantified((children, _)) => {
+                children
+                    .iter()
+                    .any(|child| self.has_terminal_text(child, target))
             }
         }
     }

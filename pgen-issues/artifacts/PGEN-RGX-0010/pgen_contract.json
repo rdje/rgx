@@ -1,0 +1,7 @@
+{
+  "supports_regex_generated_backend": true,
+  "regex_parser_release_version": "1.1.6",
+  "regex_integration_contract_version": "1.1.6",
+  "regex_ast_dump_schema_version": 1,
+  "note": "PGEN 1.1.6 at pinned submodule commit f876a60. R1 ambiguity present in 1.1.6."
+}
