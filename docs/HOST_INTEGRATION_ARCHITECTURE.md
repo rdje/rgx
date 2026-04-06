@@ -12,6 +12,23 @@ The regex engine is an execution substrate, not just a pattern matcher. The host
 - The host provides domain logic, external data, and steering decisions.
 - Both sides communicate through typed, structured interfaces — never through string hacks or side channels.
 
+## Core philosophy: regex-level power, not language-level complexity
+
+Existing tools require you to leave the regex world to get host interaction:
+- sed `s///e` shells out — you write Bash, not regex.
+- Perl `(?{code})` embeds Perl — you're locked to one language.
+- PCRE2 `(?C)` gives a callback number — no data, no steering, no inline code.
+
+RGX's approach: **the pattern IS the integration surface.** You stay at the regex level and the host comes to you. The syntax `(?{native:validate})` is still a regex construct — it compiles, it participates in backtracking, it's zero-width. But it reaches into the host environment for logic that regex alone can't express.
+
+This means:
+- A Rust program registers callbacks, compiles a pattern, and matches. The pattern calls Rust functions mid-match.
+- A Python program (via future bindings) does the same — the pattern calls Python functions.
+- A CLI user specifies `--var` and `--wasm-module` flags — the pattern calls host-provided logic without writing any code beyond the regex.
+- The host language doesn't matter. The regex is the common language.
+
+This is sed's `s///e` and Perl's `(?{code})` **on steroids, decoupled from any specific host language, and with full bidirectional data exchange.** You write patterns, not programs. The host registers capabilities. The engine connects them.
+
 ## Architecture overview
 
 ```

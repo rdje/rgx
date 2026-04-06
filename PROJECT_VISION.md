@@ -2,7 +2,9 @@
 This document describes long-term direction, not a statement that all features are currently shipped.
 
 ## Mission
-Build a fast, safe regex engine with a VM core that targets practical parity with PCRE2 for features, speed, and matching accuracy, plus controlled embedded code execution.
+Build a fast, safe regex engine with a VM core that targets practical parity with PCRE2 for features, speed, and matching accuracy — plus deep host integration that lets you stay at the regex level while reaching into the host environment for logic, data, and control that regex alone can't express.
+
+Think sed's `s///e` and Perl's `(?{code})` but decoupled from any specific host language, with full bidirectional data exchange, match steering, and file-backed reactive processing. You write patterns, not programs. The host registers capabilities. The engine connects them.
 
 ## Principles
 - Performance-first core for pure regex workloads
