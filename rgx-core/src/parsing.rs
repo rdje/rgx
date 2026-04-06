@@ -1313,31 +1313,17 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    /// Handle DEFINE, bare name (including R1 ambiguity PGEN-RGX-0010), and
-    /// bare numeric fallback for condition nodes that lack structured children.
+    /// Handle DEFINE, bare name, and bare numeric fallback for condition
+    /// nodes that lack structured children.
     fn convert_condition_text_fallback(&self, node: &PgenAstNode) -> Result<ConditionalTest> {
         let text = self.slice(node)?.trim();
         if text == "DEFINE" {
             return Ok(ConditionalTest::Define);
         }
-        // Bare name — including R1 ambiguity (PGEN-RGX-0010).
-        // When PGEN cannot distinguish R1 as recursion-into-group-1 vs a
-        // name, it produces a flat `name` child. We disambiguate here.
+        // Bare name reference (PGEN 1.1.7+ routes R/R1/R&name through
+        // recursion_condition, so only genuine named groups reach here).
         if let Some(name_node) = self.first_descendant(node, "name") {
             let name = self.slice(name_node)?.to_string();
-            if name == "R" {
-                return Ok(ConditionalTest::RecursionAny);
-            }
-            if let Some(rest) = name.strip_prefix("R&") {
-                return Ok(ConditionalTest::RecursionNamed(rest.to_string()));
-            }
-            if let Some(rest) = name.strip_prefix('R') {
-                if let Ok(group) = rest.parse::<u32>() {
-                    if group > 0 {
-                        return Ok(ConditionalTest::RecursionGroup(group));
-                    }
-                }
-            }
             return Ok(ConditionalTest::NamedGroupExists(name));
         }
         // Fallback: try as bare number

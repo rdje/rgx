@@ -1,7 +1,7 @@
 id: PGEN-RGX-0010
 summary: |
   Conditional condition (?(R1)...) is ambiguous: PGEN produces `name` child with text "R1" instead of `recursion_condition` with group number 1
-status: open
+status: closed
 opened_at: 2026-04-04T00:00:00Z
 first_seen_at: 2026-04-04T00:00:00Z
 last_updated_at: 2026-04-04T00:00:00Z
@@ -98,7 +98,12 @@ impact: |
   but relies on the assumption that no user-defined group is literally
   named "R1", "R2", etc.
 resolution:
-  status: open
-  fixed_in_rgx_commit: null
-  verified_at: null
-  verification_notes: null
+  status: verified-fixed-upstream
+  fixed_in_rgx_commit: pending
+  verified_at: 2026-04-06T02:00:00Z
+  verification_notes: |
+    Fixed in PGEN 1.1.7 (commit 8b31c80). Condition node now contains
+    recursion_condition with digits child (was bare name "R1"). RGX
+    adapter R1 workaround removed. Fixed AST dump archived at
+    pgen-issues/artifacts/PGEN-RGX-0010/pgen_ast_dump_fixed.json.
+    strip_prefix/strip_suffix count reduced from 4 to 2.

@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Bump PGEN to 1.1.7, close PGEN-RGX-0010
+- Scope: PGEN submodule upgrade, R1 workaround removal.
+- Changes:
+  - Bumped `subs/pgen` from `f876a60` (1.1.6) to `8b31c80` (1.1.7).
+  - PGEN 1.1.7 fixes `(?(R1)...)` ambiguity: now produces `recursion_condition` with digits child instead of bare `name("R1")`.
+  - Removed R1 workaround `strip_prefix` calls from `convert_condition_text_fallback`.
+  - `strip_prefix`/`strip_suffix` count in parsing.rs: **2** (only untagged code block fallback).
+  - Closed `PGEN-RGX-0010` as `verified-fixed-upstream`.
+- Validation:
+  - All 282 tests pass, 0 clippy warnings.
+- Notes/impact:
+  - All 6 RGX-filed PGEN issues (0005-0010) now closed. PGEN 1.1.7 is the current pin.
+  - String-parsing in the adapter is now at the irreducible minimum: 2 calls for untagged code block delimiter stripping.
+
 ### 2026-04-06 - Use PGEN structured AST for remaining adapter sites; file PGEN-RGX-0010
 - Scope: eliminate remaining string-parsing in the PGEN adapter.
 - Changes:

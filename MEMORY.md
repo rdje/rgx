@@ -53,7 +53,7 @@ Live continuity memory for `rgx` sessions.
   - 4 new parity regression tests lock this behavior
 - **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
 - Adapter now uses PGEN's structured AST for flag modifiers, named/numeric backreferences, Python backreferences, and subroutine calls; string-parsing sites reduced from 31 to 16
-- **PGEN 1.1.6 upgrade**: bumped submodule to 11821c4; PGEN-RGX-0007 (\g<1>) and PGEN-RGX-0008 (code_block_lang) both closed/verified; all 4 RGX-filed PGEN issues now resolved
+- **PGEN 1.1.7 upgrade**: bumped submodule to 11821c4; PGEN-RGX-0007 (\g<1>) and PGEN-RGX-0008 (code_block_lang) both closed/verified; all 4 RGX-filed PGEN issues now resolved
 - **PGEN-RGX-0007** filed for `\g<1>` numeric-angle subroutine reference misparse (PGEN grammar gap: `subroutine_ref "<" name ">"` rejects digits since `name_start = letter|_`)
 - **PGEN upgrade**: bumped submodule to PGEN 1.1.3 (commit `962acfd`) which fixes PGEN-RGX-0006 (braced octal escape `\o{101}` was misparsed as `simple_escape(o) + counted_quantifier{101}`); verified with RGX regression tests and PCRE2 parity tests; PGEN-RGX-0006 now closed/verified-fixed-upstream
 - PGEN adapter now uses PGEN's structured AST natively for escapes (hex/property/control/octal) and character classes (ranges, negation, class_escape) — no more Lexer::new() or string-parsing fallback for these; remaining string-parsing is limited to short coarse-flattened constructs (flag chars, code block delimiters, subroutine targets, backref names)
@@ -166,7 +166,7 @@ Live continuity memory for `rgx` sessions.
   - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
-- The pinned PGEN submodule commit is `f876a609b22dad349572cf9421de8bf0af0e5183` (PGEN 1.1.6).
+- The pinned PGEN submodule commit is `8b31c801c1369d3562180ef6c9dfd91c196517df` (PGEN 1.1.7).
 - Latest extended-character-class cleanup did not widen syntax, but it hardened the new bare POSIX-term path:
   - `rgx-core/src/compiler.rs` now uses a typed internal ASCII POSIX registry plus `ExtendedPosixClassSpec` instead of ad hoc string matching for the current `(?[...])` POSIX-term subset
   - invalid POSIX names now fail through one narrower helper path, while non-POSIX bodies still fall back cleanly to the ordinary bracket/escape-term lowering logic
