@@ -435,6 +435,22 @@ impl Regex {
         result
     }
 
+    /// Register a PCRE2-style callout handler by number.
+    ///
+    /// `(?C)` invokes callout 0, `(?C123)` invokes callout 123. Internally this
+    /// registers a native callback named `__callout_N`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager.
+    pub fn register_callout<F>(&self, number: u32, callback: F) -> Result<()>
+    where
+        F: Fn(&ExecContext) -> ExecResult + Send + Sync + 'static,
+    {
+        let name = format!("__callout_{number}");
+        self.register_native(name, callback)
+    }
+
     /// Register a named wasm module for `(?{wasm:module:function})` code blocks on this compiled regex.
     ///
     /// # Errors
@@ -4217,5 +4233,137 @@ mod tests {
         let re = Regex::compile("a(*FAIL)|b").unwrap();
         assert!(re.is_match("b"));
         assert!(!re.is_match("a"));
+    }
+
+    // ======================================================================
+    // \G (Previous Match End Anchor) tests
+    // ======================================================================
+
+    #[test]
+    fn previous_match_end_anchor_find_all_contiguous() {
+        // Classic tokenizer: \G\w+\s* matches contiguous word+space tokens
+        let re = Regex::compile(r"\G\w+\s*").unwrap();
+        let all = re.find_all("hello world foo");
+        assert_eq!(all.len(), 3);
+        assert_eq!(&"hello world foo"[all[0].start..all[0].end], "hello ");
+        assert_eq!(&"hello world foo"[all[1].start..all[1].end], "world ");
+        assert_eq!(&"hello world foo"[all[2].start..all[2].end], "foo");
+    }
+
+    #[test]
+    fn previous_match_end_anchor_stops_at_gap() {
+        // \G\d+ on "123 456" should only match "123" because the space
+        // creates a gap where \G fails.
+        let re = Regex::compile(r"\G\d+").unwrap();
+        let all = re.find_all("123 456");
+        assert_eq!(all.len(), 1);
+        assert_eq!(&"123 456"[all[0].start..all[0].end], "123");
+    }
+
+    #[test]
+    fn previous_match_end_anchor_find_first_at_start() {
+        // For find_first, \G matches at position 0
+        let re = Regex::compile(r"\Gabc").unwrap();
+        let m = re.find_first("abcdef").unwrap();
+        assert_eq!((m.start, m.end), (0, 3));
+    }
+
+    #[test]
+    fn previous_match_end_anchor_find_first_no_match_not_at_start() {
+        // \G only matches at position 0 for find_first, so "xxabc" fails
+        let re = Regex::compile(r"\Gabc").unwrap();
+        assert!(re.find_first("xxabc").is_none());
+    }
+
+    #[test]
+    fn previous_match_end_anchor_alternation() {
+        // \G can be used with alternation
+        let re = Regex::compile(r"\G(?:\d+|\w+)\s*").unwrap();
+        let all = re.find_all("abc 123 xyz");
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn previous_match_end_anchor_empty_input() {
+        let re = Regex::compile(r"\G\w+").unwrap();
+        let all = re.find_all("");
+        assert!(all.is_empty());
+    }
+
+    // ======================================================================
+    // (?C) Callout tests
+    // ======================================================================
+
+    #[test]
+    fn callout_default_is_noop() {
+        // (?C) with no registered callout should be a no-op (match succeeds)
+        let re = Regex::with_mode("a(?C)b", ExecutionMode::Full).unwrap();
+        assert!(re.is_match("ab"));
+    }
+
+    #[test]
+    fn callout_numbered_is_noop_when_unregistered() {
+        // (?C123) with no registered callout should be a no-op
+        let re = Regex::with_mode("a(?C123)b", ExecutionMode::Full).unwrap();
+        assert!(re.is_match("ab"));
+    }
+
+    #[test]
+    fn callout_registered_handler_called() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let re = Regex::with_mode("a(?C)b", ExecutionMode::Full).unwrap();
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let cc = call_count.clone();
+        re.register_callout(0, move |_ctx| {
+            cc.fetch_add(1, Ordering::SeqCst);
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("ab"));
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn callout_numbered_handler_called() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let re = Regex::with_mode("a(?C42)b", ExecutionMode::Full).unwrap();
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let cc = call_count.clone();
+        re.register_callout(42, move |_ctx| {
+            cc.fetch_add(1, Ordering::SeqCst);
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("ab"));
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn callout_failure_prevents_match() {
+        let re = Regex::with_mode("a(?C)b", ExecutionMode::Full).unwrap();
+        re.register_callout(0, |_ctx| ExecResult::Failure).unwrap();
+        assert!(!re.is_match("ab"));
+    }
+
+    #[test]
+    fn callout_in_find_all() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let re = Regex::with_mode(r"\w+(?C)", ExecutionMode::Full).unwrap();
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let cc = call_count.clone();
+        re.register_callout(0, move |_ctx| {
+            cc.fetch_add(1, Ordering::SeqCst);
+            ExecResult::Success
+        })
+        .unwrap();
+        let all = re.find_all("abc def ghi");
+        assert_eq!(all.len(), 3);
+        assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 }

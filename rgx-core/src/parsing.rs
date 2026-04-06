@@ -498,10 +498,7 @@ impl<'a> PgenAstAdapter<'a> {
             "code_block" => self.convert_code_block(actual),
             "subroutine_call" => self.convert_subroutine_call(actual),
             "python_named_backreference" => self.convert_python_named_backreference(actual),
-            // Unsupported constructs
-            "callout" => Err(RgxError::Compile(
-                "unsupported: callout constructs are not supported by rgx".to_string(),
-            )),
+            "callout" => self.convert_callout(actual),
             "comment_group" => Ok(Regex::Empty), // (?#...) is a zero-width comment, ignored
             "directive_verb" => self.convert_directive_verb(actual),
             "whitespace_literal" => self.convert_whitespace_literal(actual),
@@ -558,6 +555,7 @@ impl<'a> PgenAstAdapter<'a> {
             "\\A" => Ok(Regex::Anchor(AnchorType::AbsStart)),
             "\\Z" => Ok(Regex::Anchor(AnchorType::AbsEnd)),
             "\\z" => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+            "\\G" => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
             "\\b" => Ok(Regex::WordBoundary { positive: true }),
             "\\B" => Ok(Regex::WordBoundary { positive: false }),
             other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
@@ -639,6 +637,9 @@ impl<'a> PgenAstAdapter<'a> {
             'A' => Ok(Regex::Anchor(AnchorType::AbsStart)),
             'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
             'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+
+            // PCRE2 end-of-previous-match anchor (\G)
+            'G' => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
 
             // PCRE2 match reset (\K)
             'K' => Ok(Regex::MatchReset),
@@ -934,6 +935,26 @@ impl<'a> PgenAstAdapter<'a> {
                 "unsupported backtracking verb '(*{other})'"
             ))),
         }
+    }
+
+    /// Convert a `callout` node — `(?C)` or `(?C123)`.
+    ///
+    /// Extracts the optional callout number from the span text. The number
+    /// defaults to 0 when absent (bare `(?C)`).
+    fn convert_callout(&self, node: &PgenAstNode) -> Result<Regex> {
+        let text = self
+            .terminal_text(node)
+            .or_else(|_| self.slice(node).map(ToString::to_string))?;
+        // text is the full span, e.g. "(?C)" or "(?C123)". Extract digits after "C".
+        let digits = text.trim_start_matches("(?C").trim_end_matches(')');
+        let number: u32 = if digits.is_empty() {
+            0
+        } else {
+            digits
+                .parse::<u32>()
+                .map_err(|_| RgxError::Compile(format!("invalid callout number in '{text}'")))?
+        };
+        Ok(Regex::Callout(number))
     }
 
     /// Convert a `subroutine_call` node — `(?R)`, `(?1)`, `(?&name)`,

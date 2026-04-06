@@ -129,6 +129,11 @@ pub enum Regex {
         /// The code to execute
         code: String,
     },
+    /// PCRE2 callout (?C) or (?C123)
+    ///
+    /// Invokes a host-registered callout by number during matching.
+    /// Compiled as `(?{native:__callout_N})` internally.
+    Callout(u32),
 
     // Inline flag groups
     /// Scoped flag modifier group (?m:...), (?i:...), (?s:...), etc.
@@ -309,6 +314,8 @@ pub enum AnchorType {
     AbsEnd,
     /// \z - Absolute end of string
     AbsEndNoNL,
+    /// \G - End of previous match (or start of string if no previous match)
+    PreviousMatchEnd,
 }
 
 /// Condition tests for conditional patterns

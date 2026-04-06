@@ -79,7 +79,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | `\z` absolute end | Yes | Yes | `shipped` |
 | `\b` word boundary | Yes | Yes | `shipped` |
 | `\B` non-word boundary | Yes | Yes | `shipped` |
-| `\G` end of previous match | Yes | No | `rgx-gap` |
+| `\G` end of previous match | Yes | Yes | `shipped` |
 
 ### Lookarounds
 
@@ -160,7 +160,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 
 | Feature | PCRE2 | RGX | Status |
 |---------|-------|-----|--------|
-| Callouts `(?C)`, `(?C123)` | Yes | No | `rgx-gap` |
+| Callouts `(?C)`, `(?C123)` | Yes | Yes | `shipped` (via native callback system) |
 | Partial matching API | Yes | No | `rgx-gap` |
 | JIT compilation | Yes | No | `rgx-gap` — speed, not functionality |
 | Embedded code blocks `(?{lang:code})` | No | Yes | `out-of-scope` — rgx extension |

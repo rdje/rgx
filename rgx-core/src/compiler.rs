@@ -1581,6 +1581,7 @@ impl Compiler {
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
@@ -1835,6 +1836,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
@@ -1981,6 +1983,7 @@ impl Compiler {
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
@@ -2438,6 +2441,7 @@ impl Compiler {
             | RegexAst::WordBoundary { .. }
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
@@ -2590,6 +2594,7 @@ impl Compiler {
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept
@@ -2671,6 +2676,7 @@ impl Compiler {
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
             | RegexAst::CodeBlock { .. }
+            | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
             | RegexAst::Accept

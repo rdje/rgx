@@ -37,6 +37,8 @@ pub enum OpCode {
     AnyDotAll = 0x05,
     /// \K — Reset the reported match start to the current position
     MatchReset = 0x06,
+    /// \G — Assert that current position equals end of previous match
+    PreviousMatchEnd = 0x07,
 
     // === CHARACTER CLASSES (0x10-0x1F) ===
     /// ASCII digit [0-9]
@@ -188,6 +190,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Lookahead { .. } => "Lookahead",
         Regex::Lookbehind { .. } => "Lookbehind",
         Regex::CodeBlock { .. } => "CodeBlock",
+        Regex::Callout(_) => "Callout",
         Regex::Conditional { .. } => "Conditional",
         Regex::Recursion { .. } => "Recursion",
         Regex::FlagGroup { .. } => "FlagGroup",
@@ -355,6 +358,9 @@ pub struct ExecContext {
     /// When `Some(pos)`, the reported match start is `pos` instead of the
     /// scanning-loop's `start` variable.
     pub match_start_override: Option<usize>,
+    /// End position of the previous match, used by the `\G` anchor.
+    /// `None` means no previous match (only position 0 satisfies `\G`).
+    pub previous_match_end: Option<usize>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -575,6 +581,7 @@ impl RegexVM {
             recursion_stack: Vec::new(),
             code_result: None,
             match_start_override: None,
+            previous_match_end: None,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -932,6 +939,7 @@ impl RegexVM {
             recursion_stack: ctx.recursion_stack.clone(),
             code_result: ctx.code_result.clone(),
             match_start_override: ctx.match_start_override,
+            previous_match_end: ctx.previous_match_end,
         }
     }
 
@@ -1259,6 +1267,17 @@ impl RegexVM {
                 }
                 OpCode::EndTextOrNL => {
                     if Self::is_at_absolute_end_or_before_final_newline(ctx) {
+                        continue;
+                    }
+                    if Self::try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+
+                OpCode::PreviousMatchEnd => {
+                    let target = ctx.previous_match_end.unwrap_or(0);
+                    if ctx.pos == target {
                         continue;
                     }
                     if Self::try_backtrack(ctx, &mut ip) {
@@ -2229,6 +2248,7 @@ impl RegexVM {
             recursion_stack: Vec::new(),
             code_result: None,
             match_start_override: None,
+            previous_match_end: None,
         };
 
         let mut matches = Vec::new();
@@ -2260,6 +2280,7 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     };
                     last_match_end = Some(m_end);
+                    ctx.previous_match_end = Some(m_end);
                     start = m_end.max(candidate + 1);
                     matches.push(m);
                 } else {
@@ -2293,6 +2314,7 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     };
                     last_match_end = Some(m_end);
+                    ctx.previous_match_end = Some(m_end);
                     start = m_end.max(start + 1);
                     matches.push(m);
                 } else {
@@ -2527,6 +2549,13 @@ impl RegexVM {
                 }
                 OpCode::NonWordBoundary => {
                     if !Self::is_at_word_boundary(ctx) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
+                OpCode::PreviousMatchEnd => {
+                    let target = ctx.previous_match_end.unwrap_or(0);
+                    if ctx.pos == target {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -3661,7 +3690,7 @@ impl OptimizingCompiler {
                 self.flags.has_lookarounds = true;
                 self.analyze_pass(expr);
             }
-            Regex::CodeBlock { .. } => self.flags.has_code_blocks = true,
+            Regex::CodeBlock { .. } | Regex::Callout(_) => self.flags.has_code_blocks = true,
             Regex::Conditional {
                 condition,
                 true_branch,
@@ -3819,6 +3848,7 @@ impl OptimizingCompiler {
                     self.emit_op(OpCode::EndTextOrNL);
                 }
                 AnchorType::AbsEndNoNL => self.emit_op(OpCode::EndText),
+                AnchorType::PreviousMatchEnd => self.emit_op(OpCode::PreviousMatchEnd),
             },
 
             Regex::Sequence(items) => {
@@ -3944,6 +3974,12 @@ impl OptimizingCompiler {
 
             Regex::CodeBlock { lang, code } => {
                 self.emit_code_block(lang, code);
+            }
+
+            Regex::Callout(number) => {
+                // Compile callout as a native code block with conventional name
+                let callback_name = format!("__callout_{number}");
+                self.emit_code_block("native", &callback_name);
             }
 
             Regex::Conditional {
@@ -4454,6 +4490,7 @@ impl OptimizingCompiler {
             | Regex::RelativeBackreference(_)
             | Regex::Recursion { .. }
             | Regex::CodeBlock { .. }
+            | Regex::Callout(_)
             | Regex::MatchReset
             | Regex::NewlineSequence
             | Regex::Accept
@@ -4562,6 +4599,7 @@ impl OptimizingCompiler {
                 | OpCode::AtomicStart
                 | OpCode::AtomicEnd
                 | OpCode::MatchReset
+                | OpCode::PreviousMatchEnd
                 | OpCode::Match
                 | OpCode::Fail
                 | OpCode::Accept
@@ -4722,15 +4760,17 @@ impl TryFrom<u8> for OpCode {
             Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
             CodeBlock, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, Jump,
             JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Match,
-            MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, QuestionGreedy, QuestionLazy,
-            SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy,
-            StarGreedy, StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg, WordBoundary,
+            MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, QuestionGreedy,
+            QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split,
+            SplitLazy, StarGreedy, StarLazy, StartLine, StartText, WordAscii, WordAsciiNeg,
+            WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
             0x01 => Ok(Any),
             0x05 => Ok(AnyDotAll),
             0x06 => Ok(MatchReset),
+            0x07 => Ok(PreviousMatchEnd),
             0x10 => Ok(DigitAscii),
             0x11 => Ok(DigitAsciiNeg),
             0x12 => Ok(WordAscii),

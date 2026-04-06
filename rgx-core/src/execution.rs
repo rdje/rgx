@@ -1860,6 +1860,20 @@ impl NativeCallbackRegistry {
                 exec_result_kind(&result)
             );
             result
+        } else if name.starts_with("__callout_") {
+            // Unregistered callouts are no-ops per PCRE2 semantics
+            trace_decision!(
+                "execution",
+                "callbacks.get(name).is_some()",
+                false,
+                "unregistered callout treated as no-op (PCRE2 semantics)"
+            );
+            trace_exit!(
+                "execution",
+                "NativeCallbackRegistry::call",
+                "ok=true,result_kind=success_callout_noop"
+            );
+            ExecResult::Success
         } else {
             trace_decision!(
                 "execution",

@@ -1794,6 +1794,32 @@ fn pcre2_parity_supported_combined_feature_patterns() {
             pattern: r"a(*ACCEPT)b",
             input: "axyz",
         },
+        // \G anchor
+        ParityCase {
+            name: "g_anchor_contiguous_words",
+            pattern: r"\G\w+\s*",
+            input: "hello world foo",
+        },
+        ParityCase {
+            name: "g_anchor_stops_at_gap",
+            pattern: r"\G\d+",
+            input: "123 456",
+        },
+        ParityCase {
+            name: "g_anchor_at_start",
+            pattern: r"\Gabc",
+            input: "abcdef",
+        },
+        ParityCase {
+            name: "g_anchor_no_match_not_at_start",
+            pattern: r"\Gabc",
+            input: "xxabc",
+        },
+        ParityCase {
+            name: "g_anchor_empty_input",
+            pattern: r"\G\w+",
+            input: "",
+        },
     ];
 
     for case in cases {
