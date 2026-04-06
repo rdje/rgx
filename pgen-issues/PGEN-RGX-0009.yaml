@@ -1,0 +1,95 @@
+id: PGEN-RGX-0009
+summary: |
+  code_block_lang ws? rule consumes the first byte of the code body, causing code_content span to start 1 byte late
+status: open
+opened_at: 2026-04-06T00:28:33Z
+first_seen_at: 2026-04-06T00:28:33Z
+last_updated_at: 2026-04-06T00:28:33Z
+parser_backend: pgen
+parser_backend_version: 1.1.5
+rgx_commit: b7e968c475fa6288213e2b027dfe6654eec1298d
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse-dump-ast-pretty regex pgen-issues/artifacts/PGEN-RGX-0009/repro_input.txt pgen-issues/artifacts/PGEN-RGX-0009/pgen_ast_dump.json --profile regex_default
+  pattern: '(?{native:validate_word})'
+  input: '(?{native:validate_word})'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 11821c49a935bff28bcf72a8e63aacf3c2be3fd7
+    Regex parser release version: 1.1.5
+    Regex integration contract version: 1.1.5
+    Integration surface: pgen::embedding_api plus parseability_probe
+    Host OS / arch: Darwin arm64
+
+    Root cause (from regex.ebnf line 303):
+      code_block_lang = "(?{" code_lang ":" ws? code_content "})"
+
+    The ws? rule between ":" and code_content is consuming one byte
+    even when there is no whitespace present. For (?{native:validate_word}),
+    the ":" is at position 9, so code_content should start at position 10
+    (the "v" of "validate_word"). Instead it starts at position 11 (the "a"),
+    producing the truncated span "alidate_word" instead of "validate_word".
+
+    This affects ALL language-tagged code blocks regardless of language tag.
+expected_behavior: |
+  For (?{native:validate_word}):
+    code_lang span:    [3, 9]  → "native"      (correct)
+    code_content span: [10, 23] → "validate_word" (expected)
+
+  The ws? after ":" should consume zero bytes when no whitespace follows,
+  so code_content begins immediately after the colon.
+actual_behavior: |
+  For (?{native:validate_word}):
+    code_lang span:    [3, 9]  → "native"        (correct)
+    code_content span: [11, 23] → "alidate_word"  (WRONG — first byte eaten)
+
+  Evidence from pgen_ast_dump.json:
+    code_content.span.start = 11 (should be 10)
+    code_content.span.end = 23
+    Pattern[10] = 'v' (the missing byte)
+    Pattern[11] = 'a' (the wrongly-first byte)
+
+  The ws? rule between ":" and code_content is consuming position 10
+  despite it not being whitespace.
+reproduction: |
+  Smallest reproducer:
+    pattern: (?{native:validate_word})
+    input file: pgen-issues/artifacts/PGEN-RGX-0009/repro_input.txt (25 bytes)
+
+  Also affected: (?{lua:return true}), (?{js:code}), (?{rhai:expr}), etc.
+  Any code_block_lang pattern with non-whitespace immediately after ":".
+
+  Verification script:
+    python3 -c "
+    import json
+    with open('pgen-issues/artifacts/PGEN-RGX-0009/pgen_ast_dump.json') as f:
+        ast = json.load(f)
+    # ... walk AST to find code_content span and show [11,23] vs expected [10,23]
+    "
+
+  Artifacts: pgen-issues/artifacts/PGEN-RGX-0009/
+impact: |
+  This is a span-offset correctness bug (class: "parses but returns the
+  wrong AST/dump"). Every language-tagged code block has its code body
+  truncated by one character when read via the code_content span.
+
+  RGX-side workaround (currently in place): convert_code_block reads the
+  code_lang structurally for the language tag, then extracts the body from
+  the full code_block_lang span text using string slicing instead of
+  trusting code_content.span. This works but defeats the structured AST.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    When fixed upstream, verify that code_content.span.start equals
+    code_lang.span.end + 1 (the byte after ":") for patterns with no
+    whitespace after the colon. Then update RGX's convert_code_block to
+    read code_content.span directly instead of falling back to span text.

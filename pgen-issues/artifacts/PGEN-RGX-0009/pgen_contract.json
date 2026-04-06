@@ -1,0 +1,7 @@
+{
+  "supports_regex_generated_backend": true,
+  "regex_parser_release_version": "1.1.5",
+  "regex_integration_contract_version": "1.1.5",
+  "regex_ast_dump_schema_version": 1,
+  "note": "PGEN 1.1.5 at pinned submodule commit 11821c4. Bug present in 1.1.5."
+}
