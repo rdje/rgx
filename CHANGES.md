@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Close PCRE2 speed gap: text copy elimination and trace gating
+- Scope: major performance optimization targeting per-call overhead.
+- Changes:
+  - `ExecContext.text` changed from `Vec<u8>` to `&[u8]` borrowed slice, eliminating the per-call text allocation.
+  - All trace/debug/log macros gated behind `cfg(feature = "trace")`, zero-cost in non-trace builds.
+  - Prefix filter extended to skip zero-width assertions and match compiled char classes.
+- Validation:
+  - Literal find_first 1K: 51x → 4.6x vs PCRE2. Capture find_first 1K: 24x → 5.6x.
+  - 8 of 10 matching benchmarks under <10x target. Email at ~14x (VM dispatch overhead).
+  - Total session speedup: literal 106x→7x (15x faster), capture 1437x→6x (240x faster).
+
 ### 2026-04-06 - Ship \K match-reset and \R newline sequence escapes
 - Scope: two new PCRE2 escape sequences.
 - Changes:
