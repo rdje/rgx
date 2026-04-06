@@ -225,7 +225,7 @@ pub enum MatchEvent {
 
 ### Layer 5 — Async/External I/O
 
-**Status: `planned` (hardest layer)**
+**Status: `shipped`**
 
 Callbacks can suspend the match, perform async I/O, and resume. This transforms the regex engine from a synchronous text processor into an async query engine.
 

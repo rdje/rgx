@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-06 - Ship Layer 5: Async/External I/O via continuation-passing
+- Scope: the hardest host integration layer — callbacks can suspend the match, do async work, and resume.
+- Changes:
+  - Added `MatchOutcome` enum (`Completed` / `Suspended`), `MatchContinuation` struct (captures full VM state, owns all data, automatically `Send + Sync`), `ExecContextSnapshot` for async resolvers.
+  - Added `ExecResult::Suspend(String)` variant for async callback signaling.
+  - VM code-block dispatch: when `ctx.suspendable` is true, unregistered native callbacks trigger suspension instead of error; registered callbacks run synchronously as before.
+  - `execute_at_continuation` resumes VM from arbitrary instruction pointer with restored state.
+  - Public API: `Regex::find_first_suspendable()`, `Regex::resume(continuation, result)`, `Regex::find_first_async(resolver)`.
+  - Zero overhead on synchronous path (`suspendable` defaults to `false`; the only new branch is never-taken).
+  - Thread-safe: `MatchContinuation` is `Send + Sync` by construction (all owned data).
+  - 12 unit tests covering sync completion, suspension, resume with success/failure/values, backtracking after failure, chained suspensions, context snapshot correctness, Send+Sync verification.
+- Validation:
+  - `cargo test -p rgx-core` (327 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass), 0 new clippy warnings.
+
 ### 2026-04-06 - Ship Layer 6: File-Backed Matching (core API)
 - Scope: new host integration layer — match directly against filesystem files.
 - Changes:

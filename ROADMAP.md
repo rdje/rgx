@@ -133,13 +133,8 @@ Live forward-looking tracker for rgx.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 4
 
 ### Host integration Layer 5: Async/External I/O
-- Status: `planned`
-- Goal: allow callbacks to suspend the match, perform async I/O, and resume via continuation-passing.
-- Scope:
-  - add `MatchContinuation` struct for VM state capture
-  - add `ExecResult::Suspend` and `Regex::resume(...)` API
-  - add async convenience wrappers for common runtimes
-  - zero overhead on synchronous paths
+- Status: `done`
+- Shipped: continuation-passing with `MatchOutcome`, `MatchContinuation` (Send+Sync, owns all data), `ExecResult::Suspend`, `find_first_suspendable`, `resume`, `find_first_async`; zero sync overhead; correct under backtracking/recursion; 12 tests.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Layer 5
 
 ## Later (strategic)

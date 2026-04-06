@@ -106,7 +106,10 @@ pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 pub use error::{Result, RgxError};
 pub use events::MatchEvent;
-pub use execution::{CodeBlockValue, ExecContext, ExecResult, SteerResult};
+pub use execution::{
+    CodeBlockValue, ExecContext, ExecContextSnapshot, ExecResult, MatchContinuation, MatchOutcome,
+    SteerResult,
+};
 pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
 
@@ -303,6 +306,115 @@ impl Regex {
             first.is_some()
         );
         first
+    }
+
+    /// Find the first match with support for async callback suspension.
+    ///
+    /// This is the suspendable counterpart to [`find_first`](Self::find_first).
+    /// When an unregistered native callback is encountered during matching,
+    /// execution suspends and returns [`MatchOutcome::Suspended`] with a
+    /// [`MatchContinuation`] that captures the full VM state. The caller
+    /// resolves the callback externally and calls [`resume`](Self::resume)
+    /// to continue matching.
+    ///
+    /// For patterns without unregistered native callbacks, this behaves
+    /// identically to `find_first` with negligible overhead.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
+    ///
+    /// let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+    /// let mut outcome = re.find_first_suspendable("hello cat");
+    /// loop {
+    ///     match outcome {
+    ///         MatchOutcome::Completed(result) => {
+    ///             // result is Option<MatchResult>
+    ///             break;
+    ///         }
+    ///         MatchOutcome::Suspended(continuation) => {
+    ///             // Resolve the callback externally
+    ///             let _name = &continuation.pending_callback_name;
+    ///             outcome = re.resume(*continuation, ExecResult::Success);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    pub fn find_first_suspendable(&self, text: &str) -> MatchOutcome {
+        trace_enter!(
+            "api",
+            "Regex::find_first_suspendable",
+            "text_len={}",
+            text.len()
+        );
+        let outcome = self.engine.find_first_suspendable(text.as_bytes());
+        trace_exit!(
+            "api",
+            "Regex::find_first_suspendable",
+            "ok=true,suspended={}",
+            matches!(outcome, MatchOutcome::Suspended(_))
+        );
+        outcome
+    }
+
+    /// Resume a suspended match after the caller resolves an async callback.
+    ///
+    /// The `callback_result` is the resolved value for the callback that
+    /// caused suspension. Matching continues from where it left off:
+    /// - On [`ExecResult::Success`] the VM proceeds past the code block.
+    /// - On [`ExecResult::Failure`] the VM backtracks (potentially finding
+    ///   an alternative match or trying the next scan position).
+    /// - If another unregistered native callback is encountered, another
+    ///   [`MatchOutcome::Suspended`] is returned, enabling chained
+    ///   resolution.
+    #[must_use]
+    pub fn resume(
+        &self,
+        continuation: MatchContinuation,
+        callback_result: ExecResult,
+    ) -> MatchOutcome {
+        trace_enter!(
+            "api",
+            "Regex::resume",
+            "callback_name={}",
+            continuation.pending_callback_name
+        );
+        let outcome = self.engine.resume(continuation, callback_result);
+        trace_exit!(
+            "api",
+            "Regex::resume",
+            "ok=true,suspended={}",
+            matches!(outcome, MatchOutcome::Suspended(_))
+        );
+        outcome
+    }
+
+    /// Convenience method for async runtimes that resolves callbacks via a
+    /// user-provided async resolver function.
+    ///
+    /// This drives the suspend/resume loop automatically, calling `resolver`
+    /// each time a native callback needs resolution.
+    ///
+    /// Works with any async runtime (tokio, async-std, smol, etc.).
+    pub async fn find_first_async<F, Fut>(&self, text: &str, resolver: F) -> Option<MatchResult>
+    where
+        F: Fn(String, ExecContextSnapshot) -> Fut,
+        Fut: std::future::Future<Output = ExecResult>,
+    {
+        let mut outcome = self.find_first_suspendable(text);
+        loop {
+            match outcome {
+                MatchOutcome::Completed(result) => return result,
+                MatchOutcome::Suspended(continuation) => {
+                    let name = continuation.pending_callback_name.clone();
+                    let ctx = continuation.pending_context.clone();
+                    let result = resolver(name, ctx).await;
+                    outcome = self.resume(*continuation, result);
+                }
+            }
+        }
     }
 
     /// Replace the first match using a winning-path `CodeBlockValue::Replacement`.
@@ -4495,5 +4607,213 @@ mod tests {
         assert!(collected
             .iter()
             .any(|e| matches!(e, MatchEvent::BacktrackOccurred { .. })));
+    }
+
+    // ====================================================================
+    // LAYER 5: ASYNC / CONTINUATION-PASSING TESTS
+    // ====================================================================
+
+    #[test]
+    fn suspendable_completes_without_async_callbacks() {
+        let re = Regex::compile("cat").unwrap();
+        match re.find_first_suspendable("hello cat") {
+            MatchOutcome::Completed(Some(m)) => assert_eq!((m.start, m.end), (6, 9)),
+            MatchOutcome::Completed(None) => panic!("expected a match, got None"),
+            MatchOutcome::Suspended(_) => panic!("expected completed match, got suspension"),
+        }
+    }
+
+    #[test]
+    fn suspendable_no_match_completes() {
+        let re = Regex::compile("dog").unwrap();
+        match re.find_first_suspendable("hello cat") {
+            MatchOutcome::Completed(None) => {} // expected
+            MatchOutcome::Completed(Some(m)) => {
+                panic!("expected no match, got {}..{}", m.start, m.end)
+            }
+            MatchOutcome::Suspended(_) => panic!("expected completed, got suspension"),
+        }
+    }
+
+    #[test]
+    fn suspendable_suspends_on_unregistered_native() {
+        let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+        // Don't register "check" — it should suspend
+        match re.find_first_suspendable("cat") {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_callback_name, "check");
+                // Resume with success
+                match re.resume(*cont, ExecResult::Success) {
+                    MatchOutcome::Completed(Some(m)) => {
+                        assert_eq!((m.start, m.end), (0, 3));
+                    }
+                    other => panic!("expected completed match after resume, got {:?}", other),
+                }
+            }
+            other => panic!("expected suspension, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_resume_with_failure_backtracks() {
+        let re = Regex::with_mode(r"cat(?{native:check})|dog", ExecutionMode::Full).unwrap();
+        match re.find_first_suspendable("catdog") {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_callback_name, "check");
+                // Resume with failure — should backtrack and find "dog"
+                match re.resume(*cont, ExecResult::Failure) {
+                    MatchOutcome::Completed(Some(m)) => {
+                        assert_eq!((m.start, m.end), (3, 6));
+                    }
+                    other => panic!("expected dog match after check failure, got {:?}", other),
+                }
+            }
+            other => panic!("expected suspension, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_registered_callback_does_not_suspend() {
+        let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+        // Register the callback — should NOT suspend
+        re.register_native("check", |_ctx| ExecResult::Success)
+            .unwrap();
+        match re.find_first_suspendable("cat") {
+            MatchOutcome::Completed(Some(m)) => {
+                assert_eq!((m.start, m.end), (0, 3));
+            }
+            MatchOutcome::Completed(None) => panic!("expected match"),
+            MatchOutcome::Suspended(_) => {
+                panic!("should not suspend when callback is registered")
+            }
+        }
+    }
+
+    #[test]
+    fn suspendable_resume_with_replacement_value() {
+        let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+        match re.find_first_suspendable("cat") {
+            MatchOutcome::Suspended(cont) => {
+                match re.resume(*cont, ExecResult::Replacement("kitten".to_string())) {
+                    MatchOutcome::Completed(Some(m)) => {
+                        assert_eq!((m.start, m.end), (0, 3));
+                        assert_eq!(
+                            m.code_result,
+                            Some(CodeBlockValue::Replacement("kitten".to_string()))
+                        );
+                    }
+                    other => panic!("expected completed match, got {:?}", other),
+                }
+            }
+            other => panic!("expected suspension, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_resume_with_numeric_value() {
+        let re = Regex::with_mode(r"cat(?{native:score})", ExecutionMode::Full).unwrap();
+        match re.find_first_suspendable("cat") {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_callback_name, "score");
+                match re.resume(*cont, ExecResult::Numeric(42.0)) {
+                    MatchOutcome::Completed(Some(m)) => {
+                        assert_eq!(m.code_result, Some(CodeBlockValue::Numeric(42.0)));
+                    }
+                    other => panic!("expected completed match, got {:?}", other),
+                }
+            }
+            other => panic!("expected suspension, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_context_snapshot_has_correct_position() {
+        let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+        match re.find_first_suspendable("hello cat") {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_context.match_start, 6);
+                // Position should be at the end of "cat" (position 9)
+                assert_eq!(cont.pending_context.position, 9);
+            }
+            other => panic!("expected suspension, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn continuation_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<MatchContinuation>();
+    }
+
+    #[test]
+    fn suspendable_pure_pattern_fast_path() {
+        // Pure literal pattern should take the literal_finder fast path
+        let re = Regex::compile("hello").unwrap();
+        match re.find_first_suspendable("say hello world") {
+            MatchOutcome::Completed(Some(m)) => {
+                assert_eq!((m.start, m.end), (4, 9));
+            }
+            other => panic!("expected completed match, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_multiple_suspensions_chained() {
+        // Pattern with two consecutive code blocks — both unregistered
+        let re = Regex::with_mode(
+            r"cat(?{native:first})(?{native:second})",
+            ExecutionMode::Full,
+        )
+        .unwrap();
+        let mut outcome = re.find_first_suspendable("cat");
+
+        // First suspension
+        match outcome {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_callback_name, "first");
+                outcome = re.resume(*cont, ExecResult::Success);
+            }
+            other => panic!("expected first suspension, got {:?}", other),
+        }
+
+        // Second suspension
+        match outcome {
+            MatchOutcome::Suspended(cont) => {
+                assert_eq!(cont.pending_callback_name, "second");
+                outcome = re.resume(*cont, ExecResult::Success);
+            }
+            other => panic!("expected second suspension, got {:?}", other),
+        }
+
+        // Final completion
+        match outcome {
+            MatchOutcome::Completed(Some(m)) => {
+                assert_eq!((m.start, m.end), (0, 3));
+            }
+            other => panic!("expected completed match, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn suspendable_sync_path_unaffected() {
+        // Verify that the synchronous find_first path still works correctly
+        // when patterns have registered callbacks
+        let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+        re.register_native("check", |_ctx| ExecResult::Success)
+            .unwrap();
+
+        // Synchronous path
+        let sync_result = re.find_first("cat");
+        assert!(sync_result.is_some());
+        assert_eq!(sync_result.as_ref().unwrap().start, 0);
+        assert_eq!(sync_result.as_ref().unwrap().end, 3);
+
+        // Suspendable path should also work
+        match re.find_first_suspendable("cat") {
+            MatchOutcome::Completed(Some(m)) => {
+                assert_eq!((m.start, m.end), (0, 3));
+            }
+            other => panic!("expected completed, got {:?}", other),
+        }
     }
 }

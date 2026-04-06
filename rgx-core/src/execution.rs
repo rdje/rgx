@@ -300,6 +300,12 @@ pub enum ExecResult {
     Error(String),
     /// Host steering action — controls how matching proceeds.
     Steer(SteerResult),
+    /// Suspend execution — an async callback needs external resolution.
+    ///
+    /// The `String` is the callback name that needs to be resolved
+    /// asynchronously by the caller. Used by the suspendable matching
+    /// path to signal that the VM should pause and return control.
+    Suspend(String),
 }
 
 fn exec_result_kind(result: &ExecResult) -> &'static str {
@@ -310,6 +316,7 @@ fn exec_result_kind(result: &ExecResult) -> &'static str {
         ExecResult::Numeric(_) => "Numeric",
         ExecResult::Error(_) => "Error",
         ExecResult::Steer(_) => "Steer",
+        ExecResult::Suspend(_) => "Suspend",
     }
 }
 
@@ -2380,6 +2387,11 @@ impl ExecutionManager {
         snapshot
     }
 
+    /// Check if a named native callback is registered.
+    pub fn has_native(&self, name: &str) -> bool {
+        self.native_callbacks.has(name)
+    }
+
     /// Check if a language is available
     pub fn is_language_available(&self, language: &str) -> bool {
         trace_enter!(
@@ -2414,4 +2426,91 @@ impl Default for ExecutionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ============================================================================
+// ASYNC / CONTINUATION-PASSING TYPES
+// ============================================================================
+
+/// Outcome of a potentially-async match operation.
+///
+/// When the VM encounters an unregistered native callback during
+/// `find_first_suspendable`, it returns `Suspended` instead of treating
+/// the callback as an error. The caller resolves the callback externally
+/// and calls `resume` to continue matching.
+#[derive(Debug)]
+pub enum MatchOutcome {
+    /// Match completed synchronously.
+    Completed(Option<crate::engine::MatchResult>),
+    /// Match suspended — an async callback needs resolution.
+    ///
+    /// The continuation is boxed to keep the enum size reasonable,
+    /// since `MatchContinuation` owns a full VM state snapshot while
+    /// `Completed` is a small option of position data.
+    Suspended(Box<MatchContinuation>),
+}
+
+/// Captured VM state for resuming a suspended match.
+///
+/// This struct owns all data needed to resume — no borrowed references.
+/// All fields are owned types (`Vec`, `String`, `HashMap`, primitives),
+/// making `MatchContinuation` automatically `Send + Sync`.
+pub struct MatchContinuation {
+    /// The original input text (owned copy for lifetime independence).
+    pub(crate) text: Vec<u8>,
+    /// The callback name that needs async resolution.
+    pub pending_callback_name: String,
+    /// Snapshot of the execution context for the callback.
+    pub pending_context: ExecContextSnapshot,
+    /// Internal VM state for resumption (opaque to the caller).
+    pub(crate) vm_state: VmResumeState,
+}
+
+impl std::fmt::Debug for MatchContinuation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MatchContinuation")
+            .field("text_len", &self.text.len())
+            .field("pending_callback_name", &self.pending_callback_name)
+            .field("pending_context", &self.pending_context)
+            .field("vm_state", &"<opaque>")
+            .finish()
+    }
+}
+
+/// Snapshot of execution context exposed to the async callback resolver.
+///
+/// Contains the information the external callback needs to make its
+/// decision: current position, captures, and host variables.
+#[derive(Debug, Clone)]
+pub struct ExecContextSnapshot {
+    /// Current byte position in the input text.
+    pub position: usize,
+    /// Start of the current match attempt in bytes.
+    pub match_start: usize,
+    /// Capture group byte-offset slots (pairs of start/end).
+    pub captures: Vec<Option<usize>>,
+    /// Host-provided variables snapshot.
+    pub variables: HashMap<String, String>,
+}
+
+/// Opaque internal VM state needed to resume execution.
+///
+/// This captures the full VM execution state at the point of suspension
+/// so that matching can continue exactly where it left off.
+pub(crate) struct VmResumeState {
+    pub(crate) pos: usize,
+    pub(crate) match_start: usize,
+    pub(crate) ip: usize,
+    pub(crate) captures: Vec<Option<usize>>,
+    pub(crate) capture_trail: Vec<(usize, Option<usize>)>,
+    pub(crate) call_stack: Vec<usize>,
+    pub(crate) backtrack_stack: Vec<crate::vm::BacktrackFrame>,
+    pub(crate) current_alternative: Option<usize>,
+    pub(crate) recursion_stack: Vec<(usize, usize)>,
+    pub(crate) code_result: Option<CodeBlockValue>,
+    pub(crate) committed: bool,
+    pub(crate) skip_position: Option<usize>,
+    pub(crate) match_start_override: Option<usize>,
+    pub(crate) previous_match_end: Option<usize>,
+    pub(crate) scan_start: usize,
 }

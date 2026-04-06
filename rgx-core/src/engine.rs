@@ -1,6 +1,8 @@
 use crate::error::Result;
 use crate::events::MatchEvent;
-use crate::execution::{CodeBlockValue, ExecContext, ExecResult, ExecutionManager};
+use crate::execution::{
+    CodeBlockValue, ExecContext, ExecResult, ExecutionManager, MatchContinuation, MatchOutcome,
+};
 use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
 use crate::{trace_decision, trace_enter, trace_exit};
@@ -236,6 +238,32 @@ impl Engine {
             );
             false // Invalid UTF-8 cannot match
         }
+    }
+
+    /// Find the first match with support for async callback suspension.
+    ///
+    /// This is the suspendable counterpart to [`find_first`](Self::find_first).
+    /// When an unregistered native callback is encountered, returns
+    /// [`MatchOutcome::Suspended`] with a continuation that can be resumed
+    /// after the callback is resolved externally.
+    #[must_use]
+    pub fn find_first_suspendable(&self, text: &[u8]) -> MatchOutcome {
+        let Ok(text_str) = std::str::from_utf8(text) else {
+            return MatchOutcome::Completed(None);
+        };
+        self.vm.find_first_suspendable(text_str)
+    }
+
+    /// Resume a suspended match after the caller resolves an async callback.
+    ///
+    /// See [`MatchContinuation`] for details on the continuation-passing protocol.
+    #[must_use]
+    pub fn resume(
+        &self,
+        continuation: MatchContinuation,
+        callback_result: ExecResult,
+    ) -> MatchOutcome {
+        self.vm.resume(continuation, callback_result)
     }
 
     /// Register a native callback on the engine's execution manager.
