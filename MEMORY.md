@@ -45,45 +45,45 @@ Live continuity memory for `rgx` sessions.
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).
 
 ## Current technical snapshot
-- **New feature**: `(?x:...)` extended/verbose mode shipped — whitespace ignored, `#` comments stripped, escaped space `\ ` preserved; fourth and final inline flag
-- Adapter string-parsing reduced from 31 → **2** sites (untagged code block fallback only)
-- **PGEN-RGX-0010** filed: `(?(R1)...)` parsed as bare `name("R1")` instead of `recursion_condition` with group 1
-- **Accuracy fix**: `^` and `$` now compile to single-line semantics by default (matching PCRE2), not multiline
-  - previously `^` matched after `\n` and `$` matched before `\n` without `(?m)` — incorrect
-  - `StartLine`/`EndLine` opcodes are preserved for future `(?m)` support
-  - 4 new parity regression tests lock this behavior
-- **Accuracy fix**: `Regex::Empty` no longer compiles to `Fail` — patterns like `()`, `|a`, `a||b` now correctly produce zero-width matches (root cause: catch-all codegen arm emitted `Fail` for unhandled AST nodes including `Empty`)
-- Adapter now uses PGEN's structured AST for flag modifiers, named/numeric backreferences, Python backreferences, and subroutine calls; string-parsing sites reduced from 31 to 16
-- **PGEN 1.1.7 upgrade**: bumped submodule to 11821c4; PGEN-RGX-0007 (\g<1>) and PGEN-RGX-0008 (code_block_lang) both closed/verified; all 4 RGX-filed PGEN issues now resolved
-- **PGEN-RGX-0007** filed for `\g<1>` numeric-angle subroutine reference misparse (PGEN grammar gap: `subroutine_ref "<" name ">"` rejects digits since `name_start = letter|_`)
-- **PGEN upgrade**: bumped submodule to PGEN 1.1.3 (commit `962acfd`) which fixes PGEN-RGX-0006 (braced octal escape `\o{101}` was misparsed as `simple_escape(o) + counted_quantifier{101}`); verified with RGX regression tests and PCRE2 parity tests; PGEN-RGX-0006 now closed/verified-fixed-upstream
-- PGEN adapter now uses PGEN's structured AST natively for escapes (hex/property/control/octal) and character classes (ranges, negation, class_escape) — no more Lexer::new() or string-parsing fallback for these; remaining string-parsing is limited to short coarse-flattened constructs (flag chars, code block delimiters, subroutine targets, backref names)
-- **CRITICAL**: Builtin recursive-descent parser fully retired from PGEN integration path — `parse_leaf_fragment`, `RecursiveDescentParser`, `PgenFeatureBackend` all removed; PGEN is now the sole parser with native converters for all atom rule names; any PGEN issue will surface as an explicit error instead of being masked by fallback
-- **New feature**: Python-style `(?P<name>...)` named groups and `(?P=name)` named backreferences shipped — reuse existing tokens, no new AST needed instead of falling through to recursive-descent fallback — no PGEN bugs found, the gap was in RGX's adapter code
-- **New feature**: named backreferences `\k<name>` and `\k'name'` shipped — resolve to numbered backref at compile time; missing names produce compile errors
-- **New feature**: non-scoped inline flags `(?i)`, `(?m)`, `(?s)` and combinations shipped — apply to rest of current group; `lower_flag_toggles` compiler pass handles PGEN-backed empty-body flag nodes
-- **New feature**: `(?i:...)` scoped case-insensitive mode shipped — ASCII case folding for literals and char classes within scope; third inline flag
-- **New feature**: `(?s:...)` scoped dotall mode shipped — `.` matches `\n` within scope; second inline flag after `(?m:...)`
-- **SOTA critical fix**: backtrack frame cloning replaced with trail/undo log — frame saves now O(1) instead of O(num_groups), restores O(modified_slots); email find_all 10K improved 105x→62x, literal find_all 10K improved 45x→30x
-- SOTA quality audit identified critical/major/moderate gaps; first fixes landed:
-  - `current_char()` now decodes minimal UTF-8 bytes (not entire remaining text)
-  - `advance_char()` determines width from leading byte without re-decoding
-  - Unicode range lookup upgraded from linear scan O(N) to binary search O(log N)
-  - remaining SOTA gaps: backtrack capture cloning (critical), text reference copy (major), trace log overhead (moderate)
-- **New feature**: `(?m:...)` scoped multiline mode shipped — `^`/`$` match at line boundaries within scope, default single-line outside; lexer also accepts `(?i:`, `(?s:`, `(?x:` syntax for future compiler support
-- **Accuracy fix**: `find_all` now suppresses zero-width matches at the end of a just-completed consuming match, matching PCRE2 iteration semantics (also fixes the `(?=a)|b` open item)
-- Second accuracy probe found more issues: zero-width iteration (fixed), dot UTF-8 byte semantics (design decision needed), capture group[0] convention (API convention), missing `(?i)`/`(?m)`/`(?s)` flags and `\k` backreferences (features to add)
-- All 3 accuracy bugs from initial probe now fixed: anchor defaults, empty-string compilation, zero-width find_all iteration
-- Fourth VM optimization: extended prefix filter from single-byte literals to character classes (`\d`, `\w`, `\s`), dramatically improving digit/word/space-prefixed patterns
-  - capture_groups find_all 10K: 1437x → 22x vs PCRE2 (65x faster total session improvement)
-  - uses a cached `PrefixFilter` enum with `memchr` for bytes and inline predicates for classes
-- Third VM optimization: switched scanning loops from manual byte comparison to `memchr`-based candidate jumping (uses platform SIMD internally; cleaner code, same or better performance for rare-byte patterns)
-- Second VM performance optimization: rewrote `find_all` to scan in-place with a single `ExecContext` instead of calling `find_first` on substrings (eliminates O(n) text copies per match)
-  - find_all literal 1K: 106x → 34x vs PCRE2 (3.1x total session improvement)
-  - find_all literal 10K: 119x → 43x vs PCRE2 (2.8x total improvement)
-  - find_all capture 10K: 1426x → 1124x vs PCRE2 (1.3x improvement)
-- First VM performance optimization landed: literal-prefix skip in the scanning loop
-  - caches the first required literal byte from the compiled bytecode at VM construction
+
+### PGEN integration
+- PGEN 1.1.7 is the sole parser (pinned at `8b31c801c1369d3562180ef6c9dfd91c196517df`)
+- Builtin recursive-descent parser fully retired — gated behind `cfg(not(feature = "pgen-parser"))`
+- Adapter uses PGEN's structured AST natively for all constructs; only 2 `strip_prefix` calls remain (untagged code block fallback)
+- All 6 filed PGEN issues (0005-0010) closed/verified
+
+### PCRE2 feature parity (~95% tracked, ~90% real-world)
+- Full inline flag system: `(?i)`, `(?m)`, `(?s)`, `(?x)` with enable, disable, scoped, inline, combined forms
+- Named backrefs: `\k<name>`, `\k'name'`, `\k{name}`, `(?P=name)`, `\g{name}`, `\g<+1>`, `\g<-1>`
+- Python syntax: `(?P<name>...)`, `(?P=name)`, `(?P>name)`
+- Escapes: `\K`, `\R`, `\N`, `\G`, `\h/\H`, `\v/\V`, all hex/octal/control forms
+- Backtracking verbs: `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*MARK:name)`, `(*FAIL)`, `(*ACCEPT)`
+- Mode settings: `(*UTF)`, `(*UCP)`, `(*BSR_*)`, `(*CRLF)` etc. accepted as no-ops
+- `(?C)` callouts via native callback system, `(?#...)` comment groups, `(?J)` duplicate names
+- Relative subroutines `(?+1)`/`(?-1)`, relative conditionals
+- 6 deferred gaps (all low/very-low): `\X`, returned-capture subroutines, VERSION conditionals, `(*SKIP:name)`, partial matching, JIT
+
+### Performance (release profile, criterion)
+- Literal find_first: **6.4x** vs PCRE2 (memmem fast path bypasses VM)
+- Email find_first: **3.4x** vs PCRE2
+- Capture find_first: **0.88x** (RGX wins)
+- Key optimizations: `ExecContext.text` is borrowed `&[u8]`, trail-based backtracking O(1) saves, trace macros gated behind `cfg(feature = "trace")`, prefix filter skips zero-width assertions, binary search Unicode ranges, minimal UTF-8 decoding
+
+### SOTA upgrades
+- Trail/undo log for backtracking (replaces full capture vector cloning)
+- Binary search O(log N) for Unicode character class ranges
+- Minimal UTF-8 character decoding (ASCII fast path, multi-byte reads only needed bytes)
+- memchr-accelerated scanning with prefix filter for literals, classes, and compiled char classes
+
+### Accuracy fixes (3 bugs found and fixed via differential probing)
+- `^`/`$` now single-line by default (was multiline)
+- `Regex::Empty` codegen fixed (was emitting `Fail`)
+- `find_all` zero-width suppression matches PCRE2 iteration semantics
+
+### Architecture documents
+- `docs/HOST_INTEGRATION_ARCHITECTURE.md` — 6-layer host integration design (2 shipped, 4 planned)
+- `docs/PCRE2_COMPATIBILITY_MATRIX.md` — feature-by-feature parity table
+- `ROADMAP.md` — updated with performance targets, Layer 3-6 plans, deferred gaps with rationale
   - skips positions where that byte doesn't match, avoiding full VM invocations at impossible positions
   - literal_simple find_first improved ~2x (109x → 55x slower vs PCRE2)
   - conservative single-byte approach; multi-byte prefixes, memchr, and ExecContext allocation reduction are follow-up opportunities

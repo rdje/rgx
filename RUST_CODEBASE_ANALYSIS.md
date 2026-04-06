@@ -47,26 +47,20 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized and the explicit RGX package test matrix enabled)
-- Current large-file concentration is still dominated by `rgx-core`:
-  - `rgx-core/src/vm.rs`: 5049 lines
-  - `rgx-core/src/lib.rs`: 4059 lines
-  - `rgx-core/src/compiler.rs`: 3124 lines
-  - `rgx-core/src/execution.rs`: 2382 lines
+- Current large-file concentration in `rgx-core`:
+  - `rgx-core/src/vm.rs`: 5610 lines
+  - `rgx-core/src/lib.rs`: 4369 lines
+  - `rgx-core/src/compiler.rs`: 3374 lines
+  - `rgx-core/src/parsing.rs`: 2718 lines
+  - `rgx-core/src/execution.rs`: 2396 lines
   - `rgx-core/src/lexer.rs`: 2383 lines
-  - `rgx-core/src/parsing.rs`: 2331 lines
-  - `rgx-core/src/lexer.rs`: 2146 lines
-  - `rgx-core/src/parsing.rs`: 1619 lines
-  - `rgx-core/src/parser.rs`: 1389 lines
-- Current scaffold concentration remains visible in several near-empty modules/crates:
-  - `rgx-core/src/javascript.rs`
-  - `rgx-core/src/wasm.rs`
-  - `rgx-core/src/cache.rs`
-  - `rgx-core/src/simd.rs`
-  - `rgx-wasm/src/lib.rs`
-- Latest warning-debt cleanup hardened parser-facing utilities and public docs in `ast.rs`, `token.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs`, including `#[must_use]` coverage, missing `# Errors` sections, missing module docs, parser-adapter `Default` implementations, and a small parser/lexer utility simplification pass.
-- Latest parity-boundary check confirmed that bare top-level Perl extended character class ordinary terms such as `(?[a-z])` and `(?[\dA-F])` remain outside the shipped subset because the local PCRE2 differential harness compile-rejected those forms; RGX intentionally keeps only the already-shipped nested ordinary bracket forms such as `(?[[a-z]])` and `(?[[\dA-F]])`.
-- Latest RGX-owned warning-debt cleanup trimmed dead private scaffolding in the base parser/runtime path and brought the visible `rgx-core` warning count in the standard validation loop down from 101 to 93.
-- Latest RGX-owned warning-debt cleanup trimmed another small isolated slice in `compiler.rs`, `lexer.rs`, `parser.rs`, `parsing.rs`, and `lib.rs` without widening syntax.
+  - `rgx-core/src/ast.rs`: 531 lines
+- The builtin recursive-descent parser module (`parser.rs`) is gated behind `#[cfg(not(feature = "pgen-parser"))]` — not compiled in the default PGEN build.
+- PGEN is the sole parser (pinned at 1.1.7). The adapter uses PGEN's structured AST natively for all constructs; only 2 `strip_prefix` calls remain (untagged code block fallback).
+- All 6 filed PGEN issues (0005-0010) are closed/verified.
+- Release-profile performance (criterion): literal find_first 6.4x vs PCRE2, email 3.4x, capture 0.88x (RGX wins). `ExecContext.text` is borrowed `&[u8]`, trace macros gated behind `cfg(feature = "trace")`, literal patterns bypass VM via `memmem`.
+- PCRE2 feature parity: ~95% tracked families, ~90% real-world patterns. 6 deferred gaps (all low/very-low priority). Full inline flag system (`(?i)`, `(?m)`, `(?s)`, `(?x)` with enable/disable/scoped/inline/combined), `\K`, `\R`, `\N`, `\G`, `(?C)` callouts, `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*MARK)`, `(*FAIL)`, `(*ACCEPT)`, `(?#...)`, `(?P<>)`, `(?P=)`, `\k<>`, `(?J)`, relative subroutines/backrefs all shipped.
+- Host integration architecture documented in `docs/HOST_INTEGRATION_ARCHITECTURE.md` with 6 layers (2 shipped, 4 planned).
 - The latest full workspace `clippy` pass now reports **zero RGX-owned warnings** (down from 296 at session start); the only remaining 33 workspace warnings are from the PGEN submodule, which is outside RGX's control.
 
 ## Executive summary
