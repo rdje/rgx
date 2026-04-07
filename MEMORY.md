@@ -92,9 +92,10 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
-### Known bugs (from gap testing)
-- **Events don't fire during `find_first_suspendable`** before suspension — observability blind pre-suspend
-- **Recursive subroutine clobbers outer capture/position state** — `(a(b)c)` with balanced-paren recursion reports inner match
+### Known limitations
+- **Nested recursive balanced-paren matching** returns inner match instead of outer — subroutine invocation path doesn't correctly continue the outer pattern after recursive call completes (1 `#[ignore]` test documents this)
+- Events + async bug FIXED: `find_first_suspendable` and `resume` now emit events
+- Subroutine capture semantics FIXED: captures revert on subroutine success per PCRE2
 
 ### Testing
 - **5 test suites**: unit (343), integration (55), adversarial (44, 2 ignored/known bugs), property-based (11 × 256+ cases), stress/fuzz (21)

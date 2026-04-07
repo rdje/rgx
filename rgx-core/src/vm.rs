@@ -1239,6 +1239,13 @@ impl RegexVM {
         ctx.current_alternative = saved_alternative;
 
         if matched {
+            // PCRE2 semantics: subroutine calls advance position but do NOT
+            // export their internal captures to the outer match. Revert captures
+            // to what they were before the call, keeping only the position advance.
+            let advanced_pos = ctx.pos;
+            Self::undo_trail(ctx, trail_mark);
+            ctx.pos = advanced_pos;
+            ctx.code_result = saved_code_result;
             true
         } else {
             ctx.pos = saved_pos;
@@ -3007,6 +3014,8 @@ impl RegexVM {
             Self::reset_captures(ctx);
             ctx.suspension = None;
 
+            self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+
             let matched = self.execute_at(ctx, start);
 
             // Check for suspension before checking match result.
@@ -3049,6 +3058,10 @@ impl RegexVM {
             }
 
             if matched {
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched: true,
+                });
                 let effective_start = ctx.match_start_override.unwrap_or(start);
                 return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                     start: effective_start,
@@ -3057,6 +3070,11 @@ impl RegexVM {
                     code_result: ctx.code_result.clone(),
                 }));
             }
+
+            self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                position: start,
+                matched: false,
+            });
 
             // (*COMMIT): abort entire search on failure
             if ctx.committed {
@@ -3193,6 +3211,10 @@ impl RegexVM {
                     return MatchOutcome::Suspended(Box::new(cont));
                 }
                 if matched {
+                    self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                        position: state.scan_start,
+                        matched: true,
+                    });
                     let effective_start = ctx.match_start_override.unwrap_or(state.scan_start);
                     return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                         start: effective_start,
@@ -3201,6 +3223,10 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                     }));
                 }
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: state.scan_start,
+                    matched: false,
+                });
                 // Match failed after callback succeeded — continue scanning.
                 if ctx.committed {
                     return MatchOutcome::Completed(None);

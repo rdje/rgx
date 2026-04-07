@@ -606,9 +606,7 @@ fn recursion_with_steering_callback() {
 
 // Gap 2: Events during async suspension
 // Do events fire before suspension? After resume? Both?
-// BUG: events don't fire before suspension — observability is blind pre-suspend
 #[test]
-#[ignore = "known bug: events don't fire during find_first_suspendable before suspension"]
 fn events_fire_before_suspension() {
     let re = Regex::with_mode(r"cat(?{native:async_check})", ExecutionMode::Full).unwrap();
 
@@ -801,11 +799,11 @@ fn steer_accept_at_zero_width_in_find_all() {
 }
 
 // Gap 8: Deep recursion + trail backtracking
-// BUG: inner recursive subroutine clobbers outer match position state
-// Recursive pattern that captures at each level. After backtracking,
-// verify captures are restored correctly via a callback.
+// Known limitation: nested recursive balanced-paren matching returns inner
+// match instead of outer. The subroutine path doesn't correctly continue
+// the outer pattern after the recursive call completes.
 #[test]
-#[ignore = "known bug: recursive subroutine clobbers outer capture/position state"]
+#[ignore = "known limitation: nested recursion returns inner match instead of outer"]
 fn deep_recursion_with_captures_restored_correctly() {
     let re = Regex::with_mode(
         r"(?<pair>\((?<inner>[^()]*|(?&pair))*\))(?{native:verify})",

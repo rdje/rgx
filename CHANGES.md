@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Fix events+async bug, document recursion limitation
+- Scope: fix 1 of 2 bugs found by gap testing, document the other.
+- Changes:
+  - **FIXED**: Events now fire during `find_first_suspendable` and `resume` — `MatchAttemptStarted`/`MatchAttemptCompleted` emitted in the suspendable scanning path and resume completion path.
+  - **FIXED**: Subroutine calls now revert captures on success (PCRE2 semantics — subroutines advance position but don't export internal captures).
+  - **DOCUMENTED**: Nested recursive balanced-paren matching returns inner match instead of outer — marked as known limitation with `#[ignore]` test.
+  - 43 adversarial tests pass, 1 ignored (recursion limitation).
+- Validation:
+  - All tests pass across all crates.
+
 ### 2026-04-07 - Test all 9 known gap combinations — 2 real bugs found
 - Scope: prove or disprove every untested feature combination listed in TESTING_PHILOSOPHY.md.
 - Changes:
