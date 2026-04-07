@@ -2,7 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 use rgx_core::log::Verbosity;
 use rgx_core::CodeBlockValue;
-use rgx_core::{ExecutionMode, MatchResult, Regex};
+use rgx_core::{ExecutionMode, FileMatch, MatchResult, Regex};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -51,6 +51,18 @@ struct Cli {
     /// Include branch/code-block details in match output when available
     #[arg(long)]
     show_details: bool,
+
+    /// Read input from a file instead of a positional argument
+    #[arg(long = "file", value_name = "PATH")]
+    file: Option<PathBuf>,
+
+    /// When used with --file, match each line independently and print line numbers
+    #[arg(long = "line-mode", requires = "file")]
+    line_mode: bool,
+
+    /// Print the number of matches instead of match spans
+    #[arg(long)]
+    count: bool,
 
     /// Pattern to match
     pattern: String,
@@ -392,6 +404,75 @@ fn main() -> anyhow::Result<()> {
         apply_cli_variables(&regex, &cli.variables)?;
     }
 
+    // ---- File-matching mode ----
+    if let Some(ref file_path) = cli.file {
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!("File matching mode: path={}", file_path.display()),
+        );
+
+        if cli.count {
+            // --count: just print total number of matches
+            let count = if cli.line_mode {
+                regex
+                    .scan_file_lines(file_path)
+                    .map_err(|e| {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    })
+                    .unwrap()
+            } else {
+                regex
+                    .scan_file(file_path)
+                    .map_err(|e| {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    })
+                    .unwrap()
+            };
+            println!("{count}");
+            rgx_core::trace_exit!("cli", "main", "ok=true,file_count={}", count);
+            return Ok(());
+        }
+
+        if cli.line_mode {
+            // --line-mode: match each line independently, print "LINE_NUM: matched_text"
+            let file_matches: Vec<FileMatch> =
+                regex.match_file_lines(file_path).unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                });
+            let _matched = !file_matches.is_empty();
+            LOGGER.lock().unwrap().debug(
+                "main",
+                &format!("Line-mode file scan: {} matches", file_matches.len()),
+            );
+            for fm in &file_matches {
+                let text = &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
+                println!("{}: {}", fm.line_number, text);
+            }
+            rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
+            return Ok(());
+        }
+
+        // Default file mode: scan whole file, print matching spans
+        let file_matches: Vec<MatchResult> = regex.match_file(file_path).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        });
+        let _matched = !file_matches.is_empty();
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!("File scan: {} matches", file_matches.len()),
+        );
+        for m in &file_matches {
+            println!("{}", format_match_line(m, cli.show_details));
+        }
+        rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
+        return Ok(());
+    }
+
+    // ---- Inline / stdin mode (original behavior) ----
     let input = if cli.text.is_empty() {
         rgx_core::trace_decision!(
             "cli",
@@ -431,6 +512,13 @@ fn main() -> anyhow::Result<()> {
         input.len(),
         matches.len()
     );
+
+    if cli.count {
+        println!("{}", matches.len());
+        rgx_core::trace_exit!("cli", "main", "ok=true,count={}", matches.len());
+        return Ok(());
+    }
+
     if matched {
         LOGGER.lock().unwrap().debug(
             "main",
@@ -673,5 +761,77 @@ mod tests {
         assert!(regex.is_match(""));
 
         std::fs::remove_file(module_path).ok();
+    }
+
+    // ---- File matching integration tests (unit-level) ----
+
+    fn temp_test_file(name: &str, contents: &str) -> PathBuf {
+        let unique = format!(
+            "rgx-cli-{name}-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after unix epoch")
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::write(&path, contents).expect("write temp test file");
+        path
+    }
+
+    #[test]
+    fn file_match_finds_spans_in_whole_file() {
+        let path = temp_test_file("spans", "hello cat world\ndog park\ncat again");
+        let re = Regex::compile("cat").unwrap();
+        let matches = re.match_file(&path).unwrap();
+        assert_eq!(matches.len(), 2);
+        // First "cat" starts at offset 6
+        assert_eq!(matches[0].start, 6);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn file_match_lines_returns_line_numbers_and_text() {
+        let path = temp_test_file("lines", "alpha\nbeta ERROR\ngamma\ndelta WARN end");
+        let re = Regex::compile("ERROR|WARN").unwrap();
+        let matches = re.match_file_lines(&path).unwrap();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].line_number, 2);
+        assert_eq!(
+            &matches[0].line[matches[0].match_result.start..matches[0].match_result.end],
+            "ERROR"
+        );
+        assert_eq!(matches[1].line_number, 4);
+        assert_eq!(
+            &matches[1].line[matches[1].match_result.start..matches[1].match_result.end],
+            "WARN"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn scan_file_returns_count() {
+        let path = temp_test_file("count", "cat dog cat\nbird\ncat cat cat");
+        let re = Regex::compile("cat").unwrap();
+        let count = re.scan_file(&path).unwrap();
+        assert_eq!(count, 5);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn scan_file_lines_returns_count() {
+        let path = temp_test_file("countlines", "cat dog\nbird\ncat cat");
+        let re = Regex::compile("cat").unwrap();
+        let count = re.scan_file_lines(&path).unwrap();
+        assert_eq!(count, 3);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn file_match_nonexistent_returns_error() {
+        let re = Regex::compile("cat").unwrap();
+        assert!(re
+            .match_file("/tmp/rgx_cli_nonexistent_file_xyz.txt")
+            .is_err());
     }
 }

@@ -92,6 +92,10 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
+### CLI
+- File matching: `--file <PATH>`, `--line-mode` (line numbers), `--count` (match count)
+- 15 CLI tests total
+
 ### Recent bug fixes (from gap testing)
 - **Nested recursion quantifier bug FIXED**: `StarGreedy`/`PlusGreedy` zero-width guards now retry alternatives instead of breaking immediately — `(a(b)c)` balanced-paren matching works correctly
 - **Events + async FIXED**: `find_first_suspendable` and `resume` now emit events

@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Add CLI file matching: --file, --line-mode, --count
+- Scope: CLI enhancement for file-backed matching.
+- Changes:
+  - `--file <PATH>` reads input from a file instead of positional argument
+  - `--line-mode` (with `--file`) matches each line independently, prints `LINE_NUM: text`
+  - `--count` prints match count instead of spans
+  - Clear error messages for missing/unreadable files (exit code 1)
+  - 5 new CLI tests
+- Validation:
+  - `cargo test -p rgx-cli` (15 pass). Manual testing confirmed all 4 usage patterns.
+- Also fixed: exhaustiveness errors in Lua/JS/Rhai/WASM backends for Steer/Suspend/Structured variants.
+
 ### 2026-04-07 - Fix nested recursion bug in quantifier zero-width guard
 - Scope: fix the last known bug — nested recursive patterns now match correctly.
 - Changes:
