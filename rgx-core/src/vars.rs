@@ -1,6 +1,22 @@
-//! Fluent builder for host variables.
+//! Fluent builder and declarative macro for host variables.
 //!
 //! Build complex variable structures without ever touching [`Value`] directly.
+//!
+//! # Macro syntax
+//!
+//! The [`vars!`] macro is the easiest way to set variables:
+//!
+//! ```ignore
+//! vars!(re, {
+//!     "env" => "prod",
+//!     "port" => 8080,
+//!     "tags" => ["cat", "dog"],
+//!     "config" => {
+//!         "strict" => true,
+//!         "threshold" => 100
+//!     }
+//! });
+//! ```
 //!
 //! # Examples
 //!
@@ -206,6 +222,82 @@ impl<P: CommitValue> CommitValue for HashBuilder<P> {
 }
 
 // ===========================================================================
+// ===========================================================================
+// Declarative macro — zero ceremony
+// ===========================================================================
+
+/// Build a [`Value`] from a literal expression.
+///
+/// Supports scalars, arrays `[...]`, and nested maps `{...}`.
+///
+/// ```ignore
+/// let v = value!({
+///     "host" => "localhost",
+///     "port" => 8080,
+///     "tags" => ["a", "b"],
+///     "tls"  => { "enabled" => true }
+/// });
+/// ```
+#[macro_export]
+macro_rules! value {
+    // Nested map: { "key" => value, ... }
+    ({ $( $key:expr => $val:tt ),* $(,)? }) => {
+        $crate::Value::Map(vec![
+            $( ( ($key).to_string(), $crate::value!($val) ) ),*
+        ])
+    };
+    // Array: [ value, ... ]
+    ([ $( $val:tt ),* $(,)? ]) => {
+        $crate::Value::Array(vec![
+            $( $crate::value!($val) ),*
+        ])
+    };
+    // Scalar: anything that implements Into<Value>
+    ($val:expr) => {
+        <_ as Into<$crate::Value>>::into($val)
+    };
+}
+
+/// Set multiple host variables on a compiled regex using declarative syntax.
+///
+/// # Examples
+///
+/// ```ignore
+/// use rgx_core::{Regex, vars};
+///
+/// let re = Regex::compile("test")?;
+///
+/// // Simple scalars
+/// vars!(re, {
+///     "env" => "prod",
+///     "port" => 8080_i64,
+///     "debug" => false
+/// });
+///
+/// // Nested structures
+/// vars!(re, {
+///     "server" => {
+///         "host" => "localhost",
+///         "port" => 443_i64,
+///         "tls" => {
+///             "enabled" => true,
+///             "cert" => "/etc/ssl/cert.pem"
+///         }
+///     },
+///     "allowed_origins" => ["https://example.com", "https://api.example.com"],
+///     "max_retries" => 3_i64
+/// });
+/// ```
+#[macro_export]
+macro_rules! vars {
+    ($regex:expr, { $( $key:expr => $val:tt ),* $(,)? }) => {
+        $(
+            let _ = $regex.set_typed_variable($key, $crate::value!($val));
+        )*
+    };
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -313,6 +405,114 @@ mod tests {
             let db = ctx.typed_variable("db").unwrap();
             let map = db.as_map().unwrap();
             assert_eq!(map.len(), 3); // host, port, replicas
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn vars_macro_scalars() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        vars!(re, {
+            "env" => "prod",
+            "port" => 8080_i64,
+            "rate" => 0.05_f64,
+            "debug" => false
+        });
+        re.register_native("check", |ctx| {
+            assert_eq!(ctx.var_str("env").as_deref(), Some("prod"));
+            assert_eq!(ctx.var_int("port"), Some(8080));
+            assert_eq!(ctx.var_float("rate"), Some(0.05));
+            assert_eq!(ctx.var_bool("debug"), Some(false));
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn vars_macro_array() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        vars!(re, {
+            "tags" => ["alpha", "beta", "gamma"]
+        });
+        re.register_native("check", |ctx| {
+            let tags = ctx.var_array("tags").unwrap();
+            assert_eq!(tags.len(), 3);
+            assert_eq!(tags[0].as_str(), Some("alpha"));
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn vars_macro_nested_hash() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        vars!(re, {
+            "server" => {
+                "host" => "localhost",
+                "port" => 443_i64,
+                "tls" => {
+                    "enabled" => true
+                }
+            }
+        });
+        re.register_native("check", |ctx| {
+            let server = ctx.typed_variable("server").unwrap();
+            let map = server.as_map().unwrap();
+            assert_eq!(map.len(), 3);
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn vars_macro_mixed() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        vars!(re, {
+            "env" => "prod",
+            "max_retries" => 3_i64,
+            "db" => {
+                "host" => "db.example.com",
+                "port" => 5432_i64,
+                "replicas" => ["r1.example.com", "r2.example.com"]
+            }
+        });
+        re.register_native("check", |ctx| {
+            assert_eq!(ctx.var_str("env").as_deref(), Some("prod"));
+            assert_eq!(ctx.var_int("max_retries"), Some(3));
+            let db = ctx.typed_variable("db").unwrap();
+            let map = db.as_map().unwrap();
+            assert!(map.len() >= 3);
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn set_vars_option_c() {
+        use crate::value;
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_vars(value!({
+            "env" => "staging",
+            "port" => 3000_i64,
+            "db" => {
+                "host" => "db.local",
+                "tls" => { "enabled" => false }
+            },
+            "tags" => ["web", "api"]
+        }));
+        re.register_native("check", |ctx| {
+            assert_eq!(ctx.var_str("env").as_deref(), Some("staging"));
+            assert_eq!(ctx.var_int("port"), Some(3000));
+            let db = ctx.typed_variable("db").unwrap();
+            assert!(db.as_map().is_some());
+            let tags = ctx.var_array("tags").unwrap();
+            assert_eq!(tags.len(), 2);
             ExecResult::Success
         })
         .unwrap();

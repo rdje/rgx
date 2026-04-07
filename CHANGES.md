@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Ship vars!/value! macros and re.set_vars() for zero-ceremony variable setup
+- Scope: two declarative approaches to host variable construction.
+- Changes:
+  - **Option A** — `vars!(re, { "key" => value, ... })`: sets variables directly on the regex using JSON-style `{}` for maps and `[]` for arrays.
+  - **Option C** — `re.set_vars(value!({ ... }))`: builds a `Value` with the `value!` macro, then unpacks it into variables via `set_vars()`.
+  - Both support arbitrary nesting, scalars, arrays, and maps with zero `Value::` mentions.
+  - `value!` macro: standalone value construction for use anywhere.
+  - `Regex::set_vars(Value)`: unpacks a `Value::Map` into individual typed variables.
+  - 5 macro tests + 1 `set_vars` test.
+- Validation:
+  - `cargo test -p rgx-core` (349 pass), 0 new clippy warnings.
+
 ### 2026-04-07 - Ship fluent variable builder API
 - Scope: ergonomic API for building host variables without exposing `Value` internals.
 - Changes:

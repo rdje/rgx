@@ -681,6 +681,30 @@ impl Regex {
         vars::VarsBuilder::new(self)
     }
 
+    /// Set multiple host variables from a [`Value::Map`].
+    ///
+    /// Designed to work with the [`value!`] macro for JSON-style declarations:
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::{Regex, value};
+    /// let re = Regex::compile("test").unwrap();
+    /// re.set_vars(value!({
+    ///     "env" => "prod",
+    ///     "port" => 8080_i64,
+    ///     "db" => {
+    ///         "host" => "localhost",
+    ///         "replicas" => ["r1.example.com", "r2.example.com"]
+    ///     }
+    /// }));
+    /// ```
+    pub fn set_vars(&self, map: Value) {
+        if let Value::Map(entries) = map {
+            for (key, val) in entries {
+                let _ = self.set_typed_variable(&key, val);
+            }
+        }
+    }
+
     /// Register an event observer for structured match events.
     ///
     /// The observer receives [`MatchEvent`] values at key execution points

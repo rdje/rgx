@@ -81,6 +81,7 @@ Live continuity memory for `rgx` sessions.
 - `find_all` zero-width suppression matches PCRE2 iteration semantics
 
 ### Host integration
+- **Declarative variable macros shipped**: `vars!(re, { "key" => val, "nested" => { ... }, "list" => [...] })` (Option A) and `re.set_vars(value!({ ... }))` (Option C) — both zero-ceremony, arbitrary nesting, no `.done()` needed
 - **Fluent variable builder shipped**: `re.vars().set("key", value).hash("config").set("port", 8080).done()` — zero `Value::` mentions, arbitrary nesting; move-based ownership for type-safe chaining; convenience readers `var_int`/`var_float`/`var_bool`/`var_str`/`var_array`/`var_map` on ExecContext
 - **Typed values shipped**: `Value` enum (Null/Bool/Int/Float/String/Array/Map); `set_typed_variable`/`set_var` for typed input, `typed_variable` for typed reading, `Structured(Value)` for complex return values; backward compatible with string API
 - **Layer 5 Async I/O shipped**: continuation-passing style — `find_first_suspendable()` returns `MatchOutcome::Suspended(MatchContinuation)` on unregistered async callbacks; `resume(continuation, result)` restores full VM state and continues; `find_first_async(resolver)` convenience wrapper works with any async runtime; zero overhead on sync path; `MatchContinuation` is `Send + Sync`; correct under backtracking and recursion; 12 tests
