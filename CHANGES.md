@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Expose remaining engine surfaces in CLI
+- Scope: close the gap between engine capabilities and CLI access.
+- Changes:
+  - `--var-json NAME=JSON` for typed variables (int, float, bool, array, map via JSON)
+  - `--events` prints structured match events to stderr (debugging/profiling)
+  - `--json` now includes `branch` and `code_result` fields when available
+  - `--numeric` collects and prints numeric code block results
+  - `--replace-with-code` uses code block replacement values for find-and-replace
+  - `--stats` prints match statistics summary to stderr
+  - Updated `docs/CLI_GUIDE.md` with all new features
+  - 7 new tests (30 total CLI tests)
+- Validation:
+  - `cargo test -p rgx-cli` (30 pass). Manual testing of all features.
+
 ### 2026-04-07 - Ship 6 new CLI features + comprehensive CLI guide
 - Scope: major CLI enhancement with full documentation.
 - Changes:

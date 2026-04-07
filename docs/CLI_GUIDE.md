@@ -17,9 +17,14 @@ with output options ranging from simple spans to structured JSON.
 7. [Find and Replace](#find-and-replace)
 8. [Filtering with Invert-Match](#filtering-with-invert-match)
 9. [Code Blocks and Variables](#code-blocks-and-variables)
-10. [Verbosity and Debugging](#verbosity-and-debugging)
-11. [Complete Option Reference](#complete-option-reference)
-12. [Examples Cookbook](#examples-cookbook)
+10. [Typed Variables](#typed-variables)
+11. [Event Observers](#event-observers)
+12. [Numeric Code Results](#numeric-code-results)
+13. [Code-Block Replacement](#code-block-replacement)
+14. [Match Statistics](#match-statistics)
+15. [Verbosity and Debugging](#verbosity-and-debugging)
+16. [Complete Option Reference](#complete-option-reference)
+17. [Examples Cookbook](#examples-cookbook)
 
 ---
 
@@ -344,6 +349,108 @@ rgx-cli --show-details --mode full 'cat|dog' "a dog"
 
 ---
 
+## Typed Variables
+
+### `--var-json NAME=JSON`
+
+Pass typed values to code blocks as JSON. The value is parsed as JSON and
+converted to the engine's `Value` type. If JSON parsing fails, the value
+is treated as a plain string.
+
+```bash
+rgx-cli --mode safe --var-json 'config={"threshold": 100, "strict": true}' '...' "..."
+rgx-cli --mode safe --var-json 'tags=["cat","dog"]' --var-json 'limit=42' '...' "..."
+```
+
+This flag is repeatable, just like `--var`. Use it when code blocks need
+structured data (arrays, objects, booleans, numbers) rather than plain strings.
+
+---
+
+## Event Observers
+
+### `--events`
+
+Print structured match events to stderr as they happen. Useful for
+debugging and profiling regex execution:
+
+```bash
+rgx-cli --events "a*b" "aaab"
+# stderr: MatchAttemptStarted { position: 0 }
+# stderr: MatchAttemptCompleted { position: 0, matched: true }
+# stdout: 0..4
+```
+
+Events include `MatchAttemptStarted`, `MatchAttemptCompleted`,
+`BranchEntered`, `CaptureCompleted`, `BacktrackOccurred`, and
+`CodeBlockEvaluated`. They are printed to stderr so they do not mix
+with match output on stdout.
+
+---
+
+## Numeric Code Results
+
+### `--numeric`
+
+Collect numeric code-block results from each match and print them,
+one per line. Only matches whose code block returns a `Numeric` value
+produce output:
+
+```bash
+rgx-cli --mode safe --numeric '(?<n>\d+)(?{js:return parseInt(named.n) * 2})' "5 10 15"
+# 10
+# 20
+# 30
+```
+
+Works with both inline text and `--file` mode.
+
+---
+
+## Code-Block Replacement
+
+### `--replace-with-code`
+
+Replace matches using the replacement values returned by code blocks.
+Matches whose code block does not return a replacement payload are
+copied through unchanged:
+
+```bash
+rgx-cli --mode safe --replace-with-code '(?<w>[a-z]+)(?{js:return named.w.toUpperCase()})' "hello world"
+# HELLO WORLD
+```
+
+This uses the engine's `replace_all_with_code` function. Works with
+both inline text and `--file` mode.
+
+---
+
+## Match Statistics
+
+### `--stats`
+
+Print a summary of match statistics to stderr after all output:
+
+```bash
+rgx-cli --stats "cat|dog" "the cat sat with a dog"
+# 4..7
+# 19..22
+# ---
+# 2 matches in 1 lines
+```
+
+With file and recursive mode, the summary includes file counts and
+a match percentage:
+
+```bash
+rgx-cli --file src/ -r --stats "ERROR|WARN"
+# ... matches ...
+# ---
+# 42 matches in 10000 lines (0.4%), 15 files scanned
+```
+
+---
+
 ## Verbosity and Debugging
 
 ### Verbosity levels (`--verbosity`)
@@ -385,6 +492,7 @@ rgx-cli --trace --trace-log "complex|pattern" "test input"
 |------------------------------|-------|-----------------------------------------------------------------|
 | `--mode <MODE>`              |       | Execution mode: `pure`, `safe`, or `full` (default: `pure`)    |
 | `--var <NAME=VALUE>`         |       | Set a host-provided code-block variable (repeatable)            |
+| `--var-json <NAME=JSON>`     |       | Set a typed code-block variable as JSON (repeatable)            |
 | `--wasm-module <NAME=PATH>`  |       | Register a WASM module (repeatable)                             |
 | `--file <PATH>`              |       | Read input from a file or directory                             |
 | `--line-mode`                |       | Match each line independently (requires `--file`)               |
@@ -392,9 +500,13 @@ rgx-cli --trace --trace-log "complex|pattern" "test input"
 | `--count`                    |       | Print only the match count                                      |
 | `--context <N>`              | `-C`  | Show N context lines around matches                             |
 | `--replace <STRING>`         |       | Replace matches with STRING, print result                       |
-| `--json`                     |       | Output matches as JSON                                          |
+| `--replace-with-code`        |       | Replace matches using code-block replacement values             |
+| `--json`                     |       | Output matches as JSON (includes branch/code_result when set)   |
 | `--only-matching`            | `-o`  | Print only the matched text                                     |
 | `--invert-match`             | `-v`  | Print non-matching lines                                        |
+| `--events`                   |       | Print structured match events to stderr                         |
+| `--numeric`                  |       | Print numeric code-block results, one per line                  |
+| `--stats`                    |       | Print match statistics summary to stderr                        |
 | `--show-details`             |       | Include branch/code-block details in output                     |
 | `--debug`                    | `-d`  | Enable high-verbosity output                                    |
 | `--trace`                    | `-t`  | Enable debug-verbosity output                                   |

@@ -2,7 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 use rgx_core::log::Verbosity;
 use rgx_core::CodeBlockValue;
-use rgx_core::{ExecutionMode, FileMatch, MatchResult, Regex};
+use rgx_core::{ExecutionMode, FileMatch, MatchEvent, MatchResult, Regex, Value};
 use serde::Serialize;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -24,6 +24,10 @@ struct Cli {
     /// Host-provided code-block variable (`NAME=VALUE`), repeatable
     #[arg(long = "var", value_name = "NAME=VALUE")]
     variables: Vec<CliVariable>,
+
+    /// Host-provided typed code-block variable as JSON (`NAME=JSON`), repeatable
+    #[arg(long = "var-json", value_name = "NAME=JSON")]
+    typed_variables: Vec<CliVariable>,
 
     /// Register a named wasm module for `(?{wasm:module:function})` (`NAME=PATH`), repeatable
     #[arg(long = "wasm-module", value_name = "NAME=PATH")]
@@ -88,6 +92,22 @@ struct Cli {
     /// Print lines that do NOT match the pattern (line-mode only)
     #[arg(long = "invert-match", short = 'v')]
     invert_match: bool,
+
+    /// Print structured match events to stderr (debugging/profiling)
+    #[arg(long)]
+    events: bool,
+
+    /// Collect and print numeric code block results, one per line
+    #[arg(long)]
+    numeric: bool,
+
+    /// Replace matches using code block replacement values
+    #[arg(long = "replace-with-code")]
+    replace_with_code: bool,
+
+    /// Print match statistics summary to stderr at the end
+    #[arg(long)]
+    stats: bool,
 
     /// Pattern to match
     pattern: String,
@@ -156,6 +176,10 @@ struct JsonMatch {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_result: Option<String>,
 }
 
 /// Global logger for the entire rgx system
@@ -279,6 +303,47 @@ fn apply_cli_variables(regex: &Regex, variables: &[CliVariable]) -> anyhow::Resu
     Ok(())
 }
 
+/// Convert a `serde_json::Value` into an `rgx_core::Value`.
+fn json_to_value(json: &serde_json::Value) -> Value {
+    match json {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else {
+                Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::Array(arr) => Value::Array(arr.iter().map(json_to_value).collect()),
+        serde_json::Value::Object(map) => Value::Map(
+            map.iter()
+                .map(|(k, v)| (k.clone(), json_to_value(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn apply_cli_typed_variables(regex: &Regex, variables: &[CliVariable]) -> anyhow::Result<()> {
+    for variable in variables {
+        let value: Value = match serde_json::from_str::<serde_json::Value>(&variable.value) {
+            Ok(json) => json_to_value(&json),
+            Err(_) => Value::String(variable.value.clone()),
+        };
+        regex
+            .set_typed_variable(variable.name.clone(), value)
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!(
+                    "failed to set CLI typed variable '{}'; code-block variables require a compiled regex with an attached execution manager",
+                    variable.name
+                )
+            })?;
+    }
+    Ok(())
+}
+
 fn apply_cli_wasm_modules(regex: &Regex, wasm_modules: &[CliWasmModule]) -> anyhow::Result<()> {
     for wasm_module in wasm_modules {
         let module_bytes = std::fs::read(&wasm_module.path).with_context(|| {
@@ -327,6 +392,24 @@ fn format_match_line(m: &MatchResult, show_details: bool) -> String {
         let _ = write!(line, " code={}", format_code_result(code_result));
     }
     line
+}
+
+/// Build a `JsonMatch` from a `MatchResult`, slicing `text` from `input`.
+fn json_match_from(
+    m: &MatchResult,
+    input: &str,
+    line: Option<usize>,
+    file: Option<String>,
+) -> JsonMatch {
+    JsonMatch {
+        start: m.start,
+        end: m.end,
+        text: input[m.start..m.end.min(input.len())].to_string(),
+        line,
+        file,
+        branch: m.matched_branch_number,
+        code_result: m.code_result.as_ref().map(format_code_result),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +645,24 @@ fn main() -> anyhow::Result<()> {
         apply_cli_variables(&regex, &cli.variables)?;
     }
 
+    if !cli.typed_variables.is_empty() {
+        LOGGER.lock().unwrap().debug(
+            "main",
+            &format!(
+                "Applying {} CLI typed (JSON) variables to compiled regex",
+                cli.typed_variables.len()
+            ),
+        );
+        apply_cli_typed_variables(&regex, &cli.typed_variables)?;
+    }
+
+    // Register event observer if --events is specified
+    if cli.events {
+        regex.on_event(|event: &MatchEvent| {
+            eprintln!("{event:?}");
+        })?;
+    }
+
     // ---- File-matching mode ----
     if let Some(ref file_path) = cli.file {
         LOGGER.lock().unwrap().debug(
@@ -580,6 +681,28 @@ fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("failed to read '{}'", file_path.display()))?;
             let result = replace_matches(&regex, &contents, replacement);
             print!("{result}");
+            return Ok(());
+        }
+
+        // --replace-with-code on a single file
+        if cli.replace_with_code {
+            let contents = std::fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+            let result = regex.replace_all_with_code(&contents);
+            print!("{result}");
+            return Ok(());
+        }
+
+        // --numeric on a single file
+        if cli.numeric {
+            let contents = std::fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+            let matches = collect_matches(&regex, &contents);
+            for m in &matches {
+                if let Some(CodeBlockValue::Numeric(n)) = &m.code_result {
+                    println!("{n}");
+                }
+            }
             return Ok(());
         }
 
@@ -649,6 +772,17 @@ fn main() -> anyhow::Result<()> {
                     println!("{}: {}", fm.line_number, text);
                 }
             }
+            if cli.stats {
+                let contents = std::fs::read_to_string(file_path)
+                    .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+                let line_count = contents.lines().count();
+                eprintln!("---");
+                eprintln!(
+                    "{} matches in {} lines, 1 file scanned",
+                    file_matches.len(),
+                    line_count
+                );
+            }
             rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
             return Ok(());
         }
@@ -669,6 +803,15 @@ fn main() -> anyhow::Result<()> {
             } else {
                 println!("{}", format_match_line(m, cli.show_details));
             }
+        }
+        if cli.stats {
+            let line_count = contents.lines().count();
+            eprintln!("---");
+            eprintln!(
+                "{} matches in {} lines, 1 file scanned",
+                file_matches.len(),
+                line_count
+            );
         }
         rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
         return Ok(());
@@ -707,6 +850,24 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // --replace-with-code on inline/stdin text
+    if cli.replace_with_code {
+        let result = regex.replace_all_with_code(&input);
+        print!("{result}");
+        return Ok(());
+    }
+
+    // --numeric on inline/stdin text
+    if cli.numeric {
+        let matches = collect_matches(&regex, &input);
+        for m in &matches {
+            if let Some(CodeBlockValue::Numeric(n)) = &m.code_result {
+                println!("{n}");
+            }
+        }
+        return Ok(());
+    }
+
     LOGGER.lock().unwrap().debug(
         "main",
         &format!("Testing pattern against {} bytes of input", input.len()),
@@ -732,13 +893,7 @@ fn main() -> anyhow::Result<()> {
     if cli.json {
         let entries: Vec<JsonMatch> = matches
             .iter()
-            .map(|m| JsonMatch {
-                start: m.start,
-                end: m.end,
-                text: input[m.start..m.end.min(input.len())].to_string(),
-                line: None,
-                file: None,
-            })
+            .map(|m| json_match_from(m, &input, None, None))
             .collect();
         println!(
             "{}",
@@ -799,6 +954,13 @@ fn main() -> anyhow::Result<()> {
             .unwrap()
             .debug("main", "Pattern does NOT match");
     }
+
+    if cli.stats {
+        let line_count = input.lines().count();
+        eprintln!("---");
+        eprintln!("{} matches in {} lines", matches.len(), line_count);
+    }
+
     rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
 
     Ok(())
@@ -817,6 +979,9 @@ fn run_recursive(cli: &Cli, regex: &Regex, dir: &std::path::Path) -> anyhow::Res
 
     let mut json_entries: Vec<JsonMatch> = Vec::new();
     let mut total_count: usize = 0;
+    let mut stats_total_matches: usize = 0;
+    let mut stats_total_lines: usize = 0;
+    let mut stats_files_scanned: usize = 0;
 
     for file_path in &files {
         // Skip binary files by checking the first 512 bytes for null bytes.
@@ -870,12 +1035,15 @@ fn run_recursive(cli: &Cli, regex: &Regex, dir: &std::path::Path) -> anyhow::Res
         }
 
         let lines: Vec<&str> = contents.lines().collect();
+        stats_files_scanned += 1;
+        stats_total_lines += lines.len();
         for (line_idx, line) in lines.iter().enumerate() {
             let line_matches = regex.find_all(line);
             if line_matches.is_empty() {
                 continue;
             }
             let line_num = line_idx + 1;
+            stats_total_matches += line_matches.len();
 
             if cli.count {
                 total_count += line_matches.len();
@@ -886,13 +1054,12 @@ fn run_recursive(cli: &Cli, regex: &Regex, dir: &std::path::Path) -> anyhow::Res
                 let text = &line[m.start..m.end.min(line.len())];
 
                 if cli.json {
-                    json_entries.push(JsonMatch {
-                        start: m.start,
-                        end: m.end,
-                        text: text.to_string(),
-                        line: Some(line_num),
-                        file: Some(display_path.clone()),
-                    });
+                    json_entries.push(json_match_from(
+                        m,
+                        line,
+                        Some(line_num),
+                        Some(display_path.clone()),
+                    ));
                 } else if cli.only_matching {
                     println!("{display_path}:{line_num}:{text}");
                 } else {
@@ -910,6 +1077,20 @@ fn run_recursive(cli: &Cli, regex: &Regex, dir: &std::path::Path) -> anyhow::Res
             serde_json::to_string(&json_entries).expect("JSON serialization should not fail")
         );
     }
+
+    if cli.stats {
+        eprintln!("---");
+        let pct = if stats_total_lines > 0 {
+            (stats_total_matches as f64 / stats_total_lines as f64) * 100.0
+        } else {
+            0.0
+        };
+        eprintln!(
+            "{} matches in {} lines ({:.1}%), {} files scanned",
+            stats_total_matches, stats_total_lines, pct, stats_files_scanned
+        );
+    }
+
     Ok(())
 }
 
@@ -929,14 +1110,7 @@ fn run_json_file(
         });
         let entries: Vec<JsonMatch> = file_matches
             .iter()
-            .map(|fm| JsonMatch {
-                start: fm.match_result.start,
-                end: fm.match_result.end,
-                text: fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())]
-                    .to_string(),
-                line: Some(fm.line_number),
-                file: None,
-            })
+            .map(|fm| json_match_from(&fm.match_result, &fm.line, Some(fm.line_number), None))
             .collect();
         println!(
             "{}",
@@ -948,13 +1122,7 @@ fn run_json_file(
         let matches = collect_matches(regex, &contents);
         let entries: Vec<JsonMatch> = matches
             .iter()
-            .map(|m| JsonMatch {
-                start: m.start,
-                end: m.end,
-                text: contents[m.start..m.end.min(contents.len())].to_string(),
-                line: None,
-                file: None,
-            })
+            .map(|m| json_match_from(m, &contents, None, None))
             .collect();
         println!(
             "{}",
@@ -1364,6 +1532,8 @@ mod tests {
             text: "555-1234".to_string(),
             line: None,
             file: None,
+            branch: None,
+            code_result: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains(r#""start":5"#));
@@ -1372,6 +1542,8 @@ mod tests {
         // Should not contain line or file when None
         assert!(!json.contains("line"));
         assert!(!json.contains("file"));
+        assert!(!json.contains("branch"));
+        assert!(!json.contains("code_result"));
     }
 
     #[test]
@@ -1382,9 +1554,142 @@ mod tests {
             text: "foo".to_string(),
             line: Some(42),
             file: Some("test.rs".to_string()),
+            branch: None,
+            code_result: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains(r#""line":42"#));
         assert!(json.contains(r#""file":"test.rs""#));
+    }
+
+    // ---- New feature tests ----
+
+    #[test]
+    fn json_match_serializes_branch_and_code_result_when_present() {
+        let entry = JsonMatch {
+            start: 0,
+            end: 3,
+            text: "cat".to_string(),
+            line: None,
+            file: None,
+            branch: Some(1),
+            code_result: Some("numeric:42".to_string()),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(r#""branch":1"#));
+        assert!(json.contains(r#""code_result":"numeric:42""#));
+    }
+
+    #[test]
+    fn json_to_value_converts_primitives() {
+        let v = json_to_value(&serde_json::json!(42));
+        assert_eq!(v, Value::Int(42));
+
+        let v = json_to_value(&serde_json::json!(3.14));
+        assert_eq!(v, Value::Float(3.14));
+
+        let v = json_to_value(&serde_json::json!(true));
+        assert_eq!(v, Value::Bool(true));
+
+        let v = json_to_value(&serde_json::json!("hello"));
+        assert_eq!(v, Value::String("hello".to_string()));
+
+        let v = json_to_value(&serde_json::json!(null));
+        assert_eq!(v, Value::Null);
+    }
+
+    #[test]
+    fn json_to_value_converts_arrays_and_objects() {
+        let v = json_to_value(&serde_json::json!(["cat", "dog"]));
+        assert_eq!(
+            v,
+            Value::Array(vec![
+                Value::String("cat".to_string()),
+                Value::String("dog".to_string()),
+            ])
+        );
+
+        let v = json_to_value(&serde_json::json!({"key": 42}));
+        assert_eq!(v, Value::Map(vec![("key".to_string(), Value::Int(42))]));
+    }
+
+    #[test]
+    fn apply_cli_typed_variables_parses_json_values() {
+        let regex =
+            Regex::with_mode(r#"(?{native:check})"#, ExecutionMode::Full).expect("compile regex");
+        apply_cli_typed_variables(
+            &regex,
+            &[CliVariable {
+                name: "limit".to_string(),
+                value: "42".to_string(),
+            }],
+        )
+        .expect("set typed variable");
+
+        regex
+            .register_native("check", |ctx| {
+                if ctx.typed_variable("limit") == Some(Value::Int(42)) {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("register callback");
+
+        assert!(regex.is_match(""));
+    }
+
+    #[test]
+    fn apply_cli_typed_variables_falls_back_to_string_on_invalid_json() {
+        let regex =
+            Regex::with_mode(r#"(?{native:check})"#, ExecutionMode::Full).expect("compile regex");
+        apply_cli_typed_variables(
+            &regex,
+            &[CliVariable {
+                name: "label".to_string(),
+                value: "not-json".to_string(),
+            }],
+        )
+        .expect("set typed variable");
+
+        regex
+            .register_native("check", |ctx| {
+                if ctx.typed_variable("label") == Some(Value::String("not-json".to_string())) {
+                    ExecResult::Success
+                } else {
+                    ExecResult::Failure
+                }
+            })
+            .expect("register callback");
+
+        assert!(regex.is_match(""));
+    }
+
+    #[test]
+    fn json_match_from_populates_branch_from_match_result() {
+        let m = MatchResult {
+            start: 0,
+            end: 3,
+            matched_branch_number: Some(2),
+            code_result: Some(CodeBlockValue::Numeric(7.0)),
+        };
+        let jm = json_match_from(&m, "cat", None, None);
+        assert_eq!(jm.branch, Some(2));
+        assert_eq!(jm.code_result, Some("numeric:7".to_string()));
+    }
+
+    #[test]
+    fn replace_all_with_code_replaces_via_code_results() {
+        // This tests the engine function directly; the CLI just wraps it.
+        // The code block must come after the named capture so it can read the match.
+        let regex = Regex::with_mode(r#"(?<w>[a-z]+)(?{native:upper})"#, ExecutionMode::Full)
+            .expect("compile regex");
+        regex
+            .register_native("upper", |ctx| {
+                ExecResult::Replacement(ctx.named("w").unwrap_or("").to_uppercase())
+            })
+            .expect("register callback");
+        let result = regex.replace_all_with_code("hello world");
+        assert_eq!(result, "HELLO WORLD");
     }
 }
