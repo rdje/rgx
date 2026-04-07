@@ -101,6 +101,10 @@ pub mod error;
 // Logging system
 pub mod log;
 
+// Fluent variable builder
+/// Fluent builder API for host variables — see [`vars::VarsBuilder`].
+pub mod vars;
+
 // Re-exports for convenience
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
@@ -112,6 +116,7 @@ pub use execution::{
 };
 pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
+pub use vars::VarsBuilder;
 
 /// High-performance regex matcher with optional code execution capabilities.
 ///
@@ -636,6 +641,44 @@ impl Regex {
         let result = self.engine.set_typed_variable(&name, value);
         trace_exit!("api", "Regex::set_typed_variable", "ok={}", result.is_ok());
         result
+    }
+
+    /// Set a host variable with automatic type conversion.
+    ///
+    /// Accepts strings, integers, floats, booleans, arrays, and maps:
+    /// ```ignore
+    /// re.set_var("threshold", 100)?;
+    /// re.set_var("rate", 0.08)?;
+    /// re.set_var("debug", true)?;
+    /// re.set_var("name", "alice")?;
+    /// re.set_var("tags", vec!["a", "b", "c"])?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager.
+    pub fn set_var<V: Into<Value>>(&self, name: &str, value: V) -> Result<()> {
+        self.set_typed_variable(name, value.into())
+    }
+
+    /// Start a fluent builder for host variables.
+    ///
+    /// Returns a [`VarsBuilder`](vars::VarsBuilder) that lets you set scalars,
+    /// arrays, and nested maps without constructing [`Value`] manually:
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::{Regex, ExecutionMode};
+    /// let re = Regex::with_mode(r".", ExecutionMode::Full).unwrap();
+    /// re.vars()
+    ///     .set("env", "prod")
+    ///     .hash("db")
+    ///         .set("host", "localhost")
+    ///         .set("port", 5432_i64)
+    ///         .done();
+    /// ```
+    #[must_use]
+    pub fn vars(&self) -> vars::VarsBuilder<'_> {
+        vars::VarsBuilder::new(self)
     }
 
     /// Register an event observer for structured match events.
@@ -4972,6 +5015,45 @@ mod tests {
                 ctx.typed_variable("threshold").and_then(|v| v.as_i64()),
                 Some(42)
             );
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn set_var_ergonomic_int() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_var("n", 42_i64).unwrap();
+        re.register_native("check", |ctx| {
+            assert_eq!(ctx.var_int("n"), Some(42));
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn set_var_ergonomic_vec_str() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_var("tags", vec!["a", "b", "c"]).unwrap();
+        re.register_native("check", |ctx| {
+            let tags = ctx.var_array("tags").unwrap();
+            assert_eq!(tags.len(), 3);
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn value_array_builder() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_var("nums", Value::array([1_i64, 2, 3])).unwrap();
+        re.register_native("check", |ctx| {
+            let nums = ctx.var_array("nums").unwrap();
+            assert_eq!(nums.len(), 3);
+            assert_eq!(nums[0].as_i64(), Some(1));
             ExecResult::Success
         })
         .unwrap();

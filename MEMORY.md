@@ -81,7 +81,8 @@ Live continuity memory for `rgx` sessions.
 - `find_all` zero-width suppression matches PCRE2 iteration semantics
 
 ### Host integration
-- **Typed values shipped**: `Value` enum (Null/Bool/Int/Float/String/Array/Map); `set_typed_variable` for typed input, `typed_variable` for typed reading, `Structured(Value)` for complex return values; backward compatible with string API
+- **Fluent variable builder shipped**: `re.vars().set("key", value).hash("config").set("port", 8080).done()` — zero `Value::` mentions, arbitrary nesting; move-based ownership for type-safe chaining; convenience readers `var_int`/`var_float`/`var_bool`/`var_str`/`var_array`/`var_map` on ExecContext
+- **Typed values shipped**: `Value` enum (Null/Bool/Int/Float/String/Array/Map); `set_typed_variable`/`set_var` for typed input, `typed_variable` for typed reading, `Structured(Value)` for complex return values; backward compatible with string API
 - **Layer 5 Async I/O shipped**: continuation-passing style — `find_first_suspendable()` returns `MatchOutcome::Suspended(MatchContinuation)` on unregistered async callbacks; `resume(continuation, result)` restores full VM state and continues; `find_first_async(resolver)` convenience wrapper works with any async runtime; zero overhead on sync path; `MatchContinuation` is `Send + Sync`; correct under backtracking and recursion; 12 tests
 - **Layer 6 File-Backed Matching shipped (core API)**: `match_file`, `match_file_lines`, `scan_file`, `scan_file_lines` — line-oriented mode with `FileMatch` struct carrying line numbers; `tail_file` and CLI integration deferred
 - **Layer 4 Structured Events shipped**: `MatchEvent` enum with 6 variants; `Regex::on_event(observer)` API; zero overhead when no observer; instrumented all scanning strategies and key VM opcodes

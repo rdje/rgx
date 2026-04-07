@@ -2916,6 +2916,18 @@ impl RegexVM {
         Ok(())
     }
 
+    /// Set a host variable with automatic type conversion.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
+    pub fn set_var<V: Into<crate::execution::Value>>(
+        &self,
+        name: &str,
+        value: V,
+    ) -> crate::error::Result<()> {
+        self.set_typed_variable(name, value.into())
+    }
+
     // ========================================================================
     // SUSPENDABLE (ASYNC / CONTINUATION-PASSING) MATCHING
     // ========================================================================

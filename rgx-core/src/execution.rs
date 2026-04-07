@@ -122,6 +122,30 @@ impl Value {
             _ => None,
         }
     }
+
+    /// Create an array from an iterator of values.
+    pub fn array<I, V>(items: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<Value>,
+    {
+        Value::Array(items.into_iter().map(Into::into).collect())
+    }
+
+    /// Create a map from key-value pairs.
+    pub fn map<I, K, V>(pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<Value>,
+    {
+        Value::Map(
+            pairs
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        )
+    }
 }
 
 impl fmt::Display for Value {
@@ -183,6 +207,70 @@ impl From<f64> for Value {
 impl From<bool> for Value {
     fn from(b: bool) -> Self {
         Value::Bool(b)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(n: i32) -> Self {
+        Value::Int(i64::from(n))
+    }
+}
+
+impl From<u32> for Value {
+    fn from(n: u32) -> Self {
+        Value::Int(i64::from(n))
+    }
+}
+
+impl From<usize> for Value {
+    #[allow(clippy::cast_possible_wrap)]
+    fn from(n: usize) -> Self {
+        Value::Int(n as i64)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(n: f32) -> Self {
+        Value::Float(f64::from(n))
+    }
+}
+
+impl From<Vec<&str>> for Value {
+    fn from(v: Vec<&str>) -> Self {
+        Value::Array(
+            v.into_iter()
+                .map(|s| Value::String(s.to_string()))
+                .collect(),
+        )
+    }
+}
+
+impl From<Vec<String>> for Value {
+    fn from(v: Vec<String>) -> Self {
+        Value::Array(v.into_iter().map(Value::String).collect())
+    }
+}
+
+impl From<Vec<i64>> for Value {
+    fn from(v: Vec<i64>) -> Self {
+        Value::Array(v.into_iter().map(Value::Int).collect())
+    }
+}
+
+impl From<Vec<f64>> for Value {
+    fn from(v: Vec<f64>) -> Self {
+        Value::Array(v.into_iter().map(Value::Float).collect())
+    }
+}
+
+impl<K: Into<String>, V: Into<Value>> From<Vec<(K, V)>> for Value {
+    fn from(pairs: Vec<(K, V)>) -> Self {
+        Value::Map(
+            pairs
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        )
     }
 }
 
@@ -435,6 +523,45 @@ impl ExecContext {
             value.is_some()
         );
         value
+    }
+
+    /// Get a variable as a string.
+    #[must_use]
+    pub fn var_str(&self, name: &str) -> Option<String> {
+        self.typed_variable(name)
+            .and_then(|v| v.as_str().map(ToString::to_string))
+    }
+
+    /// Get a variable as an integer.
+    #[must_use]
+    pub fn var_int(&self, name: &str) -> Option<i64> {
+        self.typed_variable(name).and_then(|v| v.as_i64())
+    }
+
+    /// Get a variable as a float.
+    #[must_use]
+    pub fn var_float(&self, name: &str) -> Option<f64> {
+        self.typed_variable(name).and_then(|v| v.as_f64())
+    }
+
+    /// Get a variable as a boolean.
+    #[must_use]
+    pub fn var_bool(&self, name: &str) -> Option<bool> {
+        self.typed_variable(name).and_then(|v| v.as_bool())
+    }
+
+    /// Get a variable as an array.
+    #[must_use]
+    pub fn var_array(&self, name: &str) -> Option<Vec<Value>> {
+        self.typed_variable(name)
+            .and_then(|v| v.as_array().map(<[Value]>::to_vec))
+    }
+
+    /// Get a variable as a map.
+    #[must_use]
+    pub fn var_map(&self, name: &str) -> Option<Vec<(String, Value)>> {
+        self.typed_variable(name)
+            .and_then(|v| v.as_map().map(<[(String, Value)]>::to_vec))
     }
 }
 
@@ -2622,6 +2749,11 @@ impl ExecutionManager {
             "ExecutionManager::set_typed_variable",
             "ok=true"
         );
+    }
+
+    /// Set a host variable with automatic type conversion.
+    pub fn set_var<V: Into<Value>>(&self, name: &str, value: V) {
+        self.set_typed_variable(name, value.into());
     }
 
     /// Clone the current execution-variable snapshot.

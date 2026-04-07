@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Ship fluent variable builder API
+- Scope: ergonomic API for building host variables without exposing `Value` internals.
+- Changes:
+  - Created `rgx-core/src/vars.rs` with `VarsBuilder`, `ArrayBuilder`, `HashBuilder` using move-based ownership for type-safe chaining.
+  - `re.vars().set("key", value).hash("config").set("port", 8080).done()` — no `Value::` mentions.
+  - Arbitrary nesting: `.hash()` and `.list()` inside `.hash()` at any depth.
+  - Added `set_var<V: Into<Value>>()` ergonomic setter and `var_int()`, `var_float()`, `var_bool()`, `var_str()`, `var_array()`, `var_map()` convenience readers on `ExecContext`.
+  - Added `Value::array()` and `Value::map()` static builders, plus `From` impls for `i32`, `u32`, `usize`, `f32`, `Vec<&str>`, `Vec<String>`, `Vec<i64>`, `Vec<f64>`, `Vec<(K,V)>`.
+  - 5 fluent builder tests + 3 ergonomic API tests.
+- Validation:
+  - `cargo test -p rgx-core` (343 pass), 0 new clippy warnings.
+
 ### 2026-04-07 - Ship typed host values: scalars, arrays, maps for data exchange
 - Scope: extend host variable system beyond strings to typed scalars and aggregates.
 - Changes:

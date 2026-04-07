@@ -301,6 +301,14 @@ impl Engine {
         self.vm.set_typed_variable(name, value)
     }
 
+    /// Set a host variable with automatic type conversion.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
+    pub fn set_var<V: Into<crate::execution::Value>>(&self, name: &str, value: V) -> Result<()> {
+        self.set_typed_variable(name, value.into())
+    }
+
     /// Register an event observer for structured match events.
     ///
     /// The observer receives [`MatchEvent`] values at key execution points.
