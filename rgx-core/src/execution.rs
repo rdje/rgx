@@ -36,9 +36,155 @@
 use crate::error::{Result, RgxError};
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::collections::HashMap;
+use std::fmt;
 #[cfg(any(feature = "javascript", feature = "lua", feature = "rhai"))]
 use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
+
+// ============================================================================
+// TYPED VALUE
+// ============================================================================
+
+/// A typed value for host-engine data exchange.
+///
+/// Used for host variables (data in) and code block results (data out).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    /// No value.
+    Null,
+    /// Boolean.
+    Bool(bool),
+    /// 64-bit integer.
+    Int(i64),
+    /// 64-bit float.
+    Float(f64),
+    /// String.
+    String(String),
+    /// Ordered list of values.
+    Array(Vec<Value>),
+    /// Key-value map.
+    Map(Vec<(String, Value)>),
+}
+
+impl Value {
+    /// Try to extract a string reference.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Try to extract an `i64`.
+    #[must_use]
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Value::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Try to extract an `f64`.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Float(n) => Some(*n),
+            Value::Int(n) => Some(*n as f64),
+            _ => None,
+        }
+    }
+
+    /// Try to extract a `bool`.
+    #[must_use]
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Try to extract an array slice.
+    #[must_use]
+    pub fn as_array(&self) -> Option<&[Value]> {
+        match self {
+            Value::Array(arr) => Some(arr.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Try to extract a map slice.
+    #[must_use]
+    pub fn as_map(&self) -> Option<&[(String, Value)]> {
+        match self {
+            Value::Map(map) => Some(map.as_slice()),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Null => write!(f, "null"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Int(n) => write!(f, "{n}"),
+            Value::Float(n) => write!(f, "{n}"),
+            Value::String(s) => write!(f, "{s}"),
+            Value::Array(arr) => {
+                write!(f, "[")?;
+                for (i, v) in arr.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
+            Value::Map(map) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
+            }
+        }
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(s.to_string())
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Int(n)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(n: f64) -> Self {
+        Value::Float(n)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
 
 // ============================================================================
 // EXECUTION CONTEXT
@@ -70,6 +216,8 @@ pub struct ExecContext {
     pub named_captures: HashMap<String, String>,
     /// Host-provided variable snapshot for this code-block execution
     pub variables: Arc<RwLock<HashMap<String, String>>>,
+    /// Host-provided typed variable snapshot for this code-block execution
+    pub typed_variables: Arc<RwLock<HashMap<String, Value>>>,
     /// 1-based top-level branch number when the current path is inside a top-level alternation arm
     pub matched_branch_number: Option<usize>,
 }
@@ -93,6 +241,7 @@ impl ExecContext {
             captures: Vec::new(),
             named_captures: HashMap::new(),
             variables: Arc::new(RwLock::new(HashMap::new())),
+            typed_variables: Arc::new(RwLock::new(HashMap::new())),
             matched_branch_number: None,
         };
         trace_exit!(
@@ -253,6 +402,40 @@ impl ExecContext {
         );
         snapshot
     }
+
+    /// Get a typed variable value by name.
+    ///
+    /// Returns a clone of the [`Value`] stored under `name`, if any.
+    /// When a string variable was set via [`crate::Regex::set_variable`], it is
+    /// also accessible here as [`Value::String`].
+    ///
+    /// # Panics
+    /// Panics if the internal typed-variables `RwLock` is poisoned.
+    #[must_use]
+    pub fn typed_variable(&self, name: &str) -> Option<Value> {
+        let typed_slots = self.typed_variables.read().unwrap().len();
+        trace_enter!(
+            "execution",
+            "ExecContext::typed_variable",
+            "name={},typed_variable_slots={}",
+            name,
+            typed_slots
+        );
+        let value = self.typed_variables.read().unwrap().get(name).cloned();
+        trace_decision!(
+            "execution",
+            "typed_variable(name).is_some()",
+            value.is_some(),
+            "typed execution variable lookup completed"
+        );
+        trace_exit!(
+            "execution",
+            "ExecContext::typed_variable",
+            "ok=true,found={}",
+            value.is_some()
+        );
+        value
+    }
 }
 
 // ============================================================================
@@ -265,6 +448,8 @@ pub enum CodeBlockValue {
     Replacement(String),
     /// Code returned a numeric payload.
     Numeric(f64),
+    /// Code returned a structured [`Value`] payload.
+    Structured(Value),
 }
 
 /// Match steering actions returned by host callbacks.
@@ -306,6 +491,8 @@ pub enum ExecResult {
     /// asynchronously by the caller. Used by the suspendable matching
     /// path to signal that the VM should pause and return control.
     Suspend(String),
+    /// Code returned a structured [`Value`] payload.
+    Structured(Value),
 }
 
 fn exec_result_kind(result: &ExecResult) -> &'static str {
@@ -317,6 +504,7 @@ fn exec_result_kind(result: &ExecResult) -> &'static str {
         ExecResult::Error(_) => "Error",
         ExecResult::Steer(_) => "Steer",
         ExecResult::Suspend(_) => "Suspend",
+        ExecResult::Structured(_) => "Structured",
     }
 }
 
@@ -325,6 +513,7 @@ fn emitted_result_to_exec_result(result: CodeBlockValue) -> ExecResult {
     match result {
         CodeBlockValue::Replacement(text) => ExecResult::Replacement(text),
         CodeBlockValue::Numeric(value) => ExecResult::Numeric(value),
+        CodeBlockValue::Structured(value) => ExecResult::Structured(value),
     }
 }
 
@@ -336,7 +525,9 @@ fn finish_exec_result(
     let emitted = emitted_result.lock().unwrap().take();
     match base_result {
         ExecResult::Success => emitted.map_or(base_result, emitted_result_to_exec_result),
-        ExecResult::Numeric(_) | ExecResult::Replacement(_) => base_result,
+        ExecResult::Numeric(_) | ExecResult::Replacement(_) | ExecResult::Structured(_) => {
+            base_result
+        }
         ExecResult::Failure | ExecResult::Error(_) => base_result,
     }
 }
@@ -1965,6 +2156,7 @@ impl Default for NativeCallbackRegistry {
 /// Registry for host-provided execution variables.
 pub struct ExecutionVariableRegistry {
     variables: RwLock<HashMap<String, String>>,
+    typed_variables: RwLock<HashMap<String, Value>>,
 }
 
 impl ExecutionVariableRegistry {
@@ -1974,6 +2166,7 @@ impl ExecutionVariableRegistry {
         trace_enter!("execution", "ExecutionVariableRegistry::new");
         let registry = Self {
             variables: RwLock::new(HashMap::new()),
+            typed_variables: RwLock::new(HashMap::new()),
         };
         trace_exit!(
             "execution",
@@ -1985,6 +2178,9 @@ impl ExecutionVariableRegistry {
 
     /// Register or replace a host-provided execution variable.
     ///
+    /// Also stores the value as a [`Value::String`] in the typed variable map
+    /// so that it is accessible via [`ExecContext::typed_variable`].
+    ///
     /// # Panics
     /// Panics if the internal variables `RwLock` is poisoned.
     pub fn set(&self, name: &str, value: String) {
@@ -1995,6 +2191,10 @@ impl ExecutionVariableRegistry {
             name,
             value.len()
         );
+        self.typed_variables
+            .write()
+            .unwrap()
+            .insert(name.to_string(), Value::String(value.clone()));
         let mut variables = self.variables.write().unwrap();
         let replaced_existing = variables.insert(name.to_string(), value).is_some();
         trace_decision!(
@@ -2009,6 +2209,37 @@ impl ExecutionVariableRegistry {
             "ok=true,name={},registered_variables={}",
             name,
             variables.len()
+        );
+    }
+
+    /// Register or replace a typed host-provided execution variable.
+    ///
+    /// Also stores a string representation in the legacy string variable map
+    /// so that it is accessible via [`ExecContext::variable`].
+    ///
+    /// # Panics
+    /// Panics if the internal variables `RwLock` is poisoned.
+    pub fn set_typed(&self, name: &str, value: Value) {
+        trace_enter!(
+            "execution",
+            "ExecutionVariableRegistry::set_typed",
+            "name={}",
+            name
+        );
+        let string_repr = value.to_string();
+        self.variables
+            .write()
+            .unwrap()
+            .insert(name.to_string(), string_repr);
+        self.typed_variables
+            .write()
+            .unwrap()
+            .insert(name.to_string(), value);
+        trace_exit!(
+            "execution",
+            "ExecutionVariableRegistry::set_typed",
+            "ok=true,name={}",
+            name
         );
     }
 
@@ -2031,6 +2262,14 @@ impl ExecutionVariableRegistry {
             snapshot.len()
         );
         snapshot
+    }
+
+    /// Clone the current typed-variable state into an owned map.
+    ///
+    /// # Panics
+    /// Panics if the internal typed-variables `RwLock` is poisoned.
+    pub fn typed_snapshot(&self) -> HashMap<String, Value> {
+        self.typed_variables.read().unwrap().clone()
     }
 
     /// Count registered variables.
@@ -2369,6 +2608,22 @@ impl ExecutionManager {
         );
     }
 
+    /// Register or replace a typed host-provided execution variable.
+    pub fn set_typed_variable(&self, name: &str, value: Value) {
+        trace_enter!(
+            "execution",
+            "ExecutionManager::set_typed_variable",
+            "name={}",
+            name
+        );
+        self.variables.set_typed(name, value);
+        trace_exit!(
+            "execution",
+            "ExecutionManager::set_typed_variable",
+            "ok=true"
+        );
+    }
+
     /// Clone the current execution-variable snapshot.
     pub fn variable_snapshot(&self) -> HashMap<String, String> {
         trace_enter!(
@@ -2385,6 +2640,11 @@ impl ExecutionManager {
             snapshot.len()
         );
         snapshot
+    }
+
+    /// Clone the current typed-variable snapshot.
+    pub fn typed_variable_snapshot(&self) -> HashMap<String, Value> {
+        self.variables.typed_snapshot()
     }
 
     /// Check if a named native callback is registered.

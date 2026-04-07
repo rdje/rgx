@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Ship typed host values: scalars, arrays, maps for data exchange
+- Scope: extend host variable system beyond strings to typed scalars and aggregates.
+- Changes:
+  - Added `Value` enum with 7 variants: `Null`, `Bool(bool)`, `Int(i64)`, `Float(f64)`, `String(String)`, `Array(Vec<Value>)`, `Map(Vec<(String, Value)>)`.
+  - Added `Regex::set_typed_variable(name, Value)` for typed variable input.
+  - Added `ExecContext::typed_variable(name) -> Option<Value>` for typed variable reading in callbacks.
+  - Added `CodeBlockValue::Structured(Value)` and `ExecResult::Structured(Value)` for structured return values from callbacks.
+  - Backward compatible: `set_variable("x", "hello")` still works and is also accessible as `typed_variable("x") → Value::String("hello")`. Typed variables auto-stringify for Lua/JS/Rhai compat.
+  - `From` impls for `&str`, `String`, `i64`, `f64`, `bool` for ergonomic construction.
+  - 6 unit tests: int, array, map, structured result, backward compat (x2).
+- Validation:
+  - `cargo test -p rgx-core` (333 pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass), 0 new clippy warnings.
+- Notes/impact:
+  - Callbacks can now receive typed data (thresholds as ints, lookup tables as maps, feature flags as bools) without string parsing.
+  - Callbacks can return structured results (maps with multiple fields) instead of single numeric/string values.
+
 ### 2026-04-07 - Create The RGX Guide: 12-file book-style documentation
 - Scope: comprehensive user-facing documentation covering every feature.
 - Changes:

@@ -261,6 +261,7 @@ fn format_code_result(value: &CodeBlockValue) -> String {
     match value {
         CodeBlockValue::Replacement(text) => format!("replacement:{text:?}"),
         CodeBlockValue::Numeric(number) => format!("numeric:{number}"),
+        CodeBlockValue::Structured(v) => format!("structured:{v}"),
     }
 }
 

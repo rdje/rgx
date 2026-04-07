@@ -293,6 +293,14 @@ impl Engine {
         self.vm.set_variable(name, value)
     }
 
+    /// Register or replace a typed host-provided execution variable on the engine's execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this engine.
+    pub fn set_typed_variable(&self, name: &str, value: crate::execution::Value) -> Result<()> {
+        self.vm.set_typed_variable(name, value)
+    }
+
     /// Register an event observer for structured match events.
     ///
     /// The observer receives [`MatchEvent`] values at key execution points.

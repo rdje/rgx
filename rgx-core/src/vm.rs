@@ -2315,6 +2315,15 @@ impl RegexVM {
                 // treat as failure for safety.
                 CodeBlockOutcome::Fail
             }
+            ExecResult::Structured(value) => {
+                debug_log!(
+                    "vm",
+                    "CodeBlock {} returned a structured value; storing it on the current match path",
+                    language,
+                );
+                ctx.code_result = Some(CodeBlockValue::Structured(value));
+                CodeBlockOutcome::Pass
+            }
         }
     }
 
@@ -2402,6 +2411,8 @@ impl RegexVM {
         }
         if let Some(execution_manager) = &self.execution_manager {
             exec_ctx.variables = Arc::new(RwLock::new(execution_manager.variable_snapshot()));
+            exec_ctx.typed_variables =
+                Arc::new(RwLock::new(execution_manager.typed_variable_snapshot()));
         }
         exec_ctx
     }
@@ -2886,6 +2897,25 @@ impl RegexVM {
         Ok(())
     }
 
+    /// Register or replace a typed host-provided execution variable on the attached execution manager.
+    ///
+    /// # Errors
+    /// Returns `RgxError::Engine` if no execution manager is attached to this VM.
+    pub fn set_typed_variable(
+        &self,
+        name: &str,
+        value: crate::execution::Value,
+    ) -> crate::error::Result<()> {
+        let Some(execution_manager) = &self.execution_manager else {
+            return Err(crate::error::RgxError::Engine(
+                "execution variable registration is unavailable for this compiled regex"
+                    .to_string(),
+            ));
+        };
+        execution_manager.set_typed_variable(name, value);
+        Ok(())
+    }
+
     // ========================================================================
     // SUSPENDABLE (ASYNC / CONTINUATION-PASSING) MATCHING
     // ========================================================================
@@ -3102,6 +3132,10 @@ impl RegexVM {
             ExecResult::Suspend(_) => {
                 // Treat nested Suspend as failure.
                 CodeBlockOutcome::Fail
+            }
+            ExecResult::Structured(value) => {
+                ctx.code_result = Some(CodeBlockValue::Structured(value.clone()));
+                CodeBlockOutcome::Pass
             }
         };
 

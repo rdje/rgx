@@ -108,7 +108,7 @@ pub use error::{Result, RgxError};
 pub use events::MatchEvent;
 pub use execution::{
     CodeBlockValue, ExecContext, ExecContextSnapshot, ExecResult, MatchContinuation, MatchOutcome,
-    SteerResult,
+    SteerResult, Value,
 };
 pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
@@ -618,6 +618,23 @@ impl Regex {
         );
         let result = self.engine.set_variable(&name, value);
         trace_exit!("api", "Regex::set_variable", "ok={}", result.is_ok());
+        result
+    }
+
+    /// Register or replace a typed host-provided execution variable for code-block evaluation.
+    ///
+    /// When a typed variable is set, the legacy string variable (accessible via
+    /// [`ExecContext::variable`]) is also updated with the `Display` representation
+    /// of the value for backward compatibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] when the compiled regex has no execution manager.
+    pub fn set_typed_variable(&self, name: impl Into<String>, value: Value) -> Result<()> {
+        let name = name.into();
+        trace_enter!("api", "Regex::set_typed_variable", "name={}", name);
+        let result = self.engine.set_typed_variable(&name, value);
+        trace_exit!("api", "Regex::set_typed_variable", "ok={}", result.is_ok());
         result
     }
 
@@ -4815,5 +4832,149 @@ mod tests {
             }
             other => panic!("expected completed, got {:?}", other),
         }
+    }
+
+    // ========================================================================
+    // TYPED VALUE TESTS
+    // ========================================================================
+
+    #[test]
+    fn typed_variable_int() {
+        let re = Regex::with_mode(r"(?<n>\d+)(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_typed_variable("threshold", Value::Int(100)).unwrap();
+        re.register_native("check", |ctx| {
+            let n: i64 = ctx.named("n").unwrap().parse().unwrap();
+            let threshold = ctx
+                .typed_variable("threshold")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            if n > threshold {
+                ExecResult::Success
+            } else {
+                ExecResult::Failure
+            }
+        })
+        .unwrap();
+        assert!(re.is_match("150"));
+        assert!(!re.is_match("50"));
+    }
+
+    #[test]
+    fn typed_variable_array() {
+        let re = Regex::with_mode(r"(?<word>\w+)(?{native:in_list})", ExecutionMode::Full).unwrap();
+        re.set_typed_variable(
+            "allowed",
+            Value::Array(vec![
+                Value::String("cat".into()),
+                Value::String("dog".into()),
+            ]),
+        )
+        .unwrap();
+        re.register_native("in_list", |ctx| {
+            let word = ctx.named("word").unwrap_or("");
+            let allowed = ctx
+                .typed_variable("allowed")
+                .and_then(|v| match v {
+                    Value::Array(arr) => Some(arr),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            if allowed.iter().any(|v| v.as_str() == Some(word)) {
+                ExecResult::Success
+            } else {
+                ExecResult::Failure
+            }
+        })
+        .unwrap();
+        assert!(re.is_match("cat"));
+        assert!(!re.is_match("bird"));
+    }
+
+    #[test]
+    fn typed_variable_map() {
+        let re = Regex::with_mode(r"(?<code>\w+)(?{native:lookup})", ExecutionMode::Full).unwrap();
+        re.set_typed_variable(
+            "codes",
+            Value::Map(vec![
+                ("US".into(), Value::String("United States".into())),
+                ("UK".into(), Value::String("United Kingdom".into())),
+            ]),
+        )
+        .unwrap();
+        re.register_native("lookup", |ctx| {
+            let code = ctx.named("code").unwrap_or("");
+            let codes = ctx
+                .typed_variable("codes")
+                .and_then(|v| match v {
+                    Value::Map(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            if codes.iter().any(|(k, _)| k == code) {
+                ExecResult::Success
+            } else {
+                ExecResult::Failure
+            }
+        })
+        .unwrap();
+        assert!(re.is_match("US"));
+        assert!(!re.is_match("XX"));
+    }
+
+    #[test]
+    fn structured_result() {
+        let re = Regex::with_mode(r"(?<n>\d+)(?{native:enrich})", ExecutionMode::Full).unwrap();
+        re.register_native("enrich", |ctx| {
+            let n: i64 = ctx.named("n").unwrap().parse().unwrap();
+            ExecResult::Structured(Value::Map(vec![
+                ("original".into(), Value::Int(n)),
+                ("doubled".into(), Value::Int(n * 2)),
+                ("is_even".into(), Value::Bool(n % 2 == 0)),
+            ]))
+        })
+        .unwrap();
+        let m = re.find_first("42").unwrap();
+        if let Some(CodeBlockValue::Structured(v)) = &m.code_result {
+            assert_eq!(v.as_map().unwrap().len(), 3);
+        } else {
+            panic!("expected Structured code_result");
+        }
+    }
+
+    #[test]
+    fn string_variable_backward_compat() {
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_variable("key", "value").unwrap();
+        re.register_native("check", |ctx| {
+            assert_eq!(ctx.variable("key"), Some("value".to_string()));
+            // Also accessible as typed
+            assert_eq!(
+                ctx.typed_variable("key")
+                    .and_then(|v| v.as_str().map(String::from)),
+                Some("value".to_string())
+            );
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
+    }
+
+    #[test]
+    fn typed_variable_int_backward_compat_string() {
+        // When a typed variable is set, the string variable should also be set
+        let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+        re.set_typed_variable("threshold", Value::Int(42)).unwrap();
+        re.register_native("check", |ctx| {
+            // String variable should return the Display representation
+            assert_eq!(ctx.variable("threshold"), Some("42".to_string()));
+            // Typed variable should return the original Int
+            assert_eq!(
+                ctx.typed_variable("threshold").and_then(|v| v.as_i64()),
+                Some(42)
+            );
+            ExecResult::Success
+        })
+        .unwrap();
+        assert!(re.is_match("x"));
     }
 }
