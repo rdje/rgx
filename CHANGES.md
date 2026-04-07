@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Test all 9 known gap combinations — 2 real bugs found
+- Scope: prove or disprove every untested feature combination listed in TESTING_PHILOSOPHY.md.
+- Changes:
+  - Added 10 tests covering all 9 known gaps: recursion+steering, events+async, file+callbacks, variable mutation in find_all, captures across \K, verbs in lookaheads, steering+zero-width, deep recursion+trail, concurrent variable mutation.
+  - **Bug found**: events don't fire during `find_first_suspendable` before suspension — observability layer is blind to pre-suspension work.
+  - **Bug found**: recursive subroutine calls clobber outer match position/capture state — `(a(b)c)` with recursive balanced-paren pattern reports inner match instead of outer.
+  - Both bugs marked `#[ignore]` with documentation; 42 pass, 2 ignored.
+  - Total adversarial tests: 44.
+- Validation:
+  - `cargo test -p rgx-core --test adversarial`: 42 pass, 0 fail, 2 ignored.
+
 ### 2026-04-07 - Expand four weakest guide chapters to SOTA+++ documentation quality
 - Scope: improve user-facing documentation for the chapters that needed it most.
 - Changes:

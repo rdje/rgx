@@ -92,9 +92,13 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
+### Known bugs (from gap testing)
+- **Events don't fire during `find_first_suspendable`** before suspension — observability blind pre-suspend
+- **Recursive subroutine clobbers outer capture/position state** — `(a(b)c)` with balanced-paren recursion reports inner match
+
 ### Testing
-- **5 test suites**: unit (343), integration (55), adversarial (34), property-based (11 × 256+ cases), stress/fuzz (21)
-- Total: **~520 tests**, all passing, zero failures
+- **5 test suites**: unit (343), integration (55), adversarial (44, 2 ignored/known bugs), property-based (11 × 256+ cases), stress/fuzz (21)
+- Total: **~530 tests**, 2 known bugs documented with `#[ignore]`
 - Property-based via `proptest`: random patterns/inputs verify invariants (bounds, non-overlap, determinism, UTF-8 safety)
 - Stress: 10K inputs, 100K rapid-fire, 8-thread concurrency, 100K-line file scan, 5000 random compilations
 - `docs/TESTING_PHILOSOPHY.md`: hostile skepticism doctrine, behavioral categories, claims-to-prove, known gaps, process rules

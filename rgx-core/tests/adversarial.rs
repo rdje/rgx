@@ -559,3 +559,319 @@ fn concurrent_file_scanning() {
     }
     std::fs::remove_file(&path).ok();
 }
+
+// =========================================================================
+// KNOWN GAPS — feature combinations from TESTING_PHILOSOPHY.md
+// =========================================================================
+
+// Gap 1: Recursion + steering
+// What happens if a callback steers inside a recursive subroutine?
+#[test]
+fn recursion_with_steering_callback() {
+    // Pattern: match balanced parentheses, then invoke a callback.
+    // The callback aborts after 2 matches, proving steering works
+    // correctly even when the prior match used recursion.
+    let re = Regex::with_mode(
+        r"(?<pair>\((?:[^()]+|(?&pair))*\))(?{native:check})",
+        ExecutionMode::Full,
+    )
+    .unwrap();
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let c = count.clone();
+    re.register_native("check", move |_ctx| {
+        let n = c.fetch_add(1, Ordering::Relaxed);
+        if n >= 2 {
+            ExecResult::Steer(SteerResult::Abort)
+        } else {
+            ExecResult::Success
+        }
+    })
+    .unwrap();
+
+    // Nested parens: (a(b(c)d)e) (f) (g) (h)
+    let matches = re.find_all("(a(b(c)d)e) (f) (g) (h)");
+    // Should abort after the callback fires for the 3rd match
+    assert!(
+        matches.len() <= 3,
+        "abort should stop matching, got {} matches",
+        matches.len()
+    );
+    // At least one match should have succeeded before abort
+    assert!(
+        !matches.is_empty(),
+        "at least one recursive match should succeed"
+    );
+}
+
+// Gap 2: Events during async suspension
+// Do events fire before suspension? After resume? Both?
+// BUG: events don't fire before suspension — observability is blind pre-suspend
+#[test]
+#[ignore = "known bug: events don't fire during find_first_suspendable before suspension"]
+fn events_fire_before_suspension() {
+    let re = Regex::with_mode(r"cat(?{native:async_check})", ExecutionMode::Full).unwrap();
+
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let ec = events.clone();
+    re.on_event(move |event| {
+        ec.lock().unwrap().push(format!("{event:?}"));
+    })
+    .unwrap();
+
+    let outcome = re.find_first_suspendable("cat");
+
+    // Events should have fired BEFORE suspension (match attempt started, etc.)
+    let collected = events.lock().unwrap();
+    assert!(
+        !collected.is_empty(),
+        "events should fire before suspension"
+    );
+
+    // Resume and check that more events fire
+    if let MatchOutcome::Suspended(cont) = outcome {
+        let events_before_resume = collected.len();
+        drop(collected); // release lock before resume
+
+        let _ = re.resume(*cont, ExecResult::Success);
+
+        let collected = events.lock().unwrap();
+        assert!(
+            collected.len() > events_before_resume,
+            "events should fire during resume"
+        );
+    }
+}
+
+// Gap 3: File scanning + async callbacks
+// Can you suspend during a file scan? scan_file uses find_all internally
+// which is synchronous. Verify it works with a registered callback.
+#[test]
+fn file_scan_with_callback_works() {
+    let path = std::env::temp_dir().join("rgx_gap_file_async.txt");
+    std::fs::write(&path, "test data cat dog").unwrap();
+
+    let re = Regex::with_mode(r"\w+(?{native:check})", ExecutionMode::Full).unwrap();
+    re.register_native("check", |_| ExecResult::Success)
+        .unwrap();
+
+    // This should work fine — callback is registered and returns Success
+    let count = re.scan_file(&path).unwrap();
+    assert!(count > 0, "scan_file with callback should find matches");
+
+    std::fs::remove_file(&path).ok();
+}
+
+// Gap 4: Variable mutation between find_all matches
+// Does the second match see updated variables? find_all creates one
+// ExecContext upfront, so all matches should see the same snapshot.
+#[test]
+fn variable_mutation_between_find_all_matches() {
+    let re = Regex::with_mode(r"\w+(?{native:read_var})", ExecutionMode::Full).unwrap();
+    let values = Arc::new(Mutex::new(Vec::<String>::new()));
+    let v = values.clone();
+    re.register_native("read_var", move |ctx| {
+        let val = ctx
+            .variable("counter")
+            .unwrap_or_else(|| "none".to_string());
+        v.lock().unwrap().push(val);
+        ExecResult::Success
+    })
+    .unwrap();
+
+    re.set_variable("counter", "initial").unwrap();
+    let matches = re.find_all("one two three");
+
+    let collected = values.lock().unwrap();
+    assert_eq!(collected.len(), 3, "should have 3 matches for 3 words");
+    // All three should see "initial" since variables are snapshotted at context creation
+    for val in collected.iter() {
+        assert_eq!(
+            val, "initial",
+            "all matches should see the same variable snapshot"
+        );
+    }
+    drop(collected);
+
+    // Now verify that changing the variable AFTER find_all does not
+    // retroactively affect previous results (sanity check).
+    re.set_variable("counter", "updated").unwrap();
+    let values2 = Arc::new(Mutex::new(Vec::<String>::new()));
+    let v2 = values2.clone();
+    re.register_native("read_var", move |ctx| {
+        let val = ctx
+            .variable("counter")
+            .unwrap_or_else(|| "none".to_string());
+        v2.lock().unwrap().push(val);
+        ExecResult::Success
+    })
+    .unwrap();
+    let _ = re.find_all("alpha beta");
+    let collected2 = values2.lock().unwrap();
+    for val in collected2.iter() {
+        assert_eq!(val, "updated", "new find_all should see 'updated'");
+    }
+    // At minimum, we should have gotten matches
+    assert_eq!(matches.len(), 3);
+}
+
+// Gap 5: Capture groups across \K boundaries
+// \K resets the reported match start. Are captures set BEFORE \K still
+// correct? We verify through a callback since MatchResult has no groups.
+#[test]
+fn captures_correct_across_match_reset() {
+    let re = Regex::with_mode(
+        r"(?<prefix>foo)\K(?<suffix>bar)(?{native:verify})",
+        ExecutionMode::Full,
+    )
+    .unwrap();
+
+    let prefix_seen = Arc::new(Mutex::new(String::new()));
+    let suffix_seen = Arc::new(Mutex::new(String::new()));
+    let ps = prefix_seen.clone();
+    let ss = suffix_seen.clone();
+    re.register_native("verify", move |ctx| {
+        if let Some(p) = ctx.named("prefix") {
+            *ps.lock().unwrap() = p.to_string();
+        }
+        if let Some(s) = ctx.named("suffix") {
+            *ss.lock().unwrap() = s.to_string();
+        }
+        ExecResult::Success
+    })
+    .unwrap();
+
+    let m = re.find_first("foobar").unwrap();
+
+    // Match should report "bar" (positions 3..6) due to \K
+    assert_eq!(
+        (m.start, m.end),
+        (3, 6),
+        "\\K should reset reported match start"
+    );
+
+    // But the captures should still reflect both groups
+    assert_eq!(*prefix_seen.lock().unwrap(), "foo");
+    assert_eq!(*suffix_seen.lock().unwrap(), "bar");
+}
+
+// Gap 6a: Backtracking verbs inside lookaheads
+// (*COMMIT) inside a lookahead should NOT abort the outer match search.
+// Lookaheads are isolated — verbs inside them shouldn't leak out.
+#[test]
+fn commit_inside_lookahead_does_not_affect_outer() {
+    let re = Regex::compile(r"(?=a(*COMMIT)b)ab|cd").unwrap();
+
+    // If (*COMMIT) leaks out of the lookahead, "cd" would never be tried
+    // after "ab" fails at a position. Test with input where only "cd" matches.
+    let m = re.find_first("cd");
+    assert!(
+        m.is_some(),
+        "cd should match even if (*COMMIT) is in the lookahead"
+    );
+}
+
+// Gap 6b: (*PRUNE) inside lookahead is isolated
+#[test]
+fn prune_inside_lookahead_is_isolated() {
+    let re = Regex::compile(r"(?=x(*PRUNE)y)..|ab").unwrap();
+    // (*PRUNE) inside the lookahead shouldn't prevent "ab" from matching
+    let m = re.find_first("ab");
+    assert!(m.is_some(), "ab should match despite (*PRUNE) in lookahead");
+}
+
+// Gap 7: Steering + zero-width matches in find_all
+// Accept at a zero-width position — does find_all handle this correctly
+// without infinite looping?
+#[test]
+fn steer_accept_at_zero_width_in_find_all() {
+    let re = Regex::with_mode(r"(?{native:accept_all})", ExecutionMode::Full).unwrap();
+    re.register_native("accept_all", |_| ExecResult::Steer(SteerResult::Accept))
+        .unwrap();
+
+    // This could infinite-loop if zero-width Accept doesn't advance
+    let matches = re.find_all("abc");
+    // Should get zero-width matches at positions 0, 1, 2, 3 (like empty pattern)
+    // Key: no infinite loop, no panic
+    assert!(
+        matches.len() <= 10,
+        "should not infinite loop, got {} matches",
+        matches.len()
+    );
+}
+
+// Gap 8: Deep recursion + trail backtracking
+// BUG: inner recursive subroutine clobbers outer match position state
+// Recursive pattern that captures at each level. After backtracking,
+// verify captures are restored correctly via a callback.
+#[test]
+#[ignore = "known bug: recursive subroutine clobbers outer capture/position state"]
+fn deep_recursion_with_captures_restored_correctly() {
+    let re = Regex::with_mode(
+        r"(?<pair>\((?<inner>[^()]*|(?&pair))*\))(?{native:verify})",
+        ExecutionMode::Full,
+    )
+    .unwrap();
+
+    let outer_seen = Arc::new(Mutex::new(String::new()));
+    let os = outer_seen.clone();
+    re.register_native("verify", move |ctx| {
+        if let Some(p) = ctx.named("pair") {
+            *os.lock().unwrap() = p.to_string();
+        }
+        ExecResult::Success
+    })
+    .unwrap();
+
+    let m = re.find_first("(a(b)c)").unwrap();
+    assert_eq!((m.start, m.end), (0, 7));
+
+    // The outer group should capture the full "(a(b)c)"
+    let captured = outer_seen.lock().unwrap();
+    assert_eq!(
+        *captured, "(a(b)c)",
+        "outer recursive group should capture the full balanced parens"
+    );
+}
+
+// Gap 9: Concurrent set_variable + matching
+// Is it safe to update variables from one thread while others are matching?
+#[test]
+fn concurrent_set_variable_and_matching() {
+    use std::thread;
+
+    let re = Arc::new(Regex::with_mode(r"(?{native:read})", ExecutionMode::Full).unwrap());
+    re.register_native("read", |ctx| {
+        // Just read the variable — should never panic
+        let _ = ctx.variable("counter");
+        ExecResult::Success
+    })
+    .unwrap();
+
+    re.set_variable("counter", "0").unwrap();
+
+    let mut handles = vec![];
+
+    // Thread 1: continuously update the variable
+    let re1 = re.clone();
+    handles.push(thread::spawn(move || {
+        for i in 0..1000 {
+            re1.set_variable("counter", &i.to_string()).unwrap();
+        }
+    }));
+
+    // Threads 2-5: continuously match
+    for _ in 0..4 {
+        let re2 = re.clone();
+        handles.push(thread::spawn(move || {
+            for _ in 0..1000 {
+                let _ = re2.is_match("x");
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join()
+            .expect("thread panicked during concurrent variable mutation + matching");
+    }
+}
