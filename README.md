@@ -80,6 +80,7 @@ If you are new to the repo, use this order:
 - [`docs/guide/`](docs/guide/) — **The RGX Guide** — comprehensive book-style documentation with chapters on every feature, loaded with examples
 - [`docs/HOST_INTEGRATION_GUIDE.md`](docs/HOST_INTEGRATION_GUIDE.md) — single-file quick reference for host integration
 - [`docs/HOST_INTEGRATION_ARCHITECTURE.md`](docs/HOST_INTEGRATION_ARCHITECTURE.md) — deep host-engine integration design (match steering, events, async I/O)
+- [`docs/CLI_GUIDE.md`](docs/CLI_GUIDE.md) — comprehensive CLI user guide with 20+ examples
 - [`docs/TESTING_PHILOSOPHY.md`](docs/TESTING_PHILOSOPHY.md) — hostile skepticism testing approach, known gaps, and process
 ## README maintenance policy
 `README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:

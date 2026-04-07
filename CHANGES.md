@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Ship 6 new CLI features + comprehensive CLI guide
+- Scope: major CLI enhancement with full documentation.
+- Changes:
+  - `--recursive` / `-r`: scan directories recursively
+  - `--context N` / `-C N`: show surrounding lines (like grep -C)
+  - `--replace STRING`: find-and-replace, print to stdout
+  - `--json`: structured JSON output for piping
+  - `--only-matching` / `-o`: print just matched text
+  - `--invert-match` / `-v`: print non-matching lines
+  - Created `docs/CLI_GUIDE.md` with 12 sections and 20+ examples
+  - 8 new tests (23 total CLI tests)
+- Validation:
+  - `cargo test -p rgx-cli` (23 pass). Manual testing of all features.
+
 ### 2026-04-07 - Add CLI file matching: --file, --line-mode, --count
 - Scope: CLI enhancement for file-backed matching.
 - Changes:

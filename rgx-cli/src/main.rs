@@ -3,6 +3,7 @@ use clap::Parser;
 use rgx_core::log::Verbosity;
 use rgx_core::CodeBlockValue;
 use rgx_core::{ExecutionMode, FileMatch, MatchResult, Regex};
+use serde::Serialize;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -64,6 +65,30 @@ struct Cli {
     #[arg(long)]
     count: bool,
 
+    /// Scan directories recursively when --file points to a directory
+    #[arg(long, short = 'r', requires = "file")]
+    recursive: bool,
+
+    /// Show N lines of context before and after each match (line-mode only)
+    #[arg(long = "context", short = 'C', value_name = "N")]
+    context: Option<usize>,
+
+    /// Replace matches with the given string and print the result
+    #[arg(long = "replace", value_name = "STRING")]
+    replace: Option<String>,
+
+    /// Output matches as JSON
+    #[arg(long)]
+    json: bool,
+
+    /// Print only the matched text, one per line
+    #[arg(long = "only-matching", short = 'o')]
+    only_matching: bool,
+
+    /// Print lines that do NOT match the pattern (line-mode only)
+    #[arg(long = "invert-match", short = 'v')]
+    invert_match: bool,
+
     /// Pattern to match
     pattern: String,
 
@@ -119,6 +144,18 @@ impl FromStr for CliWasmModule {
             path: PathBuf::from(path),
         })
     }
+}
+
+/// JSON-serializable match entry for `--json` output.
+#[derive(Serialize)]
+struct JsonMatch {
+    start: usize,
+    end: usize,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
 }
 
 /// Global logger for the entire rgx system
@@ -292,6 +329,127 @@ fn format_match_line(m: &MatchResult, show_details: bool) -> String {
     line
 }
 
+// ---------------------------------------------------------------------------
+// Replacement helper
+// ---------------------------------------------------------------------------
+
+/// Replace all matches in `input` with `replacement`, returning the resulting string.
+fn replace_matches(regex: &Regex, input: &str, replacement: &str) -> String {
+    let matches = regex.find_all(input);
+    if matches.is_empty() {
+        return input.to_string();
+    }
+    let mut result = String::with_capacity(input.len());
+    let mut cursor = 0;
+    for m in &matches {
+        result.push_str(&input[cursor..m.start]);
+        result.push_str(replacement);
+        cursor = m.end;
+    }
+    result.push_str(&input[cursor..]);
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Recursive directory scanner
+// ---------------------------------------------------------------------------
+
+/// Collect all regular files under `dir`, recursively.
+fn collect_files_recursive(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    collect_files_inner(dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_files_inner(dir: &std::path::Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    let entries = std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory '{}'", dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in '{}'", dir.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip hidden directories
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'))
+            {
+                continue;
+            }
+            collect_files_inner(&path, files)?;
+        } else if path.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Context-line display helper
+// ---------------------------------------------------------------------------
+
+/// Print matches with surrounding context lines and `--` group separators.
+fn print_with_context(
+    regex: &Regex,
+    lines: &[String],
+    context: usize,
+    prefix: Option<&str>,
+    invert: bool,
+) {
+    let matching: Vec<bool> = lines
+        .iter()
+        .map(|line| !regex.find_all(line).is_empty())
+        .collect();
+
+    // Build a set of line indices to display.
+    let mut display = vec![false; lines.len()];
+    for (i, is_match) in matching.iter().enumerate() {
+        let should_show = if invert { !*is_match } else { *is_match };
+        if should_show {
+            let start = i.saturating_sub(context);
+            let end = (i + context + 1).min(lines.len());
+            for slot in &mut display[start..end] {
+                *slot = true;
+            }
+        }
+    }
+
+    let mut last_printed: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if !display[i] {
+            continue;
+        }
+        // Print group separator if there is a gap between displayed lines.
+        if let Some(prev) = last_printed {
+            if i > prev + 1 {
+                println!("--");
+            }
+        }
+        let line_num = i + 1;
+        let marker = {
+            let is_match = matching[i];
+            let is_target = if invert { !is_match } else { is_match };
+            if is_target {
+                ':'
+            } else {
+                '-'
+            }
+        };
+        if let Some(pfx) = prefix {
+            println!("{pfx}:{line_num}{marker}{line}");
+        } else {
+            println!("{line_num}{marker}{line}");
+        }
+        last_printed = Some(i);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let verbosity = resolve_verbosity(&cli);
@@ -411,6 +569,20 @@ fn main() -> anyhow::Result<()> {
             &format!("File matching mode: path={}", file_path.display()),
         );
 
+        // Recursive directory scanning
+        if cli.recursive || file_path.is_dir() {
+            return run_recursive(&cli, &regex, file_path);
+        }
+
+        // --replace on a single file
+        if let Some(ref replacement) = cli.replace {
+            let contents = std::fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+            let result = replace_matches(&regex, &contents, replacement);
+            print!("{result}");
+            return Ok(());
+        }
+
         if cli.count {
             // --count: just print total number of matches
             let count = if cli.line_mode {
@@ -435,6 +607,25 @@ fn main() -> anyhow::Result<()> {
             return Ok(());
         }
 
+        // --json on a file
+        if cli.json {
+            return run_json_file(&regex, file_path, cli.line_mode);
+        }
+
+        // --invert-match (line-mode only)
+        if cli.invert_match {
+            return run_invert_file(&regex, file_path, cli.context);
+        }
+
+        // --context (line-mode)
+        if cli.context.is_some() && cli.line_mode {
+            let contents = std::fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+            let lines: Vec<String> = contents.lines().map(String::from).collect();
+            print_with_context(&regex, &lines, cli.context.unwrap_or(0), None, false);
+            return Ok(());
+        }
+
         if cli.line_mode {
             // --line-mode: match each line independently, print "LINE_NUM: matched_text"
             let file_matches: Vec<FileMatch> =
@@ -448,25 +639,36 @@ fn main() -> anyhow::Result<()> {
                 &format!("Line-mode file scan: {} matches", file_matches.len()),
             );
             for fm in &file_matches {
-                let text = &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
-                println!("{}: {}", fm.line_number, text);
+                if cli.only_matching {
+                    let text =
+                        &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
+                    println!("{text}");
+                } else {
+                    let text =
+                        &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
+                    println!("{}: {}", fm.line_number, text);
+                }
             }
             rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
             return Ok(());
         }
 
         // Default file mode: scan whole file, print matching spans
-        let file_matches: Vec<MatchResult> = regex.match_file(file_path).unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            std::process::exit(1);
-        });
+        let contents = std::fs::read_to_string(file_path)
+            .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+        let file_matches = collect_matches(&regex, &contents);
         let _matched = !file_matches.is_empty();
         LOGGER.lock().unwrap().debug(
             "main",
             &format!("File scan: {} matches", file_matches.len()),
         );
         for m in &file_matches {
-            println!("{}", format_match_line(m, cli.show_details));
+            if cli.only_matching {
+                let text = &contents[m.start..m.end.min(contents.len())];
+                println!("{text}");
+            } else {
+                println!("{}", format_match_line(m, cli.show_details));
+            }
         }
         rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", _matched);
         return Ok(());
@@ -498,6 +700,13 @@ fn main() -> anyhow::Result<()> {
         cli.text
     };
 
+    // --replace on inline/stdin text
+    if let Some(ref replacement) = cli.replace {
+        let result = replace_matches(&regex, &input, replacement);
+        print!("{result}");
+        return Ok(());
+    }
+
     LOGGER.lock().unwrap().debug(
         "main",
         &format!("Testing pattern against {} bytes of input", input.len()),
@@ -516,6 +725,52 @@ fn main() -> anyhow::Result<()> {
     if cli.count {
         println!("{}", matches.len());
         rgx_core::trace_exit!("cli", "main", "ok=true,count={}", matches.len());
+        return Ok(());
+    }
+
+    // --json on inline/stdin text
+    if cli.json {
+        let entries: Vec<JsonMatch> = matches
+            .iter()
+            .map(|m| JsonMatch {
+                start: m.start,
+                end: m.end,
+                text: input[m.start..m.end.min(input.len())].to_string(),
+                line: None,
+                file: None,
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string(&entries).expect("JSON serialization should not fail")
+        );
+        rgx_core::trace_exit!("cli", "main", "ok=true,json_entries={}", entries.len());
+        return Ok(());
+    }
+
+    // --only-matching on inline/stdin text
+    if cli.only_matching {
+        for m in &matches {
+            let text = &input[m.start..m.end.min(input.len())];
+            println!("{text}");
+        }
+        rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
+        return Ok(());
+    }
+
+    // --invert-match on inline/stdin text (line-oriented)
+    if cli.invert_match {
+        let lines: Vec<String> = input.lines().map(String::from).collect();
+        if let Some(ctx) = cli.context {
+            print_with_context(&regex, &lines, ctx, None, true);
+        } else {
+            for (i, line) in lines.iter().enumerate() {
+                if regex.find_all(line).is_empty() {
+                    println!("{}:{line}", i + 1);
+                }
+            }
+        }
+        rgx_core::trace_exit!("cli", "main", "ok=true,inverted=true");
         return Ok(());
     }
 
@@ -546,6 +801,191 @@ fn main() -> anyhow::Result<()> {
     }
     rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Recursive directory scanning
+// ---------------------------------------------------------------------------
+
+fn run_recursive(cli: &Cli, regex: &Regex, dir: &std::path::Path) -> anyhow::Result<()> {
+    let files = collect_files_recursive(dir)?;
+    LOGGER.lock().unwrap().debug(
+        "main",
+        &format!("Recursive scan: {} files in {}", files.len(), dir.display()),
+    );
+
+    let mut json_entries: Vec<JsonMatch> = Vec::new();
+    let mut total_count: usize = 0;
+
+    for file_path in &files {
+        // Skip binary files by checking the first 512 bytes for null bytes.
+        let Ok(raw) = std::fs::read(file_path) else {
+            continue;
+        };
+        let preview = &raw[..raw.len().min(512)];
+        if preview.contains(&0) {
+            continue;
+        }
+        let Ok(contents) = String::from_utf8(raw) else {
+            continue;
+        };
+
+        let display_path = file_path
+            .strip_prefix(dir)
+            .unwrap_or(file_path)
+            .display()
+            .to_string();
+
+        // --replace on recursive files
+        if let Some(ref replacement) = cli.replace {
+            let result = replace_matches(regex, &contents, replacement);
+            if result != contents {
+                print!("{result}");
+            }
+            continue;
+        }
+
+        // --context on recursive scan
+        if cli.context.is_some() {
+            let lines: Vec<String> = contents.lines().map(String::from).collect();
+            print_with_context(
+                regex,
+                &lines,
+                cli.context.unwrap_or(0),
+                Some(&display_path),
+                cli.invert_match,
+            );
+            continue;
+        }
+
+        // --invert-match on recursive scan
+        if cli.invert_match {
+            for (i, line) in contents.lines().enumerate() {
+                if regex.find_all(line).is_empty() {
+                    println!("{display_path}:{}:{line}", i + 1);
+                }
+            }
+            continue;
+        }
+
+        let lines: Vec<&str> = contents.lines().collect();
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_matches = regex.find_all(line);
+            if line_matches.is_empty() {
+                continue;
+            }
+            let line_num = line_idx + 1;
+
+            if cli.count {
+                total_count += line_matches.len();
+                continue;
+            }
+
+            for m in &line_matches {
+                let text = &line[m.start..m.end.min(line.len())];
+
+                if cli.json {
+                    json_entries.push(JsonMatch {
+                        start: m.start,
+                        end: m.end,
+                        text: text.to_string(),
+                        line: Some(line_num),
+                        file: Some(display_path.clone()),
+                    });
+                } else if cli.only_matching {
+                    println!("{display_path}:{line_num}:{text}");
+                } else {
+                    println!("{display_path}:{line_num}: {text}");
+                }
+            }
+        }
+    }
+
+    if cli.count {
+        println!("{total_count}");
+    } else if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string(&json_entries).expect("JSON serialization should not fail")
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// JSON file output
+// ---------------------------------------------------------------------------
+
+fn run_json_file(
+    regex: &Regex,
+    file_path: &std::path::Path,
+    line_mode: bool,
+) -> anyhow::Result<()> {
+    if line_mode {
+        let file_matches: Vec<FileMatch> = regex.match_file_lines(file_path).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        });
+        let entries: Vec<JsonMatch> = file_matches
+            .iter()
+            .map(|fm| JsonMatch {
+                start: fm.match_result.start,
+                end: fm.match_result.end,
+                text: fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())]
+                    .to_string(),
+                line: Some(fm.line_number),
+                file: None,
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string(&entries).expect("JSON serialization should not fail")
+        );
+    } else {
+        let contents = std::fs::read_to_string(file_path)
+            .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+        let matches = collect_matches(regex, &contents);
+        let entries: Vec<JsonMatch> = matches
+            .iter()
+            .map(|m| JsonMatch {
+                start: m.start,
+                end: m.end,
+                text: contents[m.start..m.end.min(contents.len())].to_string(),
+                line: None,
+                file: None,
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string(&entries).expect("JSON serialization should not fail")
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Invert-match file output
+// ---------------------------------------------------------------------------
+
+fn run_invert_file(
+    regex: &Regex,
+    file_path: &std::path::Path,
+    context: Option<usize>,
+) -> anyhow::Result<()> {
+    let contents = std::fs::read_to_string(file_path)
+        .with_context(|| format!("failed to read '{}'", file_path.display()))?;
+    let lines: Vec<String> = contents.lines().map(String::from).collect();
+
+    if let Some(ctx) = context {
+        print_with_context(regex, &lines, ctx, None, true);
+    } else {
+        for (i, line) in lines.iter().enumerate() {
+            if regex.find_all(line).is_empty() {
+                println!("{}:{line}", i + 1);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -833,5 +1273,118 @@ mod tests {
         assert!(re
             .match_file("/tmp/rgx_cli_nonexistent_file_xyz.txt")
             .is_err());
+    }
+
+    // ---- New feature tests ----
+
+    #[test]
+    fn replace_matches_replaces_all_occurrences() {
+        let re = Regex::compile("cat|kitten").unwrap();
+        let result = replace_matches(&re, "I have a cat and a kitten", "dog");
+        assert_eq!(result, "I have a dog and a dog");
+    }
+
+    #[test]
+    fn replace_matches_returns_original_when_no_match() {
+        let re = Regex::compile("xyz").unwrap();
+        let result = replace_matches(&re, "hello world", "replaced");
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn replace_matches_handles_empty_replacement() {
+        let re = Regex::compile("cat").unwrap();
+        let result = replace_matches(&re, "a cat sat on a cat mat", "");
+        assert_eq!(result, "a  sat on a  mat");
+    }
+
+    #[test]
+    fn replace_matches_handles_adjacent_matches() {
+        let re = Regex::compile("ab").unwrap();
+        let result = replace_matches(&re, "ababab", "X");
+        assert_eq!(result, "XXX");
+    }
+
+    #[test]
+    fn collect_files_recursive_finds_files_in_nested_dirs() {
+        let base = std::env::temp_dir().join(format!(
+            "rgx-cli-recurse-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(base.join("sub/deep")).unwrap();
+        std::fs::write(base.join("top.txt"), "top").unwrap();
+        std::fs::write(base.join("sub/mid.txt"), "mid").unwrap();
+        std::fs::write(base.join("sub/deep/bot.txt"), "bot").unwrap();
+
+        let files = collect_files_recursive(&base).unwrap();
+        assert_eq!(files.len(), 3);
+
+        // Verify all files are collected (sorted)
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.strip_prefix(&base).unwrap().display().to_string())
+            .collect();
+        assert!(names.contains(&"top.txt".to_string()));
+        assert!(names.contains(&"sub/mid.txt".to_string()));
+        assert!(names.contains(&"sub/deep/bot.txt".to_string()));
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn collect_files_recursive_skips_hidden_directories() {
+        let base = std::env::temp_dir().join(format!(
+            "rgx-cli-hidden-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(base.join(".hidden")).unwrap();
+        std::fs::write(base.join("visible.txt"), "yes").unwrap();
+        std::fs::write(base.join(".hidden/secret.txt"), "no").unwrap();
+
+        let files = collect_files_recursive(&base).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("visible.txt"));
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn json_match_serializes_correctly() {
+        let entry = JsonMatch {
+            start: 5,
+            end: 13,
+            text: "555-1234".to_string(),
+            line: None,
+            file: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(r#""start":5"#));
+        assert!(json.contains(r#""end":13"#));
+        assert!(json.contains(r#""text":"555-1234""#));
+        // Should not contain line or file when None
+        assert!(!json.contains("line"));
+        assert!(!json.contains("file"));
+    }
+
+    #[test]
+    fn json_match_serializes_with_line_and_file() {
+        let entry = JsonMatch {
+            start: 0,
+            end: 3,
+            text: "foo".to_string(),
+            line: Some(42),
+            file: Some("test.rs".to_string()),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(r#""line":42"#));
+        assert!(json.contains(r#""file":"test.rs""#));
     }
 }

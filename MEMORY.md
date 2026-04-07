@@ -93,8 +93,10 @@ Live continuity memory for `rgx` sessions.
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
 ### CLI
-- File matching: `--file <PATH>`, `--line-mode` (line numbers), `--count` (match count)
-- 15 CLI tests total
+- Full-featured grep-like tool: `--file`, `--line-mode`, `--count`, `--recursive`, `--context N`, `--replace`, `--json`, `--only-matching`, `--invert-match`
+- Code block support: `--mode`, `--var`, `--wasm-module`, `--show-details`
+- `docs/CLI_GUIDE.md`: 12 sections, 20+ examples, complete option reference
+- 23 CLI tests
 
 ### Recent bug fixes (from gap testing)
 - **Nested recursion quantifier bug FIXED**: `StarGreedy`/`PlusGreedy` zero-width guards now retry alternatives instead of breaking immediately — `(a(b)c)` balanced-paren matching works correctly
