@@ -48,6 +48,7 @@ all-languages = ["wasm", "lua", "javascript", "rhai"]
 [dev-dependencies]
 criterion = { workspace = true }
 wat = { workspace = true }
+proptest = "1"
 
 [[bench]]
 name = "core_performance"

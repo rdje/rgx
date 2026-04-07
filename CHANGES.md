@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Add property-based, stress, and fuzz test suites + testing philosophy doc
+- Scope: three new test categories + testing doctrine.
+- Changes:
+  - Created `rgx-core/tests/property_tests.rs` — 11 proptest-based tests (256+ random cases each): compilation safety, position bounds, non-overlapping, determinism, branch numbers, UTF-8 validity.
+  - Created `rgx-core/tests/stress_tests.rs` — 21 stress/soak/fuzz tests: 1000 pattern compilations, 10K input matching, 100K rapid-fire, 1000 variables, 5000 callbacks, 8-thread concurrency, 100K-line file scan, 100 suspend/resume cycles, 5000 random compilations.
+  - Created `docs/TESTING_PHILOSOPHY.md` — hostile skepticism approach, behavioral categories, claims-to-prove, known gaps, process rules.
+  - Added `proptest = "1"` to dev-dependencies.
+  - Total test count: ~520 across all crates.
+- Validation:
+  - All tests pass. Property tests found no violations. Stress tests completed without panics or resource issues.
+
 ### 2026-04-07 - Fix all 4 RGX-side adversarial failures — zero failures remain
 - Scope: fix the 4 remaining adversarial test failures that were RGX-side issues.
 - Changes:

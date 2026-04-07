@@ -93,10 +93,11 @@ Live continuity memory for `rgx` sessions.
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
 ### Testing
-- 55 integration tests in `rgx-core/tests/host_integration.rs` + 34 adversarial tests in `rgx-core/tests/adversarial.rs`
-- **All adversarial tests pass** — zero failures remain (was 7 fail → 3 PGEN fixes → 4 RGX fixes → 0)
-- Total test count: **~487** across all crates, all passing
-- Adversarial coverage: catastrophic backtracking, 50-level nesting, 1000 alternatives, emoji/multibyte, 10-thread concurrency, steering edge cases, async chaining, cross-thread continuations, 10K-line file scan, all layers combined
+- **5 test suites**: unit (343), integration (55), adversarial (34), property-based (11 × 256+ cases), stress/fuzz (21)
+- Total: **~520 tests**, all passing, zero failures
+- Property-based via `proptest`: random patterns/inputs verify invariants (bounds, non-overlap, determinism, UTF-8 safety)
+- Stress: 10K inputs, 100K rapid-fire, 8-thread concurrency, 100K-line file scan, 5000 random compilations
+- `docs/TESTING_PHILOSOPHY.md`: hostile skepticism doctrine, behavioral categories, claims-to-prove, known gaps, process rules
 - Every user-facing API is exercised including error paths, concurrency, and edge cases
 
 ### Documentation
