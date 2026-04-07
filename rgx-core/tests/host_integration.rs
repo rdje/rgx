@@ -794,3 +794,303 @@ fn all_layers_combined() {
     );
     cleanup(&path);
 }
+
+// ============================================================================
+// ADVERSARIAL & EDGE-CASE TESTS
+// ============================================================================
+
+// --- Backtracking after resume ---
+
+#[test]
+fn resume_then_backtrack_past_suspension_point() {
+    // Pattern: (cat(?{native:check})|dog)
+    // Input: "catdog"
+    // Scenario:
+    //   1. Engine matches "cat", hits check callback, suspends
+    //   2. We resume with Failure
+    //   3. Engine must backtrack and try "dog" alternative
+    //   4. "dog" should match at position 3
+    let re = Regex::with_mode(r"(cat(?{native:check})|dog)", ExecutionMode::Full).unwrap();
+
+    match re.find_first_suspendable("catdog") {
+        MatchOutcome::Suspended(cont) => {
+            assert_eq!(cont.pending_callback_name, "check");
+            match re.resume(*cont, ExecResult::Failure) {
+                MatchOutcome::Completed(Some(m)) => {
+                    // Should find "dog" at position 3, not "cat" at 0
+                    assert_eq!((m.start, m.end), (3, 6));
+                }
+                other => panic!("expected dog match, got {:?}", other),
+            }
+        }
+        other => panic!("expected suspension, got {:?}", other),
+    }
+}
+
+// --- Steering edge cases ---
+
+#[test]
+fn steer_skip_past_end_of_text() {
+    // Skip(1000) on a 3-byte input -- should not panic, just fail gracefully
+    let re = Regex::with_mode(r"a(?{native:skip_far})", ExecutionMode::Full).unwrap();
+    re.register_native("skip_far", |_| ExecResult::Steer(SteerResult::Skip(1000)))
+        .unwrap();
+    // Should not crash -- skip goes past end, VM should handle gracefully
+    let result = re.find_first("abc");
+    // Result might be Some or None depending on implementation, but NO PANIC
+    drop(result);
+}
+
+#[test]
+fn steer_accept_at_position_zero_no_captures() {
+    // Accept immediately before any captures are filled
+    let re = Regex::with_mode(r"(?{native:accept_now})abc", ExecutionMode::Full).unwrap();
+    re.register_native("accept_now", |_| ExecResult::Steer(SteerResult::Accept))
+        .unwrap();
+    let m = re.find_first("xyz").unwrap();
+    assert_eq!(m.start, 0);
+    assert_eq!(m.end, 0); // zero-width match at position 0
+}
+
+#[test]
+fn steer_abort_in_find_all_returns_partial() {
+    // Abort after 2nd match -- find_all should return first 2 matches only
+    let counter = Arc::new(AtomicUsize::new(0));
+    let cc = counter.clone();
+    let re = Regex::with_mode(r"\w+(?{native:limit})", ExecutionMode::Full).unwrap();
+    re.register_native("limit", move |_| {
+        let n = cc.fetch_add(1, Ordering::Relaxed);
+        if n >= 2 {
+            ExecResult::Steer(SteerResult::Abort)
+        } else {
+            ExecResult::Success
+        }
+    })
+    .unwrap();
+    let matches = re.find_all("one two three four five");
+    assert!(
+        matches.len() <= 2,
+        "expected at most 2 matches, got {}",
+        matches.len()
+    );
+}
+
+// --- Thread safety ---
+
+#[test]
+fn concurrent_find_first_on_shared_regex() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let re = Arc::new(Regex::compile(r"\d+").unwrap());
+    let mut handles = vec![];
+
+    for i in 0..10 {
+        let re = re.clone();
+        let input = format!("text {} with number {}", i, i * 100);
+        handles.push(thread::spawn(move || {
+            let m = re.find_first(&input);
+            assert!(m.is_some(), "thread {} should find a match", i);
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+}
+
+#[test]
+fn concurrent_find_all_on_shared_regex() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let re = Arc::new(Regex::compile(r"\w+").unwrap());
+    let mut handles = vec![];
+
+    for _ in 0..10 {
+        let re = re.clone();
+        handles.push(thread::spawn(move || {
+            let matches = re.find_all("hello world foo bar");
+            assert_eq!(matches.len(), 4);
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+}
+
+#[test]
+fn event_observer_under_concurrent_matching() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::thread;
+
+    let re = Arc::new(Regex::compile(r"\d+").unwrap());
+    let event_count = Arc::new(AtomicUsize::new(0));
+    let ec = event_count.clone();
+    re.on_event(move |_| {
+        ec.fetch_add(1, Ordering::Relaxed);
+    })
+    .unwrap();
+
+    let mut handles = vec![];
+    for _ in 0..10 {
+        let re = re.clone();
+        handles.push(thread::spawn(move || {
+            re.find_first("abc 123 def");
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert!(
+        event_count.load(Ordering::Relaxed) > 0,
+        "events should have fired"
+    );
+}
+
+// --- Zero-width edge cases ---
+
+#[test]
+fn events_during_zero_width_matches() {
+    let re = Regex::compile("a*").unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let ec = events.clone();
+    re.on_event(move |e| ec.lock().unwrap().push(format!("{:?}", e)))
+        .unwrap();
+    re.find_all("b"); // zero-width matches
+    let collected = events.lock().unwrap();
+    assert!(
+        !collected.is_empty(),
+        "events should fire even for zero-width matches"
+    );
+}
+
+#[test]
+fn steering_from_zero_width_callback() {
+    // Callback at position 0 (zero-width) returns Accept
+    let re = Regex::with_mode(r"(?{native:check})abc", ExecutionMode::Full).unwrap();
+    re.register_native("check", |ctx| {
+        if ctx.position == 0 {
+            ExecResult::Steer(SteerResult::Accept)
+        } else {
+            ExecResult::Success
+        }
+    })
+    .unwrap();
+    let m = re.find_first("abc");
+    assert!(m.is_some());
+}
+
+// --- Error conditions ---
+
+#[test]
+fn match_file_nonexistent_returns_error() {
+    let re = Regex::compile("test").unwrap();
+    let result = re.match_file("/tmp/rgx_nonexistent_file_12345.txt");
+    assert!(result.is_err());
+}
+
+#[test]
+fn resume_with_error_result_does_not_panic() {
+    let re = Regex::with_mode(r"cat(?{native:check})", ExecutionMode::Full).unwrap();
+    match re.find_first_suspendable("cat") {
+        MatchOutcome::Suspended(cont) => {
+            // Resume with an Error result -- should not panic
+            let outcome = re.resume(*cont, ExecResult::Error("deliberate error".into()));
+            // Should complete (likely no match due to error)
+            match outcome {
+                MatchOutcome::Completed(_) => {} // OK
+                MatchOutcome::Suspended(_) => {} // Also OK
+            }
+        }
+        _ => panic!("expected suspension"),
+    }
+}
+
+#[test]
+fn empty_pattern_is_compile_error() {
+    let result = Regex::compile("");
+    assert!(result.is_err(), "empty pattern should be a compile error");
+}
+
+#[test]
+fn find_all_on_empty_input() {
+    let re = Regex::compile(r"\w+").unwrap();
+    let matches = re.find_all("");
+    assert!(matches.is_empty());
+}
+
+#[test]
+fn find_all_on_empty_input_with_zero_width_pattern() {
+    // A zero-width-capable pattern on empty input
+    let re = Regex::compile(r"\d*").unwrap();
+    let matches = re.find_all("");
+    // Zero-width match at position 0 is valid
+    assert!(!matches.is_empty());
+}
+
+// --- Large input / stress ---
+
+#[test]
+fn find_all_on_large_input() {
+    let re = Regex::compile(r"\d+").unwrap();
+    let input = "word 42 ".repeat(10000); // 80K input with 10K matches
+    let matches = re.find_all(&input);
+    assert_eq!(matches.len(), 10000);
+}
+
+#[test]
+fn deeply_nested_variable_access() {
+    let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
+    re.set_vars(value!({
+        "a" => {
+            "b" => {
+                "c" => {
+                    "d" => {
+                        "e" => 42_i64
+                    }
+                }
+            }
+        }
+    }));
+    re.register_native("check", |ctx| {
+        let a = ctx.typed_variable("a").unwrap();
+        // Navigate 5 levels deep
+        let val = a
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == "b")
+            .unwrap()
+            .1
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == "c")
+            .unwrap()
+            .1
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == "d")
+            .unwrap()
+            .1
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == "e")
+            .unwrap()
+            .1
+            .as_i64()
+            .unwrap();
+        assert_eq!(val, 42);
+        ExecResult::Success
+    })
+    .unwrap();
+    assert!(re.is_match("x"));
+}

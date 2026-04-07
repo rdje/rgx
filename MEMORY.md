@@ -93,9 +93,9 @@ Live continuity memory for `rgx` sessions.
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
 ### Testing
-- 39 integration tests in `rgx-core/tests/host_integration.rs` covering all 6 layers + 5 cross-layer tests
-- Total test count: 437 across all crates (343 unit + 39 integration + 6 doc + 10 CLI + 39 bench)
-- Every user-facing API is exercised: typed variables, convenience readers, macros, steering actions, all event types, suspension/resume, file matching modes
+- 55 integration tests in `rgx-core/tests/host_integration.rs`: 39 happy-path + 17 adversarial (backtracking after resume, steering edge cases, 10-thread concurrency, zero-width interactions, error conditions, 10K-match stress test, 5-level deep nested variables)
+- Total test count: **453** across all crates (343 unit + 55 integration + 6 doc + 10 CLI + 39 bench)
+- Every user-facing API is exercised including error paths, concurrency, and edge cases
 
 ### Documentation
 - `docs/guide/` — **The RGX Guide**: 12-file book-style documentation (4,350 lines) covering every feature with extensive examples

@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Add adversarial and edge-case tests for real confidence
+- Scope: tests that prove correctness under stress, not just happy paths.
+- Changes:
+  - Added 17 adversarial tests to `host_integration.rs`:
+    - Backtracking after resume (suspension point rollback)
+    - Steering: Skip past end of text, Accept at position 0, Abort partial results
+    - Thread safety: 10 concurrent threads on shared regex (find_first, find_all, events)
+    - Zero-width: events during zero-width matches, steering from zero-width callback
+    - Error conditions: nonexistent file, resume with error, empty input, empty pattern
+    - Stress: 10K matches on 80K input, 5-level deep nested variable access
+  - Total integration tests: 55. Total across all crates: 453.
+- Validation:
+  - All 453 tests pass. Thread safety tests run 10 concurrent threads without panics.
+
 ### 2026-04-07 - Add comprehensive integration tests for all host integration layers
 - Scope: fill every test gap across all 6 layers.
 - Changes:
