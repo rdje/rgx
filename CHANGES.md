@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Expand four weakest guide chapters to SOTA+++ documentation quality
+- Scope: improve user-facing documentation for the chapters that needed it most.
+- Changes:
+  - **Chapter 00 (First Match)**: 144→334 lines, 6→18 examples. Added warm welcome, real-world patterns (dates, emails, URLs, key-value), try-it-yourself exercises, common gotchas, visual match diagram.
+  - **Chapter 03 (Steering)**: 382→769 lines, 11→27 examples. Added before/after comparisons, decision flowchart, patterns & recipes section, combined example with variables+callbacks+steering.
+  - **Chapter 05 (Async)**: 344→552 lines, 11→17 examples. Added gentle intro, ASCII flow diagram, step-by-step walkthrough, common mistakes, sync-unaffected proof.
+  - **Chapter 06 (Files)**: 384→748 lines, 13→23 examples. Added CSV/config/multi-file scenarios, mini-grep walkthrough, data pipeline, binary handling, performance notes.
+  - Total guide: 4,350→5,810 lines, 41→85 examples in the improved chapters alone.
+
 ### 2026-04-07 - Add property-based, stress, and fuzz test suites + testing philosophy doc
 - Scope: three new test categories + testing doctrine.
 - Changes:

@@ -101,7 +101,9 @@ Live continuity memory for `rgx` sessions.
 - Every user-facing API is exercised including error paths, concurrency, and edge cases
 
 ### Documentation
-- `docs/guide/` — **The RGX Guide**: 12-file book-style documentation (4,350 lines) covering every feature with extensive examples
+- `docs/guide/` — **The RGX Guide**: 12-file book-style documentation (**5,810 lines**, 150+ code examples) covering every feature
+  - All chapters audited for SOTA+++ quality: warm tone, real-world scenarios, before/after comparisons, gotchas, visual diagrams
+  - `docs/TESTING_PHILOSOPHY.md` — hostile skepticism doctrine for test authoring
   - 8 chapters: first match, data exchange, callbacks, steering, events, async, files, real-world patterns
   - 3 reference docs: quick reference, execution modes, context reference
   - Chapter 7 has 5 complete real-world examples: log monitor, tokenizer, data pipeline, config parser, WAF engine

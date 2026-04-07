@@ -1,8 +1,10 @@
 # Chapter 3: Steering the Match
 
+This is what makes rgx different from every other regex engine.
+
 In [Chapter 2](02-predicate-callbacks.md) you learned that callbacks answer a simple question: does this match pass or fail? That's enough for validation, but real programs need more nuanced control. What if you want to accept a match immediately without letting the engine try other possibilities? What if you want to skip ahead? What if you want to stop the entire search?
 
-This chapter introduces **match steering** -- a set of actions that give your callback fine-grained control over how the engine proceeds.
+Most regex engines give you two outcomes: match or no match. rgx gives you five. Your callback can say "yes," "no," "yes and stop looking," "jump forward," or "stop everything." That's match steering, and once you've used it, you'll wonder how you ever lived without it.
 
 ## Why pass/fail isn't always enough
 
@@ -38,7 +40,7 @@ Callbacks can return `ExecResult::Steer(action)` where `action` is one of:
 | `SteerResult::Skip(n)` | Advance the input position by `n` bytes | When you know the next `n` bytes can't contribute to a match |
 | `SteerResult::Abort` | Stop the entire search | When you want no more matches from this call |
 
-Let's explore each one with examples.
+Let's explore each one with examples, and for each, we'll show how you'd solve the problem *without* steering so you can see the difference.
 
 ### Continue
 
@@ -67,6 +69,8 @@ This is functionally identical to returning `Success`/`Failure`, but reads more 
 ### Fail
 
 `Fail` tells the engine to backtrack, just like `ExecResult::Failure`. The engine pretends the pattern didn't match at this point and tries alternatives.
+
+**Without steering:** You'd use a plain predicate callback that returns `Failure`. The result is the same, but when you're mixing `Fail` with `Accept` or `Abort` in the same callback, using `Steer` for all branches keeps the code consistent.
 
 ```rust
 let re = Regex::with_mode(
@@ -113,6 +117,8 @@ re.register_native("not_in_comment", |ctx| {
 
 This is powerful when you know the first valid match is the one you want.
 
+**Without steering:** You'd call `find_first`, get a result, then stop using it. But the engine still explores alternatives before returning -- you're paying for work you don't need. Or, with `find_all`, you'd collect all matches and take the first. `Accept` short-circuits this: the engine stops the moment your callback says so.
+
 #### Example 1: First-match optimization
 
 ```rust
@@ -156,9 +162,34 @@ re.register_native("priority_accept", |ctx| {
 })?;
 ```
 
+**Without steering:** You'd find all log levels, then sort by priority, then take the highest. With `Accept`, the engine commits the moment it sees `FATAL` or `ERROR` -- no sorting, no post-processing.
+
+#### Example 3: Accepting after validation
+
+Combine validation with early acceptance -- validate a credit card number format and accept immediately if it passes the Luhn check:
+
+```rust
+let re = Regex::with_mode(
+    r"(?<cc>\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4})(?{native:luhn_accept})",
+    ExecutionMode::Full,
+)?;
+
+re.register_native("luhn_accept", |ctx| {
+    let digits: String = ctx.named("cc").unwrap_or("")
+        .chars().filter(|c| c.is_ascii_digit()).collect();
+    if passes_luhn(&digits) {
+        ExecResult::Steer(SteerResult::Accept)  // valid card, commit now
+    } else {
+        ExecResult::Steer(SteerResult::Fail)    // not a valid number
+    }
+})?;
+```
+
 ### Skip
 
 `Skip(n)` advances the engine's input position by `n` bytes before continuing. This is different from failing -- it doesn't backtrack. Instead, it tells the engine to leap forward, bypassing text that can't possibly contribute to a match.
+
+**Without steering:** You'd either let the engine grind through every character (slow), or preprocess the input to remove the uninteresting sections (complicated and memory-intensive). `Skip` gives you surgical control.
 
 #### Example 1: Skipping binary data
 
@@ -195,9 +226,28 @@ re.register_native("skip_quoted", |ctx| {
 })?;
 ```
 
+#### Example 3: Skipping known-safe sections in structured data
+
+You're scanning a file where sections are delimited and some are known-safe:
+
+```rust
+let re = Regex::with_mode(
+    r"(?<header>---SAFE-SECTION:(?<len>\d+)---)(?{native:skip_safe})|(?<pattern>sensitive-\w+)",
+    ExecutionMode::Full,
+)?;
+
+re.register_native("skip_safe", |ctx| {
+    let len: usize = ctx.named("len").unwrap_or("0").parse().unwrap_or(0);
+    // Jump past the safe section entirely
+    ExecResult::Steer(SteerResult::Skip(len))
+})?;
+```
+
 ### Abort
 
 `Abort` stops the entire match search. No more matches will be returned, no more start positions will be tried. The engine halts as if it reached the end of the input.
+
+**Without steering:** You'd wrap your matching code in a loop with a manual break condition. But the engine doesn't know about your break -- it completes a full `find_all` before you can check. With `Abort`, the engine stops from the inside.
 
 #### Example 1: Budget-limited scanning
 
@@ -253,6 +303,144 @@ let matches = re.find_all(huge_text);
 ```
 
 Note: because of backtracking, the counter might be incremented on paths that don't lead to a final match. If you need an exact count of *accepted* matches, track that in a separate variable and only increment when the engine ultimately accepts the path. For a hard cap, an atomic counter is a reasonable approximation.
+
+#### Example 3: Stopping on a sentinel value
+
+Stop scanning as soon as you hit an end-of-data marker:
+
+```rust
+let re = Regex::with_mode(
+    r"(?<token>[^\s,]+)(?{native:stop_at_end})",
+    ExecutionMode::Full,
+)?;
+
+re.register_native("stop_at_end", |ctx| {
+    let token = ctx.named("token").unwrap_or("");
+    if token == "END" || token == "---" {
+        ExecResult::Steer(SteerResult::Abort)  // stop the entire search
+    } else {
+        ExecResult::Steer(SteerResult::Continue)
+    }
+})?;
+
+let text = "apple, banana, cherry, END, dragonfruit, elderberry";
+let matches = re.find_all(text);
+// Only matches apple, banana, cherry -- stops at END
+```
+
+## Which steering action should I use?
+
+Here's a decision guide. Start at the top and follow the first condition that applies:
+
+```
+Do you need to stop the ENTIRE search (not just this match)?
+  Yes --> Abort
+  No  |
+      v
+Do you want to commit to this match immediately, no backtracking?
+  Yes --> Accept
+  No  |
+      v
+Do you want to skip past a known-uninteresting region?
+  Yes --> Skip(n)
+  No  |
+      v
+Should this match path be rejected (backtrack, try alternatives)?
+  Yes --> Fail
+  No  |
+      v
+Everything is fine, keep going?
+  Yes --> Continue
+```
+
+And here's the same logic as a quick-reference table:
+
+| Your situation | Action | Example use case |
+|---------------|--------|-----------------|
+| "I found what I need, stop everything" | `Abort` | Time budget exceeded, sentinel found |
+| "This match is perfect, commit now" | `Accept` | First valid error line, highest-priority match |
+| "Jump over this section" | `Skip(n)` | Binary data block, base64 region |
+| "This isn't right, try something else" | `Fail` | Failed validation, match inside a comment |
+| "So far so good, keep matching" | `Continue` | Default path in a multi-branch callback |
+
+## Before/after: solving problems with and without steering
+
+### Input sanitization
+
+**Without steering:** Find all matches, then filter in a second pass.
+
+```rust
+// Two passes, extra allocation, can't influence backtracking
+let all_inputs = re.find_all(text);
+let safe_inputs: Vec<_> = all_inputs.into_iter()
+    .filter(|m| is_safe(&text[m.start..m.end]))
+    .collect();
+```
+
+**With steering:** Reject unsafe inputs during matching. The engine backtracks and tries alternatives.
+
+```rust
+re.register_native("sanitize", |ctx| {
+    let input = ctx.named("value").unwrap_or("");
+    if is_safe(input) {
+        ExecResult::Steer(SteerResult::Continue)
+    } else {
+        ExecResult::Steer(SteerResult::Fail)  // backtrack, try next
+    }
+})?;
+```
+
+### Rate-limited field extraction
+
+**Without steering:** Extract everything, then truncate the result.
+
+```rust
+// Extracts ALL matches, even if there are millions, then takes 10
+let all = re.find_all(huge_text);
+let first_ten = &all[..10.min(all.len())];
+```
+
+**With steering:** Stop after 10 matches. No wasted work.
+
+```rust
+let count = Arc::new(AtomicUsize::new(0));
+let counter = count.clone();
+re.register_native("rate_limit", move |_ctx| {
+    if counter.fetch_add(1, Ordering::Relaxed) >= 10 {
+        ExecResult::Steer(SteerResult::Abort)
+    } else {
+        ExecResult::Steer(SteerResult::Continue)
+    }
+})?;
+let first_ten = re.find_all(huge_text);
+```
+
+### Field extraction with validation
+
+**Without steering:** Match the structure, then validate fields in a separate step.
+
+```rust
+// Phase 1: extract candidates
+let candidates = re.find_all(csv_row);
+// Phase 2: validate each candidate (separate logic, separate pass)
+for c in &candidates {
+    let value = &csv_row[c.start..c.end];
+    if !validate_field(value) { /* skip */ }
+}
+```
+
+**With steering:** Validate inline. Invalid fields cause backtracking to try the next interpretation.
+
+```rust
+re.register_native("validate_field", |ctx| {
+    let field = ctx.named("field").unwrap_or("");
+    if validate_field(field) {
+        ExecResult::Steer(SteerResult::Continue)
+    } else {
+        ExecResult::Steer(SteerResult::Fail)
+    }
+})?;
+```
 
 ## Real scenario: building a resource-budgeted scanner
 
@@ -338,6 +526,78 @@ assert!(m.is_some());
 
 The engine finds `Content-Type: application/json`, the callback says `Accept`, and the engine immediately returns without scanning the JSON body.
 
+## Real scenario: steering + callbacks + variables working together
+
+Here's a complete example that combines host variables (Chapter 1), predicate callbacks (Chapter 2), and steering (this chapter) into a configurable security scanner:
+
+```rust
+use rgx_core::{ExecResult, ExecutionMode, Regex, SteerResult};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::collections::HashSet;
+
+let re = Regex::with_mode(
+    r"(?<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?{native:security_scan})",
+    ExecutionMode::Full,
+)?;
+
+let seen_ips = Arc::new(std::sync::Mutex::new(HashSet::new()));
+let seen = seen_ips.clone();
+let alert_count = Arc::new(AtomicUsize::new(0));
+let alerts = alert_count.clone();
+
+re.register_native("security_scan", move |ctx| {
+    let ip = ctx.named("ip").unwrap_or("").to_string();
+
+    // Use a host variable to set the maximum number of alerts
+    let max_alerts: usize = ctx.variable("max_alerts")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+
+    // Check the alert budget
+    let current = alerts.load(Ordering::Relaxed);
+    if current >= max_alerts {
+        return ExecResult::Steer(SteerResult::Abort);  // budget exhausted
+    }
+
+    // Skip IPs we've already seen (deduplication)
+    let mut set = seen.lock().unwrap();
+    if set.contains(&ip) {
+        return ExecResult::Steer(SteerResult::Fail);  // skip duplicate
+    }
+    set.insert(ip.clone());
+
+    // Use a host variable to decide the scan mode
+    let mode = ctx.variable("scan_mode").unwrap_or_else(|| "normal".to_string());
+    match mode.as_str() {
+        "strict" => {
+            // In strict mode, accept the first suspicious IP immediately
+            if is_suspicious(&ip) {
+                alerts.fetch_add(1, Ordering::Relaxed);
+                ExecResult::Steer(SteerResult::Accept)
+            } else {
+                ExecResult::Steer(SteerResult::Fail)
+            }
+        }
+        _ => {
+            // In normal mode, just record it and continue
+            if is_suspicious(&ip) {
+                alerts.fetch_add(1, Ordering::Relaxed);
+            }
+            ExecResult::Steer(SteerResult::Continue)
+        }
+    }
+})?;
+
+// Configure via variables -- no recompilation needed
+re.set_variable("scan_mode", "strict")?;
+re.set_variable("max_alerts", "50")?;
+
+let matches = re.find_all(log_text);
+```
+
+This single pattern does deduplication, budget enforcement, configurable scan modes, and early termination -- all during matching.
+
 ## How steering interacts with backtracking
 
 Understanding the interaction between steering and backtracking is important for writing correct callbacks.
@@ -366,6 +626,133 @@ Be careful with skip distances. If `n` is larger than the remaining input, the e
 `Abort` is the most drastic action. It terminates the entire search, not just the current match attempt. No more start positions are tried. `find_all` returns whatever matches were found so far. `find_first` returns the last successfully completed match (if any) or `None`.
 
 Because `Abort` can fire on a backtracking path, it's possible for `Abort` to fire even though the match wouldn't have ultimately succeeded. In practice, this is usually fine -- `Abort` is used for resource limits, and an occasional false positive on "we've spent too long" is acceptable.
+
+## Patterns and recipes
+
+Here are copy-paste-ready patterns for common steering scenarios. Each one is self-contained.
+
+### Recipe 1: First N matches
+
+Stop after collecting a specific number of matches.
+
+```rust
+use rgx_core::{ExecResult, ExecutionMode, Regex, SteerResult};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+let re = Regex::with_mode(r"(?<email>[\w.+-]+@[\w.-]+\.\w{2,})(?{native:first_n})", ExecutionMode::Full)?;
+let count = Arc::new(AtomicUsize::new(0));
+let c = count.clone();
+let limit = 5;
+re.register_native("first_n", move |_ctx| {
+    if c.fetch_add(1, Ordering::Relaxed) >= limit {
+        ExecResult::Steer(SteerResult::Abort)
+    } else {
+        ExecResult::Steer(SteerResult::Continue)
+    }
+})?;
+```
+
+### Recipe 2: Timeout guard
+
+Abort if the match takes too long, suitable for user-facing applications.
+
+```rust
+use std::time::Instant;
+use std::sync::Arc;
+
+let re = Regex::with_mode(r"(?<m>.+?)(?{native:timeout})", ExecutionMode::Full)?;
+let start = Arc::new(Instant::now());
+let t = start.clone();
+let max_ms: u128 = 50;
+re.register_native("timeout", move |_ctx| {
+    if t.elapsed().as_millis() > max_ms {
+        ExecResult::Steer(SteerResult::Abort)
+    } else {
+        ExecResult::Steer(SteerResult::Continue)
+    }
+})?;
+```
+
+### Recipe 3: Deduplicated matches
+
+Skip values you've already seen.
+
+```rust
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+let re = Regex::with_mode(r"(?<word>\b\w+\b)(?{native:dedup})", ExecutionMode::Full)?;
+let seen = Arc::new(Mutex::new(HashSet::new()));
+let s = seen.clone();
+re.register_native("dedup", move |ctx| {
+    let word = ctx.named("word").unwrap_or("").to_lowercase();
+    let mut set = s.lock().unwrap();
+    if set.insert(word) {
+        ExecResult::Steer(SteerResult::Continue)  // new word, keep it
+    } else {
+        ExecResult::Steer(SteerResult::Fail)      // duplicate, skip
+    }
+})?;
+```
+
+### Recipe 4: Accept-on-condition with fallback
+
+Accept high-priority matches immediately, continue on lower-priority ones.
+
+```rust
+re.register_native("priority", |ctx| {
+    let severity = ctx.named("severity").unwrap_or("info");
+    match severity {
+        "critical" | "fatal" => ExecResult::Steer(SteerResult::Accept),
+        "error" | "warn"     => ExecResult::Steer(SteerResult::Continue),
+        _                    => ExecResult::Steer(SteerResult::Fail),
+    }
+})?;
+```
+
+### Recipe 5: Skip-to-delimiter
+
+Jump to the next section boundary instead of scanning through irrelevant data.
+
+```rust
+re.register_native("skip_section", |ctx| {
+    let section_len: usize = ctx.named("len").unwrap_or("0").parse().unwrap_or(0);
+    if section_len > 0 {
+        ExecResult::Steer(SteerResult::Skip(section_len))
+    } else {
+        ExecResult::Steer(SteerResult::Continue)
+    }
+})?;
+```
+
+### Recipe 6: Combined budget (time + count + size)
+
+A production-ready budget that limits by time, count, and bytes scanned.
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+let re = Regex::with_mode(r"(?<m>\S+)(?{native:budget})", ExecutionMode::Full)?;
+let match_count = Arc::new(AtomicUsize::new(0));
+let bytes_scanned = Arc::new(AtomicUsize::new(0));
+let start = Arc::new(Instant::now());
+let (mc, bs, st) = (match_count.clone(), bytes_scanned.clone(), start.clone());
+
+re.register_native("budget", move |ctx| {
+    // Time check
+    if st.elapsed().as_millis() > 100 { return ExecResult::Steer(SteerResult::Abort); }
+    // Count check
+    if mc.fetch_add(1, Ordering::Relaxed) > 10_000 { return ExecResult::Steer(SteerResult::Abort); }
+    // Bytes check
+    bs.fetch_add(ctx.match_end - ctx.match_start, Ordering::Relaxed);
+    if bs.load(Ordering::Relaxed) > 1_000_000 { return ExecResult::Steer(SteerResult::Abort); }
+
+    ExecResult::Steer(SteerResult::Continue)
+})?;
+```
 
 ## Summary
 
