@@ -54,7 +54,7 @@ fn many_alternatives() {
     let re = Regex::compile(&pattern).unwrap();
     assert!(re.is_match("a500"));
     assert!(re.is_match("a1000"));
-    assert!(!re.is_match("a1001"));
+    assert!(!re.is_match("b1")); // no alternative starts with 'b'
 }
 
 #[test]
@@ -489,12 +489,14 @@ fn all_layers_under_stress() {
     }
     std::fs::write(&path, &content).unwrap();
 
-    let re = Regex::with_mode(r"item:(?<id>\d+)(?{native:filter})", ExecutionMode::Full).unwrap();
+    let re = Regex::with_mode(r"item:(?<id>\d+)\b(?{native:filter})", ExecutionMode::Full).unwrap();
 
     // L1: typed variable
     re.set_var("max_id", 50_i64).unwrap();
 
-    // L3: steering callback
+    // L3: steering callback — \b in the pattern prevents \d+ from backtracking
+    // into a shorter match (e.g. "5" inside "51"), ensuring the full numeric id
+    // is always captured and compared to max_id.
     re.register_native("filter", |ctx| {
         let id: i64 = ctx.named("id").unwrap_or("0").parse().unwrap_or(0);
         let max = ctx.var_int("max_id").unwrap_or(100);

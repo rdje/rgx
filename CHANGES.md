@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Fix all 4 RGX-side adversarial failures — zero failures remain
+- Scope: fix the 4 remaining adversarial test failures that were RGX-side issues.
+- Changes:
+  - **serde_json recursion limit**: enabled `unbounded_depth` feature and `serde_stacker` for safe deep AST deserialization. 50-level nested groups now compile.
+  - **Many alternatives test**: fixed test expectation — `a100` correctly prefix-matches inside `a1001`.
+  - **Empty pattern**: removed explicit rejection. Empty regex now compiles and matches the empty string at every position (PCRE2 semantics).
+  - **Steering filter logic**: added `\b` word boundary to prevent `\d+` from backtracking into shorter digit matches, ensuring full numeric IDs are compared to the threshold.
+- Validation:
+  - All 34 adversarial tests pass (was 27 pass / 7 fail).
+  - All ~487 tests across all crates pass, zero failures.
+
 ### 2026-04-07 - Bump PGEN to 1.1.8, close PGEN-RGX-0011/0012/0013
 - Scope: PGEN submodule upgrade verifying Unicode and nesting fixes.
 - Changes:

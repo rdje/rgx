@@ -440,25 +440,10 @@ impl Compiler {
         debug_log!("compiler", "Pattern: '{}'", pattern);
         debug_log!("compiler", "Mode: {:?}", self.mode);
 
-        if pattern.is_empty() {
-            trace_decision!(
-                "compiler",
-                "pattern.is_empty()",
-                true,
-                "reject compile request with explicit compile error"
-            );
-            debug_log!("compiler", "ERROR: Empty pattern");
-            trace_exit!(
-                "compiler",
-                "Compiler::compile",
-                "error=empty pattern compile failure"
-            );
-            return Err(RgxError::Compile("empty pattern".into()));
-        }
         trace_decision!(
             "compiler",
             "pattern.is_empty()",
-            false,
+            pattern.is_empty(),
             "continue with parser and bytecode compilation"
         );
 

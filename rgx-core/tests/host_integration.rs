@@ -1013,9 +1013,12 @@ fn resume_with_error_result_does_not_panic() {
 }
 
 #[test]
-fn empty_pattern_is_compile_error() {
-    let result = Regex::compile("");
-    assert!(result.is_err(), "empty pattern should be a compile error");
+fn empty_pattern_matches_empty_string() {
+    // PGEN accepts empty patterns. An empty regex should match the empty
+    // string at every position (PCRE2 semantics).
+    let re = Regex::compile("").unwrap();
+    assert!(re.is_match(""));
+    assert!(re.is_match("abc"));
 }
 
 #[test]

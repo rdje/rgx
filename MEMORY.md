@@ -92,16 +92,11 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
-### Known RGX-side issues (from adversarial testing, not PGEN)
-- serde_json recursion limit for deeply nested PGEN AST dumps (50+ group levels)
-- Prefix-match false positive for 1000-alternative patterns (`a100` prefix-matches `a1001`)
-- Empty pattern `""` rejected by adapter
-- Steering callback filter logic in all_layers_under_stress test
-
 ### Testing
 - 55 integration tests in `rgx-core/tests/host_integration.rs` + 34 adversarial tests in `rgx-core/tests/adversarial.rs`
-- Adversarial: 30 pass, 4 fail (RGX-side issues above)
-- Total test count: **~490** across all crates
+- **All adversarial tests pass** — zero failures remain (was 7 fail → 3 PGEN fixes → 4 RGX fixes → 0)
+- Total test count: **~487** across all crates, all passing
+- Adversarial coverage: catastrophic backtracking, 50-level nesting, 1000 alternatives, emoji/multibyte, 10-thread concurrency, steering edge cases, async chaining, cross-thread continuations, 10K-line file scan, all layers combined
 - Every user-facing API is exercised including error paths, concurrency, and edge cases
 
 ### Documentation

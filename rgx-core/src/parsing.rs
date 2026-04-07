@@ -376,7 +376,10 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn parse_dump(&self, dump_json: &str) -> Result<Regex> {
-        let root: PgenAstNode = serde_json::from_str(dump_json).map_err(|err| {
+        let mut deserializer = serde_json::Deserializer::from_str(dump_json);
+        deserializer.disable_recursion_limit();
+        let deserializer = serde_stacker::Deserializer::new(&mut deserializer);
+        let root: PgenAstNode = serde::Deserialize::deserialize(deserializer).map_err(|err| {
             RgxError::Compile(format!("failed to decode pgen regex AST dump JSON: {err}"))
         })?;
         self.convert_root(&root)
