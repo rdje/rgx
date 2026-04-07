@@ -1,7 +1,7 @@
 id: PGEN-RGX-0012
 summary: |
   Multibyte UTF-8 literal characters stop the parser — pattern 'café' parses 'caf' then rejects at the 'é' (position 3)
-status: open
+status: closed
 opened_at: 2026-04-07T12:55:54Z
 first_seen_at: 2026-04-07T12:55:54Z
 last_updated_at: 2026-04-07T12:55:54Z
@@ -36,7 +36,7 @@ reproduction: |
 impact: |
   Same as PGEN-RGX-0011. Any pattern containing accented characters, non-Latin scripts, or other non-ASCII literals fails to parse.
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: null

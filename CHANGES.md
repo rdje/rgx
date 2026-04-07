@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Bump PGEN to 1.1.8, close PGEN-RGX-0011/0012/0013
+- Scope: PGEN submodule upgrade verifying Unicode and nesting fixes.
+- Changes:
+  - Bumped `subs/pgen` from `8b31c80` (1.1.7) to `54ed190` (1.1.8).
+  - PGEN-RGX-0011 (emoji literal): now parses. PGEN-RGX-0012 (café/multibyte): now parses. PGEN-RGX-0013 (50 nested groups): now parses.
+  - All 3 closed as `verified-fixed-upstream` with fixed AST dumps archived.
+  - Adversarial tests: 30 now pass (was 27). 4 remaining failures are RGX-side issues (serde_json recursion limit for deep AST, prefix-match false positive for 1000 alternatives, empty pattern rejection, steering logic).
+  - All 9 RGX-filed PGEN issues (0005-0013) now closed.
+- Validation:
+  - `cargo test -p rgx-core` (343 unit pass), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass)
+
 ### 2026-04-07 - File PGEN-RGX-0011/0012/0013 for adversarial test failures
 - Scope: PGEN bug reports for 3 failures found by adversarial testing.
 - Changes:

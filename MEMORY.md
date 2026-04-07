@@ -47,10 +47,10 @@ Live continuity memory for `rgx` sessions.
 ## Current technical snapshot
 
 ### PGEN integration
-- PGEN 1.1.7 is the sole parser (pinned at `8b31c801c1369d3562180ef6c9dfd91c196517df`)
+- PGEN 1.1.8 is the sole parser (pinned at `54ed190437371fdcc8e77751407f5b3d51efbd52`)
 - Builtin recursive-descent parser fully retired — gated behind `cfg(not(feature = "pgen-parser"))`
 - Adapter uses PGEN's structured AST natively for all constructs; only 2 `strip_prefix` calls remain (untagged code block fallback)
-- All 6 filed PGEN issues (0005-0010) closed/verified
+- All 9 filed PGEN issues (0005-0013) closed/verified — includes Unicode literals and deep nesting fixes from 1.1.8
 
 ### PCRE2 feature parity (~95% tracked, ~90% real-world)
 - Full inline flag system: `(?i)`, `(?m)`, `(?s)`, `(?x)` with enable, disable, scoped, inline, combined forms
@@ -92,15 +92,16 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
-### PGEN issues (open)
-- **PGEN-RGX-0011**: emoji/non-ASCII literal rejected by parser
-- **PGEN-RGX-0012**: multibyte UTF-8 literal stops parser at non-ASCII byte
-- **PGEN-RGX-0013**: 50 nested groups rejected (parser recursion limit)
-- Adversarial testing also found 4 RGX-side issues (not PGEN): empty pattern adapter handling, 1000 alternatives adapter performance, steering logic in all_layers test, zero-width empty pattern find_all
+### Known RGX-side issues (from adversarial testing, not PGEN)
+- serde_json recursion limit for deeply nested PGEN AST dumps (50+ group levels)
+- Prefix-match false positive for 1000-alternative patterns (`a100` prefix-matches `a1001`)
+- Empty pattern `""` rejected by adapter
+- Steering callback filter logic in all_layers_under_stress test
 
 ### Testing
-- 55 integration tests in `rgx-core/tests/host_integration.rs`: 39 happy-path + 17 adversarial (backtracking after resume, steering edge cases, 10-thread concurrency, zero-width interactions, error conditions, 10K-match stress test, 5-level deep nested variables)
-- Total test count: **453** across all crates (343 unit + 55 integration + 6 doc + 10 CLI + 39 bench)
+- 55 integration tests in `rgx-core/tests/host_integration.rs` + 34 adversarial tests in `rgx-core/tests/adversarial.rs`
+- Adversarial: 30 pass, 4 fail (RGX-side issues above)
+- Total test count: **~490** across all crates
 - Every user-facing API is exercised including error paths, concurrency, and edge cases
 
 ### Documentation
@@ -197,7 +198,7 @@ Live continuity memory for `rgx` sessions.
   - local backend selection is controlled by one constant (`PGEN_FEATURE_BACKEND`)
   - active PGEN output is validated against the recursive-descent reference AST on a widened fixture set
   - `rgx-cli` now also exposes a `pgen-parser` feature passthrough for end-to-end build/test coverage
-- The pinned PGEN submodule commit is `8b31c801c1369d3562180ef6c9dfd91c196517df` (PGEN 1.1.7).
+- The pinned PGEN submodule commit is `54ed190437371fdcc8e77751407f5b3d51efbd52` (PGEN 1.1.8).
 - Latest extended-character-class cleanup did not widen syntax, but it hardened the new bare POSIX-term path:
   - `rgx-core/src/compiler.rs` now uses a typed internal ASCII POSIX registry plus `ExtendedPosixClassSpec` instead of ad hoc string matching for the current `(?[...])` POSIX-term subset
   - invalid POSIX names now fail through one narrower helper path, while non-POSIX bodies still fall back cleanly to the ordinary bracket/escape-term lowering logic

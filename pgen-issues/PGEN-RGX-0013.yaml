@@ -1,7 +1,7 @@
 id: PGEN-RGX-0013
 summary: |
   Deeply nested groups (50 levels) are rejected — pattern (((((...a...)))) fails at position 0
-status: open
+status: closed
 opened_at: 2026-04-07T12:55:54Z
 first_seen_at: 2026-04-07T12:55:54Z
 last_updated_at: 2026-04-07T12:55:54Z
@@ -36,7 +36,7 @@ reproduction: |
 impact: |
   Patterns with moderate nesting depth cannot be compiled. This affects machine-generated patterns and patterns with deeply nested conditional/group structures.
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: null
