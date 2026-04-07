@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Add comprehensive integration tests for all host integration layers
+- Scope: fill every test gap across all 6 layers.
+- Changes:
+  - Created `rgx-core/tests/host_integration.rs` with 39 integration tests:
+    - Layer 1 Data Exchange (15): typed variable readers, null/empty values, deep nesting, backward compat, structured results, branch numbers, numeric/replacement collection
+    - Layer 3 Steering (5): abort with find_all, skip with find_all, accept with captures, fail+backtrack, continue no-op
+    - Layer 4 Events (6): branch entered, capture completed, code block evaluated, events during find_all, events don't affect results, all event types in one pattern
+    - Layer 5 Async (3): find_all graceful handling, abort via steering, accept via steering
+    - Layer 6 Files (5): no matches, empty file, callbacks during scan, unicode content, line text preservation
+    - Cross-layer (5): variables+callbacks, steering+callbacks, events+branches, callbacks+files, all layers combined
+- Validation:
+  - `cargo test -p rgx-core` (388 pass including 39 new integration tests), `-p rgx-cli` (10 pass), `-p rgx-bench` (39 pass)
+  - Total across all crates: 437 tests.
+
 ### 2026-04-07 - Ship vars!/value! macros and re.set_vars() for zero-ceremony variable setup
 - Scope: two declarative approaches to host variable construction.
 - Changes:

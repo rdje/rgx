@@ -92,6 +92,11 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
+### Testing
+- 39 integration tests in `rgx-core/tests/host_integration.rs` covering all 6 layers + 5 cross-layer tests
+- Total test count: 437 across all crates (343 unit + 39 integration + 6 doc + 10 CLI + 39 bench)
+- Every user-facing API is exercised: typed variables, convenience readers, macros, steering actions, all event types, suspension/resume, file matching modes
+
 ### Documentation
 - `docs/guide/` — **The RGX Guide**: 12-file book-style documentation (4,350 lines) covering every feature with extensive examples
   - 8 chapters: first match, data exchange, callbacks, steering, events, async, files, real-world patterns
