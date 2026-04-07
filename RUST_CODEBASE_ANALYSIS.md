@@ -47,21 +47,16 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized and the explicit RGX package test matrix enabled)
-- Current large-file concentration in `rgx-core`:
-  - `rgx-core/src/vm.rs`: 5610 lines
-  - `rgx-core/src/lib.rs`: 4369 lines
-  - `rgx-core/src/compiler.rs`: 3374 lines
-  - `rgx-core/src/parsing.rs`: 2718 lines
-  - `rgx-core/src/execution.rs`: 2396 lines
-  - `rgx-core/src/lexer.rs`: 2383 lines
-  - `rgx-core/src/ast.rs`: 531 lines
-- The builtin recursive-descent parser module (`parser.rs`) is gated behind `#[cfg(not(feature = "pgen-parser"))]` — not compiled in the default PGEN build.
-- PGEN is the sole parser (pinned at 1.1.7). The adapter uses PGEN's structured AST natively for all constructs; only 2 `strip_prefix` calls remain (untagged code block fallback).
-- All 6 filed PGEN issues (0005-0010) are closed/verified.
-- Release-profile performance (criterion): literal find_first 6.4x vs PCRE2, email 3.4x, capture 0.88x (RGX wins). `ExecContext.text` is borrowed `&[u8]`, trace macros gated behind `cfg(feature = "trace")`, literal patterns bypass VM via `memmem`.
-- PCRE2 feature parity: ~95% tracked families, ~90% real-world patterns. 6 deferred gaps (all low/very-low priority). Full inline flag system (`(?i)`, `(?m)`, `(?s)`, `(?x)` with enable/disable/scoped/inline/combined), `\K`, `\R`, `\N`, `\G`, `(?C)` callouts, `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*MARK)`, `(*FAIL)`, `(*ACCEPT)`, `(?#...)`, `(?P<>)`, `(?P=)`, `\k<>`, `(?J)`, relative subroutines/backrefs all shipped.
-- Host integration architecture documented in `docs/HOST_INTEGRATION_ARCHITECTURE.md` with 6 layers (2 shipped, 4 planned).
-- The latest full workspace `clippy` pass now reports **zero RGX-owned warnings** (down from 296 at session start); the only remaining 33 workspace warnings are from the PGEN submodule, which is outside RGX's control.
+- Source code totals ~26K lines across rgx-core (vm 6858, lib 5086, compiler 3359, execution 2914, parsing 2721, lexer 2383, ast 531, vars 521, file 193, events 54) + CLI 1695 lines.
+- PGEN 1.1.8 is the sole parser (all 9 filed issues 0005-0013 closed). Adapter uses structured AST natively; 2 `strip_prefix` calls remain (untagged code block fallback).
+- PCRE2 feature parity: ~95% tracked families, ~90% real-world patterns. 6 deferred gaps (low priority). Full inline flags (`(?imsx)` with enable/disable/scoped/combined), `\K`, `\R`, `\N`, `\G`, `(?C)` callouts, all backtracking verbs, `(?J)`, relative subroutines/backrefs, `(?P<>)`/`(?P=)`, `\k<>`, comment groups, mode settings — all shipped.
+- All 6 host integration layers shipped: data exchange, predicate callbacks (5 backends), match steering, structured events, async I/O (continuation-passing), file-backed matching.
+- Typed values with fluent builder + `vars!`/`value!` macros. `SteerResult` enum. `MatchEvent` observer. `MatchContinuation` (Send+Sync).
+- Release-profile performance (criterion): literal find_first **6.4x** vs PCRE2, email **3.4x**, capture **0.88x** (RGX wins). `ExecContext.text` is borrowed `&[u8]`, trace macros gated behind `cfg(feature = "trace")`, literal patterns bypass VM via `memmem`, trail-based backtracking, binary search Unicode ranges.
+- CLI: full-featured grep-like tool with 15+ flags (file/recursive/context/json/replace/replace-with-code/numeric/events/stats/var-json/only-matching/invert-match). 30 CLI tests.
+- Testing: 343 unit + 44 adversarial + 55 integration + 11 property (256+ cases each) + 21 stress/fuzz + 6 doc + 30 CLI + 39 bench = **~550 tests**, all passing, zero ignored.
+- Documentation: `docs/guide/` (12 files, 5810+ lines, 150+ examples), CLI guide, testing philosophy, host integration architecture, PCRE2 compatibility matrix (feature-by-feature table).
+- Nested recursion bug fixed (zero-width quantifier guard). Events+async bug fixed. Subroutine capture semantics fixed.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.

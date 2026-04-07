@@ -46,64 +46,31 @@ Live continuity memory for `rgx` sessions.
 
 ## Current technical snapshot
 
-### PGEN integration
-- PGEN 1.1.8 is the sole parser (pinned at `54ed190437371fdcc8e77751407f5b3d51efbd52`)
-- Builtin recursive-descent parser fully retired — gated behind `cfg(not(feature = "pgen-parser"))`
-- Adapter uses PGEN's structured AST natively for all constructs; only 2 `strip_prefix` calls remain (untagged code block fallback)
-- All 9 filed PGEN issues (0005-0013) closed/verified — includes Unicode literals and deep nesting fixes from 1.1.8
+### Engine
+- ~26K lines of Rust across rgx-core + 1.7K CLI. PGEN 1.1.8 sole parser (9 issues filed/closed).
+- PCRE2 feature parity ~95% tracked / ~90% real-world. Full inline flags `(?imsx)`, `\K`, `\R`, `\N`, `\G`, `(?C)`, all backtracking verbs, relative subroutines/backrefs, Python syntax, comment groups, mode settings. 6 deferred low-priority gaps.
+- Release-profile speed: literal **6.4x**, email **3.4x**, capture **0.88x** (wins) vs PCRE2. Key: borrowed `&[u8]` text, trace gating, memmem fast path, trail backtracking, binary search Unicode.
 
-### PCRE2 feature parity (~95% tracked, ~90% real-world)
-- Full inline flag system: `(?i)`, `(?m)`, `(?s)`, `(?x)` with enable, disable, scoped, inline, combined forms
-- Named backrefs: `\k<name>`, `\k'name'`, `\k{name}`, `(?P=name)`, `\g{name}`, `\g<+1>`, `\g<-1>`
-- Python syntax: `(?P<name>...)`, `(?P=name)`, `(?P>name)`
-- Escapes: `\K`, `\R`, `\N`, `\G`, `\h/\H`, `\v/\V`, all hex/octal/control forms
-- Backtracking verbs: `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*MARK:name)`, `(*FAIL)`, `(*ACCEPT)`
-- Mode settings: `(*UTF)`, `(*UCP)`, `(*BSR_*)`, `(*CRLF)` etc. accepted as no-ops
-- `(?C)` callouts via native callback system, `(?#...)` comment groups, `(?J)` duplicate names
-- Relative subroutines `(?+1)`/`(?-1)`, relative conditionals
-- 6 deferred gaps (all low/very-low): `\X`, returned-capture subroutines, VERSION conditionals, `(*SKIP:name)`, partial matching, JIT
-
-### Performance (release profile, criterion)
-- Literal find_first: **6.4x** vs PCRE2 (memmem fast path bypasses VM)
-- Email find_first: **3.4x** vs PCRE2
-- Capture find_first: **0.88x** (RGX wins)
-- Key optimizations: `ExecContext.text` is borrowed `&[u8]`, trail-based backtracking O(1) saves, trace macros gated behind `cfg(feature = "trace")`, prefix filter skips zero-width assertions, binary search Unicode ranges, minimal UTF-8 decoding
-
-### SOTA upgrades
-- Trail/undo log for backtracking (replaces full capture vector cloning)
-- Binary search O(log N) for Unicode character class ranges
-- Minimal UTF-8 character decoding (ASCII fast path, multi-byte reads only needed bytes)
-- memchr-accelerated scanning with prefix filter for literals, classes, and compiled char classes
-
-### Accuracy fixes (3 bugs found and fixed via differential probing)
-- `^`/`$` now single-line by default (was multiline)
-- `Regex::Empty` codegen fixed (was emitting `Fail`)
-- `find_all` zero-width suppression matches PCRE2 iteration semantics
-
-### Host integration
-- **Declarative variable macros shipped**: `vars!(re, { "key" => val, "nested" => { ... }, "list" => [...] })` (Option A) and `re.set_vars(value!({ ... }))` (Option C) — both zero-ceremony, arbitrary nesting, no `.done()` needed
-- **Fluent variable builder shipped**: `re.vars().set("key", value).hash("config").set("port", 8080).done()` — zero `Value::` mentions, arbitrary nesting; move-based ownership for type-safe chaining; convenience readers `var_int`/`var_float`/`var_bool`/`var_str`/`var_array`/`var_map` on ExecContext
-- **Typed values shipped**: `Value` enum (Null/Bool/Int/Float/String/Array/Map); `set_typed_variable`/`set_var` for typed input, `typed_variable` for typed reading, `Structured(Value)` for complex return values; backward compatible with string API
-- **Layer 5 Async I/O shipped**: continuation-passing style — `find_first_suspendable()` returns `MatchOutcome::Suspended(MatchContinuation)` on unregistered async callbacks; `resume(continuation, result)` restores full VM state and continues; `find_first_async(resolver)` convenience wrapper works with any async runtime; zero overhead on sync path; `MatchContinuation` is `Send + Sync`; correct under backtracking and recursion; 12 tests
-- **Layer 6 File-Backed Matching shipped (core API)**: `match_file`, `match_file_lines`, `scan_file`, `scan_file_lines` — line-oriented mode with `FileMatch` struct carrying line numbers; `tail_file` and CLI integration deferred
-- **Layer 4 Structured Events shipped**: `MatchEvent` enum with 6 variants; `Regex::on_event(observer)` API; zero overhead when no observer; instrumented all scanning strategies and key VM opcodes
-- **Layer 3 Match Steering shipped**: `SteerResult` enum with `Continue`, `Fail`, `Accept`, `Skip(usize)`, `Abort` — callbacks can now actively control match execution
-- `ExecResult::Steer(SteerResult)` extends the callback return type; VM dispatches all actions
-- `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
-- Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
+### Host integration (all 6 layers shipped)
+- L1 Data Exchange: string + typed variables (`Value` enum with Null/Bool/Int/Float/String/Array/Map), fluent builder, `vars!`/`value!` macros, numeric/replacement/structured results, branch numbers
+- L2 Predicate Callbacks: native/Lua/JS/Rhai/WASM, Pure/Safe/Full execution modes
+- L3 Match Steering: `SteerResult` (Continue/Fail/Accept/Skip/Abort)
+- L4 Structured Events: `MatchEvent` (6 types), `on_event` observer, zero overhead
+- L5 Async I/O: `find_first_suspendable`/`resume`/`find_first_async`, `MatchContinuation` (Send+Sync)
+- L6 File-Backed Matching: `match_file`/`match_file_lines`/`scan_file`/`scan_file_lines`
 
 ### CLI
-- Full-featured grep-like tool: `--file`, `--line-mode`, `--count`, `--recursive`, `--context N`, `--replace`, `--json`, `--only-matching`, `--invert-match`, `--numeric`, `--replace-with-code`, `--var-json`, `--events`, `--stats`
-- Code block support: `--mode`, `--var`, `--var-json`, `--wasm-module`, `--show-details`
-- `--json` includes branch numbers and code results; `--events` prints to stderr for debugging
-- `docs/CLI_GUIDE.md`: comprehensive guide with 20+ examples
-- 30 CLI tests
+- 15+ flags: `--file`, `--recursive`, `--line-mode`, `--count`, `--context`, `--json`, `--replace`, `--replace-with-code`, `--only-matching`, `--invert-match`, `--numeric`, `--var-json`, `--events`, `--stats`, `--mode`, `--var`, `--wasm-module`, `--show-details`
+- 30 tests. `docs/CLI_GUIDE.md` with 20+ examples.
 
-### Recent bug fixes (from gap testing)
-- **Nested recursion quantifier bug FIXED**: `StarGreedy`/`PlusGreedy` zero-width guards now retry alternatives instead of breaking immediately — `(a(b)c)` balanced-paren matching works correctly
-- **Events + async FIXED**: `find_first_suspendable` and `resume` now emit events
-- **Subroutine capture semantics FIXED**: captures revert on subroutine success per PCRE2
-- All 44 adversarial tests pass — zero ignored, zero failures
+### Testing
+- **~550 tests**, all passing: 343 unit + 44 adversarial + 55 integration + 11 property (256+ cases each) + 21 stress/fuzz + 6 doc + 30 CLI + 39 bench
+- `docs/TESTING_PHILOSOPHY.md`: hostile skepticism doctrine
+- All 9 PGEN issues filed and closed. 3 engine bugs found and fixed via gap testing (nested recursion, events+async, subroutine captures).
+
+### Documentation
+- `docs/guide/`: 12-file book (5,810+ lines, 150+ examples)
+- `docs/CLI_GUIDE.md`, `docs/PCRE2_COMPATIBILITY_MATRIX.md`, `docs/HOST_INTEGRATION_ARCHITECTURE.md`, `docs/HOST_INTEGRATION_GUIDE.md`, `docs/TESTING_PHILOSOPHY.md`
 
 ### Testing
 - **5 test suites**: unit (343), integration (55), adversarial (44, 2 ignored/known bugs), property-based (11 × 256+ cases), stress/fuzz (21)
