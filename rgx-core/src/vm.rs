@@ -1803,13 +1803,25 @@ impl RegexVM {
                             trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
                             break;
                         }
-                        // If we didn't advance, avoid infinite loop
+                        // If we didn't advance, avoid infinite loop —
+                        // but first retry requiring advancement so that
+                        // alternatives inside the body get a chance.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             ctx.call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result;
-                            trace_log!("vm", "  PlusGreedy: no advance, stopping");
-                            break;
+                            ctx.code_result = saved_code_result.clone();
+                            if !self.execute_subexpr_advancing(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                before_pos,
+                            ) {
+                                ctx.pos = before_pos;
+                                Self::undo_trail(ctx, trail_mark);
+                                ctx.call_stack.truncate(cs_mark);
+                                ctx.code_result = saved_code_result;
+                                trace_log!("vm", "  PlusGreedy: no advance, stopping");
+                                break;
+                            }
                         }
                         // Greedy path consumed one extra repetition; keep a fallback
                         // to continue after this quantifier without this repetition.
@@ -1865,12 +1877,28 @@ impl RegexVM {
                             // Can't match anymore, that's fine for *
                             break;
                         }
-                        // If we didn't advance, avoid infinite loop
+                        // If we didn't advance, the sub-expression matched
+                        // zero width. Before giving up, retry requiring
+                        // advancement so that alternatives inside the body
+                        // (e.g. a recursive subroutine call) get a chance.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             ctx.call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result;
-                            break;
+                            ctx.code_result = saved_code_result.clone();
+                            if !self.execute_subexpr_advancing(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                before_pos,
+                            ) {
+                                ctx.pos = before_pos;
+                                Self::undo_trail(ctx, trail_mark);
+                                ctx.call_stack.truncate(cs_mark);
+                                ctx.code_result = saved_code_result;
+                                break;
+                            }
+                            // The advancing retry found a non-zero-width
+                            // match — fall through to push a backtrack
+                            // frame just like a normal advancing iteration.
                         }
                         // Greedy path consumed one repetition; keep a fallback
                         // to continue after this quantifier without this repetition.
@@ -3781,6 +3809,34 @@ impl RegexVM {
     /// Execute a sub-expression (used for quantifiers)
     #[allow(clippy::too_many_lines)] // Subexpression dispatch mirrors execute_at — same architectural constraint
     fn execute_subexpr(&self, ctx: &mut ExecContext<'_>, code: &[u8]) -> bool {
+        self.execute_subexpr_inner(ctx, code, None)
+    }
+
+    /// Like [`execute_subexpr`], but rejects zero-width matches.
+    ///
+    /// When a sub-expression inside a `*` or `+` quantifier matches
+    /// without advancing the position, the quantifier loop normally
+    /// stops.  However, the sub-expression may contain alternatives
+    /// (e.g. `[^()]*|(?&pair)`) where the first branch matches zero
+    /// width but a later branch would advance.  This variant
+    /// back-tracks through the sub-expression's own local stack when
+    /// a would-be success does not advance past `origin`, ensuring
+    /// every alternative is explored before giving up.
+    fn execute_subexpr_advancing(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        origin: usize,
+    ) -> bool {
+        self.execute_subexpr_inner(ctx, code, Some(origin))
+    }
+
+    fn execute_subexpr_inner(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        must_advance_from: Option<usize>,
+    ) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
         let mut call_stack = Vec::new();
@@ -3806,6 +3862,13 @@ impl RegexVM {
 
         loop {
             if ip >= code.len() {
+                // When must_advance_from is set, reject zero-width
+                // matches by back-tracking through alternatives.
+                if let Some(origin) = must_advance_from {
+                    if ctx.pos == origin {
+                        local_backtrack_or_return_false!();
+                    }
+                }
                 return true; // Successfully executed all instructions
             }
 
@@ -4265,8 +4328,18 @@ impl RegexVM {
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result;
-                            break;
+                            ctx.code_result = saved_code_result.clone();
+                            if !self.execute_subexpr_advancing(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                before_pos,
+                            ) {
+                                ctx.pos = before_pos;
+                                Self::undo_trail(ctx, trail_mark);
+                                call_stack.truncate(cs_mark);
+                                ctx.code_result = saved_code_result;
+                                break;
+                            }
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
@@ -4327,13 +4400,25 @@ impl RegexVM {
                     let first_pos = ctx.pos;
                     let first_trail_mark = ctx.capture_trail.len();
                     let first_code_result = ctx.code_result.clone();
-                    if !self.execute_subexpr(ctx, &code[expr_start..expr_end])
-                        || ctx.pos == first_pos
-                    {
+                    if !self.execute_subexpr(ctx, &code[expr_start..expr_end]) {
                         ctx.pos = first_pos;
                         Self::undo_trail(ctx, first_trail_mark);
                         ctx.code_result = first_code_result;
                         local_backtrack_or_return_false!();
+                    }
+                    if ctx.pos == first_pos {
+                        Self::undo_trail(ctx, first_trail_mark);
+                        ctx.code_result = first_code_result.clone();
+                        if !self.execute_subexpr_advancing(
+                            ctx,
+                            &code[expr_start..expr_end],
+                            first_pos,
+                        ) {
+                            ctx.pos = first_pos;
+                            Self::undo_trail(ctx, first_trail_mark);
+                            ctx.code_result = first_code_result;
+                            local_backtrack_or_return_false!();
+                        }
                     }
 
                     loop {
@@ -4351,8 +4436,18 @@ impl RegexVM {
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result;
-                            break;
+                            ctx.code_result = saved_code_result.clone();
+                            if !self.execute_subexpr_advancing(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                before_pos,
+                            ) {
+                                ctx.pos = before_pos;
+                                Self::undo_trail(ctx, trail_mark);
+                                call_stack.truncate(cs_mark);
+                                ctx.code_result = saved_code_result;
+                                break;
+                            }
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
@@ -4418,6 +4513,11 @@ impl RegexVM {
                 }
 
                 OpCode::Match => {
+                    if let Some(origin) = must_advance_from {
+                        if ctx.pos == origin {
+                            local_backtrack_or_return_false!();
+                        }
+                    }
                     return true;
                 }
 

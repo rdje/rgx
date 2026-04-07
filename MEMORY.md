@@ -92,10 +92,11 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
-### Known limitations
-- **Nested recursive balanced-paren matching** returns inner match instead of outer — subroutine invocation path doesn't correctly continue the outer pattern after recursive call completes (1 `#[ignore]` test documents this)
-- Events + async bug FIXED: `find_first_suspendable` and `resume` now emit events
-- Subroutine capture semantics FIXED: captures revert on subroutine success per PCRE2
+### Recent bug fixes (from gap testing)
+- **Nested recursion quantifier bug FIXED**: `StarGreedy`/`PlusGreedy` zero-width guards now retry alternatives instead of breaking immediately — `(a(b)c)` balanced-paren matching works correctly
+- **Events + async FIXED**: `find_first_suspendable` and `resume` now emit events
+- **Subroutine capture semantics FIXED**: captures revert on subroutine success per PCRE2
+- All 44 adversarial tests pass — zero ignored, zero failures
 
 ### Testing
 - **5 test suites**: unit (343), integration (55), adversarial (44, 2 ignored/known bugs), property-based (11 × 256+ cases), stress/fuzz (21)

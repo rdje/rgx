@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Fix nested recursion bug in quantifier zero-width guard
+- Scope: fix the last known bug — nested recursive patterns now match correctly.
+- Changes:
+  - **Root cause**: `StarGreedy`/`PlusGreedy` zero-width match guards broke out of the quantifier loop immediately when the body matched zero characters, without trying alternative branches. For `([^()]*|(?&pair))*`, when `[^()]*` matched empty at a `(`, the loop exited without ever trying `(?&pair)`.
+  - **Fix**: Added `execute_subexpr_advancing` that retries sub-expressions rejecting zero-width matches, giving alternatives like recursive calls a chance to match and advance position.
+  - Updated all 4 zero-width guards (2 in `execute_at`, 2 in `execute_subexpr`).
+  - Removed `#[ignore]` from `deep_recursion_with_captures_restored_correctly` test.
+  - All 44 adversarial tests now pass — zero ignored, zero failures.
+- Validation:
+  - `cargo test -p rgx-core`: all pass (343 + 44 + 55 + 11 + 21 + 6). `-p rgx-bench`: all pass.
+  - Pattern `(?<pair>\((?:[^()]+|(?&pair))*\))` on `(a(b)c)` now returns `(0, 7)`.
+
 ### 2026-04-07 - Fix events+async bug, document recursion limitation
 - Scope: fix 1 of 2 bugs found by gap testing, document the other.
 - Changes:

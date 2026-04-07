@@ -799,11 +799,7 @@ fn steer_accept_at_zero_width_in_find_all() {
 }
 
 // Gap 8: Deep recursion + trail backtracking
-// Known limitation: nested recursive balanced-paren matching returns inner
-// match instead of outer. The subroutine path doesn't correctly continue
-// the outer pattern after the recursive call completes.
 #[test]
-#[ignore = "known limitation: nested recursion returns inner match instead of outer"]
 fn deep_recursion_with_captures_restored_correctly() {
     let re = Regex::with_mode(
         r"(?<pair>\((?<inner>[^()]*|(?&pair))*\))(?{native:verify})",
