@@ -77,7 +77,8 @@ If you are new to the repo, use this order:
 - [`docs/PARSER_CONTRACT.md`](docs/PARSER_CONTRACT.md) — parser interoperability contract
 - [`docs/TECHNICAL_DECISIONS.md`](docs/TECHNICAL_DECISIONS.md) — architecture/design decisions
 - [`docs/architecture.md`](docs/architecture.md) — architecture and data flow
-- [`docs/HOST_INTEGRATION_GUIDE.md`](docs/HOST_INTEGRATION_GUIDE.md) — practical guide to host integration with examples (start here)
+- [`docs/guide/`](docs/guide/) — **The RGX Guide** — comprehensive book-style documentation with chapters on every feature, loaded with examples
+- [`docs/HOST_INTEGRATION_GUIDE.md`](docs/HOST_INTEGRATION_GUIDE.md) — single-file quick reference for host integration
 - [`docs/HOST_INTEGRATION_ARCHITECTURE.md`](docs/HOST_INTEGRATION_ARCHITECTURE.md) — deep host-engine integration design (match steering, events, async I/O)
 ## README maintenance policy
 `README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:

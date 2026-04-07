@@ -90,7 +90,11 @@ Live continuity memory for `rgx` sessions.
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
 ### Documentation
-- `docs/HOST_INTEGRATION_GUIDE.md` — user-facing guide with examples for all 6 layers, combined example, and quick reference table
+- `docs/guide/` — **The RGX Guide**: 12-file book-style documentation (4,350 lines) covering every feature with extensive examples
+  - 8 chapters: first match, data exchange, callbacks, steering, events, async, files, real-world patterns
+  - 3 reference docs: quick reference, execution modes, context reference
+  - Chapter 7 has 5 complete real-world examples: log monitor, tokenizer, data pipeline, config parser, WAF engine
+- `docs/HOST_INTEGRATION_GUIDE.md` — single-file quick reference
 
 ### Architecture documents
 - `docs/HOST_INTEGRATION_ARCHITECTURE.md` — 6-layer host integration design (2 shipped, 4 planned)

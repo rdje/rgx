@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - Create The RGX Guide: 12-file book-style documentation
+- Scope: comprehensive user-facing documentation covering every feature.
+- Changes:
+  - Created `docs/guide/` with 12 markdown files (4,350+ lines total):
+    - Chapter 0: Your First Match — basics, patterns, capture groups
+    - Chapter 1: Passing Data In and Out — variables, results, branch IDs
+    - Chapter 2: Predicate Callbacks — 4 languages, 18+ examples, execution modes
+    - Chapter 3: Steering the Match — 5 actions, real scenarios
+    - Chapter 4: Watching the Engine — debugger, profiler, coverage tool
+    - Chapter 5: Async Callbacks — continuation-passing, async runtime integration
+    - Chapter 6: Working with Files — grep tool, log alerter
+    - Chapter 7: Real-World Patterns — log monitor, tokenizer, data pipeline, config parser, WAF engine
+    - Quick Reference — one-page cheat sheet
+    - Execution Modes — Pure/Safe/Full decision guide
+    - Context Reference — all callback fields across all languages
+  - Updated README to link to the guide.
+
 ### 2026-04-06 - Add comprehensive host integration guide with examples
 - Scope: user-facing documentation for all 6 host integration layers.
 - Changes:
