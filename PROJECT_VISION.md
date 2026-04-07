@@ -11,6 +11,7 @@ Think sed's `s///e` and Perl's `(?{code})` but decoupled from any specific host 
 - Safety-first design for any embedded execution features
 - Clear separation of syntax parsing, compilation, and execution
 - Pragmatic delivery: ship verified capabilities, avoid overstating status
+- **Documentation is a first-class product**: the tool is nothing if no one uses it. Clean, readable examples that solve real problems are how users adopt. The documentation should teach, not intimidate. Every feature must be explained with practical examples that show the value before the mechanics. Users should feel "I can do this" not "this is too complex for me."
 
 ## Long-term goals
 - Practical feature parity with PCRE2 across supported regex constructs
