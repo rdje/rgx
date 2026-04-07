@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-07 - File PGEN-RGX-0011/0012/0013 for adversarial test failures
+- Scope: PGEN bug reports for 3 failures found by adversarial testing.
+- Changes:
+  - Filed PGEN-RGX-0011: emoji/non-ASCII literal rejected (`🎉` fails at position 0)
+  - Filed PGEN-RGX-0012: multibyte UTF-8 literal rejected (`café` fails at `é`, position 3)
+  - Filed PGEN-RGX-0013: 50 nested groups rejected (hits parser recursion limit)
+  - Confirmed that empty pattern and 1000 alternatives are NOT PGEN bugs (PGEN accepts both; RGX adapter issues)
+  - Confirmed all_layers_under_stress failure is a steering logic issue (not PGEN)
+  - Full repro inputs, traces, and contract snapshots for each issue.
+- Notes/impact:
+  - PGEN issue tracker: 0005-0010 closed, 0011-0013 open.
+  - These are real limitations: any pattern with non-ASCII literals or >~30 nesting levels will fail to compile.
+
 ### 2026-04-07 - Add adversarial and edge-case tests for real confidence
 - Scope: tests that prove correctness under stress, not just happy paths.
 - Changes:

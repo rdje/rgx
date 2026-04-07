@@ -1,0 +1,42 @@
+id: PGEN-RGX-0013
+summary: |
+  Deeply nested groups (50 levels) are rejected — pattern (((((...a...)))) fails at position 0
+status: open
+opened_at: 2026-04-07T12:55:54Z
+first_seen_at: 2026-04-07T12:55:54Z
+last_updated_at: 2026-04-07T12:55:54Z
+parser_backend: pgen
+parser_backend_version: 1.1.7
+rgx_commit: 67e1b7bebb5d376982a823ff165071242c404ed7
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse regex pgen-issues/artifacts/PGEN-RGX-0013/repro_input.txt --profile regex_default
+  pattern: '(((((...50 levels...a...50 levels...)))))'
+  input: see repro_input.txt (101 bytes)
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 8b31c801c1369d3562180ef6c9dfd91c196517df
+    50 levels of nested capturing groups with a single 'a' at the center.
+    PCRE2 accepts this pattern (default nesting limit is 250).
+expected_behavior: |
+  The pattern should parse as 50 nested capturing groups around a literal 'a'.
+  PCRE2's default recursion limit is 250; 50 levels is well within reason.
+actual_behavior: |
+  parse_full rejected at position 0: "Parser did not consume full input at position 0"
+  The generated PEG parser likely hits a recursion depth limit.
+reproduction: |
+  repro_input.txt contains 50 '(' chars, 'a', then 50 ')' chars (101 bytes).
+impact: |
+  Patterns with moderate nesting depth cannot be compiled. This affects machine-generated patterns and patterns with deeply nested conditional/group structures.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: null

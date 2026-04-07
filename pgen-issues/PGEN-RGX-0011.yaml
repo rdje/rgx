@@ -1,0 +1,43 @@
+id: PGEN-RGX-0011
+summary: |
+  Non-ASCII literal characters (emoji, multibyte) are rejected by the regex parser — e.g. pattern consisting of a single emoji 🎉 fails at position 0
+status: open
+opened_at: 2026-04-07T12:55:54Z
+first_seen_at: 2026-04-07T12:55:54Z
+last_updated_at: 2026-04-07T12:55:54Z
+parser_backend: pgen
+parser_backend_version: 1.1.7
+rgx_commit: 67e1b7bebb5d376982a823ff165071242c404ed7
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse regex pgen-issues/artifacts/PGEN-RGX-0011/repro_input.txt --profile regex_default
+  pattern: '🎉'
+  input: '🎉'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 8b31c801c1369d3562180ef6c9dfd91c196517df
+    Regex parser release version: 1.1.7
+    Host OS / arch: Darwin arm64
+    Emoji 🎉 is U+1F389 (4 bytes UTF-8: F0 9F 8E 89).
+    PCRE2 accepts this pattern.
+expected_behavior: |
+  The pattern 🎉 should parse as a literal atom matching the emoji codepoint U+1F389.
+actual_behavior: |
+  parse_full rejected at position 0: "Parser did not consume full input at position 0"
+  The grammar's literal rule likely only matches ASCII-range characters.
+reproduction: |
+  repro_input.txt contains the 4-byte UTF-8 emoji 🎉.
+impact: |
+  Any regex containing non-ASCII literal characters (accented letters, CJK, emoji) cannot be parsed. This affects internationalized text processing.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: null

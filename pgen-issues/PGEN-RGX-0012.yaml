@@ -1,0 +1,42 @@
+id: PGEN-RGX-0012
+summary: |
+  Multibyte UTF-8 literal characters stop the parser — pattern 'café' parses 'caf' then rejects at the 'é' (position 3)
+status: open
+opened_at: 2026-04-07T12:55:54Z
+first_seen_at: 2026-04-07T12:55:54Z
+last_updated_at: 2026-04-07T12:55:54Z
+parser_backend: pgen
+parser_backend_version: 1.1.7
+rgx_commit: 67e1b7bebb5d376982a823ff165071242c404ed7
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cargo run --manifest-path subs/pgen/rust/Cargo.toml --features generated_parsers --bin parseability_probe -- --parse regex pgen-issues/artifacts/PGEN-RGX-0012/repro_input.txt --profile regex_default
+  pattern: 'café'
+  input: 'café'
+  notes: |
+    Downstream project: RGX
+    PGEN commit: 8b31c801c1369d3562180ef6c9dfd91c196517df
+    Related to PGEN-RGX-0011 (same root cause: non-ASCII literal handling).
+    é is U+00E9 (2 bytes UTF-8: C3 A9). The parser accepts 'caf' (3 ASCII bytes)
+    then fails at byte 3 where the 2-byte é sequence begins.
+    PCRE2 accepts this pattern.
+expected_behavior: |
+  The pattern 'café' should parse as 4 literal atoms: c, a, f, é.
+actual_behavior: |
+  parse_full rejected at position 3: "Parser did not consume full input at position 3"
+reproduction: |
+  repro_input.txt contains 'café' (5 bytes UTF-8).
+impact: |
+  Same as PGEN-RGX-0011. Any pattern containing accented characters, non-Latin scripts, or other non-ASCII literals fails to parse.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: null

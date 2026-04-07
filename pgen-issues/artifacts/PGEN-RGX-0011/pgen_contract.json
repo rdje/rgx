@@ -1,0 +1,7 @@
+{
+  "supports_regex_generated_backend": true,
+  "regex_parser_release_version": "1.1.7",
+  "regex_integration_contract_version": "1.1.7",
+  "regex_ast_dump_schema_version": 1,
+  "note": "PGEN 1.1.7 at pinned submodule commit 8b31c80"
+}

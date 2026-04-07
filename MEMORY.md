@@ -92,6 +92,12 @@ Live continuity memory for `rgx` sessions.
 - `Accept` forces immediate match, `Skip(n)` advances position, `Abort` reuses `(*COMMIT)` infrastructure
 - Inline-language steering (Lua/JS/Rhai helpers) planned as follow-up
 
+### PGEN issues (open)
+- **PGEN-RGX-0011**: emoji/non-ASCII literal rejected by parser
+- **PGEN-RGX-0012**: multibyte UTF-8 literal stops parser at non-ASCII byte
+- **PGEN-RGX-0013**: 50 nested groups rejected (parser recursion limit)
+- Adversarial testing also found 4 RGX-side issues (not PGEN): empty pattern adapter handling, 1000 alternatives adapter performance, steering logic in all_layers test, zero-width empty pattern find_all
+
 ### Testing
 - 55 integration tests in `rgx-core/tests/host_integration.rs`: 39 happy-path + 17 adversarial (backtracking after resume, steering edge cases, 10-thread concurrency, zero-width interactions, error conditions, 10K-match stress test, 5-level deep nested variables)
 - Total test count: **453** across all crates (343 unit + 55 integration + 6 doc + 10 CLI + 39 bench)
