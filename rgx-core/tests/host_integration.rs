@@ -38,9 +38,9 @@ fn var_int_reader() {
 #[test]
 fn var_float_reader() {
     let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
-    re.set_var("rate", 3.14_f64).unwrap();
+    re.set_var("rate", 2.72_f64).unwrap();
     re.register_native("check", |ctx| {
-        assert_eq!(ctx.var_float("rate"), Some(3.14));
+        assert_eq!(ctx.var_float("rate"), Some(2.72));
         ExecResult::Success
     })
     .unwrap();

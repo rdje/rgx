@@ -655,7 +655,10 @@ fn finish_exec_result(
         ExecResult::Numeric(_) | ExecResult::Replacement(_) | ExecResult::Structured(_) => {
             base_result
         }
-        ExecResult::Failure | ExecResult::Error(_) => base_result,
+        ExecResult::Failure
+        | ExecResult::Error(_)
+        | ExecResult::Steer(_)
+        | ExecResult::Suspend(_) => base_result,
     }
 }
 
@@ -2052,6 +2055,9 @@ pub mod wasm {
                             Some(CodeBlockValue::Numeric(value)) => ExecResult::Numeric(value),
                             Some(CodeBlockValue::Replacement(value)) => {
                                 ExecResult::Replacement(value)
+                            }
+                            Some(CodeBlockValue::Structured(value)) => {
+                                ExecResult::Structured(value)
                             }
                             None => ExecResult::Success,
                         }
