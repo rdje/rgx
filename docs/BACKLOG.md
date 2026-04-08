@@ -348,7 +348,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | A3 `tail_file` | `medium` | Log monitoring use case |
 | ~~A7 Unicode case folding~~ | `medium` | ✅ Shipped — `(?i:café)` matches `CAFÉ` |
 | A9 Language bindings | `large` | 10x user base |
-| B2 `RegexSet` | `large` | Multi-pattern matching |
+| ~~B2 `RegexSet`~~ | `large` | ✅ Shipped — multi-pattern matching with SetMatches |
 | B4 Match semantics | `medium` | POSIX compliance |
 
 ### Tier 4 — Long-term (architecture)

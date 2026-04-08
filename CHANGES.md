@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship RegexSet for multi-pattern matching
+- Scope: Tier 3 backlog item B2.
+- Changes:
+  - `RegexSet::new(&["pattern1", "pattern2", ...])` — compile N patterns
+  - `set.is_match(text)` — any pattern matches?
+  - `set.matches(text)` → `SetMatches` — which patterns matched
+  - `SetMatches`: `matched(i)`, `matched_any()`, `matched_all()`, `iter()`, `IntoIterator`
+  - `SetMatchesIter` / `SetMatchesIntoIter` for iterating matched indices
+  - `patterns()`, `len()`, `is_empty()`, `empty()`
+  - 10 tests: basic, partial, no-match, routing use case, iterators, error handling
+- Validation: 463+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship full Unicode case folding for (?i)
 - Scope: Tier 3 backlog item A7 (Unicode case folding).
 - Changes:

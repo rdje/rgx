@@ -72,6 +72,8 @@ pub mod parser;
 pub mod parsing;
 /// Compiled-pattern data structures.
 pub mod pattern;
+/// Multi-pattern simultaneous matching.
+pub mod regex_set;
 /// Token and source-position types.
 pub mod token;
 mod unicode_support;
@@ -112,6 +114,7 @@ pub use execution::{
 };
 pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
+pub use regex_set::{RegexSet, SetMatches};
 pub use vars::VarsBuilder;
 
 /// Advance `idx` to the next UTF-8 character boundary in `text`, or `text.len()`.
@@ -7141,7 +7144,10 @@ mod tests {
 
     #[test]
     fn unicode_case_fold_builder() {
-        let re = RegexBuilder::new(r"café").case_insensitive().build().unwrap();
+        let re = RegexBuilder::new(r"café")
+            .case_insensitive()
+            .build()
+            .unwrap();
         assert!(re.is_match("CAFÉ"));
     }
 
