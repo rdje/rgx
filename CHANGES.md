@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship ergonomic API batch: Match, Captures, escape, replacen, Cow replace, metadata
+- Scope: Tier 2 backlog items B13, B14, B15, B18, B19, B21.
+- Changes:
+  - `Match<'t>` type with `as_str()`, `start()`, `end()`, `range()`, `len()`, `is_empty()`
+  - `Captures<'t>` wrapper with `get(i)`, `name("n")`, `Index<usize>`, `Index<&str>`, `expand()`, `iter()`
+  - `SubCaptureMatches` iterator with `ExactSizeIterator`
+  - `escape()` function for safe literal pattern construction
+  - `replacen(text, limit, rep)` — replace up to N matches
+  - `replace` / `replace_all` now return `Cow<str>` (zero allocation on no-match)
+  - `Regex::find()` returns `Match<'t>`, `Regex::captures()` returns `Captures<'t>`
+  - `Regex::as_str()` returns original pattern, `captures_len()` returns group count
+  - Stored original pattern string in `Regex` struct
+  - 19 new tests covering all new APIs
+- Validation:
+  - `cargo test -p rgx-core` (541 pass), `cargo test -p rgx-cli` (30 pass), `cargo test -p rgx-bench` (39 pass). Zero clippy errors.
+- Notes/impact: closes B13, B14, B15, B18, B19, B21. The public API now matches `regex` crate ergonomics.
+
 ### 2026-04-08 - Ship step limits, backtrack frame limits, and configurable recursion depth
 - Scope: Tier 1 backlog items A1 (step limits) and A2 (memory limits).
 - Changes:

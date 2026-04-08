@@ -322,6 +322,12 @@ impl Engine {
         &self.vm.program.named_groups
     }
 
+    /// Number of capture groups in the compiled program (excluding group 0).
+    #[must_use]
+    pub fn num_groups(&self) -> u32 {
+        self.vm.program.num_groups
+    }
+
     /// Set the maximum number of opcode steps per match attempt.
     ///
     /// Prevents exponential backtracking from hanging the engine on

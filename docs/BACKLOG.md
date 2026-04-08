@@ -330,15 +330,15 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | B9 Error diagnostics | `medium` | Developer experience |
 | B11 `RegexBuilder` | `small` | Standard compilation API |
 | B12 Iterator APIs | `small` | Idiomatic Rust, zero-allocation |
-| B13 `Captures` wrapper | `small` | Ergonomic capture access |
-| B14 `Match` type | `trivial` | `m.as_str()` instead of manual slicing |
-| B15 `replacen` | `trivial` | Replace up to N matches |
+| ~~B13 `Captures` wrapper~~ | `small` | ✅ Shipped — `Captures<'t>` with index/name/expand/iter |
+| ~~B14 `Match` type~~ | `trivial` | ✅ Shipped — `Match<'t>` with as_str/range/len |
+| ~~B15 `replacen`~~ | `trivial` | ✅ Shipped |
 | B16 `Replacer` trait | `small` | Closure-based replacement |
 | B17 `shortest_match` | `small` | Faster match-end queries |
-| B18 `escape()` | `trivial` | Safe pattern construction |
-| B19 Metadata accessors | `trivial` | `captures_len`, `capture_names`, `as_str` |
+| ~~B18 `escape()`~~ | `trivial` | ✅ Shipped |
+| ~~B19 Metadata accessors~~ | `trivial` | ✅ Shipped — `as_str`, `captures_len` |
 | B20 `CaptureLocations` | `small` | Reusable capture storage |
-| B21 `Cow<str>` replace | `trivial` | Avoid allocation on no-match |
+| ~~B21 `Cow<str>` replace~~ | `trivial` | ✅ Shipped |
 | C3 Fuzzing | `small` | Robustness |
 | C4 Benchmark CI | `small` | Prevent regressions |
 

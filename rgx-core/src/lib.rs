@@ -108,6 +108,7 @@ pub mod vars;
 // Re-exports for convenience
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
+// Note: Match, Captures, SubCaptureMatches, escape are defined directly in this file.
 pub use error::{Result, RgxError};
 pub use events::MatchEvent;
 pub use execution::{
@@ -118,6 +119,194 @@ pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
 pub use vars::VarsBuilder;
 
+// ────────────────────────────────────────────────────────────
+// B18: escape() — escape regex metacharacters for safe concatenation
+// ────────────────────────────────────────────────────────────
+
+/// Escape all regex metacharacters in `text` so it can be used as a literal
+/// pattern.
+///
+/// ```rust,no_run
+/// # use rgx_core::escape;
+/// assert_eq!(escape("a.b+c"), r"a\.b\+c");
+/// ```
+#[must_use]
+pub fn escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len() + 8);
+    for ch in text.chars() {
+        if matches!(
+            ch,
+            '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+// ────────────────────────────────────────────────────────────
+// B14: Match<'a> — ergonomic match access
+// ────────────────────────────────────────────────────────────
+
+/// A single match with a borrowed reference to the matched text.
+///
+/// Returned by [`Captures::get`] and convertible from [`MatchResult`] via
+/// [`Regex::find`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Match<'t> {
+    text: &'t str,
+    start: usize,
+    end: usize,
+}
+
+impl<'t> Match<'t> {
+    /// The byte offset of the start of the match.
+    #[must_use]
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// The byte offset immediately after the end of the match.
+    #[must_use]
+    pub fn end(&self) -> usize {
+        self.end
+    }
+
+    /// The matched substring.
+    #[must_use]
+    pub fn as_str(&self) -> &'t str {
+        &self.text[self.start..self.end]
+    }
+
+    /// The byte range of the match.
+    #[must_use]
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+
+    /// The length of the match in bytes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    /// Whether the match is zero-length.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+}
+
+// ────────────────────────────────────────────────────────────
+// B13: Captures<'a> — ergonomic capture group access
+// ────────────────────────────────────────────────────────────
+
+/// Capture groups from a single regex match, with ergonomic access by index
+/// or name.
+///
+/// Returned by [`Regex::captures`].
+#[derive(Clone, Debug)]
+pub struct Captures<'t> {
+    text: &'t str,
+    groups: Vec<Option<(usize, usize)>>,
+    named: std::sync::Arc<std::collections::HashMap<String, u32>>,
+}
+
+impl<'t> Captures<'t> {
+    /// Get a capture group by index.
+    ///
+    /// Index 0 is the overall match. Returns `None` if the group did not
+    /// participate in the match.
+    #[must_use]
+    pub fn get(&self, i: usize) -> Option<Match<'t>> {
+        self.groups.get(i).and_then(|slot| {
+            slot.map(|(s, e)| Match {
+                text: self.text,
+                start: s,
+                end: e,
+            })
+        })
+    }
+
+    /// Get a capture group by name.
+    #[must_use]
+    pub fn name(&self, name: &str) -> Option<Match<'t>> {
+        self.named.get(name).and_then(|&idx| self.get(idx as usize))
+    }
+
+    /// The number of capture groups (including group 0).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Whether there are no capture groups.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    /// Expand a replacement template with `$1`, `$name`, `${name}`, `$&`, `$$`
+    /// and write the result to `dst`.
+    pub fn expand(&self, replacement: &str, dst: &mut String) {
+        let str_groups: Vec<Option<&str>> = self
+            .groups
+            .iter()
+            .map(|slot| slot.map(|(s, e)| &self.text[s..e]))
+            .collect();
+        Regex::interpolate_replacement(replacement, &str_groups, &self.named, dst);
+    }
+
+    /// Iterator over all capture groups.
+    pub fn iter(&self) -> SubCaptureMatches<'_, 't> {
+        SubCaptureMatches { caps: self, idx: 0 }
+    }
+}
+
+impl<'t> std::ops::Index<usize> for Captures<'t> {
+    type Output = str;
+    fn index(&self, i: usize) -> &str {
+        self.get(i)
+            .map(|m| m.as_str())
+            .unwrap_or_else(|| panic!("no group at index {i}"))
+    }
+}
+
+impl<'t> std::ops::Index<&str> for Captures<'t> {
+    type Output = str;
+    fn index(&self, name: &str) -> &str {
+        self.name(name)
+            .map(|m| m.as_str())
+            .unwrap_or_else(|| panic!("no group named '{name}'"))
+    }
+}
+
+/// Iterator over sub-capture groups inside a [`Captures`].
+pub struct SubCaptureMatches<'c, 't> {
+    caps: &'c Captures<'t>,
+    idx: usize,
+}
+
+impl<'c, 't> Iterator for SubCaptureMatches<'c, 't> {
+    type Item = Option<Match<'t>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.caps.len() {
+            return None;
+        }
+        let item = self.caps.get(self.idx);
+        self.idx += 1;
+        Some(item)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.caps.len() - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'c, 't> ExactSizeIterator for SubCaptureMatches<'c, 't> {}
+
 /// High-performance regex matcher with optional code execution capabilities.
 ///
 /// This is the main entry point for the `rgx` regex engine. It provides
@@ -125,6 +314,8 @@ pub use vars::VarsBuilder;
 /// unprecedented performance and multi-language code execution.
 pub struct Regex {
     engine: Engine,
+    /// The original pattern string, kept for `as_str()`.
+    pattern: String,
 }
 
 impl Regex {
@@ -165,7 +356,10 @@ impl Regex {
             }
         };
 
-        let regex = Self { engine };
+        let regex = Self {
+            engine,
+            pattern: pattern.to_string(),
+        };
         trace_exit!("api", "Regex::compile", "ok=true");
         Ok(regex)
     }
@@ -204,7 +398,10 @@ impl Regex {
             }
         };
 
-        let regex = Self { engine };
+        let regex = Self {
+            engine,
+            pattern: pattern.to_string(),
+        };
         trace_exit!("api", "Regex::with_mode", "ok=true");
         Ok(regex)
     }
@@ -234,7 +431,10 @@ impl Regex {
             }
         };
 
-        let regex = Self { engine };
+        let regex = Self {
+            engine,
+            pattern: String::new(),
+        };
         trace_exit!("api", "Regex::from_ast", "ok=true");
         Ok(regex)
     }
@@ -262,7 +462,10 @@ impl Regex {
             }
         };
 
-        let regex = Self { engine };
+        let regex = Self {
+            engine,
+            pattern: String::new(),
+        };
         trace_exit!("api", "Regex::from_ast_with_mode", "ok=true");
         Ok(regex)
     }
@@ -647,6 +850,8 @@ impl Regex {
     /// Replace the first match with a replacement string supporting `$1`, `$2`,
     /// `$name` capture interpolation.
     ///
+    /// Returns `Cow::Borrowed(text)` when there is no match (zero allocation).
+    ///
     /// Capture references in the replacement string:
     /// - `$0` or `$&` — the entire match
     /// - `$1`, `$2`, … — numbered capture groups
@@ -660,9 +865,9 @@ impl Regex {
     /// assert_eq!(result, "world hello");
     /// ```
     #[must_use]
-    pub fn replace(&self, text: &str, replacement: &str) -> String {
+    pub fn replace<'t>(&self, text: &'t str, replacement: &str) -> std::borrow::Cow<'t, str> {
         let Some(m) = self.engine.find_first(text.as_bytes()) else {
-            return text.to_string();
+            return std::borrow::Cow::Borrowed(text);
         };
         let groups = self.capture_groups_for_match(text, &m);
         let named = self.engine.named_groups();
@@ -670,18 +875,19 @@ impl Regex {
         result.push_str(&text[..m.start]);
         Self::interpolate_replacement(replacement, &groups, named, &mut result);
         result.push_str(&text[m.end..]);
-        result
+        std::borrow::Cow::Owned(result)
     }
 
     /// Replace all non-overlapping matches with a replacement string
     /// supporting `$1`, `$2`, `$name` capture interpolation.
     ///
+    /// Returns `Cow::Borrowed(text)` when there are no matches.
     /// See [`replace`](Self::replace) for the replacement syntax.
     #[must_use]
-    pub fn replace_all(&self, text: &str, replacement: &str) -> String {
+    pub fn replace_all<'t>(&self, text: &'t str, replacement: &str) -> std::borrow::Cow<'t, str> {
         let matches = self.engine.find_all(text.as_bytes());
         if matches.is_empty() {
-            return text.to_string();
+            return std::borrow::Cow::Borrowed(text);
         }
         let named = self.engine.named_groups();
         let mut result = String::with_capacity(text.len());
@@ -693,7 +899,82 @@ impl Regex {
             last_end = m.end;
         }
         result.push_str(&text[last_end..]);
-        result
+        std::borrow::Cow::Owned(result)
+    }
+
+    /// Replace up to `limit` non-overlapping matches.
+    ///
+    /// `replacen(text, 0, rep)` is equivalent to `replace_all`.
+    /// `replacen(text, 1, rep)` is equivalent to `replace`.
+    #[must_use]
+    pub fn replacen<'t>(
+        &self,
+        text: &'t str,
+        limit: usize,
+        replacement: &str,
+    ) -> std::borrow::Cow<'t, str> {
+        if limit == 1 {
+            return self.replace(text, replacement);
+        }
+        let matches = self.engine.find_all(text.as_bytes());
+        if matches.is_empty() {
+            return std::borrow::Cow::Borrowed(text);
+        }
+        let named = self.engine.named_groups();
+        let effective = if limit == 0 {
+            matches.len()
+        } else {
+            limit.min(matches.len())
+        };
+        let mut result = String::with_capacity(text.len());
+        let mut last_end = 0;
+        for m in matches.iter().take(effective) {
+            result.push_str(&text[last_end..m.start]);
+            let groups = self.capture_groups_for_match(text, m);
+            Self::interpolate_replacement(replacement, &groups, named, &mut result);
+            last_end = m.end;
+        }
+        result.push_str(&text[last_end..]);
+        std::borrow::Cow::Owned(result)
+    }
+
+    /// Find the first match, returning a [`Match`] that borrows the input text.
+    ///
+    /// This is the ergonomic counterpart to [`find_first`](Self::find_first).
+    /// Use `m.as_str()` to get the matched substring directly.
+    #[must_use]
+    pub fn find<'t>(&self, text: &'t str) -> Option<Match<'t>> {
+        self.find_first(text).map(|m| Match {
+            text,
+            start: m.start,
+            end: m.end,
+        })
+    }
+
+    /// Get capture groups for the first match.
+    ///
+    /// Returns a [`Captures`] object with ergonomic access by index or name.
+    #[must_use]
+    pub fn captures<'t>(&self, text: &'t str) -> Option<Captures<'t>> {
+        self.find_first(text).map(|m| Captures {
+            text,
+            groups: m.groups,
+            named: std::sync::Arc::new(self.engine.named_groups().clone()),
+        })
+    }
+
+    /// The original pattern string used to compile this regex.
+    ///
+    /// Returns an empty string for regexes compiled from AST.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.pattern
+    }
+
+    /// The number of capture groups (including group 0 for the overall match).
+    #[must_use]
+    pub fn captures_len(&self) -> usize {
+        self.engine.num_groups() as usize + 1
     }
 
     /// Set the maximum number of VM opcode steps per match attempt.
@@ -5700,5 +5981,164 @@ mod tests {
         re.set_max_recursion_depth(None); // Uses default (1024)
         let m = re.find_first("aabb");
         assert!(m.is_some());
+    }
+
+    // === B18: escape() ===
+
+    #[test]
+    fn escape_metacharacters() {
+        assert_eq!(escape("hello"), "hello");
+        assert_eq!(escape("a.b"), r"a\.b");
+        assert_eq!(escape("(a+)+b"), r"\(a\+\)\+b");
+        assert_eq!(escape("[foo]"), r"\[foo\]");
+        assert_eq!(escape("a|b"), r"a\|b");
+        assert_eq!(escape("^$"), r"\^\$");
+        assert_eq!(escape("a{3}"), r"a\{3\}");
+        assert_eq!(escape(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn escaped_string_matches_literally() {
+        let text = "price is $3.50 (USD)";
+        let pattern = escape("$3.50 (USD)");
+        let re = Regex::compile(&pattern).unwrap();
+        assert!(re.is_match(text));
+    }
+
+    // === B14: Match type ===
+
+    #[test]
+    fn find_returns_match_with_as_str() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let m = re.find("abc 42 xyz").unwrap();
+        assert_eq!(m.as_str(), "42");
+        assert_eq!(m.start(), 4);
+        assert_eq!(m.end(), 6);
+        assert_eq!(m.range(), 4..6);
+        assert_eq!(m.len(), 2);
+        assert!(!m.is_empty());
+    }
+
+    #[test]
+    fn find_zero_width_match() {
+        let re = Regex::compile(r"^").unwrap();
+        let m = re.find("hello").unwrap();
+        assert_eq!(m.as_str(), "");
+        assert!(m.is_empty());
+        assert_eq!(m.len(), 0);
+    }
+
+    // === B13: Captures wrapper ===
+
+    #[test]
+    fn captures_by_index() {
+        let re = Regex::compile(r"(\d{4})-(\d{2})-(\d{2})").unwrap();
+        let caps = re.captures("Date: 2025-03-15").unwrap();
+        assert_eq!(&caps[0], "2025-03-15");
+        assert_eq!(&caps[1], "2025");
+        assert_eq!(&caps[2], "03");
+        assert_eq!(&caps[3], "15");
+    }
+
+    #[test]
+    fn captures_by_name() {
+        let re = Regex::compile(r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})").unwrap();
+        let caps = re.captures("Date: 2025-03-15").unwrap();
+        assert_eq!(&caps["y"], "2025");
+        assert_eq!(&caps["m"], "03");
+        assert_eq!(&caps["d"], "15");
+        assert_eq!(caps.name("y").unwrap().as_str(), "2025");
+    }
+
+    #[test]
+    fn captures_get_returns_none_for_missing() {
+        let re = Regex::compile(r"(a)(b)?c").unwrap();
+        let caps = re.captures("ac").unwrap();
+        assert!(caps.get(1).is_some());
+        assert!(caps.get(2).is_none()); // group 2 didn't participate
+    }
+
+    #[test]
+    fn captures_expand() {
+        let re = Regex::compile(r"(?P<first>\w+)\s(?P<last>\w+)").unwrap();
+        let caps = re.captures("John Doe").unwrap();
+        let mut out = String::new();
+        caps.expand("$last, $first", &mut out);
+        assert_eq!(out, "Doe, John");
+    }
+
+    #[test]
+    fn captures_iter_yields_all_groups() {
+        let re = Regex::compile(r"(a)(b)(c)").unwrap();
+        let caps = re.captures("abc").unwrap();
+        let strs: Vec<_> = caps.iter().map(|m| m.map(|m| m.as_str())).collect();
+        assert_eq!(strs, vec![Some("abc"), Some("a"), Some("b"), Some("c")]);
+    }
+
+    #[test]
+    fn captures_len_method() {
+        let re = Regex::compile(r"(a)(b)(c)").unwrap();
+        let caps = re.captures("abc").unwrap();
+        assert_eq!(caps.len(), 4); // group 0 + 3 captures
+    }
+
+    // === B15: replacen ===
+
+    #[test]
+    fn replacen_limits_replacements() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replacen("a1b2c3d4", 2, "X");
+        assert_eq!(result, "aXbXc3d4");
+    }
+
+    #[test]
+    fn replacen_zero_means_all() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replacen("a1b2c3", 0, "X");
+        assert_eq!(result, "aXbXcX");
+    }
+
+    #[test]
+    fn replacen_one_is_replace_first() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replacen("a1b2c3", 1, "X");
+        assert_eq!(result, "aXb2c3");
+    }
+
+    // === B21: Cow<str> replace ===
+
+    #[test]
+    fn replace_no_match_borrows() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replace("no digits", "X");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn replace_with_match_owns() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replace("abc 42 xyz", "X");
+        assert!(matches!(result, std::borrow::Cow::Owned(_)));
+        assert_eq!(result, "abc X xyz");
+    }
+
+    // === B19: Metadata ===
+
+    #[test]
+    fn as_str_returns_original_pattern() {
+        let re = Regex::compile(r"\d{3}-\d{4}").unwrap();
+        assert_eq!(re.as_str(), r"\d{3}-\d{4}");
+    }
+
+    #[test]
+    fn captures_len_on_regex() {
+        let re = Regex::compile(r"(a)(b)(c)").unwrap();
+        assert_eq!(re.captures_len(), 4); // group 0 + 3 groups
+    }
+
+    #[test]
+    fn captures_len_no_groups() {
+        let re = Regex::compile(r"abc").unwrap();
+        assert_eq!(re.captures_len(), 1); // just group 0
     }
 }
