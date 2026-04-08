@@ -1015,3 +1015,48 @@ Live continuity memory for `rgx` sessions.
 - User requested creation of `MEMORY.md` as critical live continuity infrastructure.
 - Explicit requirement: keep this document continuously updated with key actionable exchange outcomes (not full transcript), and do it before commit workflow.
 - This file was created and integrated into live documentation policy so future AI instances can resume quickly and safely.
+
+## 2026-04-08 session — massive backlog execution (40 of 44 items closed)
+
+### New public API surface shipped this session
+- `find_first_at`, `find_all_at`, `is_match_at` — position-aware matching
+- `split`, `splitn`, `split_iter`, `splitn_iter` — regex-delimited string splitting
+- `replace`, `replace_all`, `replacen` — accept `impl Replacer` (strings, closures, `NoExpand`), return `Cow<str>`
+- `Match<'t>` with `as_str()`/`range()`/`len()`, `Captures<'t>` with index/name/expand/iter
+- `find`, `find_iter`, `captures`, `captures_iter`, `capture_names` — ergonomic + lazy iterator APIs
+- `CaptureLocations` for zero-allocation loops, `captures_read`, `captures_read_at`
+- `escape()`, `shortest_match`, `shortest_match_at`
+- `RegexBuilder` with zero-arg flag setters (`.case_insensitive()` not `.case_insensitive(true)`)
+- `RegexSet` — multi-pattern simultaneous matching with `SetMatches`
+- `RegexCache` — thread-safe LRU compilation cache (`Arc<Regex>`)
+- `BytesRegex` — match `&[u8]` without UTF-8 validation
+- `MatchSemantics` (LeftmostFirst/LeftmostLongest) — runtime switch
+- `PartialMatchResult` — streaming/incremental matching (Full/Partial/NoMatch)
+- `CompileError` with caret-highlighted span diagnostics
+- `MatchResult.groups` — capture group positions on every match result
+- `Regex::named_groups()`, `as_str()`, `captures_len()` — metadata accessors
+
+### New engine features
+- `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth` — DoS protection (AtomicU64)
+- Full Unicode `(?i)` case folding (café→CAFÉ, Greek, Cyrillic)
+- `\X` extended grapheme cluster matching via `unicode-segmentation`
+- Inline-language steering: `rgx.steer_accept()` etc. in Lua/JS/Rhai
+- `tail_file` with OS-native watching (kqueue/inotify via `notify` crate)
+
+### Infrastructure
+- CLI `--color auto|always|never` with ANSI match highlighting
+- 4 cargo-fuzz targets (compile, match, replace, roundtrip invariants)
+- Criterion benchmark CI job with 90-day artifact storage
+- Removed 4 scaffold placeholder files, zero RGX-owned clippy warnings
+
+### Backlog status (docs/BACKLOG.md)
+- **40 of 44 items closed** across all tiers
+- Remaining: A9 (language bindings), A12 (returned-capture subroutines), C1 (JIT), C2 (NFA/DFA)
+- A8 (crate publishing) deferred by user — too early
+- Test count: ~482 (481 pass, 1 ignored timing-sensitive)
+
+### User feedback captured
+- API fluency is paramount — zero ceremony, feels like driving not wrenching
+- `RegexBuilder` flag setters should be zero-argument by default
+- Don't delete old MEMORY.md entries — append dated sections to preserve continuity
+- Always update live docs before commit workflow — it's a hard gate, not optional
