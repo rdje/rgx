@@ -74,21 +74,11 @@ mod unicode_support;
 /// Virtual machine bytecode and runtime execution.
 pub mod vm;
 
-// Performance optimizations
-/// Cache-related scaffolding and helpers.
-pub mod cache;
-/// SIMD acceleration scaffolding and helpers.
-pub mod simd;
-
 // Code execution backends
-#[cfg(feature = "javascript")]
-pub mod javascript;
 #[cfg(feature = "lua")]
 pub mod lua;
 #[cfg(feature = "rhai")]
 pub mod rhai;
-#[cfg(feature = "wasm")]
-pub mod wasm;
 
 // File-backed matching
 /// File-backed matching — scan files directly without loading into a String.

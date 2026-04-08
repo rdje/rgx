@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Remove scaffold files and confirm zero RGX-owned warnings
+- Scope: Tier 1 items C5 (scaffold removal) and C6 (clean warnings).
+- Changes:
+  - Deleted 4 one-line placeholder files: `cache.rs`, `simd.rs`, `javascript.rs`, `wasm.rs`
+  - Removed corresponding `pub mod` declarations from `lib.rs`
+  - Confirmed zero RGX-owned clippy warnings across `rgx-core`, `rgx-cli`
+- Validation: all 552+ tests pass, zero clippy errors.
+- Notes/impact: closes C5 and C6. All remaining workspace warnings are from the PGEN submodule.
+
 ### 2026-04-08 - Ship lazy iterator APIs: find_iter, captures_iter, split_iter, capture_names
 - Scope: Tier 2 backlog item B12 (iterator APIs).
 - Changes:

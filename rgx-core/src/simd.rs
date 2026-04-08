@@ -1,1 +1,0 @@
-// Future: SIMD-accelerated scanners

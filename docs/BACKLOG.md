@@ -315,9 +315,9 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~B8 `split`/`splitn`~~ | `trivial` | ✅ Shipped |
 | ~~B10 `find_at`~~ | `trivial` | ✅ Shipped |
 | ~~B6 Replacer with `$1` interpolation~~ | `small` | ✅ Shipped |
-| B7 `Captures` API | `small` | Partially shipped (groups on MatchResult); wrapper next |
-| C5 Remove scaffolds | `trivial` | Hygiene |
-| C6 Clean warnings | `trivial` | Hygiene |
+| ~~B7 `Captures` API~~ | `small` | ✅ Shipped — `Captures<'t>` + `Match<'t>` + iterators |
+| ~~C5 Remove scaffolds~~ | `trivial` | ✅ Shipped — 4 files deleted |
+| ~~C6 Clean warnings~~ | `trivial` | ✅ Shipped — zero RGX-owned warnings |
 
 ### Tier 2 — Do soon (adoption + competitiveness)
 | Item | Effort | Why |
