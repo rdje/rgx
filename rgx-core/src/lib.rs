@@ -7111,4 +7111,55 @@ mod tests {
         assert_eq!(locs.len(), 4); // group 0 + 3
         assert!(!locs.is_empty());
     }
+
+    // === A7: Unicode case folding ===
+
+    #[test]
+    fn unicode_case_fold_accented_letters() {
+        let re = Regex::compile(r"(?i)café").unwrap();
+        assert!(re.is_match("café"));
+        assert!(re.is_match("CAFÉ"));
+        assert!(re.is_match("Café"));
+        assert!(re.is_match("caFÉ"));
+    }
+
+    #[test]
+    fn unicode_case_fold_greek() {
+        let re = Regex::compile(r"(?i)αβγ").unwrap();
+        assert!(re.is_match("αβγ"));
+        assert!(re.is_match("ΑΒΓ"));
+        assert!(re.is_match("Αβγ"));
+    }
+
+    #[test]
+    fn unicode_case_fold_cyrillic() {
+        let re = Regex::compile(r"(?i)москва").unwrap();
+        assert!(re.is_match("москва"));
+        assert!(re.is_match("МОСКВА"));
+        assert!(re.is_match("Москва"));
+    }
+
+    #[test]
+    fn unicode_case_fold_builder() {
+        let re = RegexBuilder::new(r"café").case_insensitive().build().unwrap();
+        assert!(re.is_match("CAFÉ"));
+    }
+
+    #[test]
+    fn unicode_case_fold_char_class() {
+        let re = Regex::compile(r"(?i)[àéîöü]").unwrap();
+        assert!(re.is_match("À"));
+        assert!(re.is_match("É"));
+        assert!(re.is_match("Î"));
+        assert!(re.is_match("Ö"));
+        assert!(re.is_match("Ü"));
+    }
+
+    #[test]
+    fn unicode_case_fold_ascii_still_works() {
+        let re = Regex::compile(r"(?i)hello").unwrap();
+        assert!(re.is_match("HELLO"));
+        assert!(re.is_match("Hello"));
+        assert!(re.is_match("hElLo"));
+    }
 }

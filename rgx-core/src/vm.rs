@@ -5766,13 +5766,17 @@ impl OptimizingCompiler {
     fn codegen_pass(&mut self, ast: &Regex, is_top_level: bool) {
         match ast {
             Regex::Char(ch) => {
-                if self.case_insensitive && ch.is_ascii_alphabetic() {
-                    let lower = ch.to_ascii_lowercase();
-                    let upper = ch.to_ascii_uppercase();
-                    let ranges = vec![CharRange::single(lower), CharRange::single(upper)];
-                    let class_id = self.compile_char_class(&ranges);
-                    self.emit_op(OpCode::CharClass);
-                    self.code.push(class_id as u8);
+                if self.case_insensitive {
+                    let variants = Self::unicode_case_variants(*ch);
+                    if variants.len() > 1 {
+                        let ranges: Vec<CharRange> =
+                            variants.into_iter().map(CharRange::single).collect();
+                        let class_id = self.compile_char_class(&ranges);
+                        self.emit_op(OpCode::CharClass);
+                        self.code.push(class_id as u8);
+                    } else {
+                        self.emit_char_op(OpCode::Char, *ch);
+                    }
                 } else {
                     self.emit_char_op(OpCode::Char, *ch);
                 }
@@ -6702,26 +6706,63 @@ impl OptimizingCompiler {
     fn case_fold_ranges(ranges: &[CharRange]) -> Vec<CharRange> {
         let mut result = ranges.to_vec();
         for range in ranges {
-            let start = range.start;
-            let end = range.end;
-            if start.is_ascii_lowercase() || start.is_ascii_uppercase() {
-                let folded_start = if start.is_ascii_lowercase() {
-                    start.to_ascii_uppercase()
-                } else {
-                    start.to_ascii_lowercase()
-                };
-                let folded_end = if end.is_ascii_lowercase() {
-                    end.to_ascii_uppercase()
-                } else {
-                    end.to_ascii_lowercase()
-                };
-                result.push(CharRange {
-                    start: folded_start,
-                    end: folded_end,
-                });
+            if range.start == range.end {
+                // Single character — collect all case variants.
+                for variant in Self::unicode_case_variants(range.start) {
+                    if variant != range.start {
+                        result.push(CharRange::single(variant));
+                    }
+                }
+            } else {
+                // Range — fold each endpoint. For ASCII ranges this is exact;
+                // for Unicode ranges it's a best-effort approximation.
+                for ch in [range.start, range.end] {
+                    for variant in Self::unicode_case_variants(ch) {
+                        if variant != ch {
+                            result.push(CharRange::single(variant));
+                        }
+                    }
+                }
+                // Also add the mirror-case range for pure ASCII letter ranges.
+                let s = range.start;
+                let e = range.end;
+                if s.is_ascii_alphabetic() && e.is_ascii_alphabetic() {
+                    let folded_s = if s.is_ascii_lowercase() {
+                        s.to_ascii_uppercase()
+                    } else {
+                        s.to_ascii_lowercase()
+                    };
+                    let folded_e = if e.is_ascii_lowercase() {
+                        e.to_ascii_uppercase()
+                    } else {
+                        e.to_ascii_lowercase()
+                    };
+                    result.push(CharRange {
+                        start: folded_s,
+                        end: folded_e,
+                    });
+                }
             }
         }
         result
+    }
+
+    /// Collect all Unicode simple case variants for a character.
+    ///
+    /// Returns at least the original character. For `é` returns `['é', 'É']`.
+    fn unicode_case_variants(ch: char) -> Vec<char> {
+        let mut variants = vec![ch];
+        for lower in ch.to_lowercase() {
+            if lower != ch && !variants.contains(&lower) {
+                variants.push(lower);
+            }
+        }
+        for upper in ch.to_uppercase() {
+            if upper != ch && !variants.contains(&upper) {
+                variants.push(upper);
+            }
+        }
+        variants
     }
 
     /// Emit opcode with character operand

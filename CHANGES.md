@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship full Unicode case folding for (?i)
+- Scope: Tier 3 backlog item A7 (Unicode case folding).
+- Changes:
+  - `(?i)` now folds all Unicode letters, not just ASCII. `(?i:café)` matches `CAFÉ`.
+  - `unicode_case_variants()` collects lowercase + uppercase variants via `char::to_lowercase()` / `char::to_uppercase()`
+  - Literal chars: expanded to char class with all case variants when `(?i)` active
+  - Custom char classes: each endpoint folded to include Unicode case variants
+  - ASCII ranges still get mirror-range folding as before
+  - 6 new tests: accented Latin, Greek, Cyrillic, builder, char classes, ASCII regression
+- Validation: 593+ tests pass. Zero clippy errors.
+- Notes/impact: closes A7. PCRE2 `(?i)` parity for internationalized text.
+
 ### 2026-04-08 - Ship bytes::BytesRegex for matching on &[u8] without UTF-8 validation
 - Scope: Tier 2 backlog item B5.
 - Changes:
