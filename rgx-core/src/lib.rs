@@ -50,6 +50,8 @@
 // Core modules
 /// Abstract syntax tree types for regex patterns.
 pub mod ast;
+/// Thread-safe compilation cache for regex patterns.
+pub mod cache;
 /// Pattern-to-program compiler logic.
 pub mod compiler;
 /// Execution-engine entry points.
@@ -96,6 +98,7 @@ pub mod log;
 pub mod vars;
 
 // Re-exports for convenience
+pub use cache::RegexCache;
 pub use compiler::Compiler;
 pub use engine::{Engine, ExecutionMode, MatchResult};
 // Note: Match, Captures, SubCaptureMatches, escape are defined directly in this file.

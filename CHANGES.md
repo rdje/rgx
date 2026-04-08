@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship thread-safe compilation cache (RegexCache)
+- Scope: Tier 2 backlog item B3.
+- Changes:
+  - `RegexCache::new(capacity)` — thread-safe LRU cache for compiled regexes
+  - `cache.get(pattern)` / `cache.get_with_mode(pattern, mode)` — compile or retrieve `Arc<Regex>`
+  - Read-lock fast path, write-lock slow path, double-check after compile
+  - LRU eviction when at capacity, mode-aware keying, `clear()` / `len()` / `is_empty()`
+  - 8 tests: cache hits, eviction, error handling, mode separation, thread safety (8 threads)
+- Validation: 609+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship RegexBuilder for fluent compilation with flag overrides
 - Scope: Tier 2 backlog item B11.
 - Changes:

@@ -325,7 +325,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | A8 Crate publishing | `small` | Users can't install without it |
 | A5 CLI `--color` | `small` | Expected by users |
 | A6 Inline-language steering | `small` | Completes the steering story |
-| B3 Compilation caching | `small` | Performance for dynamic patterns |
+| ~~B3 Compilation caching~~ | `small` | ✅ Shipped — `RegexCache` with LRU eviction |
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
 | B9 Error diagnostics | `medium` | Developer experience |
 | ~~B11 `RegexBuilder`~~ | `small` | ✅ Shipped — fluent builder with flag overrides |
