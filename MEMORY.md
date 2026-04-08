@@ -1060,3 +1060,21 @@ Live continuity memory for `rgx` sessions.
 - `RegexBuilder` flag setters should be zero-argument by default
 - Don't delete old MEMORY.md entries — append dated sections to preserve continuity
 - Always update live docs before commit workflow — it's a hard gate, not optional
+- Do not `git push` after every commit — push only when explicitly asked
+
+## 2026-04-09 session — PGEN 1.1.9, A12 + A10 shipped
+
+### PGEN submodule update
+- Updated from 1.1.8 to 1.1.9 (commit `ac2acb3`)
+- 1.1.9 adds returned-capture subroutine syntax `(?N(grouplist))`
+- Filed PGEN-RGX-0015 (feature request), closed same day as verified-fixed-upstream
+- PGEN-RGX-0014 filed then closed (not a PGEN bug — RGX adapter was missing `\X` mapping)
+
+### Features shipped
+- **A10 `\X`**: Extended grapheme cluster matching via `unicode-segmentation` crate. VM opcode `0x08`, AST node, parser mapping. Bug found via trace: opcode was missing from `TryFrom<u8>` dispatch table.
+- **A12 Returned-capture subroutines**: `(?1(1))` syntax parsed via PGEN 1.1.9 `returned_capture_subroutine` nodes. Compiles to `Call` opcode. Full capture-return VM semantics (preserving specified groups) is a follow-up.
+
+### Backlog status
+- **41 of 44 items closed**
+- Remaining: A9 (language bindings — large), C1 (JIT — major), C2 (NFA/DFA — major)
+- CI fix: `RGX_SUBMODULES_TOKEN` secret set up for private PGEN submodule access
