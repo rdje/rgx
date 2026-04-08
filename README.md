@@ -82,6 +82,7 @@ If you are new to the repo, use this order:
 - [`docs/HOST_INTEGRATION_ARCHITECTURE.md`](docs/HOST_INTEGRATION_ARCHITECTURE.md) — deep host-engine integration design (match steering, events, async I/O)
 - [`docs/CLI_GUIDE.md`](docs/CLI_GUIDE.md) — comprehensive CLI user guide with 20+ examples
 - [`docs/TESTING_PHILOSOPHY.md`](docs/TESTING_PHILOSOPHY.md) — hostile skepticism testing approach, known gaps, and process
+- [`docs/BACKLOG.md`](docs/BACKLOG.md) — complete inventory of remaining work (roadmap items, features to port, engineering improvements)
 ## README maintenance policy
 `README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:
 - project objective/scope,

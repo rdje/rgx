@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-04 - Create comprehensive BACKLOG.md
+- Scope: living inventory of all remaining work across the project.
+- Changes:
+  - Created `docs/BACKLOG.md` with 30 items across 3 categories:
+    - A. Missing from RGX roadmap (14 items: step/memory limits, tail_file, CLI follow/color, inline steering, Unicode case folding, crate publishing, language bindings, \X, named skip, returned-capture subroutines, version conditionals, partial matching)
+    - B. Features to port from Rust's regex crate (10 items: step limits, RegexSet, compilation caching, match semantics, bytes::Regex, replacer API, Captures API, split/splitn, error diagnostics, find_at)
+    - C. Engineering improvements (6 items: JIT, NFA/DFA hybrid, fuzzing, benchmark CI, scaffold cleanup, clippy warnings)
+  - Each item has effort estimate, rationale, implementation approach, and dependencies
+  - Priority tiers 1-4 from production blockers to long-term architecture
+  - Added to README.md docs index
+- Validation: manual review of completeness against ROADMAP.md, PCRE2_COMPATIBILITY_MATRIX.md, and Rust regex crate API.
+- Notes/impact: provides the master task list for the next phase of development.
+
 ### 2026-04-08 - Expose remaining engine surfaces in CLI
 - Scope: close the gap between engine capabilities and CLI access.
 - Changes:

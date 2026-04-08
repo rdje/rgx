@@ -1585,8 +1585,8 @@ mod tests {
         let v = json_to_value(&serde_json::json!(42));
         assert_eq!(v, Value::Int(42));
 
-        let v = json_to_value(&serde_json::json!(3.14));
-        assert_eq!(v, Value::Float(3.14));
+        let v = json_to_value(&serde_json::json!(2.72));
+        assert_eq!(v, Value::Float(2.72));
 
         let v = json_to_value(&serde_json::json!(true));
         assert_eq!(v, Value::Bool(true));
