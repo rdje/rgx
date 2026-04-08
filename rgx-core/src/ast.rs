@@ -120,6 +120,16 @@ pub enum Regex {
         /// The recursion target (entire pattern, group, or named group)
         target: RecursionTarget,
     },
+    /// PCRE2 10.47+ returned-capture subroutine: (?1(1,2)) or (?&name(1,name2))
+    ///
+    /// Like a subroutine call, but captures from the specified groups are
+    /// returned to the caller instead of being discarded.
+    ReturnedCaptureSubroutine {
+        /// The subroutine target (group number or name)
+        target: RecursionTarget,
+        /// Group numbers whose captures should be returned to the caller
+        returned_groups: Vec<u32>,
+    },
 
     // Code execution (rgx's unique feature!)
     /// Code block (?{lua:...}) or (?{js:...})

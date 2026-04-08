@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Ship returned-capture subroutine parsing and compilation (A12)
+- Scope: Tier 4 backlog item A12, enabled by PGEN 1.1.9.
+- Changes:
+  - PGEN submodule updated to 1.1.9 (adds `returned_capture_subroutine` syntax)
+  - `ReturnedCaptureSubroutine` AST node with `target` and `returned_groups`
+  - Parser adapter handles `returned_capture_subroutine` / `returned_capture_group_list` / `returned_capture_group`
+  - Compiles to same `Call` opcode as regular subroutines
+  - `collect_descendants` helper added to parser adapter
+  - Full capture-return semantics (preserving specified groups across call boundary) is a VM-level follow-up
+  - 2 new tests: compilation and matching
+- Validation: 484 tests pass (1 ignored). Zero clippy errors.
+
 ### 2026-04-08 - Ship \X extended grapheme cluster matching
 - Scope: Tier 4 backlog item A10.
 - Changes:

@@ -1565,6 +1565,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
@@ -1826,6 +1827,7 @@ impl Compiler {
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
@@ -1979,6 +1981,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
@@ -2443,6 +2446,7 @@ impl Compiler {
             | RegexAst::Anchor(_)
             | RegexAst::WordBoundary { .. }
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
@@ -2602,6 +2606,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
@@ -2690,6 +2695,7 @@ impl Compiler {
             | RegexAst::NamedBackreference(_)
             | RegexAst::RelativeBackreference(_)
             | RegexAst::Recursion { .. }
+            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset

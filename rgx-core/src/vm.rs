@@ -225,6 +225,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Callout(_) => "Callout",
         Regex::Conditional { .. } => "Conditional",
         Regex::Recursion { .. } => "Recursion",
+        Regex::ReturnedCaptureSubroutine { .. } => "ReturnedCaptureSubroutine",
         Regex::FlagGroup { .. } => "FlagGroup",
         Regex::MatchReset => "MatchReset",
         Regex::NewlineSequence => "NewlineSequence",
@@ -6208,7 +6209,10 @@ impl OptimizingCompiler {
                 self.code.push(group_id as u8);
             }
 
-            Regex::Recursion { target } => {
+            Regex::Recursion { target } | Regex::ReturnedCaptureSubroutine { target, .. } => {
+                // ReturnedCaptureSubroutine compiles to the same Call opcode.
+                // Full capture-return semantics (preserving specified group
+                // captures across the call boundary) is a VM-level follow-up.
                 self.emit_op(OpCode::Call);
                 let target_id = match target {
                     RecursionTarget::Entire => 0,
@@ -6698,6 +6702,7 @@ impl OptimizingCompiler {
             | Regex::NamedBackreference(_)
             | Regex::RelativeBackreference(_)
             | Regex::Recursion { .. }
+            | Regex::ReturnedCaptureSubroutine { .. }
             | Regex::CodeBlock { .. }
             | Regex::Callout(_)
             | Regex::MatchReset

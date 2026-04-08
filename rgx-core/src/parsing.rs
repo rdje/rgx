@@ -1040,6 +1040,11 @@ impl<'a> PgenAstAdapter<'a> {
     /// We inspect the structured `subroutine_target` child to build the
     /// `Recursion` AST node.
     fn convert_subroutine_call(&self, node: &PgenAstNode) -> Result<Regex> {
+        // PGEN 1.1.9+: check for returned-capture subroutine first.
+        if let Some(rcs) = self.first_descendant(node, "returned_capture_subroutine") {
+            return self.convert_returned_capture_subroutine(rcs);
+        }
+
         let target_node = self
             .first_descendant(node, "subroutine_target")
             .ok_or_else(|| {
@@ -1091,6 +1096,69 @@ impl<'a> PgenAstAdapter<'a> {
             }
         };
         Ok(Regex::Recursion { target })
+    }
+
+    /// Convert a `returned_capture_subroutine` node — `(?1(1,2))`.
+    ///
+    /// PGEN 1.1.9+ grammar: `returned_capture_subroutine` contains
+    /// `subroutine_target` and `returned_capture_group_list`.
+    fn convert_returned_capture_subroutine(&self, node: &PgenAstNode) -> Result<Regex> {
+        // Extract subroutine target.
+        let target_node = self
+            .first_descendant(node, "subroutine_target")
+            .ok_or_else(|| {
+                self.contract_error("returned_capture_subroutine missing subroutine_target")
+            })?;
+        let inner = self.alternative_child(target_node).unwrap_or(target_node);
+        let target = if let Some(signed) = self.first_descendant(inner, "signed_digits") {
+            let text = self.slice(signed)?;
+            let n: u32 = text
+                .trim_start_matches('+')
+                .trim_start_matches('-')
+                .parse()
+                .map_err(|_| {
+                    self.contract_error(&format!(
+                        "invalid returned_capture_subroutine target '{text}'"
+                    ))
+                })?;
+            RecursionTarget::Group(n)
+        } else {
+            let prefix_text = self.find_first_terminal_text(inner).unwrap_or("");
+            match prefix_text {
+                "&" | "P>" => {
+                    let name = self.name_text(inner)?;
+                    RecursionTarget::NamedGroup(name)
+                }
+                "R" => RecursionTarget::Entire,
+                other => {
+                    return Err(self.contract_error(&format!(
+                        "unrecognized returned_capture_subroutine target prefix '{other}'"
+                    )));
+                }
+            }
+        };
+
+        // Extract returned group numbers from the group list.
+        let mut returned_groups = Vec::new();
+        let children = self.collect_descendants(node, "returned_capture_group");
+        for group_node in &children {
+            if let Some(signed) = self.first_descendant(group_node, "signed_digits") {
+                if let Ok(text) = self.slice(signed) {
+                    if let Ok(n) = text
+                        .trim_start_matches('+')
+                        .trim_start_matches('-')
+                        .parse::<u32>()
+                    {
+                        returned_groups.push(n);
+                    }
+                }
+            }
+        }
+
+        Ok(Regex::ReturnedCaptureSubroutine {
+            target,
+            returned_groups,
+        })
     }
 
     /// Convert a `python_named_backreference` node — `(?P=name)`.
@@ -1788,6 +1856,21 @@ impl<'a> PgenAstAdapter<'a> {
             }
         }
         None
+    }
+
+    fn collect_descendants<'b>(
+        &'b self,
+        node: &'b PgenAstNode,
+        expected_rule: &str,
+    ) -> Vec<&'b PgenAstNode> {
+        let mut results = Vec::new();
+        if node.rule_name == expected_rule {
+            results.push(node);
+        }
+        for child in node.children() {
+            results.extend(self.collect_descendants(child, expected_rule));
+        }
+        results
     }
 
     fn alternative_child<'b>(&'b self, node: &'b PgenAstNode) -> Option<&'b PgenAstNode> {

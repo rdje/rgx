@@ -7368,4 +7368,20 @@ mod tests {
         let m = re.find("abc").unwrap();
         assert_eq!(m.as_str(), "abc");
     }
+
+    // === A12: Returned-capture subroutines ===
+
+    #[test]
+    fn returned_capture_subroutine_compiles() {
+        // (?1(1)) — call group 1, return captures from group 1
+        let result = Regex::compile(r"(a)(?1(1))");
+        assert!(result.is_ok(), "compile failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn returned_capture_subroutine_matches() {
+        // The pattern compiles and matches (currently same semantics as (?1))
+        let re = Regex::compile(r"(a)(?1(1))").unwrap();
+        assert!(re.is_match("aa"));
+    }
 }
