@@ -1,0 +1,57 @@
+id: PGEN-RGX-0014
+summary: |
+  PGEN regex parser rejects \X (extended grapheme cluster escape).
+  PCRE2 supports \X as a first-class escape that matches one Unicode
+  extended grapheme cluster. PGEN's simple_escape handler does not
+  recognize 'X' and raises "unrecognized simple_escape character 'X'".
+status: open
+opened_at: 2026-04-08T00:00:00Z
+first_seen_at: 2026-04-08T00:00:00Z
+last_updated_at: 2026-04-08T00:00:00Z
+parser_backend: pgen
+parser_backend_version: "1.1.8"
+rgx_commit: 74333dc
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: "cargo run --bin rgx-cli -- '\\X' 'cafe'"
+  pattern: "\\X"
+  input: "cafe"
+  notes: |
+    RGX has full engine support ready (AST node, VM opcode, codegen,
+    unicode-segmentation integration) blocked only on PGEN recognizing
+    \X as a valid escape in the simple_escape rule.
+expected_behavior: |
+  PGEN should parse \X and produce an AST node (e.g., rule name
+  "grapheme_cluster" or "extended_grapheme_escape") so RGX can
+  compile it to the GraphemeCluster VM opcode.
+actual_behavior: |
+  PGEN returns:
+    E_PARSE_FAILURE: pgen AST contract mismatch: unrecognized simple_escape character 'X'
+reproduction: |
+  Pattern: \X
+  Input: any text
+  Command: cargo run --bin rgx-cli -- '\X' 'test'
+  Error: "regex compile error: pgen AST contract mismatch: unrecognized simple_escape character 'X'"
+
+  Minimal Rust repro:
+    let result = rgx_core::Regex::compile(r"\X");
+    assert!(result.is_err()); // should succeed
+impact: |
+  Blocks A10 (\X extended grapheme cluster) from the RGX backlog.
+  \X is a PCRE2 feature used for correct Unicode text processing
+  (matching base characters + combining marks as a single unit).
+  RGX engine-side support is fully implemented and tested, waiting
+  only on parser recognition.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Will verify once PGEN adds \X to simple_escape and RGX updates
+    the submodule pin.
