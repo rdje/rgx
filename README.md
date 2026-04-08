@@ -58,6 +58,7 @@ If you are new to the repo, use this order:
 ## Documentation index (all `.md` files)
 ### Root markdown files
 - [`README.md`](README.md) — single entry point and navigation hub
+- [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants (loaded automatically)
 - [`SESSION_BOOTSTRAP.md`](SESSION_BOOTSTRAP.md) — new-session bootstrap instructions for AI/LLM handoff
 - [`CHANGES.md`](CHANGES.md) — authoritative change ledger
 - [`COMMIT.md`](COMMIT.md) — commit workflow contract and invariants
