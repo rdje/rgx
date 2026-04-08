@@ -1223,6 +1223,7 @@ mod tests {
         let m = MatchResult {
             start: 2,
             end: 5,
+            groups: vec![Some((2, 5))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Numeric(7.0)),
         };
@@ -1235,6 +1236,7 @@ mod tests {
         let m = MatchResult {
             start: 2,
             end: 5,
+            groups: vec![Some((2, 5))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Replacement("CAT".to_string())),
         };
@@ -1670,6 +1672,7 @@ mod tests {
         let m = MatchResult {
             start: 0,
             end: 3,
+            groups: vec![Some((0, 3))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Numeric(7.0)),
         };

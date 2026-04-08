@@ -235,10 +235,10 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | A1 Step limits | `small` | Production blocker — DoS prevention |
 | A2 Memory limits | `small` | Defense-in-depth |
 | B1 (= A1) | `small` | Same as A1 |
-| B8 `split`/`splitn` | `trivial` | Table stakes for any regex library |
-| B10 `find_at` | `trivial` | Table stakes |
-| B6 Replacer with `$1` interpolation | `small` | Very common operation |
-| B7 `Captures` API | `small` | Ergonomic necessity |
+| ~~B8 `split`/`splitn`~~ | `trivial` | ✅ Shipped |
+| ~~B10 `find_at`~~ | `trivial` | ✅ Shipped |
+| ~~B6 Replacer with `$1` interpolation~~ | `small` | ✅ Shipped |
+| B7 `Captures` API | `small` | Partially shipped (groups on MatchResult); wrapper next |
 | C5 Remove scaffolds | `trivial` | Hygiene |
 | C6 Clean warnings | `trivial` | Hygiene |
 

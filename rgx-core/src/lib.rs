@@ -543,6 +543,159 @@ impl Regex {
         matched
     }
 
+    /// Find the first match starting the scan at byte position `start`.
+    ///
+    /// This is the position-aware counterpart to [`find_first`](Self::find_first).
+    /// The engine begins scanning at `start` rather than position 0, but
+    /// positions in the returned [`MatchResult`] are still absolute (relative
+    /// to the beginning of `text`).
+    ///
+    /// Useful for tokenization, parsing, and custom scanning loops where the
+    /// caller controls the scan cursor.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn find_first_at(&self, text: &str, start: usize) -> Option<MatchResult> {
+        self.engine.find_first_at(text.as_bytes(), start)
+    }
+
+    /// Find all non-overlapping matches starting the scan at byte position `start`.
+    ///
+    /// This is the position-aware counterpart to [`find_all`](Self::find_all).
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn find_all_at(&self, text: &str, start: usize) -> Vec<MatchResult> {
+        self.engine.find_all_at(text.as_bytes(), start)
+    }
+
+    /// Boolean match test starting the scan at byte position `start`.
+    ///
+    /// This is the position-aware counterpart to [`is_match`](Self::is_match).
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn is_match_at(&self, text: &str, start: usize) -> bool {
+        self.engine.is_match_at(text.as_bytes(), start)
+    }
+
+    /// Split the input text by the pattern, returning the substrings between matches.
+    ///
+    /// This behaves like [`str::split`] but uses a regex as the delimiter.
+    /// Empty strings are included when matches are adjacent or at the
+    /// beginning/end of the input.
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::Regex;
+    /// let re = Regex::compile(r"[,;\s]+").unwrap();
+    /// let parts = re.split("one, two; three  four");
+    /// assert_eq!(parts, vec!["one", "two", "three", "four"]);
+    /// ```
+    #[must_use]
+    pub fn split<'a>(&self, text: &'a str) -> Vec<&'a str> {
+        let matches = self.find_all(text);
+        if matches.is_empty() {
+            return vec![text];
+        }
+        let mut parts = Vec::with_capacity(matches.len() + 1);
+        let mut last_end = 0;
+        for m in &matches {
+            parts.push(&text[last_end..m.start]);
+            last_end = m.end;
+        }
+        parts.push(&text[last_end..]);
+        parts
+    }
+
+    /// Split the input text by the pattern, returning at most `limit` substrings.
+    ///
+    /// The last element contains the remainder of the string after `limit - 1`
+    /// splits. If `limit` is 0, behaves identically to [`split`](Self::split).
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::Regex;
+    /// let re = Regex::compile(r",").unwrap();
+    /// let parts = re.splitn("a,b,c,d", 3);
+    /// assert_eq!(parts, vec!["a", "b", "c,d"]);
+    /// ```
+    #[must_use]
+    pub fn splitn<'a>(&self, text: &'a str, limit: usize) -> Vec<&'a str> {
+        if limit == 0 {
+            return self.split(text);
+        }
+        if limit == 1 {
+            return vec![text];
+        }
+        let matches = self.find_all(text);
+        if matches.is_empty() {
+            return vec![text];
+        }
+        let max_splits = limit - 1;
+        let mut parts = Vec::with_capacity(limit);
+        let mut last_end = 0;
+        for m in matches.iter().take(max_splits) {
+            parts.push(&text[last_end..m.start]);
+            last_end = m.end;
+        }
+        parts.push(&text[last_end..]);
+        parts
+    }
+
+    /// Replace the first match with a replacement string supporting `$1`, `$2`,
+    /// `$name` capture interpolation.
+    ///
+    /// Capture references in the replacement string:
+    /// - `$0` or `$&` — the entire match
+    /// - `$1`, `$2`, … — numbered capture groups
+    /// - `$name` or `${name}` — named capture groups
+    /// - `$$` — literal `$`
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::Regex;
+    /// let re = Regex::compile(r"(\w+)\s(\w+)").unwrap();
+    /// let result = re.replace("hello world", "$2 $1");
+    /// assert_eq!(result, "world hello");
+    /// ```
+    #[must_use]
+    pub fn replace(&self, text: &str, replacement: &str) -> String {
+        let Some(m) = self.engine.find_first(text.as_bytes()) else {
+            return text.to_string();
+        };
+        let groups = self.capture_groups_for_match(text, &m);
+        let named = self.engine.named_groups();
+        let mut result = String::with_capacity(text.len());
+        result.push_str(&text[..m.start]);
+        Self::interpolate_replacement(replacement, &groups, named, &mut result);
+        result.push_str(&text[m.end..]);
+        result
+    }
+
+    /// Replace all non-overlapping matches with a replacement string
+    /// supporting `$1`, `$2`, `$name` capture interpolation.
+    ///
+    /// See [`replace`](Self::replace) for the replacement syntax.
+    #[must_use]
+    pub fn replace_all(&self, text: &str, replacement: &str) -> String {
+        let matches = self.engine.find_all(text.as_bytes());
+        if matches.is_empty() {
+            return text.to_string();
+        }
+        let named = self.engine.named_groups();
+        let mut result = String::with_capacity(text.len());
+        let mut last_end = 0;
+        for m in &matches {
+            result.push_str(&text[last_end..m.start]);
+            let groups = self.capture_groups_for_match(text, m);
+            Self::interpolate_replacement(replacement, &groups, named, &mut result);
+            last_end = m.end;
+        }
+        result.push_str(&text[last_end..]);
+        result
+    }
+
     /// Register a native callback for `(?{native:...})` code blocks on this compiled regex.
     ///
     /// # Errors
@@ -776,6 +929,100 @@ impl Regex {
             Some(CodeBlockValue::Numeric(value)) => Some(*value),
             _ => None,
         }
+    }
+
+    /// Extract capture groups from a `MatchResult` as `(&str, Option<&str>)`
+    /// tuples for interpolation. Index 0 = full match.
+    fn capture_groups_for_match<'a>(&self, text: &'a str, m: &MatchResult) -> Vec<Option<&'a str>> {
+        m.groups
+            .iter()
+            .map(|slot| slot.map(|(s, e)| &text[s..e]))
+            .collect()
+    }
+
+    /// Interpolate `$0`, `$1`, `$name`, `${name}`, `$$`, `$&` in a
+    /// replacement string, appending the result to `out`.
+    fn interpolate_replacement(
+        replacement: &str,
+        groups: &[Option<&str>],
+        named: &std::collections::HashMap<String, u32>,
+        out: &mut String,
+    ) {
+        let bytes = replacement.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        while i < len {
+            if bytes[i] == b'$' && i + 1 < len {
+                i += 1;
+                if bytes[i] == b'$' {
+                    out.push('$');
+                    i += 1;
+                } else if bytes[i] == b'&' {
+                    if let Some(Some(s)) = groups.first() {
+                        out.push_str(s);
+                    }
+                    i += 1;
+                } else if bytes[i] == b'{' {
+                    if let Some(close) = replacement[i + 1..].find('}') {
+                        let inner = &replacement[i + 1..i + 1 + close];
+                        Self::push_group_by_ref(inner, groups, named, out);
+                        i = i + 2 + close;
+                    } else {
+                        out.push('$');
+                        out.push('{');
+                        i += 1;
+                    }
+                } else if bytes[i].is_ascii_digit() {
+                    let start = i;
+                    while i < len && bytes[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                    if let Ok(idx) = replacement[start..i].parse::<usize>() {
+                        if let Some(Some(s)) = groups.get(idx) {
+                            out.push_str(s);
+                        }
+                    }
+                } else if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+                    let start = i;
+                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                        i += 1;
+                    }
+                    let name = &replacement[start..i];
+                    Self::push_group_by_ref(name, groups, named, out);
+                } else {
+                    out.push('$');
+                }
+            } else {
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+    }
+
+    /// Resolve a group reference (number or name) and append to `out`.
+    fn push_group_by_ref(
+        reference: &str,
+        groups: &[Option<&str>],
+        named: &std::collections::HashMap<String, u32>,
+        out: &mut String,
+    ) {
+        if let Ok(idx) = reference.parse::<usize>() {
+            if let Some(Some(s)) = groups.get(idx) {
+                out.push_str(s);
+            }
+            return;
+        }
+        if let Some(&group_num) = named.get(reference) {
+            if let Some(Some(s)) = groups.get(group_num as usize) {
+                out.push_str(s);
+            }
+        }
+    }
+
+    /// Named capture group map: group name → 1-based group number.
+    #[must_use]
+    pub fn named_groups(&self) -> &std::collections::HashMap<String, u32> {
+        self.engine.named_groups()
     }
 }
 
@@ -5082,5 +5329,249 @@ mod tests {
         })
         .unwrap();
         assert!(re.is_match("x"));
+    }
+
+    // === B10: find_at / is_match_at / find_all_at ===
+
+    #[test]
+    fn find_first_at_skips_earlier_matches() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let text = "abc 123 xyz 456";
+        // From position 0 → finds "123"
+        let m = re.find_first(text).unwrap();
+        assert_eq!(&text[m.start..m.end], "123");
+        // From position 8 → skips "123", finds "456"
+        let m = re.find_first_at(text, 8).unwrap();
+        assert_eq!(&text[m.start..m.end], "456");
+    }
+
+    #[test]
+    fn find_first_at_returns_none_past_end() {
+        let re = Regex::compile(r"\d+").unwrap();
+        assert!(re.find_first_at("abc 123", 7).is_none());
+    }
+
+    #[test]
+    fn find_first_at_from_zero_same_as_find_first() {
+        let re = Regex::compile(r"cat").unwrap();
+        let text = "the cat sat";
+        assert_eq!(re.find_first_at(text, 0), re.find_first(text));
+    }
+
+    #[test]
+    fn find_all_at_starts_from_offset() {
+        let re = Regex::compile(r"\w+").unwrap();
+        let text = "one two three";
+        let all = re.find_all(text);
+        let from_4 = re.find_all_at(text, 4);
+        // find_all gets 3 words; find_all_at(4) gets "two" and "three"
+        assert_eq!(all.len(), 3);
+        assert_eq!(from_4.len(), 2);
+        assert_eq!(&text[from_4[0].start..from_4[0].end], "two");
+        assert_eq!(&text[from_4[1].start..from_4[1].end], "three");
+    }
+
+    #[test]
+    fn is_match_at_basic() {
+        let re = Regex::compile(r"world").unwrap();
+        let text = "hello world";
+        assert!(!re.is_match_at(text, 7)); // "orld" — no match
+        assert!(re.is_match_at(text, 6)); // "world" starts at 6
+    }
+
+    #[test]
+    fn find_first_at_positions_are_absolute() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let text = "aaa 123 bbb 456";
+        let m = re.find_first_at(text, 10).unwrap();
+        // "456" starts at position 12 — absolute, not relative to start=10
+        assert_eq!(m.start, 12);
+        assert_eq!(m.end, 15);
+    }
+
+    #[test]
+    fn find_first_at_with_captures() {
+        let re = Regex::compile(r"(\w+)@(\w+)").unwrap();
+        let text = "a@b then c@d";
+        let m = re.find_first_at(text, 4).unwrap();
+        assert_eq!(&text[m.start..m.end], "c@d");
+        // Group 1 = "c", Group 2 = "d"
+        assert_eq!(m.groups[1], Some((9, 10)));
+        assert_eq!(m.groups[2], Some((11, 12)));
+    }
+
+    #[test]
+    #[should_panic(expected = "not on a UTF-8 character boundary")]
+    fn find_first_at_panics_on_non_boundary() {
+        let re = Regex::compile(r".").unwrap();
+        let text = "café";
+        // 'é' is 2 bytes (positions 3,4), so position 4 is mid-char
+        re.find_first_at(text, 4);
+    }
+
+    // === B8: split / splitn ===
+
+    #[test]
+    fn split_basic() {
+        let re = Regex::compile(r"[,\s]+").unwrap();
+        let parts = re.split("one, two, three");
+        assert_eq!(parts, vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn split_no_match_returns_whole_string() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let parts = re.split("no digits here");
+        assert_eq!(parts, vec!["no digits here"]);
+    }
+
+    #[test]
+    fn split_at_boundaries_produces_empty_strings() {
+        let re = Regex::compile(r",").unwrap();
+        let parts = re.split(",a,,b,");
+        assert_eq!(parts, vec!["", "a", "", "b", ""]);
+    }
+
+    #[test]
+    fn split_empty_input() {
+        let re = Regex::compile(r",").unwrap();
+        let parts = re.split("");
+        assert_eq!(parts, vec![""]);
+    }
+
+    #[test]
+    fn splitn_limits_result_count() {
+        let re = Regex::compile(r",").unwrap();
+        let parts = re.splitn("a,b,c,d,e", 3);
+        assert_eq!(parts, vec!["a", "b", "c,d,e"]);
+    }
+
+    #[test]
+    fn splitn_limit_1_returns_whole_string() {
+        let re = Regex::compile(r",").unwrap();
+        let parts = re.splitn("a,b,c", 1);
+        assert_eq!(parts, vec!["a,b,c"]);
+    }
+
+    #[test]
+    fn splitn_limit_0_is_unlimited() {
+        let re = Regex::compile(r",").unwrap();
+        let parts_0 = re.splitn("a,b,c", 0);
+        let parts_all = re.split("a,b,c");
+        assert_eq!(parts_0, parts_all);
+    }
+
+    #[test]
+    fn splitn_limit_exceeds_splits() {
+        let re = Regex::compile(r",").unwrap();
+        let parts = re.splitn("a,b", 10);
+        assert_eq!(parts, vec!["a", "b"]);
+    }
+
+    // === B6: replace / replace_all with $1 interpolation ===
+
+    #[test]
+    fn replace_numbered_groups() {
+        let re = Regex::compile(r"(\w+)\s(\w+)").unwrap();
+        let result = re.replace("hello world", "$2 $1");
+        assert_eq!(result, "world hello");
+    }
+
+    #[test]
+    fn replace_all_numbered_groups() {
+        let re = Regex::compile(r"(\w+)-(\w+)").unwrap();
+        let result = re.replace_all("foo-bar baz-qux", "$2-$1");
+        assert_eq!(result, "bar-foo qux-baz");
+    }
+
+    #[test]
+    fn replace_dollar_ampersand_is_full_match() {
+        let re = Regex::compile(r"\w+").unwrap();
+        let result = re.replace_all("foo bar", "[$&]");
+        assert_eq!(result, "[foo] [bar]");
+    }
+
+    #[test]
+    fn replace_escaped_dollar() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replace("price 42", "$$$&");
+        assert_eq!(result, "price $42");
+    }
+
+    #[test]
+    fn replace_braced_group_ref() {
+        let re = Regex::compile(r"(\d+)").unwrap();
+        let result = re.replace("value=42", "${1}00");
+        assert_eq!(result, "value=4200");
+    }
+
+    #[test]
+    fn replace_named_group() {
+        let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})").unwrap();
+        let result = re.replace("2025-03", "$month/$year");
+        assert_eq!(result, "03/2025");
+    }
+
+    #[test]
+    fn replace_named_group_braced() {
+        let re = Regex::compile(r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})").unwrap();
+        let result = re.replace("2025-03-15", "${d}/${m}/${y}");
+        assert_eq!(result, "15/03/2025");
+    }
+
+    #[test]
+    fn replace_no_match_returns_original() {
+        let re = Regex::compile(r"\d+").unwrap();
+        assert_eq!(re.replace("no digits", "X"), "no digits");
+    }
+
+    #[test]
+    fn replace_first_only() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replace("a1b2c3", "X");
+        assert_eq!(result, "aXb2c3");
+    }
+
+    #[test]
+    fn replace_all_exhaustive() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replace_all("a1b2c3", "X");
+        assert_eq!(result, "aXbXcX");
+    }
+
+    #[test]
+    fn replace_group_0_is_full_match() {
+        let re = Regex::compile(r"(\w+)").unwrap();
+        let result = re.replace("hello", "[$0]");
+        assert_eq!(result, "[hello]");
+    }
+
+    // === MatchResult groups field ===
+
+    #[test]
+    fn match_result_groups_populated() {
+        let re = Regex::compile(r"(\d+)-(\w+)").unwrap();
+        let m = re.find_first("abc 123-xyz def").unwrap();
+        assert_eq!(m.groups[0], Some((4, 11))); // full match
+        assert_eq!(m.groups[1], Some((4, 7))); // group 1: "123"
+        assert_eq!(m.groups[2], Some((8, 11))); // group 2: "xyz"
+    }
+
+    #[test]
+    fn match_result_optional_group_is_none() {
+        let re = Regex::compile(r"(a)(b)?c").unwrap();
+        let m = re.find_first("ac").unwrap();
+        assert_eq!(m.groups[1], Some((0, 1))); // "a"
+        assert_eq!(m.groups[2], None); // "b" didn't participate
+    }
+
+    // === named_groups accessor ===
+
+    #[test]
+    fn named_groups_accessor() {
+        let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})").unwrap();
+        let ng = re.named_groups();
+        assert_eq!(ng.get("year").copied(), Some(1));
+        assert_eq!(ng.get("month").copied(), Some(2));
     }
 }

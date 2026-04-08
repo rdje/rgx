@@ -26,6 +26,11 @@ pub struct MatchResult {
     pub start: usize,
     /// End position in bytes
     pub end: usize,
+    /// Capture groups as `(start, end)` byte pairs.
+    ///
+    /// Index 0 is the overall match. Indices 1..N correspond to numbered
+    /// capture groups. `None` means the group did not participate in the match.
+    pub groups: Vec<Option<(usize, usize)>>,
     /// 1-based top-level branch number for top-level alternation matches.
     ///
     /// `None` when the pattern has no top-level alternation.
@@ -43,6 +48,17 @@ pub struct Engine {
     vm: RegexVM,
     /// Execution mode for this engine
     mode: ExecutionMode,
+}
+
+/// Convert a VM-level `Match` into a public `MatchResult`.
+fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
+    MatchResult {
+        start: m.start,
+        end: m.end,
+        groups: m.groups,
+        matched_branch_number: m.matched_alternative.map(|id| id + 1),
+        code_result: m.code_result,
+    }
 }
 
 impl Engine {
@@ -115,12 +131,7 @@ impl Engine {
             .vm
             .find_all(text_str)
             .into_iter()
-            .map(|m| MatchResult {
-                start: m.start,
-                end: m.end,
-                matched_branch_number: m.matched_alternative.map(|id| id + 1),
-                code_result: m.code_result,
-            })
+            .map(vm_match_to_result)
             .collect::<Vec<_>>();
         trace_decision!(
             "engine",
@@ -176,12 +187,7 @@ impl Engine {
             }
         };
 
-        let first = self.vm.find_first(text_str).map(|m| MatchResult {
-            start: m.start,
-            end: m.end,
-            matched_branch_number: m.matched_alternative.map(|id| id + 1),
-            code_result: m.code_result,
-        });
+        let first = self.vm.find_first(text_str).map(vm_match_to_result);
         trace_decision!(
             "engine",
             "first.is_some()",
@@ -240,6 +246,50 @@ impl Engine {
         }
     }
 
+    /// Find the first match starting the scan at byte position `start`.
+    ///
+    /// Positions in the returned `MatchResult` are absolute (relative to the
+    /// beginning of `text`, not relative to `start`).
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn find_first_at(&self, text: &[u8], start: usize) -> Option<MatchResult> {
+        let text_str = match std::str::from_utf8(text) {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+        self.vm
+            .find_first_at(text_str, start)
+            .map(vm_match_to_result)
+    }
+
+    /// Find all non-overlapping matches starting the scan at byte position `start`.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn find_all_at(&self, text: &[u8], start: usize) -> Vec<MatchResult> {
+        let text_str = match std::str::from_utf8(text) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        self.vm
+            .find_all_at(text_str, start)
+            .into_iter()
+            .map(vm_match_to_result)
+            .collect()
+    }
+
+    /// Boolean match test starting the scan at byte position `start`.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn is_match_at(&self, text: &[u8], start: usize) -> bool {
+        self.find_first_at(text, start).is_some()
+    }
+
     /// Find the first match with support for async callback suspension.
     ///
     /// This is the suspendable counterpart to [`find_first`](Self::find_first).
@@ -264,6 +314,12 @@ impl Engine {
         callback_result: ExecResult,
     ) -> MatchOutcome {
         self.vm.resume(continuation, callback_result)
+    }
+
+    /// Named capture group map: group name → 1-based group number.
+    #[must_use]
+    pub fn named_groups(&self) -> &std::collections::HashMap<String, u32> {
+        &self.vm.program.named_groups
     }
 
     /// Register a native callback on the engine's execution manager.

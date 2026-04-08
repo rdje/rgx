@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship find_at, split, splitn, replace with capture interpolation, and MatchResult groups
+- Scope: Tier 1 backlog items B10, B8, B6, B7 (partial — groups on MatchResult).
+- Changes:
+  - `find_first_at(text, start)`, `find_all_at(text, start)`, `is_match_at(text, start)` — position-aware matching at all 3 layers (VM, Engine, public API). Panics on non-UTF-8-boundary start.
+  - `split(text)` and `splitn(text, limit)` — regex-delimited string splitting.
+  - `replace(text, replacement)` and `replace_all(text, replacement)` — capture interpolation with `$0`, `$1`, `$name`, `${name}`, `$&`, `$$`.
+  - `MatchResult.groups: Vec<Option<(usize, usize)>>` — capture group positions now surfaced on every match result (VM, Engine, suspendable paths).
+  - `Regex::named_groups()` / `Engine::named_groups()` — accessor for named capture group map.
+  - 37 new unit tests covering all new APIs including edge cases.
+- Validation:
+  - `cargo test -p rgx-core` (513 pass), `cargo test -p rgx-cli` (30 pass), `cargo test -p rgx-bench` (39 pass). Zero clippy errors.
+- Notes/impact: closes B10 (find_at), B8 (split/splitn), B6 (replacer with $1 interpolation). Partially addresses B7 (groups on MatchResult — full Captures wrapper is next).
+
 ### 2026-04-04 - Create comprehensive BACKLOG.md
 - Scope: living inventory of all remaining work across the project.
 - Changes:

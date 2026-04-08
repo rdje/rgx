@@ -739,6 +739,130 @@ impl RegexVM {
         result
     }
 
+    /// Find the first match starting the scan at byte position `start`.
+    ///
+    /// Unlike `find_first`, which always scans from position 0, this method
+    /// begins scanning at the given byte offset. Positions reported in the
+    /// returned `Match` are still absolute (relative to the start of `text`).
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    pub fn find_first_at(&self, text: &str, start: usize) -> Option<Match> {
+        assert!(
+            text.is_char_boundary(start),
+            "find_first_at: start ({start}) is not on a UTF-8 character boundary"
+        );
+        if start > text.len() {
+            return None;
+        }
+
+        // Literal fast path with offset
+        if let Some(ref finder) = self.literal_finder {
+            let bytes = text.as_bytes();
+            let needle_len = finder.needle().len();
+            return finder.find(&bytes[start..]).map(|pos| {
+                let abs = start + pos;
+                Match {
+                    start: abs,
+                    end: abs + needle_len,
+                    groups: vec![Some((abs, abs + needle_len))],
+                    matched_alternative: None,
+                    code_result: None,
+                }
+            });
+        }
+
+        let bytes = text.as_bytes();
+        let mut ctx = ExecContext {
+            text: bytes,
+            pos: start,
+            match_start: start,
+            end: bytes.len(),
+            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            capture_trail: Vec::new(),
+            call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: None,
+            recursion_stack: Vec::new(),
+            code_result: None,
+            match_start_override: None,
+            previous_match_end: None,
+            committed: false,
+            skip_position: None,
+            suspendable: false,
+            suspension: None,
+        };
+
+        // For offset scans, always use the scanning path (anchored / SIMD
+        // fast-paths assume scanning from position 0).
+        self.find_first_scanning_from(&mut ctx, start)
+    }
+
+    /// Find all non-overlapping matches starting the scan at byte position `start`.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    pub fn find_all_at(&self, text: &str, start: usize) -> Vec<Match> {
+        assert!(
+            text.is_char_boundary(start),
+            "find_all_at: start ({start}) is not on a UTF-8 character boundary"
+        );
+        if start > text.len() {
+            return Vec::new();
+        }
+
+        // Literal fast path with offset
+        if let Some(ref finder) = self.literal_finder {
+            let bytes = text.as_bytes();
+            let needle_len = finder.needle().len();
+            let mut matches = Vec::new();
+            let mut offset = start;
+            while let Some(pos) = finder.find(&bytes[offset..]) {
+                let abs = offset + pos;
+                matches.push(Match {
+                    start: abs,
+                    end: abs + needle_len,
+                    groups: vec![Some((abs, abs + needle_len))],
+                    matched_alternative: None,
+                    code_result: None,
+                });
+                offset = abs + needle_len.max(1);
+            }
+            return matches;
+        }
+
+        let bytes = text.as_bytes();
+        let mut ctx = ExecContext {
+            text: bytes,
+            pos: start,
+            match_start: start,
+            end: bytes.len(),
+            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            capture_trail: Vec::new(),
+            call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: None,
+            recursion_stack: Vec::new(),
+            code_result: None,
+            match_start_override: None,
+            previous_match_end: None,
+            committed: false,
+            skip_position: None,
+            suspendable: false,
+            suspension: None,
+        };
+
+        self.find_all_scanning_from(&mut ctx, start)
+    }
+
+    /// Boolean match test starting the scan at byte position `start`.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    pub fn is_match_at(&self, text: &str, start: usize) -> bool {
+        self.find_first_at(text, start).is_some()
+    }
+
     /// Determine if SIMD pre-filtering would be beneficial
     fn should_use_simd_search(&self, ctx: &ExecContext<'_>) -> bool {
         // SIMD candidate collection followed by per-candidate VM execution is
@@ -1133,6 +1257,245 @@ impl RegexVM {
         }
         trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
         None
+    }
+
+    /// Scanning loop starting from an arbitrary byte offset.
+    ///
+    /// Same logic as `find_first_scanning` but begins at `scan_start` instead
+    /// of position 0.
+    fn find_first_scanning_from(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        scan_start: usize,
+    ) -> Option<Match> {
+        if let PrefixFilter::Byte(fb) = self.prefix_filter {
+            let mut offset = scan_start;
+            while let Some(pos) = memchr(fb, &ctx.text[offset..]) {
+                let start = offset + pos;
+                ctx.pos = start;
+                ctx.match_start = start;
+                Self::reset_captures(ctx);
+                self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+                let matched = self.execute_at(ctx, start);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched,
+                });
+                if matched {
+                    let effective_start = ctx.match_start_override.unwrap_or(start);
+                    return Some(Match {
+                        start: effective_start,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                }
+                if ctx.committed {
+                    return None;
+                }
+                if let Some(skip_pos) = ctx.skip_position.take() {
+                    offset = skip_pos;
+                } else {
+                    offset = start + 1;
+                }
+            }
+        } else {
+            let filter = self.prefix_filter;
+            let mut start = scan_start;
+            while start < ctx.text.len() {
+                if !filter.matches(ctx.text[start], &self.program.char_classes) {
+                    start += 1;
+                    continue;
+                }
+                ctx.pos = start;
+                ctx.match_start = start;
+                Self::reset_captures(ctx);
+                self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+                let matched = self.execute_at(ctx, start);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: start,
+                    matched,
+                });
+                if matched {
+                    let effective_start = ctx.match_start_override.unwrap_or(start);
+                    return Some(Match {
+                        start: effective_start,
+                        end: ctx.pos,
+                        groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                }
+                if ctx.committed {
+                    return None;
+                }
+                if let Some(skip_pos) = ctx.skip_position.take() {
+                    start = skip_pos;
+                } else {
+                    start += 1;
+                }
+            }
+        }
+        // Try match at end-of-text for zero-width patterns
+        if scan_start <= ctx.text.len() {
+            let start = ctx.text.len();
+            ctx.pos = start;
+            ctx.match_start = start;
+            Self::reset_captures(ctx);
+            self.emit_event(&MatchEvent::MatchAttemptStarted { position: start });
+            let matched = self.execute_at(ctx, start);
+            self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                position: start,
+                matched,
+            });
+            if matched {
+                let effective_start = ctx.match_start_override.unwrap_or(start);
+                return Some(Match {
+                    start: effective_start,
+                    end: ctx.pos,
+                    groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
+                    matched_alternative: ctx.current_alternative,
+                    code_result: ctx.code_result.clone(),
+                });
+            }
+        }
+        None
+    }
+
+    /// Scanning loop for `find_all_at`, starting from an arbitrary byte offset.
+    #[allow(clippy::too_many_lines)]
+    fn find_all_scanning_from(&self, ctx: &mut ExecContext<'_>, scan_start: usize) -> Vec<Match> {
+        let mut matches = Vec::new();
+        let mut last_match_end: Option<usize> = None;
+
+        if let PrefixFilter::Byte(fb) = self.prefix_filter {
+            let mut offset = scan_start;
+            while let Some(pos) = memchr(fb, &ctx.text[offset..]) {
+                let candidate = offset + pos;
+                ctx.pos = candidate;
+                ctx.match_start = candidate;
+                ctx.match_start_override = None;
+                ctx.code_result = None;
+                ctx.current_alternative = None;
+                Self::reset_captures(ctx);
+                self.emit_event(&MatchEvent::MatchAttemptStarted {
+                    position: candidate,
+                });
+                let attempt_matched = self.execute_at(ctx, candidate);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: candidate,
+                    matched: attempt_matched,
+                });
+                if attempt_matched {
+                    let m_start = ctx.match_start_override.unwrap_or(candidate);
+                    let m_end = ctx.pos;
+                    if m_start == m_end {
+                        if let Some(prev_end) = last_match_end {
+                            if m_start == prev_end {
+                                offset = candidate + 1;
+                                continue;
+                            }
+                        }
+                    }
+                    last_match_end = Some(m_end);
+                    matches.push(Match {
+                        start: m_start,
+                        end: m_end,
+                        groups: self.extract_captures_with_match(ctx, m_start, m_end),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                    ctx.previous_match_end = Some(m_end);
+                    offset = m_end.max(candidate + 1);
+                } else if ctx.committed {
+                    break;
+                } else if let Some(skip_pos) = ctx.skip_position.take() {
+                    offset = skip_pos;
+                } else {
+                    offset = candidate + 1;
+                }
+            }
+        } else {
+            let filter = self.prefix_filter;
+            let mut start = scan_start;
+            while start < ctx.text.len() {
+                if !filter.matches(ctx.text[start], &self.program.char_classes) {
+                    start += 1;
+                    continue;
+                }
+                let candidate = start;
+                ctx.pos = candidate;
+                ctx.match_start = candidate;
+                ctx.match_start_override = None;
+                ctx.code_result = None;
+                ctx.current_alternative = None;
+                Self::reset_captures(ctx);
+                self.emit_event(&MatchEvent::MatchAttemptStarted {
+                    position: candidate,
+                });
+                let attempt_matched = self.execute_at(ctx, candidate);
+                self.emit_event(&MatchEvent::MatchAttemptCompleted {
+                    position: candidate,
+                    matched: attempt_matched,
+                });
+                if attempt_matched {
+                    let m_start = ctx.match_start_override.unwrap_or(candidate);
+                    let m_end = ctx.pos;
+                    if m_start == m_end {
+                        if let Some(prev_end) = last_match_end {
+                            if m_start == prev_end {
+                                start = candidate + 1;
+                                continue;
+                            }
+                        }
+                    }
+                    last_match_end = Some(m_end);
+                    matches.push(Match {
+                        start: m_start,
+                        end: m_end,
+                        groups: self.extract_captures_with_match(ctx, m_start, m_end),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                    ctx.previous_match_end = Some(m_end);
+                    start = m_end.max(candidate + 1);
+                } else if ctx.committed {
+                    break;
+                } else if let Some(skip_pos) = ctx.skip_position.take() {
+                    start = skip_pos;
+                } else {
+                    start += 1;
+                }
+            }
+        }
+        // Try end-of-text for zero-width patterns
+        if scan_start <= ctx.text.len() {
+            let candidate = ctx.text.len();
+            ctx.pos = candidate;
+            ctx.match_start = candidate;
+            ctx.match_start_override = None;
+            ctx.code_result = None;
+            ctx.current_alternative = None;
+            Self::reset_captures(ctx);
+            let matched = self.execute_at(ctx, candidate);
+            if matched {
+                let m_start = ctx.match_start_override.unwrap_or(candidate);
+                let m_end = ctx.pos;
+                let suppress =
+                    m_start == m_end && last_match_end.is_some_and(|prev| m_start == prev);
+                if !suppress {
+                    matches.push(Match {
+                        start: m_start,
+                        end: m_end,
+                        groups: self.extract_captures_with_match(ctx, m_start, m_end),
+                        matched_alternative: ctx.current_alternative,
+                        code_result: ctx.code_result.clone(),
+                    });
+                }
+            }
+        }
+        matches
     }
 
     /// Write a single capture slot, recording the old value in the trail log
@@ -2986,6 +3349,7 @@ impl RegexVM {
             let result = finder.find(bytes).map(|pos| crate::engine::MatchResult {
                 start: pos,
                 end: pos + needle_len,
+                groups: vec![Some((pos, pos + needle_len))],
                 matched_branch_number: None,
                 code_result: None,
             });
@@ -3094,6 +3458,7 @@ impl RegexVM {
                 return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                     start: effective_start,
                     end: ctx.pos,
+                    groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                     matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                     code_result: ctx.code_result.clone(),
                 }));
@@ -3247,6 +3612,7 @@ impl RegexVM {
                     return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                         start: effective_start,
                         end: ctx.pos,
+                        groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                         matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                         code_result: ctx.code_result.clone(),
                     }));
@@ -3272,6 +3638,7 @@ impl RegexVM {
                 MatchOutcome::Completed(Some(crate::engine::MatchResult {
                     start: effective_start,
                     end: ctx.pos,
+                    groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                     matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                     code_result: ctx.code_result.clone(),
                 }))
@@ -3323,6 +3690,11 @@ impl RegexVM {
                         return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                             start: effective_start,
                             end: ctx.pos,
+                            groups: self.extract_captures_with_match(
+                                &ctx,
+                                effective_start,
+                                ctx.pos,
+                            ),
                             matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                             code_result: ctx.code_result.clone(),
                         }));
