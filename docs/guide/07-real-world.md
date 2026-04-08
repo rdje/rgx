@@ -726,6 +726,106 @@ This WAF engine:
 - Returns structured alerts with rule IDs, severity, and matched text
 - Makes block/warn/allow decisions based on the highest severity alert
 
+## Example 6: HTTP request router
+
+A URL router that classifies incoming requests using `RegexSet`, extracts parameters with `captures`, and transforms responses with `replace`. This shows the ergonomic API in action — no manual byte slicing.
+
+### The idea
+
+An HTTP server needs to match incoming paths against multiple route patterns and extract parameters. `RegexSet` tests all routes in one call, then the winning pattern extracts details.
+
+### The code
+
+```rust
+use rgx_core::*;
+
+// Define routes as a RegexSet for fast classification
+let routes = RegexSet::new(&[
+    r"^/api/users/(?P<id>\d+)$",            // 0: user by ID
+    r"^/api/users$",                          // 1: user list
+    r"^/api/posts/(?P<slug>[a-z0-9-]+)$",   // 2: post by slug
+    r"^/static/(?P<path>.+)$",               // 3: static files
+    r"^/health$",                             // 4: health check
+])?;
+
+// Individual compiled patterns for parameter extraction
+let patterns = [
+    Regex::compile(r"^/api/users/(?P<id>\d+)$")?,
+    Regex::compile(r"^/api/users$")?,
+    Regex::compile(r"^/api/posts/(?P<slug>[a-z0-9-]+)$")?,
+    Regex::compile(r"^/static/(?P<path>.+)$")?,
+    Regex::compile(r"^/health$")?,
+];
+
+fn handle_request(
+    path: &str,
+    routes: &RegexSet,
+    patterns: &[Regex],
+) -> String {
+    let matches = routes.matches(path);
+
+    for idx in matches.iter() {
+        match idx {
+            0 => {
+                let caps = patterns[0].captures(path).unwrap();
+                return format!("User profile for ID {}", &caps["id"]);
+            }
+            1 => return "User list".to_string(),
+            2 => {
+                let caps = patterns[2].captures(path).unwrap();
+                return format!("Blog post: {}", &caps["slug"]);
+            }
+            3 => {
+                let caps = patterns[3].captures(path).unwrap();
+                return format!("Serving static file: {}", &caps["path"]);
+            }
+            4 => return "OK".to_string(),
+            _ => {}
+        }
+    }
+    "404 Not Found".to_string()
+}
+
+assert_eq!(handle_request("/api/users/42", &routes, &patterns), "User profile for ID 42");
+assert_eq!(handle_request("/api/posts/hello-world", &routes, &patterns), "Blog post: hello-world");
+assert_eq!(handle_request("/health", &routes, &patterns), "OK");
+assert_eq!(handle_request("/unknown", &routes, &patterns), "404 Not Found");
+```
+
+### Why this works well
+
+- **`RegexSet`** tests all 5 routes in a single pass — no cascading if/else
+- **`captures`** with `caps["id"]` extracts named parameters — no manual group indexing
+- **`RegexCache`** could be used if routes are loaded from config at runtime
+- The patterns use `RegexBuilder` if case-insensitive matching is needed
+
+### Bonus: URL rewriting with replace
+
+```rust
+// Rewrite legacy URLs to new format
+let rewriter = Regex::compile(r"/old/(?P<section>\w+)/(?P<id>\d+)")?;
+
+let new_url = rewriter.replace(
+    "/old/articles/42",
+    "/v2/$section/$id"
+);
+assert_eq!(new_url, "/v2/articles/42");
+
+// Or with a closure for complex logic
+let new_url = rewriter.replace("/old/articles/42", |caps: &Captures| {
+    format!("/v2/{}/{}", &caps["section"], &caps["id"])
+});
+assert_eq!(new_url, "/v2/articles/42");
+```
+
+### Bonus: splitting CSV with regex
+
+```rust
+let splitter = Regex::compile(r#",(?=(?:[^"]*"[^"]*")*[^"]*$)"#)?;
+let fields = splitter.split(r#"name,"New York, NY",42"#);
+// ["name", "\"New York, NY\"", "42"]
+```
+
 ## What's next
 
 You now have the full rgx toolkit: pattern matching, data exchange, predicate callbacks, match steering, structured events, async I/O, file matching, and real-world patterns.
