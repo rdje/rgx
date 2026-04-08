@@ -181,6 +181,83 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Set `ExecContext.pos = start_position` before calling `execute_at`.
 - **Port difficulty**: Trivial.
 
+### B11. `RegexBuilder` — builder-pattern compilation with flag overrides
+- **What**: `RegexBuilder::new(pattern).case_insensitive(true).multi_line(true).build()`.
+- **Effort**: `small`
+- **Rationale**: The `regex` crate's primary compilation API. Lets users set flags without embedding them in the pattern.
+- **How**: Add a `RegexBuilder` struct with fields for each flag. Apply them as default inline flags before compilation.
+- **Port difficulty**: Easy — rgx already supports `(?imsx)` inline; builder just sets defaults.
+
+### B12. Iterator-based APIs — `find_iter`, `captures_iter`, lazy `split`
+- **What**: All `regex` find/capture/split operations return lazy iterators instead of collecting into `Vec`.
+- **Effort**: `small`
+- **Rationale**: Zero-allocation iteration is idiomatic Rust. Collecting into `Vec` forces full materialization even when only the first few matches are needed.
+- **How**: Add `FindIter`, `CaptureIter`, `SplitIter` structs that hold `&Regex` + `&str` + scan state.
+- **Port difficulty**: Easy — the scanning logic already exists; wrap it in Iterator impl.
+
+### B13. `Captures` wrapper — ergonomic capture access
+- **What**: `caps.get(1)`, `caps.name("year")`, `caps["year"]`, `caps.extract::<N>()`, `caps.expand(template, &mut dst)`.
+- **Effort**: `small`
+- **Rationale**: The `regex` crate's `Captures` is the primary way to access groups. rgx currently exposes raw `Vec<Option<(usize, usize)>>`.
+- **How**: Wrap `MatchResult` + `&str` + named-group map. Implement `Index<usize>`, `Index<&str>`, and helper methods.
+- **Port difficulty**: Easy — it's a wrapper. Replaces B7 (partially shipped).
+
+### B14. `Match` type — ergonomic match access
+- **What**: `m.as_str()`, `m.range()`, `m.len()`, `m.is_empty()` instead of manual `&text[m.start..m.end]`.
+- **Effort**: `trivial`
+- **Rationale**: Every `regex` user relies on `m.as_str()`. RGX's `MatchResult` requires manual slicing.
+- **How**: Either add these methods to `MatchResult`, or return a `Match<'a>` that borrows the input text.
+- **Port difficulty**: Trivial.
+
+### B15. `replacen` — replace up to N matches
+- **What**: `re.replacen(text, 2, replacement)` — like `replace_all` but stops after N.
+- **Effort**: `trivial`
+- **Rationale**: Common operation. `regex` has it; rgx has `replace` (first) and `replace_all` but nothing in between.
+- **How**: Add a `limit` parameter to the replace loop.
+- **Port difficulty**: Trivial.
+
+### B16. `Replacer` trait — custom replacement functions
+- **What**: `re.replace_all(text, |caps: &Captures| { format!("{}!", caps[1]) })` — closure-based replacement.
+- **Effort**: `small`
+- **Rationale**: Much more powerful than string interpolation. Lets users compute replacements programmatically.
+- **How**: Define a `Replacer` trait with `replace_append(&mut self, caps: &Captures, dst: &mut String)`. Implement for `&str`, `String`, `Fn`.
+- **Port difficulty**: Easy.
+
+### B17. `shortest_match` / `shortest_match_at`
+- **What**: Return only the end position of the first match, not the full span. Faster because the engine can stop earlier.
+- **Effort**: `small`
+- **Rationale**: Performance optimization for "does it match and where does it end?" queries (tokenizers, validators).
+- **How**: Early-exit VM mode that stops at the first `Match` opcode hit and returns `ctx.pos`.
+- **Port difficulty**: Easy.
+
+### B18. `escape()` — escape regex metacharacters
+- **What**: `regex::escape("a.b") == "a\\.b"` — make a literal string safe for regex concatenation.
+- **Effort**: `trivial`
+- **Rationale**: Every regex library has this. Critical for building patterns from user input safely.
+- **How**: Iterate chars, prefix metacharacters with `\`.
+- **Port difficulty**: Trivial.
+
+### B19. `captures_len` / `static_captures_len` / `capture_names` / `as_str` metadata
+- **What**: Introspection: how many groups? what are their names? what was the original pattern?
+- **Effort**: `trivial`
+- **Rationale**: Needed for generic regex-processing code that works with any pattern.
+- **How**: Expose `program.num_groups`, `program.named_groups`, and store the original pattern string.
+- **Port difficulty**: Trivial.
+
+### B20. `CaptureLocations` — reusable capture storage
+- **What**: Pre-allocate a capture buffer and reuse it across matches to avoid per-match allocation.
+- **Effort**: `small`
+- **Rationale**: Performance-critical loops that match millions of times. Avoids `Vec` allocation per match.
+- **How**: Add a `CaptureLocations` struct wrapping `Vec<Option<(usize, usize)>>`. Add `captures_read(text, &mut locs)` that fills it in-place.
+- **Port difficulty**: Easy.
+
+### B21. `Cow<str>` return for `replace` — avoid allocation when no match
+- **What**: `regex`'s `replace` returns `Cow<str>`, borrowing the original text when there's no match instead of cloning.
+- **Effort**: `trivial`
+- **Rationale**: Avoids unnecessary allocation. RGX's `replace` currently returns `String` always.
+- **How**: Return `Cow::Borrowed(text)` when no match, `Cow::Owned(result)` otherwise.
+- **Port difficulty**: Trivial.
+
 ---
 
 ## C. Engineering improvements
@@ -251,6 +328,17 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | B3 Compilation caching | `small` | Performance for dynamic patterns |
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
 | B9 Error diagnostics | `medium` | Developer experience |
+| B11 `RegexBuilder` | `small` | Standard compilation API |
+| B12 Iterator APIs | `small` | Idiomatic Rust, zero-allocation |
+| B13 `Captures` wrapper | `small` | Ergonomic capture access |
+| B14 `Match` type | `trivial` | `m.as_str()` instead of manual slicing |
+| B15 `replacen` | `trivial` | Replace up to N matches |
+| B16 `Replacer` trait | `small` | Closure-based replacement |
+| B17 `shortest_match` | `small` | Faster match-end queries |
+| B18 `escape()` | `trivial` | Safe pattern construction |
+| B19 Metadata accessors | `trivial` | `captures_len`, `capture_names`, `as_str` |
+| B20 `CaptureLocations` | `small` | Reusable capture storage |
+| B21 `Cow<str>` replace | `trivial` | Avoid allocation on no-match |
 | C3 Fuzzing | `small` | Robustness |
 | C4 Benchmark CI | `small` | Prevent regressions |
 
