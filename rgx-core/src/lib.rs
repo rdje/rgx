@@ -635,8 +635,8 @@ impl<'r> ExactSizeIterator for CaptureNames<'r> {}
 /// ```rust,no_run
 /// # use rgx_core::RegexBuilder;
 /// let re = RegexBuilder::new(r"hello world")
-///     .case_insensitive(true)
-///     .multi_line(true)
+///     .case_insensitive()
+///     .multi_line()
 ///     .build()
 ///     .unwrap();
 /// assert!(re.is_match("HELLO WORLD"));
@@ -673,41 +673,71 @@ impl RegexBuilder {
         self
     }
 
+    /// Enable case-insensitive matching (`(?i)`).
+    ///
+    /// Call with no argument to enable (the common case), or pass `false`
+    /// to explicitly disable.
+    #[must_use]
+    pub fn case_insensitive(self) -> Self {
+        self.set_case_insensitive(true)
+    }
+
     /// Enable or disable case-insensitive matching (`(?i)`).
     #[must_use]
-    pub fn case_insensitive(mut self, yes: bool) -> Self {
+    pub fn set_case_insensitive(mut self, yes: bool) -> Self {
         self.case_insensitive = yes;
         self
     }
 
-    /// Enable or disable multi-line mode (`(?m)`), where `^` and `$` match
-    /// line boundaries instead of only start/end of text.
+    /// Enable multi-line mode (`(?m)`), where `^`/`$` match line boundaries.
     #[must_use]
-    pub fn multi_line(mut self, yes: bool) -> Self {
+    pub fn multi_line(self) -> Self {
+        self.set_multi_line(true)
+    }
+
+    /// Enable or disable multi-line mode (`(?m)`).
+    #[must_use]
+    pub fn set_multi_line(mut self, yes: bool) -> Self {
         self.multi_line = yes;
         self
     }
 
-    /// Enable or disable dot-matches-newline mode (`(?s)`), where `.` matches
-    /// any character including `\n`.
+    /// Enable dot-matches-newline mode (`(?s)`), where `.` matches `\n`.
     #[must_use]
-    pub fn dot_matches_new_line(mut self, yes: bool) -> Self {
+    pub fn dot_matches_new_line(self) -> Self {
+        self.set_dot_matches_new_line(true)
+    }
+
+    /// Enable or disable dot-matches-newline mode (`(?s)`).
+    #[must_use]
+    pub fn set_dot_matches_new_line(mut self, yes: bool) -> Self {
         self.dot_matches_new_line = yes;
         self
     }
 
-    /// Enable or disable swap-greed mode, where quantifiers are lazy by default
-    /// and `?` makes them greedy.
+    /// Enable swap-greed mode, where quantifiers are lazy by default.
     #[must_use]
-    pub fn swap_greed(mut self, yes: bool) -> Self {
+    pub fn swap_greed(self) -> Self {
+        self.set_swap_greed(true)
+    }
+
+    /// Enable or disable swap-greed mode.
+    #[must_use]
+    pub fn set_swap_greed(mut self, yes: bool) -> Self {
         self.swap_greed = yes;
         self
     }
 
-    /// Enable or disable extended/verbose mode (`(?x)`), where unescaped
-    /// whitespace and `#` comments are ignored.
+    /// Enable extended/verbose mode (`(?x)`), where whitespace and `#`
+    /// comments are ignored.
     #[must_use]
-    pub fn ignore_whitespace(mut self, yes: bool) -> Self {
+    pub fn ignore_whitespace(self) -> Self {
+        self.set_ignore_whitespace(true)
+    }
+
+    /// Enable or disable extended/verbose mode (`(?x)`).
+    #[must_use]
+    pub fn set_ignore_whitespace(mut self, yes: bool) -> Self {
         self.ignore_whitespace = yes;
         self
     }
@@ -6845,7 +6875,7 @@ mod tests {
     #[test]
     fn regex_builder_case_insensitive() {
         let re = RegexBuilder::new(r"hello")
-            .case_insensitive(true)
+            .case_insensitive()
             .build()
             .unwrap();
         assert!(re.is_match("HELLO"));
@@ -6855,17 +6885,14 @@ mod tests {
 
     #[test]
     fn regex_builder_multi_line() {
-        let re = RegexBuilder::new(r"^line$")
-            .multi_line(true)
-            .build()
-            .unwrap();
+        let re = RegexBuilder::new(r"^line$").multi_line().build().unwrap();
         assert!(re.is_match("first\nline\nlast"));
     }
 
     #[test]
     fn regex_builder_dot_all() {
         let re = RegexBuilder::new(r"a.b")
-            .dot_matches_new_line(true)
+            .dot_matches_new_line()
             .build()
             .unwrap();
         assert!(re.is_match("a\nb"));
@@ -6880,7 +6907,7 @@ mod tests {
             \d{4}   # number
         ",
         )
-        .ignore_whitespace(true)
+        .ignore_whitespace()
         .build()
         .unwrap();
         assert!(re.is_match("555-1234"));
@@ -6889,9 +6916,9 @@ mod tests {
     #[test]
     fn regex_builder_combined_flags() {
         let re = RegexBuilder::new(r"^hello.world$")
-            .case_insensitive(true)
-            .multi_line(true)
-            .dot_matches_new_line(true)
+            .case_insensitive()
+            .multi_line()
+            .dot_matches_new_line()
             .build()
             .unwrap();
         assert!(re.is_match("prefix\nHELLO\nWORLD\nsuffix"));
