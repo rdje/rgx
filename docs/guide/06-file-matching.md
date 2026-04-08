@@ -728,6 +728,88 @@ for file in &log_files {
 }
 ```
 
+## tail_file: live file watching
+
+`tail_file` watches a file for new content and calls your callback for every match found in newly appended lines -- like `tail -f | grep`, but as a single API call with zero idle CPU cost.
+
+Under the hood, rgx uses **OS-native file watching** (kqueue on macOS, inotify on Linux) via the `notify` crate. The engine sleeps until the kernel signals that the file has changed -- no polling loop burning CPU.
+
+### Basic usage
+
+```rust
+use rgx_core::{Regex, file::TailOptions};
+
+let re = Regex::compile(r"ERROR\s.*")?;
+
+let handle = re.tail_file("app.log", TailOptions::default(), |fm| {
+    eprintln!("[line {}] {}", fm.line_number, fm.line);
+});
+
+// ... do other work while watching ...
+
+handle.stop();  // clean shutdown
+```
+
+The callback receives a `FileMatch` for every match in every new line appended to the file. `TailOptions::default()` starts from the end of the file (you only see new content).
+
+### Starting from the beginning
+
+If you want to process existing content first, then continue watching:
+
+```rust
+let handle = re.tail_file("app.log", TailOptions {
+    from_end: false,     // read existing content first
+    ..TailOptions::default()
+}, |fm| {
+    println!("line {}: {}", fm.line_number, fm.line);
+});
+```
+
+### Real-world: log alerter
+
+Watch a production log for errors and warnings, with different handling for each:
+
+```rust
+let re = Regex::compile(r"(ERROR|WARN)\s+(.*)")?;
+
+let handle = re.tail_file("/var/log/app.log", TailOptions::default(), |fm| {
+    let line = &fm.line;
+    if line.contains("ERROR") {
+        eprintln!("🔴 ALERT: {line}");
+        // Could trigger a webhook, send a Slack message, etc.
+    } else {
+        eprintln!("🟡 Warning: {line}");
+    }
+});
+
+// The watcher runs in a background thread.
+// Drop the handle or call handle.stop() to shut down.
+```
+
+### How it works
+
+1. On startup, the file position is recorded (end or beginning, per `TailOptions`)
+2. An OS-native watcher (kqueue/inotify) is registered on the file
+3. When the kernel signals a modification, rgx reads the new bytes
+4. New lines are matched against the regex; callbacks fire for each match
+5. If the file is truncated (log rotation), the position resets automatically
+6. The watcher runs in a background thread; `TailHandle::stop()` shuts it down cleanly
+
+### TailOptions
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `poll_interval` | 250ms | Fallback poll interval (OS events are near-instant) |
+| `from_end` | `true` | Start at file end (only new content) or beginning |
+
+### TailHandle
+
+| Method | What it does |
+|--------|-------------|
+| `stop()` | Signal the watcher thread and wait for it to finish |
+| `is_running()` | Check if the watcher thread is still active |
+| *(drop)* | Signals stop but doesn't block |
+
 ## Summary
 
 | What you want | How |
@@ -736,6 +818,7 @@ for file in &log_files {
 | Match file line by line | `re.match_file_lines("path")` |
 | Scan file with callbacks | `re.scan_file("path")` |
 | Scan file line by line with callbacks | `re.scan_file_lines("path")` |
+| **Watch a file for new matches** | **`re.tail_file("path", opts, callback)`** |
 | Get line numbers | Use `match_file_lines` -- each `FileMatch` has `.line_number` |
 | Get matched line text | Use `match_file_lines` -- each `FileMatch` has `.line` |
 | Handle missing files | Match on the `Result` |
