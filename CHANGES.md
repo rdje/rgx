@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship benchmark CI job
+- Scope: Tier 2 backlog item C4 (benchmark CI).
+- Changes:
+  - Added `benchmarks` job to `.github/workflows/ci.yml`
+  - Runs criterion throughput benchmarks on every push to main
+  - Results uploaded as artifacts (90-day retention) for regression tracking
+  - Skipped on PRs to avoid noisy CI
+- Validation: CI YAML is valid. Main workspace tests unaffected.
+
 ### 2026-04-08 - Ship fuzzing infrastructure (cargo-fuzz targets)
 - Scope: Tier 2 backlog item C3 (fuzzing).
 - Changes:

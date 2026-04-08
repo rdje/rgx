@@ -39,3 +39,41 @@ jobs:
 
       - name: Run local CI script
         run: ./scripts/run-local-ci.sh
+
+  benchmarks:
+    name: Performance benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run on pushes to main (not PRs) to avoid noisy CI.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.RGX_SUBMODULES_TOKEN != '' && secrets.RGX_SUBMODULES_TOKEN || github.token }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblua5.4-dev libpcre2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run criterion benchmarks
+        run: |
+          cargo bench -p rgx-bench --bench throughput -- --output-format bencher 2>/dev/null | tee benchmark-results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark-results.txt
+          retention-days: 90

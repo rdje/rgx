@@ -340,7 +340,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~B20 `CaptureLocations`~~ | `small` | ✅ Shipped — captures_read + captures_read_at |
 | ~~B21 `Cow<str>` replace~~ | `trivial` | ✅ Shipped |
 | ~~C3 Fuzzing~~ | `small` | ✅ Shipped — 4 cargo-fuzz targets with invariant checks |
-| C4 Benchmark CI | `small` | Prevent regressions |
+| ~~C4 Benchmark CI~~ | `small` | ✅ Shipped — criterion benchmarks in CI with artifact storage |
 
 ### Tier 3 — Do when ready (strategic)
 | Item | Effort | Why |
