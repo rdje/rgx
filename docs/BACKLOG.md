@@ -345,7 +345,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### Tier 3 — Do when ready (strategic)
 | Item | Effort | Why |
 |------|--------|-----|
-| ~~A3 `tail_file`~~ | `medium` | ✅ Shipped — poll-based file watching with callbacks |
+| ~~A3 `tail_file`~~ | `medium` | ✅ Shipped — OS-native event-driven watching (kqueue/inotify) |
 | ~~A7 Unicode case folding~~ | `medium` | ✅ Shipped — `(?i:café)` matches `CAFÉ` |
 | A9 Language bindings | `large` | 10x user base |
 | ~~B2 `RegexSet`~~ | `large` | ✅ Shipped — multi-pattern matching with SetMatches |

@@ -26,6 +26,9 @@ mlua = { workspace = true, optional = true }
 rquickjs = { workspace = true, optional = true }
 rhai = { workspace = true, optional = true }
 
+# File watching (OS-native: kqueue on macOS, inotify on Linux)
+notify = { workspace = true }
+
 # Utilities
 tracing = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }

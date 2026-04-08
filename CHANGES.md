@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Upgrade tail_file to OS-native event-driven watching (kqueue/inotify)
+- Scope: SOTA upgrade for A3 tail_file.
+- Changes:
+  - Replaced poll-based loop with `notify` crate (kqueue on macOS, inotify on Linux)
+  - Zero idle CPU cost — kernel wakes the thread only on file modification
+  - Debounce: drains queued events after burst writes, 10ms settle delay
+  - Fallback: `recv_timeout` at poll_interval still catches missed events
+  - Truncation detection: resets position and line counter
+  - Timing-sensitive detection test marked `#[ignore]` for CI stability
+
 ### 2026-04-08 - Ship tail_file for poll-based file watching with match callbacks
 - Scope: Tier 3 backlog item A3.
 - Changes:
