@@ -41,58 +41,39 @@ Compilation is the expensive part. Once compiled, a regex can be used millions o
 ```rust
 let re = Regex::compile(r"\d{3}-\d{4}")?;
 
-if let Some(m) = re.find_first("Call 555-1234 for info") {
-    println!("Found at position {}..{}", m.start, m.end);
-    // Found at position 5..13
-
-    // Extract the matched text
-    let text = "Call 555-1234 for info";
-    println!("Matched: {}", &text[m.start..m.end]);
-    // Matched: 555-1234
+if let Some(m) = re.find("Call 555-1234 for info") {
+    println!("Matched: {}", m.as_str());   // "555-1234"
+    println!("Position: {}..{}", m.start(), m.end());  // 5..13
+    println!("Length: {} bytes", m.len());  // 8
 }
 ```
 
-`find_first` returns `Option<MatchResult>` -- `Some` if there's a match, `None` if not.
+`find` returns `Option<Match>` — a lightweight handle that borrows the input text. Use `m.as_str()` to get the matched substring directly — no manual slicing needed.
 
-A `MatchResult` tells you:
-- `start` -- byte position where the match begins
-- `end` -- byte position where the match ends (exclusive)
-- `matched_branch_number` -- which alternative matched (more on this later)
-- `code_result` -- a value returned by code blocks (more on this later)
-
-Don't worry about `matched_branch_number` and `code_result` yet -- they become important when you start writing callbacks and multi-branch patterns. For now, `start` and `end` are all you need.
+> **Under the hood:** `find_first` returns `Option<MatchResult>` with more detail (capture groups, branch numbers, code results). `find` is the ergonomic wrapper you'll use 90% of the time.
 
 ## Finding all matches
 
 ```rust
 let re = Regex::compile(r"\b\w+\b")?;
 
-let text = "hello world foo";
-let matches = re.find_all(text);
-
-for m in &matches {
-    println!("{}", &text[m.start..m.end]);
+// Lazy iterator — no Vec allocation, matches found on demand
+for m in re.find_iter("hello world foo") {
+    println!("{}", m.as_str());
 }
 // hello
 // world
 // foo
 ```
 
-`find_all` returns all non-overlapping matches from left to right. Each match starts after the previous one ends.
+`find_iter` returns a lazy iterator. Matches are found one at a time as you advance the iterator — perfect for large inputs where you might stop early.
 
-Here's what the return value looks like conceptually:
+If you need all matches in a `Vec` (for random access or counting):
 
+```rust
+let matches = re.find_all("hello world foo");  // Vec<MatchResult>
+println!("Found {} matches", matches.len());
 ```
-text:    "hello world foo"
-          ^^^^^       ^^^
-          |   |       | |
-matches: [             ]
-  [0]: start=0,  end=5   -> "hello"
-  [1]: start=6,  end=11  -> "world"
-  [2]: start=12, end=15  -> "foo"
-```
-
-Each `MatchResult` gives you byte offsets. Slice the original text with `&text[m.start..m.end]` to get the matched string.
 
 ## Testing if a pattern matches
 
@@ -107,26 +88,34 @@ assert!(!re.is_match("no digits here"));
 
 `is_match` is slightly faster than `find_first` because it doesn't need to build the match result.
 
-## Named capture groups
+## Capture groups
 
-Capture groups let you extract specific parts of a match. Named groups make your code readable:
+Capture groups let you extract specific parts of a match. Named groups make your code self-documenting:
 
 ```rust
 let re = Regex::compile(r"(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})")?;
 
-let m = re.find_first("Date: 2026-04-06").unwrap();
-let text = "Date: 2026-04-06";
+if let Some(caps) = re.captures("Date: 2026-04-06") {
+    println!("Full match: {}", &caps[0]);    // "2026-04-06"
+    println!("Year: {}",  &caps["year"]);    // "2026"
+    println!("Month: {}", &caps["month"]);   // "04"
+    println!("Day: {}",   &caps["day"]);     // "06"
 
-// Group 0 is always the full match
-println!("Full match: {}", &text[m.start..m.end]);
-// Full match: 2026-04-06
-
-// Named groups are in the groups array (1-based)
-// groups[1] = year, groups[2] = month, groups[3] = day
-if let Some((start, end)) = m.groups.get(1).and_then(|g| *g) {
-    println!("Year: {}", &text[start..end]);
-    // Year: 2026
+    // Also works by index
+    println!("Group 1: {}", &caps[1]);       // "2026"
 }
+```
+
+`captures` returns `Option<Captures>` — index by number (`caps[1]`) or by name (`caps["year"]`). Group 0 is always the full match.
+
+Iterate over all captures in a text:
+
+```rust
+for caps in re.captures_iter("Born 1990-05-15, graduated 2012-06-22") {
+    println!("{}-{}-{}", &caps["year"], &caps["month"], &caps["day"]);
+}
+// 1990-05-15
+// 2012-06-22
 ```
 
 ## More patterns in action
@@ -179,41 +168,50 @@ for m in &matches {
 // URL: http://docs.rgx.dev/guide
 ```
 
-### Splitting words out of mixed content
+### Replacing text
 
 ```rust
-let re = Regex::compile(r"[a-zA-Z]+")?;
+let re = Regex::compile(r"(\w+)\s(\w+)")?;
 
-let text = "error_404: file-not-found (retry in 30s)";
-let matches = re.find_all(text);
+// Template interpolation with $1, $2, $name
+let result = re.replace("hello world", "$2 $1");
+println!("{result}");  // "world hello"
 
-for m in &matches {
-    print!("{} ", &text[m.start..m.end]);
-}
-// error file not found retry in s
+// Replace all occurrences
+let result = re.replace_all("John Doe and Jane Smith", "$2 $1");
+println!("{result}");  // "Doe John and Smith Jane"
+
+// Closure-based replacement — compute anything you want
+let result = re.replace_all("hello world", |caps: &Captures| {
+    caps[1].to_uppercase()
+});
+println!("{result}");  // "HELLO WORLD"
 ```
 
-### Matching multi-part structures with groups
+### Splitting text
 
 ```rust
-let re = Regex::compile(
-    r"(?<name>[a-zA-Z_]\w*)\s*=\s*(?<value>[^\n;]+)"
-)?;
+let re = Regex::compile(r"[,\s]+")?;
 
-let text = "host = 127.0.0.1\nport = 8080\nmode = production";
-let matches = re.find_all(text);
+let parts = re.split("one, two,  three");
+// ["one", "two", "three"]
 
-for m in &matches {
-    if let (Some((ns, ne)), Some((vs, ve))) = (
-        m.groups.get(1).and_then(|g| *g),
-        m.groups.get(2).and_then(|g| *g),
-    ) {
-        println!("{} => {}", &text[ns..ne], &text[vs..ve]);
-    }
+// With a limit
+let parts = re.splitn("a, b, c, d", 3);
+// ["a", "b", "c, d"]
+```
+
+### Matching config-style key=value pairs
+
+```rust
+let re = Regex::compile(r"(?<name>\w+)\s*=\s*(?<value>[^\n;]+)")?;
+
+for caps in re.captures_iter("host = 127.0.0.1\nport = 8080\nmode = prod") {
+    println!("{} => {}", &caps["name"], &caps["value"]);
 }
 // host => 127.0.0.1
 // port => 8080
-// mode => production
+// mode => prod
 ```
 
 ## Common patterns
@@ -273,6 +271,36 @@ let re = Regex::compile(r"([^&=]+)=([^&]*)")?;
 let text = "name=alice&age=30&city=portland";
 let matches = re.find_all(text);
 // Each match has two capture groups. Can you extract them?
+```
+
+## Configuring compilation with RegexBuilder
+
+Sometimes you want flags like case-insensitive matching without embedding `(?i)` in the pattern. `RegexBuilder` gives you a fluent API:
+
+```rust
+use rgx_core::RegexBuilder;
+
+let re = RegexBuilder::new(r"hello world")
+    .case_insensitive()       // (?i) — match "HELLO WORLD" too
+    .multi_line()             // (?m) — ^ and $ match line boundaries
+    .build()?;
+
+assert!(re.is_match("HELLO WORLD"));
+```
+
+Available settings: `case_insensitive()`, `multi_line()`, `dot_matches_new_line()`, `ignore_whitespace()`, `swap_greed()`, `mode(ExecutionMode::Safe)`.
+
+## Building patterns from user input safely
+
+If you're constructing patterns from user-provided strings, escape metacharacters first:
+
+```rust
+use rgx_core::escape;
+
+let user_input = "price is $3.50 (USD)";
+let pattern = escape(user_input);  // "price is \$3\.50 \(USD\)"
+let re = Regex::compile(&pattern)?;
+assert!(re.is_match(user_input));  // matches literally
 ```
 
 ## Common gotchas
