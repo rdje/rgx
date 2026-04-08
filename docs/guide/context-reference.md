@@ -83,6 +83,13 @@ Lua code blocks receive their context through global variables set before execut
 |----------|-------------|
 | `rgx.emit_numeric(n)` | Emit a numeric value for the match result |
 | `rgx.emit_replacement(s)` | Emit a replacement string for the match result |
+| `rgx.steer_continue()` | Continue matching normally |
+| `rgx.steer_fail()` | Reject this path and backtrack |
+| `rgx.steer_accept()` | Commit the match immediately |
+| `rgx.steer_skip(n)` | Advance `n` bytes before continuing |
+| `rgx.steer_abort()` | Stop the entire search |
+
+Steer actions take highest priority — if called, they override the return value.
 
 ### Return value interpretation
 
@@ -146,6 +153,13 @@ JavaScript code blocks receive their context through global variables set before
 |----------|-------------|
 | `rgx.emit_numeric(n)` | Emit a numeric value for the match result |
 | `rgx.emit_replacement(s)` | Emit a replacement string for the match result |
+| `rgx.steerContinue()` | Continue matching normally |
+| `rgx.steerFail()` | Reject this path and backtrack |
+| `rgx.steerAccept()` | Commit the match immediately |
+| `rgx.steerSkip(n)` | Advance `n` bytes before continuing |
+| `rgx.steerAbort()` | Stop the entire search |
+
+Steer actions take highest priority — if called, they override the return value.
 
 ### Return value interpretation
 
@@ -226,8 +240,13 @@ Rhai code blocks receive their context through variables injected into the evalu
 |----------|-------------|
 | `emit_numeric(n)` | Emit a numeric value for the match result (accepts i64 or f64) |
 | `emit_replacement(s)` | Emit a replacement string for the match result |
+| `steer_continue()` | Continue matching normally |
+| `steer_fail()` | Reject this path and backtrack |
+| `steer_accept()` | Commit the match immediately |
+| `steer_skip(n)` | Advance `n` bytes before continuing (n: i64) |
+| `steer_abort()` | Stop the entire search |
 
-Note: In Rhai, `emit_numeric` and `emit_replacement` are top-level functions, not methods on a namespace (unlike Lua/JS where they're on the `rgx` table).
+Note: In Rhai, all functions are top-level (not on a namespace). Steer actions take highest priority.
 
 ### Return value interpretation
 
@@ -371,3 +390,14 @@ Note: In Lua, JavaScript, and Rhai, you can also return a numeric or string valu
 | Return true/false | `(?{rhai: x > 10})` -- pure predicate, no value to surface |
 
 If you both return a value and emit a value, the returned value takes precedence for `Numeric` and `Replacement` results. If you return `true` (Success), the emitted value is used. If you return `false` (Failure), the emitted value is discarded (the match failed).
+
+### Steering the match (accept immediately)
+
+| Language | Syntax |
+|----------|--------|
+| Native | `return ExecResult::Steer(SteerResult::Accept)` |
+| Lua | `rgx.steer_accept()` |
+| JavaScript | `rgx.steerAccept()` |
+| Rhai | `steer_accept()` |
+
+Other actions: `continue`, `fail`, `skip(n)`, `abort` — same naming pattern per language.
