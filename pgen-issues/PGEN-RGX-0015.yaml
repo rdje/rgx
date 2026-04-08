@@ -1,0 +1,54 @@
+id: PGEN-RGX-0015
+summary: |
+  PGEN regex parser does not recognize PCRE2 10.47+ returned-capture
+  subroutine syntax: (?1(grouplist)). This is a feature request, not
+  a bug — the syntax is new in PCRE2 10.47 and has minimal adoption.
+status: open
+opened_at: 2026-04-08T00:00:00Z
+first_seen_at: 2026-04-08T00:00:00Z
+last_updated_at: 2026-04-08T00:00:00Z
+parser_backend: pgen
+parser_backend_version: "1.1.8"
+rgx_commit: 61baa2c
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: "parseability_probe --parse regex repro_input.txt --profile regex_default"
+  pattern: "(?1(1))"
+  input: ""
+  notes: |
+    PCRE2 10.47 introduced (?N(grouplist)) syntax for subroutines that
+    return their captures to the caller instead of discarding them.
+    This is tracked as RGX backlog item A12.
+    Low priority — near-zero real-world adoption at this time.
+expected_behavior: |
+  PGEN should parse (?1(1)) and produce a structured AST node
+  (e.g., rule name "returned_capture_subroutine" or similar) with
+  the subroutine target and the group list.
+actual_behavior: |
+  PGEN returns:
+    Error: parse_full rejected sample: Parser did not consume full input at position 0
+reproduction: |
+  File: repro_input.txt containing: (?1(1))
+
+  Command:
+    cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+      --bin parseability_probe -- --parse regex repro_input.txt --profile regex_default
+
+  Result: "Parser did not consume full input at position 0"
+impact: |
+  Blocks A12 (returned-capture subroutines) from the RGX backlog.
+  Low priority — this is a bleeding-edge PCRE2 10.47+ feature with
+  minimal real-world adoption. No urgency.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Will verify once PGEN adds (?N(grouplist)) to the regex grammar
+    and RGX updates the submodule pin.
