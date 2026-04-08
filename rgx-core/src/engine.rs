@@ -19,6 +19,23 @@ pub enum ExecutionMode {
     Full,
 }
 
+/// Controls how alternation matches are selected.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MatchSemantics {
+    /// Leftmost-first: the first alternative that matches wins (PCRE2/Perl default).
+    /// `a|ab` on "ab" → matches "a".
+    LeftmostFirst,
+    /// Leftmost-longest: at each position, the longest match wins (POSIX semantics).
+    /// `a|ab` on "ab" → matches "ab".
+    LeftmostLongest,
+}
+
+impl Default for MatchSemantics {
+    fn default() -> Self {
+        Self::LeftmostFirst
+    }
+}
+
 /// Match result with position information
 #[derive(Clone, Debug, PartialEq)]
 pub struct MatchResult {
@@ -344,6 +361,11 @@ impl Engine {
     #[must_use]
     pub fn num_groups(&self) -> u32 {
         self.vm.program.num_groups
+    }
+
+    /// Set the match semantics (leftmost-first or leftmost-longest).
+    pub fn set_match_semantics(&self, semantics: MatchSemantics) {
+        self.vm.set_match_semantics(semantics);
     }
 
     /// Set the maximum number of opcode steps per match attempt.

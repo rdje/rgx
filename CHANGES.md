@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship MatchSemantics API (leftmost-first / leftmost-longest)
+- Scope: Tier 3 backlog item B4 (configurable match semantics).
+- Changes:
+  - `MatchSemantics` enum: `LeftmostFirst` (default, PCRE2/Perl), `LeftmostLongest` (POSIX)
+  - `Regex::set_match_semantics()` — runtime switch stored as AtomicU8
+  - For non-alternation patterns, greedy quantifiers already produce the longest match
+  - Full POSIX alternation reordering (e.g., `a|ab` → `ab|a`) requires compiler-level AST sorting — tracked as follow-up
+  - Workaround: put longer branches first in alternation
+  - 6 new tests
+- Validation: 472 lib tests pass (1 ignored). Zero clippy errors.
+
 ### 2026-04-08 - Upgrade tail_file to OS-native event-driven watching (kqueue/inotify)
 - Scope: SOTA upgrade for A3 tail_file.
 - Changes:

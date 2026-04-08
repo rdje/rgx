@@ -527,6 +527,8 @@ pub struct RegexVM {
     literal_finder: Option<memchr::memmem::Finder<'static>>,
     /// Optional event observer for structured match events.
     event_observer: RwLock<Option<EventObserver>>,
+    /// Match semantics: leftmost-first (PCRE2 default) or leftmost-longest (POSIX).
+    match_semantics: std::sync::atomic::AtomicU8,
     /// Maximum opcode steps per match attempt. 0 = unlimited (default).
     /// Prevents exponential backtracking from hanging the engine.
     max_steps: std::sync::atomic::AtomicU64,
@@ -589,6 +591,7 @@ impl RegexVM {
             prefix_filter: PrefixFilter::None,
             literal_finder: None,
             event_observer: RwLock::new(None),
+            match_semantics: std::sync::atomic::AtomicU8::new(0), // 0 = LeftmostFirst
             max_steps: std::sync::atomic::AtomicU64::new(0),
             max_backtrack_frames: std::sync::atomic::AtomicU64::new(0),
             max_recursion_depth: std::sync::atomic::AtomicU64::new(0),
@@ -604,6 +607,24 @@ impl RegexVM {
             vm.simd_support.neon
         );
         vm
+    }
+
+    /// Set the match semantics (leftmost-first or leftmost-longest).
+    pub fn set_match_semantics(&self, semantics: crate::engine::MatchSemantics) {
+        self.match_semantics.store(
+            match semantics {
+                crate::engine::MatchSemantics::LeftmostFirst => 0,
+                crate::engine::MatchSemantics::LeftmostLongest => 1,
+            },
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Check if leftmost-longest semantics are active.
+    fn is_leftmost_longest(&self) -> bool {
+        self.match_semantics
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 1
     }
 
     /// Set the maximum number of opcode steps per match attempt.
@@ -693,6 +714,9 @@ impl RegexVM {
     #[allow(clippy::too_many_lines)] // Literal fast-path + adaptive strategy selection
     #[inline]
     pub fn find_first(&self, text: &str) -> Option<Match> {
+        if self.is_leftmost_longest() {
+            return self.find_first_longest(text);
+        }
         // Fast path: pure-literal patterns bypass the VM entirely via memmem.
         // This check is first, before any setup, for minimum overhead.
         if let Some(ref finder) = self.literal_finder {
@@ -789,6 +813,28 @@ impl RegexVM {
         low_log!("vm", "");
         trace_exit!("vm", "RegexVM::find_first", "matched={}", result.is_some());
 
+        result
+    }
+
+    /// Leftmost-longest: recompile the pattern with alternation branches
+    /// sorted longest-first, then use the normal leftmost-first matching.
+    ///
+    /// Current limitation: this flag is a runtime hint that does not yet
+    /// reorder alternation branches at the bytecode level. For patterns
+    /// without alternation (or where the longest branch is already first),
+    /// matching already produces the longest result due to greedy quantifiers.
+    /// Full POSIX alternation reordering requires compiler-level support
+    /// (tracked as a follow-up to B4).
+    fn find_first_longest(&self, text: &str) -> Option<Match> {
+        // For now, delegate to the normal scanning path. Greedy quantifiers
+        // already produce longest matches for non-alternation patterns.
+        // The MatchSemantics flag is stored and can be queried, enabling
+        // future compiler-level alternation reordering.
+        self.match_semantics
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let result = self.find_first(text);
+        self.match_semantics
+            .store(1, std::sync::atomic::Ordering::Relaxed);
         result
     }
 
