@@ -1074,7 +1074,13 @@ Live continuity memory for `rgx` sessions.
 - **A10 `\X`**: Extended grapheme cluster matching via `unicode-segmentation` crate. VM opcode `0x08`, AST node, parser mapping. Bug found via trace: opcode was missing from `TryFrom<u8>` dispatch table.
 - **A12 Returned-capture subroutines**: `(?1(1))` syntax parsed via PGEN 1.1.9 `returned_capture_subroutine` nodes. Compiles to `Call` opcode. Full capture-return VM semantics (preserving specified groups) is a follow-up.
 
+### The RGX Book (mdBook)
+- `book/` directory: 30 chapters, 7,300+ lines, every feature documented with examples
+- Build: `mdbook serve book` for searchable HTML
+- Live document — evolves alongside the project
+
 ### Backlog status
 - **41 of 44 items closed**
 - Remaining: A9 (language bindings — large), C1 (JIT — major), C2 (NFA/DFA — major)
+- A12 closed (returned-capture subroutines shipped with PGEN 1.1.9)
 - CI fix: `RGX_SUBMODULES_TOKEN` secret set up for private PGEN submodule access

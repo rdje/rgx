@@ -1,0 +1,18 @@
+[book]
+title = "The RGX Book"
+authors = ["Richard DJE"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/rdje/rgx"
+edit-url-template = "https://github.com/rdje/rgx/edit/main/book/src/{path}"
+
+[output.html.search]
+enable = true
+limit-results = 20

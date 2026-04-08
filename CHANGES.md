@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Ship The RGX Book (mdBook, 30 chapters, 7,300+ lines)
+- Scope: comprehensive documentation covering every user-facing feature.
+- Changes:
+  - `book/` directory with mdBook configuration and 37 markdown source files
+  - Part I: Getting Started (5 chapters — first match, finding, captures, replace/split, RegexBuilder)
+  - Part II: Core API (8 chapters — Match type, iterators, position-aware, RegexSet, RegexCache, BytesRegex, safety limits, error diagnostics)
+  - Part III: Advanced (5 chapters — Unicode, match semantics, partial matching, CaptureLocations, Replacer trait)
+  - Part IV: Host Integration (6 chapters — data exchange, callbacks, steering, events, async, file matching)
+  - Part V: Real World (5 chapters — log monitor, tokenizer, HTTP router, data pipeline, WAF engine)
+  - Appendices (5 — pattern syntax, PCRE2 compat, context reference, execution modes, CLI)
+  - Build with `mdbook serve book` for searchable HTML with Rust theme
+  - This is a live document that evolves alongside the project
+- Validation: `mdbook build book` succeeds cleanly.
+
 ### 2026-04-09 - Ship returned-capture subroutine parsing and compilation (A12)
 - Scope: Tier 4 backlog item A12, enabled by PGEN 1.1.9.
 - Changes:

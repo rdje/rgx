@@ -51,7 +51,7 @@ benchmark_results/
 
 # Documentation build
 doc/
-book/
+book/book/
 
 # Temporary files
 .temp/

@@ -10,7 +10,8 @@ Build a robust, high-performance, extensible regex engine that:
 ## Start here (fast ramp-up)
 If you are new to the repo, use this order:
 1. `README.md` (this file) for the full navigation map.
-2. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
+2. **[The RGX Book](book/src/SUMMARY.md)** — comprehensive mdBook documentation covering every feature with examples. Build with `mdbook serve book` for a searchable HTML book.
+3. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
 3. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
 4. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
 5. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
