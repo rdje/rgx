@@ -57,6 +57,8 @@ pub enum OpCode {
     MatchReset = 0x06,
     /// \G — Assert that current position equals end of previous match
     PreviousMatchEnd = 0x07,
+    /// \X — Match one Unicode extended grapheme cluster
+    GraphemeCluster = 0x08,
 
     // === CHARACTER CLASSES (0x10-0x1F) ===
     /// ASCII digit [0-9]
@@ -226,6 +228,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::FlagGroup { .. } => "FlagGroup",
         Regex::MatchReset => "MatchReset",
         Regex::NewlineSequence => "NewlineSequence",
+        Regex::GraphemeCluster => "GraphemeCluster",
         Regex::Accept => "Accept",
         Regex::Commit => "Commit",
         Regex::Prune => "Prune",
@@ -2180,6 +2183,33 @@ impl RegexVM {
                 OpCode::MatchReset => {
                     debug_log!("vm", "  \\K match reset at pos={}", ctx.pos);
                     ctx.match_start_override = Some(ctx.pos);
+                }
+
+                OpCode::GraphemeCluster => {
+                    use unicode_segmentation::UnicodeSegmentation;
+                    if ctx.pos < ctx.text.len() {
+                        // SAFETY: ctx.text is guaranteed valid UTF-8 on the &str path.
+                        let remaining =
+                            unsafe { std::str::from_utf8_unchecked(&ctx.text[ctx.pos..]) };
+                        if let Some(cluster) = remaining.graphemes(true).next() {
+                            debug_log!(
+                                "vm",
+                                "  \\X: matched grapheme {:?} ({} bytes)",
+                                cluster,
+                                cluster.len()
+                            );
+                            ctx.pos += cluster.len();
+                            continue;
+                        }
+                    }
+                    // At EOF — flag partial match if we were mid-match.
+                    if ctx.pos > ctx.match_start {
+                        ctx.hit_end = true;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
                 }
 
                 // --- Backtracking control verbs ---
@@ -6361,6 +6391,10 @@ impl OptimizingCompiler {
                 self.emit_op(OpCode::MatchReset);
             }
 
+            Regex::GraphemeCluster => {
+                self.emit_op(OpCode::GraphemeCluster);
+            }
+
             Regex::NewlineSequence => {
                 // Expand \R into (?:\r\n|\r|\n|\x0B|\x0C|\x85|\u{2028}|\u{2029})
                 let expanded = Regex::Group {
@@ -6668,6 +6702,7 @@ impl OptimizingCompiler {
             | Regex::Callout(_)
             | Regex::MatchReset
             | Regex::NewlineSequence
+            | Regex::GraphemeCluster
             | Regex::Accept
             | Regex::Commit
             | Regex::Prune
@@ -6987,11 +7022,11 @@ impl TryFrom<u8> for OpCode {
         use OpCode::{
             Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
             CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
-            Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg,
-            Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd,
-            Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
-            SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
-            VerbSkip, WordAscii, WordAsciiNeg, WordBoundary,
+            GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
+            LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
+            PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart,
+            SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
+            StartLine, StartText, Then, VerbSkip, WordAscii, WordAsciiNeg, WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -6999,6 +7034,7 @@ impl TryFrom<u8> for OpCode {
             0x05 => Ok(AnyDotAll),
             0x06 => Ok(MatchReset),
             0x07 => Ok(PreviousMatchEnd),
+            0x08 => Ok(GraphemeCluster),
             0x10 => Ok(DigitAscii),
             0x11 => Ok(DigitAsciiNeg),
             0x12 => Ok(WordAscii),

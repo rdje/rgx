@@ -7320,4 +7320,52 @@ mod tests {
             other => panic!("expected NoMatch or Partial, got {other:?}"),
         }
     }
+
+    // === A10: \X extended grapheme cluster ===
+
+    #[test]
+    fn grapheme_cluster_basic() {
+        match Regex::compile(r"\X") {
+            Err(e) => panic!("COMPILE FAILED: {e}"),
+            Ok(re) => {
+                let all = re.find_all("a");
+                assert_eq!(all.len(), 1, "expected 1 match in 'a', got {}", all.len());
+                let m = re.find("hello").unwrap();
+                assert_eq!(m.as_str(), "h");
+            }
+        }
+    }
+
+    #[test]
+    fn grapheme_cluster_combining_marks() {
+        let re = Regex::compile(r"\X").unwrap();
+        // e + combining acute (U+0301) = one grapheme cluster
+        let text = "e\u{0301}x";
+        let m = re.find(text).unwrap();
+        assert_eq!(m.as_str(), "e\u{0301}");
+        assert_eq!(m.len(), 3); // e(1) + combining(2) = 3 bytes
+    }
+
+    #[test]
+    fn grapheme_cluster_emoji() {
+        let re = Regex::compile(r"\X").unwrap();
+        let family = "👨\u{200D}👩\u{200D}👧\u{200D}👦";
+        let m = re.find(family).unwrap();
+        assert_eq!(m.as_str(), family); // entire ZWJ sequence is one grapheme
+    }
+
+    #[test]
+    fn grapheme_cluster_find_all() {
+        let re = Regex::compile(r"\X").unwrap();
+        let text = "cafe\u{0301}";
+        let all: Vec<_> = re.find_iter(text).map(|m| m.as_str()).collect();
+        assert_eq!(all, vec!["c", "a", "f", "e\u{0301}"]);
+    }
+
+    #[test]
+    fn grapheme_cluster_quantifier() {
+        let re = Regex::compile(r"\X{3}").unwrap();
+        let m = re.find("abc").unwrap();
+        assert_eq!(m.as_str(), "abc");
+    }
 }

@@ -149,6 +149,8 @@ pub enum Regex {
     MatchReset,
     /// \R — Newline sequence: matches \r\n, \r, \n, \x0B, \x0C, \x85, \u{2028}, \u{2029}
     NewlineSequence,
+    /// \X — Extended grapheme cluster: matches one full grapheme (base + combining marks)
+    GraphemeCluster,
 
     // Match control
     /// (*ACCEPT) - Force immediate match acceptance

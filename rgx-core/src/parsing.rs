@@ -666,6 +666,9 @@ impl<'a> PgenAstAdapter<'a> {
             // PCRE2 non-newline (\N) — matches any char except newline, same as . in non-dotall
             'N' => Ok(Regex::Dot),
 
+            // PCRE2 extended grapheme cluster (\X)
+            'X' => Ok(Regex::GraphemeCluster),
+
             // Literal control-character escapes: \n, \t, \r, \f, \a, \e
             'n' => Ok(Regex::Char('\n')),
             't' => Ok(Regex::Char('\t')),

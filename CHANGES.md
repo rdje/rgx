@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship \X extended grapheme cluster matching
+- Scope: Tier 4 backlog item A10.
+- Changes:
+  - `\X` matches one Unicode extended grapheme cluster (base + combining marks + ZWJ sequences)
+  - AST node `GraphemeCluster`, VM opcode `0x08`, parser mapping in `simple_escape`
+  - Uses `unicode-segmentation` crate for UAX#29-compliant grapheme boundary detection
+  - 5 tests: basic, combining marks (e + accent), ZWJ emoji (family), find_all, quantifier
+  - Bug found via trace: opcode 0x08 was missing from `TryFrom<u8>` dispatch table
+- Validation: 482 tests pass (1 ignored). Zero clippy errors.
+
 ### 2026-04-08 - Ship partial matching API for streaming/incremental input
 - Scope: Tier 4 backlog item A14 (partial matching).
 - Changes:

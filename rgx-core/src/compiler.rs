@@ -1569,6 +1569,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
@@ -1829,6 +1830,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
@@ -1981,6 +1983,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
@@ -2444,6 +2447,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
@@ -2602,6 +2606,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
@@ -2689,6 +2694,7 @@ impl Compiler {
             | RegexAst::Callout(_)
             | RegexAst::MatchReset
             | RegexAst::NewlineSequence
+            | RegexAst::GraphemeCluster
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
