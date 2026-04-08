@@ -127,11 +127,8 @@ Let's try some real scenarios you'll encounter in practice.
 ```rust
 let re = Regex::compile(r"\b\d{4}-\d{2}-\d{2}\b")?;
 
-let text = "Created: 2026-01-15, Updated: 2026-04-04, Expires: 2027-12-31";
-let matches = re.find_all(text);
-
-for m in &matches {
-    println!("Date: {}", &text[m.start..m.end]);
+for m in re.find_iter("Created: 2026-01-15, Updated: 2026-04-04, Expires: 2027-12-31") {
+    println!("Date: {}", m.as_str());
 }
 // Date: 2026-01-15
 // Date: 2026-04-04
@@ -143,11 +140,8 @@ for m in &matches {
 ```rust
 let re = Regex::compile(r"\b[\w.+-]+@[\w.-]+\.\w{2,}\b")?;
 
-let text = "Contact alice@example.com or bob.jones+work@company.co.uk for help";
-let matches = re.find_all(text);
-
-for m in &matches {
-    println!("Email: {}", &text[m.start..m.end]);
+for m in re.find_iter("Contact alice@example.com or bob.jones+work@company.co.uk") {
+    println!("Email: {}", m.as_str());
 }
 // Email: alice@example.com
 // Email: bob.jones+work@company.co.uk
@@ -158,11 +152,8 @@ for m in &matches {
 ```rust
 let re = Regex::compile(r"https?://[^\s)>\]]+\b")?;
 
-let text = "Visit https://example.com or http://docs.rgx.dev/guide for more info.";
-let matches = re.find_all(text);
-
-for m in &matches {
-    println!("URL: {}", &text[m.start..m.end]);
+for m in re.find_iter("Visit https://example.com or http://docs.rgx.dev/guide") {
+    println!("URL: {}", m.as_str());
 }
 // URL: https://example.com
 // URL: http://docs.rgx.dev/guide

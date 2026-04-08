@@ -309,9 +309,8 @@ After a traditional match, you have positions. If you want computed values, you 
 
 ```rust
 // Traditional approach: match, extract, process
-let m = re.find_first("price: $42.50").unwrap();
-let price_text = &text[m.start..m.end];
-let price: f64 = price_text.parse().unwrap();
+let m = re.find("price: $42.50").unwrap();
+let price: f64 = m.as_str().parse().unwrap();
 let with_tax = price * 1.08;
 ```
 
@@ -464,8 +463,8 @@ You have a pattern with alternatives: `error|warning|info`. When it matches, whi
 ```rust
 // Traditional approach: capture groups for branch detection
 let re = Regex::compile(r"(error)|(warning)|(info)")?;
-let m = re.find_first("got a warning").unwrap();
-// Check m.groups[1], m.groups[2], m.groups[3]...
+let caps = re.captures("got a warning").unwrap();
+// Check caps.get(1), caps.get(2), caps.get(3)...
 // Whichever is Some(...) is the winner. Tedious.
 ```
 
