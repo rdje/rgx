@@ -36,6 +36,19 @@ impl Default for MatchSemantics {
     }
 }
 
+/// Result of a partial-match query.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PartialMatchResult {
+    /// A full match was found.
+    Full(MatchResult),
+    /// The input ended mid-potential-match. More data might complete the match.
+    /// Contains the byte offset where the partial match started.
+    Partial(usize),
+    /// No match and no partial match — the pattern cannot match this input
+    /// even with more data appended.
+    NoMatch,
+}
+
 /// Match result with position information
 #[derive(Clone, Debug, PartialEq)]
 pub struct MatchResult {
@@ -68,7 +81,7 @@ pub struct Engine {
 }
 
 /// Convert a VM-level `Match` into a public `MatchResult`.
-fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
+pub(crate) fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
     MatchResult {
         start: m.start,
         end: m.end,
@@ -361,6 +374,17 @@ impl Engine {
     #[must_use]
     pub fn num_groups(&self) -> u32 {
         self.vm.program.num_groups
+    }
+
+    /// Find the first match, or report a partial match when the input
+    /// ends mid-potential-match.
+    #[must_use]
+    pub fn find_first_partial(&self, text: &[u8]) -> PartialMatchResult {
+        let text_str = match std::str::from_utf8(text) {
+            Ok(s) => s,
+            Err(_) => return PartialMatchResult::NoMatch,
+        };
+        self.vm.find_first_partial(text_str)
     }
 
     /// Set the match semantics (leftmost-first or leftmost-longest).

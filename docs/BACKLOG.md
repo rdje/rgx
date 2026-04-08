@@ -358,4 +358,4 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | C2 NFA/DFA hybrid | `major` | Guaranteed linear time for simple patterns |
 | A10 `\X` | `medium` | Niche Unicode feature |
 | A12 Returned-capture subroutines | `medium` | Bleeding-edge PCRE2 |
-| A14 Partial matching | `medium` | Streaming |
+| ~~A14 Partial matching~~ | `medium` | ✅ Shipped — PartialMatchResult with hit_end detection |

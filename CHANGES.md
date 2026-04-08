@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship partial matching API for streaming/incremental input
+- Scope: Tier 4 backlog item A14 (partial matching).
+- Changes:
+  - `PartialMatchResult` enum: `Full(MatchResult)`, `Partial(offset)`, `NoMatch`
+  - `Regex::find_first_partial(text)` — detect when input ends mid-match
+  - `ExecContext.hit_end` flag — set when a match attempt reaches EOF while the pattern was actively matching (pos > match_start)
+  - Only flags partial when the pattern has started consuming characters
+  - 5 new tests: full match, partial match, no match, date boundary, empty input
+- Validation: 477 lib tests pass (1 ignored). Zero clippy errors.
+
 ### 2026-04-08 - Ship MatchSemantics API (leftmost-first / leftmost-longest)
 - Scope: Tier 3 backlog item B4 (configurable match semantics).
 - Changes:

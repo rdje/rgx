@@ -421,6 +421,10 @@ pub struct ExecContext<'a> {
     pub max_backtrack_frames: u64,
     /// Maximum recursion depth. 0 = unlimited.
     pub max_recursion_depth: u64,
+    /// Set to `true` when a match attempt fails because it reached end-of-input
+    /// while the pattern could have continued matching with more data.
+    /// Used by partial-match APIs to distinguish "no match" from "need more input".
+    pub hit_end: bool,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -768,6 +772,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -898,6 +903,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -965,6 +971,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -976,6 +983,74 @@ impl RegexVM {
     /// Panics if `start` is not on a UTF-8 character boundary.
     pub fn is_match_at(&self, text: &str, start: usize) -> bool {
         self.find_first_at(text, start).is_some()
+    }
+
+    /// Find the first match or report a partial match when input ends
+    /// mid-potential-match. Used for streaming/incremental matching.
+    pub fn find_first_partial(&self, text: &str) -> crate::engine::PartialMatchResult {
+        use crate::engine::PartialMatchResult;
+
+        if let Some(m) = self.find_first(text) {
+            return PartialMatchResult::Full(crate::engine::vm_match_to_result(m));
+        }
+
+        // No full match — check if any position hit end-of-input while
+        // the pattern could have continued matching.
+        let bytes = text.as_bytes();
+        let mut ctx = ExecContext {
+            text: bytes,
+            pos: 0,
+            match_start: 0,
+            end: bytes.len(),
+            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            capture_trail: Vec::new(),
+            call_stack: Vec::new(),
+            backtrack_stack: Vec::new(),
+            current_alternative: None,
+            recursion_stack: Vec::new(),
+            code_result: None,
+            match_start_override: None,
+            previous_match_end: None,
+            committed: false,
+            skip_position: None,
+            suspendable: false,
+            suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
+        };
+
+        // Scan through positions looking for one that hits end-of-input.
+        let filter = self.prefix_filter;
+        let mut start = 0;
+        while start <= bytes.len() {
+            if start < bytes.len() && !filter.matches(bytes[start], &self.program.char_classes) {
+                start += 1;
+                continue;
+            }
+            ctx.pos = start;
+            ctx.hit_end = false;
+            Self::reset_captures(&mut ctx);
+            let _ = self.execute_at(&mut ctx, start);
+            if ctx.hit_end {
+                return PartialMatchResult::Partial(start);
+            }
+            if ctx.committed {
+                break;
+            }
+            if start >= bytes.len() {
+                break;
+            }
+            start += 1;
+        }
+
+        PartialMatchResult::NoMatch
     }
 
     /// Determine if SIMD pre-filtering would be beneficial
@@ -1689,6 +1764,7 @@ impl RegexVM {
             max_steps: ctx.max_steps,
             max_backtrack_frames: ctx.max_backtrack_frames,
             max_recursion_depth: ctx.max_recursion_depth,
+            hit_end: false,
         }
     }
 
@@ -1759,6 +1835,7 @@ impl RegexVM {
         ctx.committed = false;
         ctx.skip_position = None;
         ctx.step_count = 0;
+        ctx.hit_end = false;
         let mut ip = 0;
         let code = &self.program.code;
 
@@ -1822,6 +1899,11 @@ impl RegexVM {
                             trace_log!("vm", "  ✗ Got '{}' != '{}'", actual, expected);
                         } else {
                             trace_log!("vm", "  ✗ EOF, expected '{}'", expected);
+                            // Only flag partial match if we've advanced past the
+                            // match start (i.e., the pattern was actively matching).
+                            if ctx.pos > ctx.match_start {
+                                ctx.hit_end = true;
+                            }
                         }
                     }
                     // Character didn't match - try backtracking
@@ -1932,6 +2014,9 @@ impl RegexVM {
                         }
                     } else {
                         trace_log!("vm", "  ✗ Any: EOF");
+                        if ctx.pos > ctx.match_start {
+                            ctx.hit_end = true;
+                        }
                     }
                     if self.try_backtrack(ctx, &mut ip) {
                         continue;
@@ -1945,6 +2030,9 @@ impl RegexVM {
                         continue;
                     }
                     trace_log!("vm", "  ✗ AnyDotAll: EOF");
+                    if ctx.pos > ctx.match_start {
+                        ctx.hit_end = true;
+                    }
                     if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
@@ -3266,6 +3354,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         let mut matches = Vec::new();
@@ -3528,6 +3617,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -3686,6 +3776,7 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            hit_end: false,
         };
 
         // Determine the CodeBlockOutcome from the callback result.

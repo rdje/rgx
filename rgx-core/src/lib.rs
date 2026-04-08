@@ -104,7 +104,7 @@ pub mod vars;
 // Re-exports for convenience
 pub use cache::RegexCache;
 pub use compiler::Compiler;
-pub use engine::{Engine, ExecutionMode, MatchResult, MatchSemantics};
+pub use engine::{Engine, ExecutionMode, MatchResult, MatchSemantics, PartialMatchResult};
 // Note: Match, Captures, SubCaptureMatches, escape are defined directly in this file.
 pub use error::{Result, RgxError};
 pub use events::MatchEvent;
@@ -1680,6 +1680,31 @@ impl Regex {
     /// to the default.
     pub fn set_max_recursion_depth(&self, limit: Option<u64>) {
         self.engine.set_max_recursion_depth(limit);
+    }
+
+    /// Find the first match, or report a partial match when the input ends
+    /// while the pattern could still be matching.
+    ///
+    /// Useful for streaming/incremental matching where input arrives in chunks.
+    ///
+    /// Returns:
+    /// - `Full(MatchResult)` — a complete match was found
+    /// - `Partial(offset)` — the input ended while a match was in progress
+    ///   at byte offset `offset`. Appending more data may complete the match.
+    /// - `NoMatch` — no match is possible even with more data
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::{Regex, PartialMatchResult};
+    /// let re = Regex::compile(r"hello world").unwrap();
+    /// match re.find_first_partial("hello wor") {
+    ///     PartialMatchResult::Partial(_) => println!("need more input"),
+    ///     PartialMatchResult::Full(m) => println!("matched: {}..{}", m.start, m.end),
+    ///     PartialMatchResult::NoMatch => println!("no match possible"),
+    /// }
+    /// ```
+    #[must_use]
+    pub fn find_first_partial(&self, text: &str) -> PartialMatchResult {
+        self.engine.find_first_partial(text.as_bytes())
     }
 
     /// Set the match semantics.
@@ -7234,5 +7259,65 @@ mod tests {
         let m = re.find("abc 123 def").unwrap();
         // Greedy quantifier already matches longest — semantics don't change this.
         assert_eq!(m.as_str(), "123");
+    }
+
+    // === A14: Partial matching ===
+
+    #[test]
+    fn partial_match_full() {
+        let re = Regex::compile(r"hello world").unwrap();
+        match re.find_first_partial("hello world") {
+            PartialMatchResult::Full(m) => assert_eq!(m.start, 0),
+            other => panic!("expected Full, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn partial_match_partial() {
+        let re = Regex::compile(r"hello world").unwrap();
+        match re.find_first_partial("hello wor") {
+            PartialMatchResult::Partial(offset) => assert_eq!(offset, 0),
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn partial_match_no_match() {
+        let re = Regex::compile(r"hello").unwrap();
+        match re.find_first_partial("xyz") {
+            PartialMatchResult::NoMatch => {}
+            other => panic!("expected NoMatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn partial_match_at_boundary() {
+        let re = Regex::compile(r"\d{4}-\d{2}-\d{2}").unwrap();
+        // Full date matches
+        assert!(matches!(
+            re.find_first_partial("2025-03-15"),
+            PartialMatchResult::Full(_)
+        ));
+        // Partial date — input ends mid-match
+        assert!(matches!(
+            re.find_first_partial("2025-03"),
+            PartialMatchResult::Partial(_)
+        ));
+        // No digits at all
+        assert!(matches!(
+            re.find_first_partial("abc"),
+            PartialMatchResult::NoMatch
+        ));
+    }
+
+    #[test]
+    fn partial_match_empty_input() {
+        let re = Regex::compile(r"abc").unwrap();
+        // Empty input can't match "abc" but could with more data
+        // (pattern starts matching at position 0)
+        match re.find_first_partial("") {
+            PartialMatchResult::NoMatch | PartialMatchResult::Partial(_) => {}
+            other => panic!("expected NoMatch or Partial, got {other:?}"),
+        }
     }
 }
