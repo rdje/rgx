@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship inline-language steering for Lua, JavaScript, and Rhai
+- Scope: Tier 2 backlog item A6 (inline-language steering).
+- Changes:
+  - Lua: `rgx.steer_continue()`, `rgx.steer_fail()`, `rgx.steer_accept()`, `rgx.steer_skip(n)`, `rgx.steer_abort()`
+  - JavaScript: `rgx.steerContinue()`, `rgx.steerFail()`, `rgx.steerAccept()`, `rgx.steerSkip(n)`, `rgx.steerAbort()`
+  - Rhai: `steer_continue()`, `steer_fail()`, `steer_accept()`, `steer_skip(n)`, `steer_abort()`
+  - Steer takes highest priority: if emitted, overrides return-value semantics
+  - `finish_exec_result_with_steer` centralizes steer/result priority logic
+- Validation: all 616+ tests pass. Zero clippy errors.
+- Notes/impact: closes A6. Inline languages now have the same match-steering power as native callbacks.
+
 ### 2026-04-08 - Ship benchmark CI job
 - Scope: Tier 2 backlog item C4 (benchmark CI).
 - Changes:

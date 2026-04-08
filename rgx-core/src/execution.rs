@@ -649,6 +649,20 @@ fn finish_exec_result(
     base_result: ExecResult,
     emitted_result: &Arc<Mutex<Option<CodeBlockValue>>>,
 ) -> ExecResult {
+    finish_exec_result_with_steer(base_result, emitted_result, &Arc::new(Mutex::new(None)))
+}
+
+#[cfg(any(feature = "javascript", feature = "lua", feature = "rhai"))]
+fn finish_exec_result_with_steer(
+    base_result: ExecResult,
+    emitted_result: &Arc<Mutex<Option<CodeBlockValue>>>,
+    emitted_steer: &Arc<Mutex<Option<SteerResult>>>,
+) -> ExecResult {
+    // Steer takes highest priority — if the code block emitted a steer
+    // action, it overrides everything else.
+    if let Some(steer) = emitted_steer.lock().unwrap().take() {
+        return ExecResult::Steer(steer);
+    }
     let emitted = emitted_result.lock().unwrap().take();
     match base_result {
         ExecResult::Success => emitted.map_or(base_result, emitted_result_to_exec_result),
@@ -712,7 +726,11 @@ pub mod rhai {
             Ok(Self)
         }
 
-        fn new_engine(&self, emitted_result: Arc<Mutex<Option<CodeBlockValue>>>) -> RhaiRuntime {
+        fn new_engine(
+            &self,
+            emitted_result: Arc<Mutex<Option<CodeBlockValue>>>,
+            emitted_steer: Arc<Mutex<Option<SteerResult>>>,
+        ) -> RhaiRuntime {
             let mut engine = RhaiRuntime::new();
             engine.on_print(|_| {});
             engine.on_debug(|_, _, _| {});
@@ -729,6 +747,29 @@ pub mod rhai {
                 *emitted_replacement.lock().unwrap() =
                     Some(CodeBlockValue::Replacement(value.to_string()));
             });
+
+            // Steer functions
+            let s = emitted_steer.clone();
+            engine.register_fn("steer_continue", move || {
+                *s.lock().unwrap() = Some(SteerResult::Continue);
+            });
+            let s = emitted_steer.clone();
+            engine.register_fn("steer_fail", move || {
+                *s.lock().unwrap() = Some(SteerResult::Fail);
+            });
+            let s = emitted_steer.clone();
+            engine.register_fn("steer_accept", move || {
+                *s.lock().unwrap() = Some(SteerResult::Accept);
+            });
+            let s = emitted_steer.clone();
+            engine.register_fn("steer_skip", move |n: i64| {
+                *s.lock().unwrap() = Some(SteerResult::Skip(n as usize));
+            });
+            let s = emitted_steer;
+            engine.register_fn("steer_abort", move || {
+                *s.lock().unwrap() = Some(SteerResult::Abort);
+            });
+
             engine
         }
 
@@ -813,10 +854,15 @@ pub mod rhai {
     impl ExecutionEngine for RhaiEngine {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             let emitted_result = Arc::new(Mutex::new(None));
-            let engine = self.new_engine(emitted_result.clone());
+            let emitted_steer = Arc::new(Mutex::new(None));
+            let engine = self.new_engine(emitted_result.clone(), emitted_steer.clone());
             let mut scope = self.build_scope(context);
             match engine.eval_with_scope::<Dynamic>(&mut scope, code) {
-                Ok(value) => finish_exec_result(Self::into_exec_result(value), &emitted_result),
+                Ok(value) => finish_exec_result_with_steer(
+                    Self::into_exec_result(value),
+                    &emitted_result,
+                    &emitted_steer,
+                ),
                 Err(err) => ExecResult::Error(format!("Rhai error: {}", err)),
             }
         }
@@ -948,6 +994,62 @@ pub mod lua {
             Ok(())
         }
 
+        /// Register `rgx.steer_*` helpers on the Lua `rgx` table.
+        fn setup_steer_functions(
+            &self,
+            lua: &Lua,
+            emitted_steer: Arc<Mutex<Option<SteerResult>>>,
+        ) -> mlua::Result<()> {
+            let rgx_table: mlua::Table = lua.globals().get("rgx")?;
+
+            let s = emitted_steer.clone();
+            rgx_table.set(
+                "steer_continue",
+                lua.create_function(move |_, ()| {
+                    *s.lock().unwrap() = Some(SteerResult::Continue);
+                    Ok(())
+                })?,
+            )?;
+
+            let s = emitted_steer.clone();
+            rgx_table.set(
+                "steer_fail",
+                lua.create_function(move |_, ()| {
+                    *s.lock().unwrap() = Some(SteerResult::Fail);
+                    Ok(())
+                })?,
+            )?;
+
+            let s = emitted_steer.clone();
+            rgx_table.set(
+                "steer_accept",
+                lua.create_function(move |_, ()| {
+                    *s.lock().unwrap() = Some(SteerResult::Accept);
+                    Ok(())
+                })?,
+            )?;
+
+            let s = emitted_steer.clone();
+            rgx_table.set(
+                "steer_skip",
+                lua.create_function(move |_, n: usize| {
+                    *s.lock().unwrap() = Some(SteerResult::Skip(n));
+                    Ok(())
+                })?,
+            )?;
+
+            let s = emitted_steer;
+            rgx_table.set(
+                "steer_abort",
+                lua.create_function(move |_, ()| {
+                    *s.lock().unwrap() = Some(SteerResult::Abort);
+                    Ok(())
+                })?,
+            )?;
+
+            Ok(())
+        }
+
         fn eval_user_code<'lua>(&self, lua: &'lua Lua, code: &str) -> mlua::Result<Value<'lua>> {
             // Prefer direct evaluation so explicit `return ...` bodies and full chunks keep
             // working. Fall back to `return ...` wrapping so bare expression bodies behave
@@ -966,9 +1068,13 @@ pub mod lua {
         fn execute(&self, code: &str, context: &ExecContext) -> ExecResult {
             let lua = self.new_sandboxed_lua();
             let emitted_result = Arc::new(Mutex::new(None));
+            let emitted_steer = Arc::new(Mutex::new(None));
             // Set up context
             if let Err(e) = self.setup_context(&lua, context, emitted_result.clone()) {
                 return ExecResult::Error(format!("Context setup failed: {}", e));
+            }
+            if let Err(e) = self.setup_steer_functions(&lua, emitted_steer.clone()) {
+                return ExecResult::Error(format!("Steer setup failed: {}", e));
             }
 
             let result = self.eval_user_code(&lua, code);
@@ -987,7 +1093,7 @@ pub mod lua {
                 Ok(_) => ExecResult::Success,
                 Err(e) => ExecResult::Error(format!("Lua error: {}", e)),
             };
-            finish_exec_result(base_result, &emitted_result)
+            finish_exec_result_with_steer(base_result, &emitted_result, &emitted_steer)
         }
 
         fn language(&self) -> &str {
@@ -1104,6 +1210,7 @@ pub mod javascript {
             };
             let ctx_result = Context::full(&runtime);
             let emitted_result = Arc::new(Mutex::new(None));
+            let emitted_steer = Arc::new(Mutex::new(None));
 
             let ctx = match ctx_result {
                 Ok(ctx) => ctx,
@@ -1187,6 +1294,38 @@ pub mod javascript {
                     {
                         rgx_obj.set("emit_replacement", emit_replacement).ok();
                     }
+                    // Steer functions
+                    let s = emitted_steer.clone();
+                    if let Ok(f) = Function::new(ctx.clone(), move || {
+                        *s.lock().unwrap() = Some(SteerResult::Continue);
+                    }) {
+                        rgx_obj.set("steerContinue", f).ok();
+                    }
+                    let s = emitted_steer.clone();
+                    if let Ok(f) = Function::new(ctx.clone(), move || {
+                        *s.lock().unwrap() = Some(SteerResult::Fail);
+                    }) {
+                        rgx_obj.set("steerFail", f).ok();
+                    }
+                    let s = emitted_steer.clone();
+                    if let Ok(f) = Function::new(ctx.clone(), move || {
+                        *s.lock().unwrap() = Some(SteerResult::Accept);
+                    }) {
+                        rgx_obj.set("steerAccept", f).ok();
+                    }
+                    let s = emitted_steer.clone();
+                    if let Ok(f) = Function::new(ctx.clone(), move |n: usize| {
+                        *s.lock().unwrap() = Some(SteerResult::Skip(n));
+                    }) {
+                        rgx_obj.set("steerSkip", f).ok();
+                    }
+                    let s = emitted_steer.clone();
+                    if let Ok(f) = Function::new(ctx.clone(), move || {
+                        *s.lock().unwrap() = Some(SteerResult::Abort);
+                    }) {
+                        rgx_obj.set("steerAbort", f).ok();
+                    }
+
                     globals.set("rgx", rgx_obj).ok();
                 }
 
@@ -1197,7 +1336,11 @@ pub mod javascript {
                 globals.set("XMLHttpRequest", Undefined).ok();
 
                 match self.eval_user_code(ctx.clone(), code) {
-                    Ok(val) => finish_exec_result(Self::into_exec_result(val), &emitted_result),
+                    Ok(val) => finish_exec_result_with_steer(
+                        Self::into_exec_result(val),
+                        &emitted_result,
+                        &emitted_steer,
+                    ),
                     Err(e) => ExecResult::Error(format!("JS error: {}", e)),
                 }
             })

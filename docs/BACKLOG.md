@@ -324,7 +324,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 |------|--------|-----|
 | A8 Crate publishing | `small` | Users can't install without it |
 | ~~A5 CLI `--color`~~ | `small` | ✅ Shipped — bold red matches, auto-detect terminal |
-| A6 Inline-language steering | `small` | Completes the steering story |
+| ~~A6 Inline-language steering~~ | `small` | ✅ Shipped — steer_* in Lua/JS/Rhai |
 | ~~B3 Compilation caching~~ | `small` | ✅ Shipped — `RegexCache` with LRU eviction |
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
 | ~~B9 Error diagnostics~~ | `medium` | ✅ Shipped — CompileError with caret highlighting |
