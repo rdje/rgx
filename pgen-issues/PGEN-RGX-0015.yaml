@@ -3,12 +3,12 @@ summary: |
   PGEN regex parser does not recognize PCRE2 10.47+ returned-capture
   subroutine syntax: (?1(grouplist)). This is a feature request, not
   a bug — the syntax is new in PCRE2 10.47 and has minimal adoption.
-status: open
+status: closed
 opened_at: 2026-04-08T00:00:00Z
 first_seen_at: 2026-04-08T00:00:00Z
-last_updated_at: 2026-04-08T00:00:00Z
+last_updated_at: 2026-04-09T00:00:00Z
 parser_backend: pgen
-parser_backend_version: "1.1.8"
+parser_backend_version: "1.1.9"
 rgx_commit: 61baa2c
 upstream_report:
   reported: false
@@ -25,30 +25,33 @@ context:
     PCRE2 10.47 introduced (?N(grouplist)) syntax for subroutines that
     return their captures to the caller instead of discarding them.
     This is tracked as RGX backlog item A12.
-    Low priority — near-zero real-world adoption at this time.
 expected_behavior: |
   PGEN should parse (?1(1)) and produce a structured AST node
   (e.g., rule name "returned_capture_subroutine" or similar) with
   the subroutine target and the group list.
 actual_behavior: |
-  PGEN returns:
-    Error: parse_full rejected sample: Parser did not consume full input at position 0
+  Fixed in PGEN 1.1.9. Now produces:
+    - returned_capture_subroutine (top-level node)
+    - subroutine_target (the target group number)
+    - returned_capture_group_list (the groups to return)
+    - returned_capture_group (individual group entries)
 reproduction: |
   File: repro_input.txt containing: (?1(1))
 
-  Command:
+  Command (PGEN 1.1.9):
     cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
       --bin parseability_probe -- --parse regex repro_input.txt --profile regex_default
 
-  Result: "Parser did not consume full input at position 0"
+  Result: "parse_full passed"
 impact: |
-  Blocks A12 (returned-capture subroutines) from the RGX backlog.
-  Low priority — this is a bleeding-edge PCRE2 10.47+ feature with
-  minimal real-world adoption. No urgency.
+  Unblocks A12 (returned-capture subroutines) from the RGX backlog.
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-04-09T00:00:00Z
   verification_notes: |
-    Will verify once PGEN adds (?N(grouplist)) to the regex grammar
-    and RGX updates the submodule pin.
+    PGEN 1.1.9 (commit ac2acb3) parses (?1(1)) successfully.
+    AST produces returned_capture_subroutine with subroutine_target
+    and returned_capture_group_list nodes.
+    RGX submodule pinned to 1.1.9.
+    RGX-side A12 implementation can now proceed.
