@@ -149,6 +149,24 @@ impl Engine {
         matches
     }
 
+    /// Find the first match, accepting a pre-validated `&str` directly.
+    ///
+    /// Used by `bytes::BytesRegex` which handles the UTF-8 boundary itself.
+    #[must_use]
+    pub(crate) fn vm_find_first(&self, text: &str) -> Option<MatchResult> {
+        self.vm.find_first(text).map(vm_match_to_result)
+    }
+
+    /// Find all matches, accepting a pre-validated `&str` directly.
+    #[must_use]
+    pub(crate) fn vm_find_all(&self, text: &str) -> Vec<MatchResult> {
+        self.vm
+            .find_all(text)
+            .into_iter()
+            .map(vm_match_to_result)
+            .collect()
+    }
+
     /// Find the first match in the input
     #[must_use]
     pub fn find_first(&self, text: &[u8]) -> Option<MatchResult> {

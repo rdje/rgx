@@ -326,7 +326,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~A5 CLI `--color`~~ | `small` | ✅ Shipped — bold red matches, auto-detect terminal |
 | ~~A6 Inline-language steering~~ | `small` | ✅ Shipped — steer_* in Lua/JS/Rhai |
 | ~~B3 Compilation caching~~ | `small` | ✅ Shipped — `RegexCache` with LRU eviction |
-| B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
+| ~~B5 `bytes::Regex`~~ | `medium` | ✅ Shipped — `BytesRegex` matches `&[u8]` directly |
 | ~~B9 Error diagnostics~~ | `medium` | ✅ Shipped — CompileError with caret highlighting |
 | ~~B11 `RegexBuilder`~~ | `small` | ✅ Shipped — fluent builder with flag overrides |
 | ~~B12 Iterator APIs~~ | `small` | ✅ Shipped — find_iter, captures_iter, split_iter, capture_names |

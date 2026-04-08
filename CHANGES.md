@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship bytes::BytesRegex for matching on &[u8] without UTF-8 validation
+- Scope: Tier 2 backlog item B5.
+- Changes:
+  - `bytes::BytesRegex` — compile patterns, match against `&[u8]` directly
+  - `bytes::BytesMatch` — match result with `as_bytes()`, `start()`, `end()`, `range()`, `len()`
+  - `compile()`, `with_mode()`, `is_match()`, `find()`, `find_all()`, `as_str()`
+  - Bypasses UTF-8 validation: `.` matches single bytes, `\w`/`\d`/`\s` work on ASCII
+  - `Engine::vm_find_first` / `vm_find_all` internal methods for direct `&str` access
+  - 7 tests including non-UTF-8 input and binary patterns
+- Validation: 587+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship inline-language steering for Lua, JavaScript, and Rhai
 - Scope: Tier 2 backlog item A6 (inline-language steering).
 - Changes:

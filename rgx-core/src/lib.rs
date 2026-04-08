@@ -50,6 +50,8 @@
 // Core modules
 /// Abstract syntax tree types for regex patterns.
 pub mod ast;
+/// Byte-oriented regex matching on `&[u8]` without requiring valid UTF-8.
+pub mod bytes;
 /// Thread-safe compilation cache for regex patterns.
 pub mod cache;
 /// Pattern-to-program compiler logic.
