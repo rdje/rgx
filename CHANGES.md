@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship fuzzing infrastructure (cargo-fuzz targets)
+- Scope: Tier 2 backlog item C3 (fuzzing).
+- Changes:
+  - `fuzz/` directory with standalone Cargo.toml (independent of workspace)
+  - 4 fuzz targets:
+    - `fuzz_compile` — arbitrary bytes as patterns, no panics/UB
+    - `fuzz_match` — pattern + input, exercises is_match/find_first/find_all/captures with step limits
+    - `fuzz_replace` — pattern + input + replacement, exercises replace/split APIs
+    - `fuzz_roundtrip` — invariant checks (bounds, non-overlap, is_match/find_first agreement, group 0 consistency)
+  - Uses `libfuzzer-sys` + `arbitrary` for structured input generation
+  - Step limits (50K) prevent hangs on pathological patterns
+- Validation: main workspace tests unaffected. Run with `cargo +nightly fuzz run fuzz_compile`.
+
 ### 2026-04-08 - Ship syntax error diagnostics with span highlighting
 - Scope: Tier 2 backlog item B9 (error diagnostics).
 - Changes:

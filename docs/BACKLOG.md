@@ -339,7 +339,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~B19 Metadata accessors~~ | `trivial` | ✅ Shipped — `as_str`, `captures_len` |
 | ~~B20 `CaptureLocations`~~ | `small` | ✅ Shipped — captures_read + captures_read_at |
 | ~~B21 `Cow<str>` replace~~ | `trivial` | ✅ Shipped |
-| C3 Fuzzing | `small` | Robustness |
+| ~~C3 Fuzzing~~ | `small` | ✅ Shipped — 4 cargo-fuzz targets with invariant checks |
 | C4 Benchmark CI | `small` | Prevent regressions |
 
 ### Tier 3 — Do when ready (strategic)

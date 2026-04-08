@@ -1,0 +1,38 @@
+[package]
+name = "rgx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.rgx-core]
+path = "../rgx-core"
+
+# Prevent this from interfering with the workspace.
+[workspace]
+
+[[bin]]
+name = "fuzz_compile"
+path = "fuzz_targets/fuzz_compile.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_match"
+path = "fuzz_targets/fuzz_match.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_replace"
+path = "fuzz_targets/fuzz_replace.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_roundtrip"
+path = "fuzz_targets/fuzz_roundtrip.rs"
+doc = false
