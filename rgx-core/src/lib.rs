@@ -119,6 +119,18 @@ pub use file::FileMatch;
 pub use pattern::{CompiledPattern, Pattern};
 pub use vars::VarsBuilder;
 
+/// Advance `idx` to the next UTF-8 character boundary in `text`, or `text.len()`.
+fn next_char_boundary(text: &str, idx: usize) -> usize {
+    if idx >= text.len() {
+        return text.len();
+    }
+    let mut i = idx;
+    while i < text.len() && !text.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 // ────────────────────────────────────────────────────────────
 // B18: escape() — escape regex metacharacters for safe concatenation
 // ────────────────────────────────────────────────────────────
@@ -306,6 +318,229 @@ impl<'c, 't> Iterator for SubCaptureMatches<'c, 't> {
 }
 
 impl<'c, 't> ExactSizeIterator for SubCaptureMatches<'c, 't> {}
+
+// ────────────────────────────────────────────────────────────
+// B12: Iterator-based APIs
+// ────────────────────────────────────────────────────────────
+
+/// Lazy iterator over successive non-overlapping matches.
+///
+/// Created by [`Regex::find_iter`].
+pub struct FindIter<'r, 't> {
+    regex: &'r Regex,
+    text: &'t str,
+    last_end: usize,
+    last_match_end: Option<usize>,
+    done: bool,
+}
+
+impl<'r, 't> Iterator for FindIter<'r, 't> {
+    type Item = Match<'t>;
+
+    fn next(&mut self) -> Option<Match<'t>> {
+        if self.done {
+            return None;
+        }
+        loop {
+            let m = self.regex.find_first_at(self.text, self.last_end)?;
+            let start = m.start;
+            let end = m.end;
+            // Zero-width match suppression at the same position as previous match end
+            if start == end {
+                if let Some(prev) = self.last_match_end {
+                    if start == prev {
+                        // Advance past this position
+                        if self.last_end >= self.text.len() {
+                            self.done = true;
+                            return None;
+                        }
+                        // Advance by one UTF-8 character
+                        self.last_end = next_char_boundary(self.text, self.last_end + 1);
+                        continue;
+                    }
+                }
+            }
+            self.last_match_end = Some(end);
+            self.last_end = if start == end {
+                next_char_boundary(self.text, end + 1)
+            } else {
+                end
+            };
+            return Some(Match {
+                text: self.text,
+                start,
+                end,
+            });
+        }
+    }
+}
+
+impl<'r, 't> std::iter::FusedIterator for FindIter<'r, 't> {}
+
+/// Lazy iterator over successive non-overlapping matches with capture groups.
+///
+/// Created by [`Regex::captures_iter`].
+pub struct CaptureIter<'r, 't> {
+    inner: FindIter<'r, 't>,
+    named: std::sync::Arc<std::collections::HashMap<String, u32>>,
+}
+
+impl<'r, 't> Iterator for CaptureIter<'r, 't> {
+    type Item = Captures<'t>;
+
+    fn next(&mut self) -> Option<Captures<'t>> {
+        // We need the full MatchResult (with groups), not just the Match.
+        // Re-derive from find_first_at which returns MatchResult with groups.
+        if self.inner.done {
+            return None;
+        }
+        loop {
+            let mr = self
+                .inner
+                .regex
+                .find_first_at(self.inner.text, self.inner.last_end)?;
+            let start = mr.start;
+            let end = mr.end;
+            // Zero-width suppression (same logic as FindIter)
+            if start == end {
+                if let Some(prev) = self.inner.last_match_end {
+                    if start == prev {
+                        if self.inner.last_end >= self.inner.text.len() {
+                            self.inner.done = true;
+                            return None;
+                        }
+                        self.inner.last_end =
+                            next_char_boundary(self.inner.text, self.inner.last_end + 1);
+                        continue;
+                    }
+                }
+            }
+            self.inner.last_match_end = Some(end);
+            self.inner.last_end = if start == end {
+                next_char_boundary(self.inner.text, end + 1)
+            } else {
+                end
+            };
+            return Some(Captures {
+                text: self.inner.text,
+                groups: mr.groups,
+                named: self.named.clone(),
+            });
+        }
+    }
+}
+
+impl<'r, 't> std::iter::FusedIterator for CaptureIter<'r, 't> {}
+
+/// Lazy iterator over substrings delimited by regex matches.
+///
+/// Created by [`Regex::split_iter`].
+pub struct SplitIter<'r, 't> {
+    finder: FindIter<'r, 't>,
+    last_end: usize,
+    done: bool,
+}
+
+impl<'r, 't> Iterator for SplitIter<'r, 't> {
+    type Item = &'t str;
+
+    fn next(&mut self) -> Option<&'t str> {
+        if self.done {
+            return None;
+        }
+        match self.finder.next() {
+            Some(m) => {
+                let piece = &self.finder.text[self.last_end..m.start()];
+                self.last_end = m.end();
+                Some(piece)
+            }
+            None => {
+                self.done = true;
+                Some(&self.finder.text[self.last_end..])
+            }
+        }
+    }
+}
+
+impl<'r, 't> std::iter::FusedIterator for SplitIter<'r, 't> {}
+
+/// Lazy iterator over substrings delimited by regex matches, with a limit.
+///
+/// Created by [`Regex::splitn_iter`].
+pub struct SplitNIter<'r, 't> {
+    finder: FindIter<'r, 't>,
+    last_end: usize,
+    limit: usize,
+    count: usize,
+    done: bool,
+}
+
+impl<'r, 't> Iterator for SplitNIter<'r, 't> {
+    type Item = &'t str;
+
+    fn next(&mut self) -> Option<&'t str> {
+        if self.done {
+            return None;
+        }
+        self.count += 1;
+        // If we've reached the limit, return the remainder
+        if self.count >= self.limit {
+            self.done = true;
+            return Some(&self.finder.text[self.last_end..]);
+        }
+        match self.finder.next() {
+            Some(m) => {
+                let piece = &self.finder.text[self.last_end..m.start()];
+                self.last_end = m.end();
+                Some(piece)
+            }
+            None => {
+                self.done = true;
+                Some(&self.finder.text[self.last_end..])
+            }
+        }
+    }
+}
+
+impl<'r, 't> std::iter::FusedIterator for SplitNIter<'r, 't> {}
+
+/// Iterator over capture group names.
+///
+/// Created by [`Regex::capture_names`].
+pub struct CaptureNames<'r> {
+    named: &'r std::collections::HashMap<String, u32>,
+    num_groups: u32,
+    idx: u32,
+}
+
+impl<'r> Iterator for CaptureNames<'r> {
+    type Item = Option<&'r str>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx > self.num_groups {
+            return None;
+        }
+        let current = self.idx;
+        self.idx += 1;
+        if current == 0 {
+            return Some(None); // Group 0 is unnamed
+        }
+        // Find the name for this group number
+        let name = self
+            .named
+            .iter()
+            .find(|(_, &num)| num == current)
+            .map(|(name, _)| name.as_str());
+        Some(name)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = (self.num_groups + 1 - self.idx) as usize;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'r> ExactSizeIterator for CaptureNames<'r> {}
 
 /// High-performance regex matcher with optional code execution capabilities.
 ///
@@ -975,6 +1210,67 @@ impl Regex {
     #[must_use]
     pub fn captures_len(&self) -> usize {
         self.engine.num_groups() as usize + 1
+    }
+
+    /// Iterator over capture group names.
+    ///
+    /// Yields `None` for unnamed groups (including group 0) and
+    /// `Some(name)` for named groups.
+    pub fn capture_names(&self) -> CaptureNames<'_> {
+        CaptureNames {
+            named: self.engine.named_groups(),
+            num_groups: self.engine.num_groups(),
+            idx: 0,
+        }
+    }
+
+    /// Lazy iterator over successive non-overlapping matches.
+    ///
+    /// Unlike [`find_all`](Self::find_all), this does not allocate a `Vec`.
+    /// Matches are found on demand as the iterator is advanced.
+    pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> FindIter<'r, 't> {
+        FindIter {
+            regex: self,
+            text,
+            last_end: 0,
+            last_match_end: None,
+            done: false,
+        }
+    }
+
+    /// Lazy iterator over successive non-overlapping matches with capture groups.
+    ///
+    /// Each item is a [`Captures`] object with ergonomic group access.
+    pub fn captures_iter<'r, 't>(&'r self, text: &'t str) -> CaptureIter<'r, 't> {
+        CaptureIter {
+            inner: self.find_iter(text),
+            named: std::sync::Arc::new(self.engine.named_groups().clone()),
+        }
+    }
+
+    /// Lazy iterator over substrings delimited by regex matches.
+    ///
+    /// Unlike [`split`](Self::split), this does not allocate a `Vec`.
+    pub fn split_iter<'r, 't>(&'r self, text: &'t str) -> SplitIter<'r, 't> {
+        SplitIter {
+            finder: self.find_iter(text),
+            last_end: 0,
+            done: false,
+        }
+    }
+
+    /// Lazy iterator over substrings delimited by regex matches, with a limit.
+    ///
+    /// The last item contains the unsplit remainder. Unlike
+    /// [`splitn`](Self::splitn), this does not allocate a `Vec`.
+    pub fn splitn_iter<'r, 't>(&'r self, text: &'t str, limit: usize) -> SplitNIter<'r, 't> {
+        SplitNIter {
+            finder: self.find_iter(text),
+            last_end: 0,
+            limit,
+            count: 0,
+            done: limit == 0,
+        }
     }
 
     /// Set the maximum number of VM opcode steps per match attempt.
@@ -6140,5 +6436,105 @@ mod tests {
     fn captures_len_no_groups() {
         let re = Regex::compile(r"abc").unwrap();
         assert_eq!(re.captures_len(), 1); // just group 0
+    }
+
+    // === B12: Iterator APIs ===
+
+    #[test]
+    fn find_iter_basic() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let matches: Vec<_> = re.find_iter("a1b22c333").map(|m| m.as_str()).collect();
+        assert_eq!(matches, vec!["1", "22", "333"]);
+    }
+
+    #[test]
+    fn find_iter_no_match() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let matches: Vec<_> = re.find_iter("abc").collect();
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn find_iter_agrees_with_find_all() {
+        let re = Regex::compile(r"\w+").unwrap();
+        let text = "one two three";
+        let iter_results: Vec<_> = re.find_iter(text).map(|m| (m.start(), m.end())).collect();
+        let all_results: Vec<_> = re.find_all(text).iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(iter_results, all_results);
+    }
+
+    #[test]
+    fn captures_iter_basic() {
+        let re = Regex::compile(r"(\w+)=(\d+)").unwrap();
+        let pairs: Vec<_> = re
+            .captures_iter("a=1 b=2 c=3")
+            .map(|c| (c[1].to_string(), c[2].to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string()),
+                ("c".to_string(), "3".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn split_iter_basic() {
+        let re = Regex::compile(r"[,\s]+").unwrap();
+        let parts: Vec<_> = re.split_iter("one, two, three").collect();
+        assert_eq!(parts, vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn split_iter_agrees_with_split() {
+        let re = Regex::compile(r",").unwrap();
+        let text = ",a,,b,";
+        let iter_parts: Vec<_> = re.split_iter(text).collect();
+        let vec_parts = re.split(text);
+        assert_eq!(iter_parts, vec_parts);
+    }
+
+    #[test]
+    fn splitn_iter_basic() {
+        let re = Regex::compile(r",").unwrap();
+        let parts: Vec<_> = re.splitn_iter("a,b,c,d,e", 3).collect();
+        assert_eq!(parts, vec!["a", "b", "c,d,e"]);
+    }
+
+    #[test]
+    fn splitn_iter_limit_zero_is_empty() {
+        let re = Regex::compile(r",").unwrap();
+        let parts: Vec<_> = re.splitn_iter("a,b,c", 0).collect();
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn capture_names_basic() {
+        let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(\d{2})").unwrap();
+        let names: Vec<_> = re.capture_names().collect();
+        // Group 0 = None, group 1 = "year", group 2 = "month", group 3 = None (unnamed)
+        assert_eq!(names.len(), 4);
+        assert_eq!(names[0], None);
+        assert_eq!(names[1], Some("year"));
+        assert_eq!(names[2], Some("month"));
+        assert_eq!(names[3], None);
+    }
+
+    #[test]
+    fn capture_names_exact_size() {
+        let re = Regex::compile(r"(a)(b)").unwrap();
+        let names = re.capture_names();
+        assert_eq!(names.len(), 3); // ExactSizeIterator
+    }
+
+    #[test]
+    fn find_iter_fused() {
+        let re = Regex::compile(r"\d").unwrap();
+        let mut iter = re.find_iter("a1");
+        assert!(iter.next().is_some());
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none()); // FusedIterator
     }
 }

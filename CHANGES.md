@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship lazy iterator APIs: find_iter, captures_iter, split_iter, capture_names
+- Scope: Tier 2 backlog item B12 (iterator APIs).
+- Changes:
+  - `find_iter(text)` → `FindIter` — lazy match iteration, zero Vec allocation
+  - `captures_iter(text)` → `CaptureIter` — lazy capture iteration
+  - `split_iter(text)` → `SplitIter` — lazy regex-delimited split
+  - `splitn_iter(text, limit)` → `SplitNIter` — lazy limited split
+  - `capture_names()` → `CaptureNames` — iterator over group names with `ExactSizeIterator`
+  - All iterators implement `FusedIterator`
+  - 12 new tests including parity checks against Vec-returning methods
+- Validation:
+  - `cargo test -p rgx-core` (552 pass), `cargo test -p rgx-cli` (30 pass), `cargo test -p rgx-bench` (39 pass). Zero clippy errors.
+
 ### 2026-04-08 - Ship ergonomic API batch: Match, Captures, escape, replacen, Cow replace, metadata
 - Scope: Tier 2 backlog items B13, B14, B15, B18, B19, B21.
 - Changes:

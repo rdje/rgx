@@ -329,7 +329,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
 | B9 Error diagnostics | `medium` | Developer experience |
 | B11 `RegexBuilder` | `small` | Standard compilation API |
-| B12 Iterator APIs | `small` | Idiomatic Rust, zero-allocation |
+| ~~B12 Iterator APIs~~ | `small` | ✅ Shipped — find_iter, captures_iter, split_iter, capture_names |
 | ~~B13 `Captures` wrapper~~ | `small` | ✅ Shipped — `Captures<'t>` with index/name/expand/iter |
 | ~~B14 `Match` type~~ | `trivial` | ✅ Shipped — `Match<'t>` with as_str/range/len |
 | ~~B15 `replacen`~~ | `trivial` | ✅ Shipped |
