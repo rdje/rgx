@@ -1,16 +1,15 @@
 id: PGEN-RGX-0014
 summary: |
-  PGEN regex parser rejects \X (extended grapheme cluster escape).
-  PCRE2 supports \X as a first-class escape that matches one Unicode
-  extended grapheme cluster. PGEN's simple_escape handler does not
-  recognize 'X' and raises "unrecognized simple_escape character 'X'".
-status: open
+  CLOSED — NOT A PGEN BUG. PGEN correctly parses \X as a simple_escape
+  node. The error was in RGX's parsing.rs adapter which did not handle
+  'X' in its simple_escape character mapping.
+status: closed
 opened_at: 2026-04-08T00:00:00Z
 first_seen_at: 2026-04-08T00:00:00Z
 last_updated_at: 2026-04-08T00:00:00Z
 parser_backend: pgen
 parser_backend_version: "1.1.8"
-rgx_commit: 74333dc
+rgx_commit: 0f60722
 upstream_report:
   reported: false
   issue_id: null
@@ -23,35 +22,24 @@ context:
   pattern: "\\X"
   input: "cafe"
   notes: |
-    RGX has full engine support ready (AST node, VM opcode, codegen,
-    unicode-segmentation integration) blocked only on PGEN recognizing
-    \X as a valid escape in the simple_escape rule.
+    PGEN produces a correct simple_escape AST node for \X.
+    The error was in RGX's simple_escape handler in parsing.rs
+    which did not map 'X' to Regex::GraphemeCluster.
 expected_behavior: |
-  PGEN should parse \X and produce an AST node (e.g., rule name
-  "grapheme_cluster" or "extended_grapheme_escape") so RGX can
-  compile it to the GraphemeCluster VM opcode.
+  N/A — PGEN behaves correctly.
 actual_behavior: |
-  PGEN returns:
-    E_PARSE_FAILURE: pgen AST contract mismatch: unrecognized simple_escape character 'X'
+  N/A — PGEN behaves correctly. RGX adapter was missing the mapping.
 reproduction: |
-  Pattern: \X
-  Input: any text
-  Command: cargo run --bin rgx-cli -- '\X' 'test'
-  Error: "regex compile error: pgen AST contract mismatch: unrecognized simple_escape character 'X'"
-
-  Minimal Rust repro:
-    let result = rgx_core::Regex::compile(r"\X");
-    assert!(result.is_err()); // should succeed
+  PGEN parseability_probe confirms successful parse:
+    cargo run --bin parseability_probe -- --parse regex repro_input.txt --profile regex_default
+    => "parse_full passed"
+  AST dump shows: rule_name "simple_escape" at span 1..2
 impact: |
-  Blocks A10 (\X extended grapheme cluster) from the RGX backlog.
-  \X is a PCRE2 feature used for correct Unicode text processing
-  (matching base characters + combining marks as a single unit).
-  RGX engine-side support is fully implemented and tested, waiting
-  only on parser recognition.
+  None — this was an RGX-side bug, not a PGEN issue.
 resolution:
-  status: unresolved
+  status: closed-not-a-pgen-bug
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-04-08T00:00:00Z
   verification_notes: |
-    Will verify once PGEN adds \X to simple_escape and RGX updates
-    the submodule pin.
+    Verified via parseability_probe that PGEN correctly parses \X.
+    Fix will be applied in RGX parsing.rs adapter.
