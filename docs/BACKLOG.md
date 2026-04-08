@@ -333,8 +333,8 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~B13 `Captures` wrapper~~ | `small` | ✅ Shipped — `Captures<'t>` with index/name/expand/iter |
 | ~~B14 `Match` type~~ | `trivial` | ✅ Shipped — `Match<'t>` with as_str/range/len |
 | ~~B15 `replacen`~~ | `trivial` | ✅ Shipped |
-| B16 `Replacer` trait | `small` | Closure-based replacement |
-| B17 `shortest_match` | `small` | Faster match-end queries |
+| ~~B16 `Replacer` trait~~ | `small` | ✅ Shipped — Replacer trait + NoExpand + closure support |
+| ~~B17 `shortest_match`~~ | `small` | ✅ Shipped — shortest_match + shortest_match_at |
 | ~~B18 `escape()`~~ | `trivial` | ✅ Shipped |
 | ~~B19 Metadata accessors~~ | `trivial` | ✅ Shipped — `as_str`, `captures_len` |
 | B20 `CaptureLocations` | `small` | Reusable capture storage |

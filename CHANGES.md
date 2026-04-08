@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship Replacer trait, NoExpand, shortest_match
+- Scope: Tier 2 backlog items B16 (Replacer trait) and B17 (shortest_match).
+- Changes:
+  - `Replacer` trait with `replace_append` and `no_expansion` — pluggable replacement strategy
+  - Implemented for `&str`, `String`, `&String` (template interpolation), `FnMut(&Captures) -> T` (closures), and `NoExpand` (literal)
+  - `replace`/`replace_all`/`replacen` now accept `impl Replacer` instead of `&str` — closures work directly
+  - `NoExpand` wrapper prevents `$1`/`$name` interpolation
+  - Fast path: when `no_expansion()` returns `Some`, capture extraction is skipped entirely
+  - `shortest_match(text)` and `shortest_match_at(text, start)` — return only end position
+  - 9 new tests
+- Validation:
+  - All 562+ tests pass across rgx-core, rgx-cli, rgx-bench. Zero clippy errors.
+
 ### 2026-04-08 - Remove scaffold files and confirm zero RGX-owned warnings
 - Scope: Tier 1 items C5 (scaffold removal) and C6 (clean warnings).
 - Changes:

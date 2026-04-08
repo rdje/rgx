@@ -313,6 +313,100 @@ impl<'c, 't> ExactSizeIterator for SubCaptureMatches<'c, 't> {}
 // B12: Iterator-based APIs
 // ────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────
+// B16: Replacer trait — pluggable replacement strategy
+// ────────────────────────────────────────────────────────────
+
+/// Trait for types that can produce replacement text for regex matches.
+///
+/// Implemented for:
+/// - `&str` / `String` / `&String` — template with `$1`, `$name` interpolation
+/// - `FnMut(&Captures) -> T` where `T: AsRef<str>` — closure-based replacement
+/// - [`NoExpand`] — literal string, no interpolation
+pub trait Replacer {
+    /// Append the replacement for `caps` to `dst`.
+    fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String);
+
+    /// If the replacement is a fixed string with no capture references, return
+    /// it here. This lets the engine skip capture extraction entirely.
+    fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
+        None
+    }
+}
+
+impl Replacer for &str {
+    fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+        caps.expand(self, dst);
+    }
+
+    fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
+        // Quick check: if there's no '$' at all, it's a literal replacement.
+        if !self.contains('$') {
+            Some(std::borrow::Cow::Borrowed(self))
+        } else {
+            None
+        }
+    }
+}
+
+impl Replacer for String {
+    fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+        caps.expand(self, dst);
+    }
+
+    fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
+        if !self.contains('$') {
+            Some(std::borrow::Cow::Borrowed(self))
+        } else {
+            None
+        }
+    }
+}
+
+impl Replacer for &String {
+    fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+        caps.expand(self, dst);
+    }
+
+    fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
+        if !self.contains('$') {
+            Some(std::borrow::Cow::Borrowed(self))
+        } else {
+            None
+        }
+    }
+}
+
+impl<F, T> Replacer for F
+where
+    F: FnMut(&Captures<'_>) -> T,
+    T: AsRef<str>,
+{
+    fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+        dst.push_str(self(caps).as_ref());
+    }
+}
+
+/// Wrapper that prevents `$1`/`$name` interpolation in a replacement string.
+///
+/// ```rust,no_run
+/// # use rgx_core::{Regex, NoExpand};
+/// let re = Regex::compile(r"\d+").unwrap();
+/// let result = re.replace("price 42", NoExpand("$$$"));
+/// assert_eq!(result, "price $$$");
+/// ```
+pub struct NoExpand<'s>(pub &'s str);
+
+impl<'s> Replacer for NoExpand<'s> {
+    fn replace_append(&mut self, _caps: &Captures<'_>, dst: &mut String) {
+        dst.push_str(self.0);
+    }
+
+    fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
+        Some(std::borrow::Cow::Borrowed(self.0))
+    }
+}
+
 /// Lazy iterator over successive non-overlapping matches.
 ///
 /// Created by [`Regex::find_iter`].
@@ -1072,91 +1166,92 @@ impl Regex {
         parts
     }
 
-    /// Replace the first match with a replacement string supporting `$1`, `$2`,
-    /// `$name` capture interpolation.
+    /// Replace the first match using a [`Replacer`].
     ///
     /// Returns `Cow::Borrowed(text)` when there is no match (zero allocation).
     ///
-    /// Capture references in the replacement string:
-    /// - `$0` or `$&` — the entire match
-    /// - `$1`, `$2`, … — numbered capture groups
-    /// - `$name` or `${name}` — named capture groups
-    /// - `$$` — literal `$`
+    /// The replacer can be:
+    /// - A `&str` or `String` — template with `$1`/`$name`/`$&`/`$$` interpolation
+    /// - A closure `|caps: &Captures| -> impl AsRef<str>` — programmatic replacement
+    /// - A [`NoExpand`] wrapper — literal string, no interpolation
     ///
     /// ```rust,no_run
     /// # use rgx_core::Regex;
     /// let re = Regex::compile(r"(\w+)\s(\w+)").unwrap();
-    /// let result = re.replace("hello world", "$2 $1");
-    /// assert_eq!(result, "world hello");
+    /// // Template interpolation:
+    /// assert_eq!(re.replace("hello world", "$2 $1"), "world hello");
+    /// // Closure:
+    /// let result = re.replace("hello world", |caps: &rgx_core::Captures| {
+    ///     caps[1].to_uppercase()
+    /// });
+    /// assert_eq!(result, "HELLO world");
     /// ```
     #[must_use]
-    pub fn replace<'t>(&self, text: &'t str, replacement: &str) -> std::borrow::Cow<'t, str> {
-        let Some(m) = self.engine.find_first(text.as_bytes()) else {
+    pub fn replace<'t, R: Replacer>(&self, text: &'t str, mut rep: R) -> std::borrow::Cow<'t, str> {
+        let Some(mr) = self.engine.find_first(text.as_bytes()) else {
             return std::borrow::Cow::Borrowed(text);
         };
-        let groups = self.capture_groups_for_match(text, &m);
-        let named = self.engine.named_groups();
         let mut result = String::with_capacity(text.len());
-        result.push_str(&text[..m.start]);
-        Self::interpolate_replacement(replacement, &groups, named, &mut result);
-        result.push_str(&text[m.end..]);
+        result.push_str(&text[..mr.start]);
+        if let Some(literal) = rep.no_expansion() {
+            result.push_str(&literal);
+        } else {
+            let caps = Captures {
+                text,
+                groups: mr.groups,
+                named: std::sync::Arc::new(self.engine.named_groups().clone()),
+            };
+            rep.replace_append(&caps, &mut result);
+        }
+        result.push_str(&text[mr.end..]);
         std::borrow::Cow::Owned(result)
     }
 
-    /// Replace all non-overlapping matches with a replacement string
-    /// supporting `$1`, `$2`, `$name` capture interpolation.
+    /// Replace all non-overlapping matches using a [`Replacer`].
     ///
     /// Returns `Cow::Borrowed(text)` when there are no matches.
-    /// See [`replace`](Self::replace) for the replacement syntax.
+    /// See [`replace`](Self::replace) for replacer options.
     #[must_use]
-    pub fn replace_all<'t>(&self, text: &'t str, replacement: &str) -> std::borrow::Cow<'t, str> {
-        let matches = self.engine.find_all(text.as_bytes());
-        if matches.is_empty() {
-            return std::borrow::Cow::Borrowed(text);
-        }
-        let named = self.engine.named_groups();
-        let mut result = String::with_capacity(text.len());
-        let mut last_end = 0;
-        for m in &matches {
-            result.push_str(&text[last_end..m.start]);
-            let groups = self.capture_groups_for_match(text, m);
-            Self::interpolate_replacement(replacement, &groups, named, &mut result);
-            last_end = m.end;
-        }
-        result.push_str(&text[last_end..]);
-        std::borrow::Cow::Owned(result)
+    pub fn replace_all<'t, R: Replacer>(&self, text: &'t str, rep: R) -> std::borrow::Cow<'t, str> {
+        self.replacen(text, 0, rep)
     }
 
-    /// Replace up to `limit` non-overlapping matches.
+    /// Replace up to `limit` non-overlapping matches using a [`Replacer`].
     ///
-    /// `replacen(text, 0, rep)` is equivalent to `replace_all`.
-    /// `replacen(text, 1, rep)` is equivalent to `replace`.
+    /// `replacen(text, 0, rep)` replaces all. `replacen(text, 1, rep)` replaces
+    /// only the first.
     #[must_use]
-    pub fn replacen<'t>(
+    pub fn replacen<'t, R: Replacer>(
         &self,
         text: &'t str,
         limit: usize,
-        replacement: &str,
+        mut rep: R,
     ) -> std::borrow::Cow<'t, str> {
-        if limit == 1 {
-            return self.replace(text, replacement);
-        }
         let matches = self.engine.find_all(text.as_bytes());
         if matches.is_empty() {
             return std::borrow::Cow::Borrowed(text);
         }
-        let named = self.engine.named_groups();
         let effective = if limit == 0 {
             matches.len()
         } else {
             limit.min(matches.len())
         };
+        let literal = rep.no_expansion().map(|c| c.into_owned());
+        let named = std::sync::Arc::new(self.engine.named_groups().clone());
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
         for m in matches.iter().take(effective) {
             result.push_str(&text[last_end..m.start]);
-            let groups = self.capture_groups_for_match(text, m);
-            Self::interpolate_replacement(replacement, &groups, named, &mut result);
+            if let Some(ref lit) = literal {
+                result.push_str(lit);
+            } else {
+                let caps = Captures {
+                    text,
+                    groups: m.groups.clone(),
+                    named: named.clone(),
+                };
+                rep.replace_append(&caps, &mut result);
+            }
             last_end = m.end;
         }
         result.push_str(&text[last_end..]);
@@ -1186,6 +1281,24 @@ impl Regex {
             groups: m.groups,
             named: std::sync::Arc::new(self.engine.named_groups().clone()),
         })
+    }
+
+    /// Return only the end byte offset of the first match.
+    ///
+    /// Faster than [`find`](Self::find) when you only need to know *where*
+    /// a match ends (e.g., tokenizers, validators).
+    #[must_use]
+    pub fn shortest_match(&self, text: &str) -> Option<usize> {
+        self.find_first(text).map(|m| m.end)
+    }
+
+    /// Return only the end byte offset of the first match starting at `start`.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn shortest_match_at(&self, text: &str, start: usize) -> Option<usize> {
+        self.find_first_at(text, start).map(|m| m.end)
     }
 
     /// The original pattern string used to compile this regex.
@@ -6526,5 +6639,78 @@ mod tests {
         assert!(iter.next().is_some());
         assert!(iter.next().is_none());
         assert!(iter.next().is_none()); // FusedIterator
+    }
+
+    // === B16: Replacer trait ===
+
+    #[test]
+    fn replace_with_closure() {
+        let re = Regex::compile(r"\w+").unwrap();
+        let result = re.replace_all("hello world", |caps: &Captures| caps[0].to_uppercase());
+        assert_eq!(result, "HELLO WORLD");
+    }
+
+    #[test]
+    fn replace_closure_with_captures() {
+        let re = Regex::compile(r"(\w+)\s(\w+)").unwrap();
+        let result = re.replace("John Doe", |caps: &Captures| {
+            format!("{}, {}", &caps[2], &caps[1])
+        });
+        assert_eq!(result, "Doe, John");
+    }
+
+    #[test]
+    fn replace_with_no_expand() {
+        let re = Regex::compile(r"\d+").unwrap();
+        // NoExpand prevents $1 from being interpreted
+        let result = re.replace("price 42", NoExpand("$1"));
+        assert_eq!(result, "price $1");
+    }
+
+    #[test]
+    fn replace_all_with_closure_counter() {
+        let re = Regex::compile(r"\w+").unwrap();
+        let mut count = 0;
+        let result = re.replace_all("a b c", |_caps: &Captures| {
+            count += 1;
+            count.to_string()
+        });
+        assert_eq!(result, "1 2 3");
+    }
+
+    #[test]
+    fn replacen_with_closure() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let result = re.replacen("a1b2c3", 2, |caps: &Captures| format!("[{}]", &caps[0]));
+        assert_eq!(result, "a[1]b[2]c3");
+    }
+
+    #[test]
+    fn replace_literal_no_dollar_skips_expansion() {
+        let re = Regex::compile(r"\d+").unwrap();
+        // "X" has no '$', so no_expansion() returns Some → fast path
+        let result = re.replace_all("a1b2c3", "X");
+        assert_eq!(result, "aXbXcX");
+    }
+
+    // === B17: shortest_match ===
+
+    #[test]
+    fn shortest_match_returns_end_position() {
+        let re = Regex::compile(r"\d+").unwrap();
+        assert_eq!(re.shortest_match("abc 42 xyz"), Some(6)); // end of "42"
+    }
+
+    #[test]
+    fn shortest_match_no_match() {
+        let re = Regex::compile(r"\d+").unwrap();
+        assert_eq!(re.shortest_match("abc"), None);
+    }
+
+    #[test]
+    fn shortest_match_at_from_offset() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let text = "12 abc 34";
+        assert_eq!(re.shortest_match_at(text, 3), Some(9)); // end of "34"
     }
 }
