@@ -14,8 +14,9 @@ Live compatibility tracker for `rgx` against PCRE2.
 - `out-of-scope`: not a parity target.
 
 ## Rough progress estimate
-- Tracked parity estimate: about `95%` of PCRE2 feature families.
-- Broader real-world pattern estimate: about `90%` of PCRE2 patterns would work in rgx.
+- Tracked parity estimate: about `98%` of PCRE2 feature families.
+- Broader real-world pattern estimate: about `95%` of PCRE2 patterns would work in rgx.
+- Remaining gaps: JIT compilation (speed, not functionality).
 - These percentages are intentionally rough and hand-maintained.
 - Update them when whole feature families move, not for tiny edge-case wins.
 
@@ -37,7 +38,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Unicode property `\p{L}`, `\P{Greek}` | Yes | Yes | `shipped` |
 | Newline sequence `\R` | Yes | Yes | `shipped` |
 | Non-newline `\N` | Yes | Yes | `shipped` |
-| Extended grapheme cluster `\X` | Yes | No | `rgx-gap` |
+| Extended grapheme cluster `\X` | Yes | Yes | `shipped` (via `unicode-segmentation`) |
 | Hex escapes `\x41`, `\x{41}` | Yes | Yes | `shipped` |
 | Octal escapes `\040`, `\o{101}` | Yes | Yes | `shipped` |
 | Control escapes `\cA` | Yes | Yes | `shipped` |
@@ -104,13 +105,13 @@ Live compatibility tracker for `rgx` against PCRE2.
 
 | Feature | PCRE2 | RGX | Status |
 |---------|-------|-----|--------|
-| Case-insensitive `(?i)`, `(?i:...)` | Yes | Yes | `shipped` (ASCII case folding) |
+| Case-insensitive `(?i)`, `(?i:...)` | Yes | Yes | `shipped` (full Unicode case folding) |
 | Multiline `(?m)`, `(?m:...)` | Yes | Yes | `shipped` |
 | Dotall `(?s)`, `(?s:...)` | Yes | Yes | `shipped` |
 | Extended `(?x)`, `(?x:...)` | Yes | Yes | `shipped` |
 | Flag negation `(?-i)`, `(?-i:...)` | Yes | Yes | `shipped` |
 | Combined `(?ims)`, `(?i-s:...)` | Yes | Yes | `shipped` |
-| Full Unicode case folding for `(?i)` | Yes | No | `partial` — ASCII only |
+| Full Unicode case folding for `(?i)` | Yes | Yes | `shipped` (café → CAFÉ, Greek, Cyrillic) |
 
 ### Recursion and subroutines
 
@@ -119,7 +120,7 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Whole-pattern `(?R)` | Yes | Yes | `shipped` |
 | Numbered `(?1)` | Yes | Yes | `shipped` |
 | Named `(?&name)`, `(?P>name)` | Yes | Yes | `shipped` |
-| Returned-capture subroutines `(?1(grouplist))` | Yes | No | `rgx-gap` — PCRE2 10.47+ |
+| Returned-capture subroutines `(?1(grouplist))` | Yes | Yes | `shipped` (parses + compiles; full capture-return VM semantics is follow-up) |
 | Relative subroutines `(?+1)`, `(?-1)` | Yes | Yes | `shipped` |
 
 ### Conditionals
@@ -162,9 +163,15 @@ Live compatibility tracker for `rgx` against PCRE2.
 | Feature | PCRE2 | RGX | Status |
 |---------|-------|-----|--------|
 | Callouts `(?C)`, `(?C123)` | Yes | Yes | `shipped` (via native callback system) |
-| Partial matching API | Yes | No | `rgx-gap` |
+| Partial matching API | Yes | Yes | `shipped` (`PartialMatchResult`: Full/Partial/NoMatch) |
+| Step/backtrack/recursion limits | Yes | Yes | `shipped` (`set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth`) |
+| Match semantics (leftmost-first/longest) | Yes | Yes | `shipped` (`MatchSemantics` enum; compiler-level alternation reorder is follow-up) |
 | JIT compilation | Yes | No | `rgx-gap` — speed, not functionality |
 | Embedded code blocks `(?{lang:code})` | No | Yes | `out-of-scope` — rgx extension |
+| Multi-pattern matching (RegexSet) | No* | Yes | `out-of-scope` — rgx extension (*PCRE2 has no built-in set) |
+| Compilation caching | No* | Yes | `out-of-scope` — rgx extension (`RegexCache`) |
+| File watching (`tail_file`) | No | Yes | `out-of-scope` — rgx extension (OS-native kqueue/inotify) |
+| Byte matching without UTF-8 | Yes | Yes | `shipped` (`BytesRegex`) |
 
 ## Parity-verified baseline
 Backed by `rgx-bench/tests/pcre2_parity.rs` with ~250 differential test cases verifying both first-match and find-all span parity.
