@@ -337,7 +337,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | ~~B17 `shortest_match`~~ | `small` | ✅ Shipped — shortest_match + shortest_match_at |
 | ~~B18 `escape()`~~ | `trivial` | ✅ Shipped |
 | ~~B19 Metadata accessors~~ | `trivial` | ✅ Shipped — `as_str`, `captures_len` |
-| B20 `CaptureLocations` | `small` | Reusable capture storage |
+| ~~B20 `CaptureLocations`~~ | `small` | ✅ Shipped — captures_read + captures_read_at |
 | ~~B21 `Cow<str>` replace~~ | `trivial` | ✅ Shipped |
 | C3 Fuzzing | `small` | Robustness |
 | C4 Benchmark CI | `small` | Prevent regressions |

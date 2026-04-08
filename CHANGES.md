@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship CaptureLocations for zero-allocation capture loops
+- Scope: Tier 2 backlog item B20.
+- Changes:
+  - `CaptureLocations` type with `get(i)`, `len()`, `is_empty()`
+  - `Regex::capture_locations()` — create reusable buffer sized for this pattern
+  - `Regex::captures_read(text, &mut locs)` — fill buffer in-place, return `Match`
+  - `Regex::captures_read_at(text, start, &mut locs)` — position-aware variant
+  - 6 new tests: basic, reuse, no-match, optional groups, offset, len
+- Validation: 586+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship CLI --color output with ANSI match highlighting
 - Scope: Tier 2 backlog item A5 (CLI color).
 - Changes:

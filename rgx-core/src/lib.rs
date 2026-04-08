@@ -313,6 +313,52 @@ impl<'c, 't> Iterator for SubCaptureMatches<'c, 't> {
 impl<'c, 't> ExactSizeIterator for SubCaptureMatches<'c, 't> {}
 
 // ────────────────────────────────────────────────────────────
+// B20: CaptureLocations — reusable capture storage
+// ────────────────────────────────────────────────────────────
+
+/// Pre-allocated capture group storage for zero-allocation matching loops.
+///
+/// Create once with [`Regex::capture_locations`], then reuse across calls
+/// to [`Regex::captures_read`] to avoid allocating a new `Vec` per match.
+///
+/// ```rust,no_run
+/// # use rgx_core::Regex;
+/// let re = Regex::compile(r"(\d+)-(\w+)").unwrap();
+/// let mut locs = re.capture_locations();
+/// if re.captures_read("item 42-abc", &mut locs).is_some() {
+///     assert_eq!(locs.get(1), Some((5, 7)));   // "42"
+///     assert_eq!(locs.get(2), Some((8, 11)));   // "abc"
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct CaptureLocations {
+    slots: Vec<Option<(usize, usize)>>,
+}
+
+impl CaptureLocations {
+    /// Get the byte offset pair for capture group `i`.
+    ///
+    /// Index 0 is the overall match. Returns `None` if the group did not
+    /// participate in the match.
+    #[must_use]
+    pub fn get(&self, i: usize) -> Option<(usize, usize)> {
+        self.slots.get(i).copied().flatten()
+    }
+
+    /// The number of slots (including group 0).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Whether there are no slots.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+}
+
+// ────────────────────────────────────────────────────────────
 // B12: Iterator-based APIs
 // ────────────────────────────────────────────────────────────
 
@@ -1472,6 +1518,63 @@ impl Regex {
     #[must_use]
     pub fn captures_len(&self) -> usize {
         self.engine.num_groups() as usize + 1
+    }
+
+    /// Create a reusable [`CaptureLocations`] buffer sized for this regex.
+    ///
+    /// Use with [`captures_read`](Self::captures_read) to avoid per-match
+    /// allocation in tight loops.
+    #[must_use]
+    pub fn capture_locations(&self) -> CaptureLocations {
+        CaptureLocations {
+            slots: vec![None; self.captures_len()],
+        }
+    }
+
+    /// Fill `locs` with capture positions for the first match, returning
+    /// the overall match as a [`Match`].
+    ///
+    /// This avoids allocating a new `Vec` per match — ideal for loops
+    /// that process millions of inputs.
+    #[must_use]
+    pub fn captures_read<'t>(
+        &self,
+        text: &'t str,
+        locs: &mut CaptureLocations,
+    ) -> Option<Match<'t>> {
+        let mr = self.find_first(text)?;
+        // Copy group positions into the reusable buffer.
+        for (i, slot) in locs.slots.iter_mut().enumerate() {
+            *slot = mr.groups.get(i).copied().flatten();
+        }
+        Some(Match {
+            text,
+            start: mr.start,
+            end: mr.end,
+        })
+    }
+
+    /// Fill `locs` with capture positions for the first match starting at
+    /// `start`, returning the overall match as a [`Match`].
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub fn captures_read_at<'t>(
+        &self,
+        text: &'t str,
+        start: usize,
+        locs: &mut CaptureLocations,
+    ) -> Option<Match<'t>> {
+        let mr = self.find_first_at(text, start)?;
+        for (i, slot) in locs.slots.iter_mut().enumerate() {
+            *slot = mr.groups.get(i).copied().flatten();
+        }
+        Some(Match {
+            text,
+            start: mr.start,
+            end: mr.end,
+        })
     }
 
     /// Iterator over capture group names.
@@ -6945,5 +7048,65 @@ mod tests {
             re1.find_first(text).map(|m| (m.start, m.end)),
             re2.find_first(text).map(|m| (m.start, m.end))
         );
+    }
+
+    // === B20: CaptureLocations ===
+
+    #[test]
+    fn capture_locations_basic() {
+        let re = Regex::compile(r"(\d+)-(\w+)").unwrap();
+        let mut locs = re.capture_locations();
+        let m = re.captures_read("item 42-abc end", &mut locs).unwrap();
+        assert_eq!(m.as_str(), "42-abc");
+        assert_eq!(locs.get(0), Some((5, 11))); // full match
+        assert_eq!(locs.get(1), Some((5, 7))); // "42"
+        assert_eq!(locs.get(2), Some((8, 11))); // "abc"
+    }
+
+    #[test]
+    fn capture_locations_reuse() {
+        let re = Regex::compile(r"(\w+)").unwrap();
+        let mut locs = re.capture_locations();
+
+        let m1 = re.captures_read("hello", &mut locs).unwrap();
+        assert_eq!(m1.as_str(), "hello");
+        assert_eq!(locs.get(1), Some((0, 5)));
+
+        let m2 = re.captures_read("world", &mut locs).unwrap();
+        assert_eq!(m2.as_str(), "world");
+        assert_eq!(locs.get(1), Some((0, 5)));
+    }
+
+    #[test]
+    fn capture_locations_no_match() {
+        let re = Regex::compile(r"\d+").unwrap();
+        let mut locs = re.capture_locations();
+        assert!(re.captures_read("abc", &mut locs).is_none());
+    }
+
+    #[test]
+    fn capture_locations_optional_group() {
+        let re = Regex::compile(r"(a)(b)?c").unwrap();
+        let mut locs = re.capture_locations();
+        re.captures_read("ac", &mut locs).unwrap();
+        assert!(locs.get(1).is_some()); // "a" matched
+        assert!(locs.get(2).is_none()); // "b" didn't participate
+    }
+
+    #[test]
+    fn capture_locations_at_offset() {
+        let re = Regex::compile(r"(\d+)").unwrap();
+        let mut locs = re.capture_locations();
+        let m = re.captures_read_at("aa 11 bb 22", 5, &mut locs).unwrap();
+        assert_eq!(m.as_str(), "22");
+        assert_eq!(locs.get(1), Some((9, 11)));
+    }
+
+    #[test]
+    fn capture_locations_len() {
+        let re = Regex::compile(r"(a)(b)(c)").unwrap();
+        let locs = re.capture_locations();
+        assert_eq!(locs.len(), 4); // group 0 + 3
+        assert!(!locs.is_empty());
     }
 }
