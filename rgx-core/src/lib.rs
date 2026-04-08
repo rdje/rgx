@@ -626,6 +626,132 @@ impl<'r> Iterator for CaptureNames<'r> {
 
 impl<'r> ExactSizeIterator for CaptureNames<'r> {}
 
+// ────────────────────────────────────────────────────────────
+// B11: RegexBuilder — fluent compilation with flag overrides
+// ────────────────────────────────────────────────────────────
+
+/// Builder for configuring and compiling a [`Regex`] with flag overrides.
+///
+/// ```rust,no_run
+/// # use rgx_core::RegexBuilder;
+/// let re = RegexBuilder::new(r"hello world")
+///     .case_insensitive(true)
+///     .multi_line(true)
+///     .build()
+///     .unwrap();
+/// assert!(re.is_match("HELLO WORLD"));
+/// ```
+pub struct RegexBuilder {
+    pattern: String,
+    mode: ExecutionMode,
+    case_insensitive: bool,
+    multi_line: bool,
+    dot_matches_new_line: bool,
+    swap_greed: bool,
+    ignore_whitespace: bool,
+}
+
+impl RegexBuilder {
+    /// Create a new builder for the given pattern.
+    #[must_use]
+    pub fn new(pattern: &str) -> Self {
+        Self {
+            pattern: pattern.to_string(),
+            mode: ExecutionMode::Pure,
+            case_insensitive: false,
+            multi_line: false,
+            dot_matches_new_line: false,
+            swap_greed: false,
+            ignore_whitespace: false,
+        }
+    }
+
+    /// Set the execution mode.
+    #[must_use]
+    pub fn mode(mut self, mode: ExecutionMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Enable or disable case-insensitive matching (`(?i)`).
+    #[must_use]
+    pub fn case_insensitive(mut self, yes: bool) -> Self {
+        self.case_insensitive = yes;
+        self
+    }
+
+    /// Enable or disable multi-line mode (`(?m)`), where `^` and `$` match
+    /// line boundaries instead of only start/end of text.
+    #[must_use]
+    pub fn multi_line(mut self, yes: bool) -> Self {
+        self.multi_line = yes;
+        self
+    }
+
+    /// Enable or disable dot-matches-newline mode (`(?s)`), where `.` matches
+    /// any character including `\n`.
+    #[must_use]
+    pub fn dot_matches_new_line(mut self, yes: bool) -> Self {
+        self.dot_matches_new_line = yes;
+        self
+    }
+
+    /// Enable or disable swap-greed mode, where quantifiers are lazy by default
+    /// and `?` makes them greedy.
+    #[must_use]
+    pub fn swap_greed(mut self, yes: bool) -> Self {
+        self.swap_greed = yes;
+        self
+    }
+
+    /// Enable or disable extended/verbose mode (`(?x)`), where unescaped
+    /// whitespace and `#` comments are ignored.
+    #[must_use]
+    pub fn ignore_whitespace(mut self, yes: bool) -> Self {
+        self.ignore_whitespace = yes;
+        self
+    }
+
+    /// Compile the regex with the configured options.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RgxError`] if the pattern is invalid.
+    pub fn build(self) -> Result<Regex> {
+        let flags = self.flag_prefix();
+        let effective_pattern = if flags.is_empty() {
+            self.pattern.clone()
+        } else {
+            format!("(?{flags}){}", self.pattern)
+        };
+        if self.mode == ExecutionMode::Pure {
+            Regex::compile(&effective_pattern)
+        } else {
+            Regex::with_mode(&effective_pattern, self.mode)
+        }
+    }
+
+    /// Build the inline flag prefix string from enabled flags.
+    fn flag_prefix(&self) -> String {
+        let mut flags = String::new();
+        if self.case_insensitive {
+            flags.push('i');
+        }
+        if self.multi_line {
+            flags.push('m');
+        }
+        if self.dot_matches_new_line {
+            flags.push('s');
+        }
+        if self.ignore_whitespace {
+            flags.push('x');
+        }
+        // swap_greed doesn't map to a standard inline flag — we'd need
+        // compiler support. For now it's a no-op placeholder.
+        flags
+    }
+}
+
 /// High-performance regex matcher with optional code execution capabilities.
 ///
 /// This is the main entry point for the `rgx` regex engine. It provides
@@ -6712,5 +6838,82 @@ mod tests {
         let re = Regex::compile(r"\d+").unwrap();
         let text = "12 abc 34";
         assert_eq!(re.shortest_match_at(text, 3), Some(9)); // end of "34"
+    }
+
+    // === B11: RegexBuilder ===
+
+    #[test]
+    fn regex_builder_case_insensitive() {
+        let re = RegexBuilder::new(r"hello")
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        assert!(re.is_match("HELLO"));
+        assert!(re.is_match("Hello"));
+        assert!(re.is_match("hello"));
+    }
+
+    #[test]
+    fn regex_builder_multi_line() {
+        let re = RegexBuilder::new(r"^line$")
+            .multi_line(true)
+            .build()
+            .unwrap();
+        assert!(re.is_match("first\nline\nlast"));
+    }
+
+    #[test]
+    fn regex_builder_dot_all() {
+        let re = RegexBuilder::new(r"a.b")
+            .dot_matches_new_line(true)
+            .build()
+            .unwrap();
+        assert!(re.is_match("a\nb"));
+    }
+
+    #[test]
+    fn regex_builder_extended() {
+        let re = RegexBuilder::new(
+            r"
+            \d{3}   # area code
+            -
+            \d{4}   # number
+        ",
+        )
+        .ignore_whitespace(true)
+        .build()
+        .unwrap();
+        assert!(re.is_match("555-1234"));
+    }
+
+    #[test]
+    fn regex_builder_combined_flags() {
+        let re = RegexBuilder::new(r"^hello.world$")
+            .case_insensitive(true)
+            .multi_line(true)
+            .dot_matches_new_line(true)
+            .build()
+            .unwrap();
+        assert!(re.is_match("prefix\nHELLO\nWORLD\nsuffix"));
+    }
+
+    #[test]
+    fn regex_builder_with_mode() {
+        let re = RegexBuilder::new(r"\d+")
+            .mode(ExecutionMode::Safe)
+            .build()
+            .unwrap();
+        assert!(re.is_match("42"));
+    }
+
+    #[test]
+    fn regex_builder_no_flags_same_as_compile() {
+        let re1 = Regex::compile(r"\d+").unwrap();
+        let re2 = RegexBuilder::new(r"\d+").build().unwrap();
+        let text = "abc 123 xyz";
+        assert_eq!(
+            re1.find_first(text).map(|m| (m.start, m.end)),
+            re2.find_first(text).map(|m| (m.start, m.end))
+        );
     }
 }

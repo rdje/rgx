@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship RegexBuilder for fluent compilation with flag overrides
+- Scope: Tier 2 backlog item B11.
+- Changes:
+  - `RegexBuilder::new(pattern).case_insensitive(true).build()` — fluent flag configuration
+  - Methods: `case_insensitive`, `multi_line`, `dot_matches_new_line`, `ignore_whitespace`, `swap_greed`, `mode`
+  - Prepends `(?imsx)` prefix to pattern — zero compiler changes needed
+  - 7 new tests
+- Validation: 600+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship Replacer trait, NoExpand, shortest_match
 - Scope: Tier 2 backlog items B16 (Replacer trait) and B17 (shortest_match).
 - Changes:

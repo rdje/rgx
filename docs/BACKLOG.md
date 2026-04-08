@@ -328,7 +328,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | B3 Compilation caching | `small` | Performance for dynamic patterns |
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
 | B9 Error diagnostics | `medium` | Developer experience |
-| B11 `RegexBuilder` | `small` | Standard compilation API |
+| ~~B11 `RegexBuilder`~~ | `small` | ✅ Shipped — fluent builder with flag overrides |
 | ~~B12 Iterator APIs~~ | `small` | ✅ Shipped — find_iter, captures_iter, split_iter, capture_names |
 | ~~B13 `Captures` wrapper~~ | `small` | ✅ Shipped — `Captures<'t>` with index/name/expand/iter |
 | ~~B14 `Match` type~~ | `trivial` | ✅ Shipped — `Match<'t>` with as_str/range/len |
