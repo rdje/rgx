@@ -328,6 +328,57 @@ let matches = re.find_all(text);
 // Only matches apple, banana, cherry -- stops at END
 ```
 
+## Steering from inline languages
+
+Steering isn't limited to native Rust callbacks. Lua, JavaScript, and Rhai code blocks can steer the match too, using helper functions on the `rgx` object:
+
+### Lua
+
+```lua
+-- (?{lua:rgx.steer_accept()})
+rgx.steer_continue()     -- proceed normally
+rgx.steer_fail()         -- reject this path
+rgx.steer_accept()       -- commit the match immediately
+rgx.steer_skip(10)       -- advance 10 bytes
+rgx.steer_abort()        -- stop the entire search
+```
+
+### JavaScript
+
+```javascript
+// (?{js:rgx.steerAccept()})
+rgx.steerContinue()      // proceed normally
+rgx.steerFail()          // reject this path
+rgx.steerAccept()        // commit the match immediately
+rgx.steerSkip(10)        // advance 10 bytes
+rgx.steerAbort()         // stop the entire search
+```
+
+### Rhai
+
+```rust
+// (?{rhai:steer_accept()})
+steer_continue()          // proceed normally
+steer_fail()              // reject this path
+steer_accept()            // commit the match immediately
+steer_skip(10)            // advance 10 bytes
+steer_abort()             // stop the entire search
+```
+
+### Example: early acceptance from Lua
+
+```rust
+let re = Regex::with_mode(
+    r#"(\w+)(?{lua:if arg[1] == "STOP" then rgx.steer_abort() end; return true})"#,
+    ExecutionMode::Safe,
+)?;
+
+let matches = re.find_all("one two STOP three four");
+// Matches: "one", "two", "STOP" — then search aborts
+```
+
+Steer actions take the highest priority in the execution result. If your code block returns a value *and* calls a steer function, the steer wins.
+
 ## Which steering action should I use?
 
 Here's a decision guide. Start at the top and follow the first condition that applies:
