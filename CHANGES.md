@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship tail_file for poll-based file watching with match callbacks
+- Scope: Tier 3 backlog item A3.
+- Changes:
+  - `Regex::tail_file(path, options, on_match)` — watch a file, call back on matches in new lines
+  - `TailOptions` — `poll_interval` (default 250ms), `from_end` (default true)
+  - `TailHandle` — `stop()`, `is_running()`, auto-stop on drop
+  - Background thread with poll loop, truncation detection, line-number tracking
+  - 3 new tests: appended content detection, from-beginning mode, handle lifecycle
+- Validation: 606+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship RegexSet for multi-pattern matching
 - Scope: Tier 3 backlog item B2.
 - Changes:

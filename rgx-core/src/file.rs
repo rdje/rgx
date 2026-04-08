@@ -127,6 +127,157 @@ impl Regex {
     }
 }
 
+/// Options for [`Regex::tail_file`].
+pub struct TailOptions {
+    /// How often to poll for new content (default: 250ms).
+    pub poll_interval: std::time::Duration,
+    /// Whether to read from the end of the file (true) or the beginning (false).
+    /// Default: true (start at end, only see new content).
+    pub from_end: bool,
+}
+
+impl Default for TailOptions {
+    fn default() -> Self {
+        Self {
+            poll_interval: std::time::Duration::from_millis(250),
+            from_end: true,
+        }
+    }
+}
+
+/// A handle to a running [`tail_file`](Regex::tail_file) operation.
+///
+/// Drop the handle or call [`stop`](TailHandle::stop) to terminate the watcher.
+pub struct TailHandle {
+    stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl TailHandle {
+    /// Signal the tail thread to stop and wait for it to finish.
+    pub fn stop(mut self) {
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.thread.take() {
+            handle.join().ok();
+        }
+    }
+
+    /// Check if the tail thread is still running.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.thread.as_ref().map_or(false, |h| !h.is_finished())
+    }
+}
+
+impl Drop for TailHandle {
+    fn drop(&mut self) {
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        // Don't block in drop — the thread will notice the flag on its next poll.
+    }
+}
+
+impl Regex {
+    /// Watch a file for new content and call `on_match` for each match found
+    /// in newly appended lines.
+    ///
+    /// Returns a [`TailHandle`] that stops the watcher when dropped.
+    /// The watcher runs in a background thread using poll-based reading.
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::{Regex, file::TailOptions};
+    /// let re = Regex::compile(r"ERROR.*").unwrap();
+    /// let handle = re.tail_file("/var/log/app.log", TailOptions::default(), |fm| {
+    ///     eprintln!("line {}: {}", fm.line_number, fm.line);
+    /// });
+    /// // ... do other work ...
+    /// handle.stop();
+    /// ```
+    pub fn tail_file<P, F>(&self, path: P, options: TailOptions, on_match: F) -> TailHandle
+    where
+        P: AsRef<Path> + Send + 'static,
+        F: Fn(&FileMatch) + Send + 'static,
+    {
+        let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = stop_flag.clone();
+
+        // Clone the pattern to compile a new Regex in the background thread.
+        let pattern = self.as_str().to_string();
+
+        let thread = std::thread::spawn(move || {
+            let Ok(re) = crate::Regex::compile(&pattern) else {
+                return;
+            };
+            let path = path.as_ref();
+            let Ok(metadata) = fs::metadata(path) else {
+                return;
+            };
+
+            let mut pos = if options.from_end { metadata.len() } else { 0 };
+            let mut line_number = if options.from_end {
+                // Count existing lines so line numbers are correct.
+                fs::read_to_string(path)
+                    .map(|s| s.lines().count())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(options.poll_interval);
+
+                let Ok(current_meta) = fs::metadata(path) else {
+                    continue;
+                };
+                let current_len = current_meta.len();
+
+                if current_len <= pos {
+                    // File hasn't grown (or was truncated — reset).
+                    if current_len < pos {
+                        pos = 0;
+                        line_number = 0;
+                    }
+                    continue;
+                }
+
+                // Read the new bytes.
+                let Ok(file) = fs::File::open(path) else {
+                    continue;
+                };
+                use std::io::{Read, Seek, SeekFrom};
+                let mut reader = BufReader::new(file);
+                if reader.seek(SeekFrom::Start(pos)).is_err() {
+                    continue;
+                }
+                let mut new_data = String::new();
+                if reader.read_to_string(&mut new_data).is_err() {
+                    continue;
+                }
+
+                // Match line by line in the new content.
+                for line in new_data.lines() {
+                    line_number += 1;
+                    for m in re.find_all(line) {
+                        on_match(&FileMatch {
+                            match_result: m,
+                            line_number,
+                            line: line.to_string(),
+                        });
+                    }
+                }
+
+                pos = current_len;
+            }
+        });
+
+        TailHandle {
+            stop_flag,
+            thread: Some(thread),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Regex;
@@ -187,6 +338,103 @@ mod tests {
         let re = Regex::compile("cat").unwrap();
         let count = re.scan_file_lines(&path).unwrap();
         assert_eq!(count, 3);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn tail_file_detects_appended_content() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("rgx_test_tail.txt");
+        std::fs::write(&path, "initial line\n").unwrap();
+
+        let re = Regex::compile(r"ERROR").unwrap();
+        let found = Arc::new(Mutex::new(Vec::new()));
+        let found_clone = found.clone();
+
+        let handle = re.tail_file(
+            path.clone(),
+            super::TailOptions {
+                poll_interval: std::time::Duration::from_millis(50),
+                from_end: true,
+            },
+            move |fm| {
+                found_clone.lock().unwrap().push(fm.line.clone());
+            },
+        );
+
+        // Append new content after a small delay.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(f, "INFO all good").unwrap();
+            writeln!(f, "ERROR something broke").unwrap();
+            writeln!(f, "ERROR another failure").unwrap();
+        }
+
+        // Wait for the tailer to pick it up.
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        handle.stop();
+
+        let matches = found.lock().unwrap();
+        assert_eq!(matches.len(), 2);
+        assert!(matches[0].contains("something broke"));
+        assert!(matches[1].contains("another failure"));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn tail_file_from_beginning() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("rgx_test_tail_begin.txt");
+        std::fs::write(&path, "ERROR first\nOK\nERROR second\n").unwrap();
+
+        let re = Regex::compile(r"ERROR").unwrap();
+        let found = Arc::new(Mutex::new(Vec::new()));
+        let found_clone = found.clone();
+
+        let handle = re.tail_file(
+            path.clone(),
+            super::TailOptions {
+                poll_interval: std::time::Duration::from_millis(50),
+                from_end: false,
+            },
+            move |fm| {
+                found_clone.lock().unwrap().push(fm.line_number);
+            },
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        handle.stop();
+
+        let lines = found.lock().unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], 1);
+        assert_eq!(lines[1], 3);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn tail_handle_is_running() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("rgx_test_tail_running.txt");
+        std::fs::write(&path, "").unwrap();
+
+        let re = Regex::compile(r"x").unwrap();
+        let handle = re.tail_file(path.clone(), super::TailOptions::default(), |_| {});
+
+        assert!(handle.is_running());
+        handle.stop();
 
         std::fs::remove_file(&path).ok();
     }
