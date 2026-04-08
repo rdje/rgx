@@ -696,6 +696,45 @@ impl Regex {
         result
     }
 
+    /// Set the maximum number of VM opcode steps per match attempt.
+    ///
+    /// Prevents exponential backtracking from hanging the engine on
+    /// pathological patterns like `(a+)+b`. When the limit is reached the
+    /// match attempt fails (returns no-match). The scanning loop may still
+    /// try other start positions.
+    ///
+    /// Pass `None` to remove the limit (default). Pass `Some(n)` to cap
+    /// each attempt at `n` opcode steps.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::Regex;
+    /// let re = Regex::compile(r"(a+)+b").unwrap();
+    /// re.set_max_steps(Some(10_000));
+    /// // On pathological input, this returns None instead of hanging:
+    /// assert!(re.find_first("aaaaaaaaaaaaaaaaaaaac").is_none());
+    /// ```
+    pub fn set_max_steps(&self, limit: Option<u64>) {
+        self.engine.set_max_steps(limit);
+    }
+
+    /// Set the maximum backtrack stack depth per match attempt.
+    ///
+    /// When the limit is exceeded the match attempt fails. Pass `None`
+    /// to remove the limit (default).
+    pub fn set_max_backtrack_frames(&self, limit: Option<u64>) {
+        self.engine.set_max_backtrack_frames(limit);
+    }
+
+    /// Set the maximum recursion depth per match attempt.
+    ///
+    /// Overrides the default hard limit of 1024. Pass `None` to revert
+    /// to the default.
+    pub fn set_max_recursion_depth(&self, limit: Option<u64>) {
+        self.engine.set_max_recursion_depth(limit);
+    }
+
     /// Register a native callback for `(?{native:...})` code blocks on this compiled regex.
     ///
     /// # Errors
@@ -5573,5 +5612,93 @@ mod tests {
         let ng = re.named_groups();
         assert_eq!(ng.get("year").copied(), Some(1));
         assert_eq!(ng.get("month").copied(), Some(2));
+    }
+
+    // === A1: Step limits ===
+
+    #[test]
+    fn step_limit_prevents_catastrophic_backtracking() {
+        // (a+)+b is the classic exponential backtracking pattern.
+        // Without limits, matching against "aaa...c" hangs the engine.
+        let re = Regex::compile(r"(a+)+b").unwrap();
+        re.set_max_steps(Some(10_000));
+        // With a step limit, the engine aborts instead of hanging.
+        let result = re.find_first("aaaaaaaaaaaaaaaaaaaaac");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn step_limit_does_not_prevent_valid_matches() {
+        let re = Regex::compile(r"(a+)+b").unwrap();
+        re.set_max_steps(Some(10_000));
+        // This should still match fine — no pathological backtracking.
+        let m = re.find_first("aaab").unwrap();
+        assert_eq!(&"aaab"[m.start..m.end], "aaab");
+    }
+
+    #[test]
+    fn step_limit_none_is_unlimited() {
+        let re = Regex::compile(r"\d+").unwrap();
+        re.set_max_steps(None); // Explicitly unlimited
+        assert!(re.is_match("123"));
+    }
+
+    #[test]
+    fn step_limit_applies_per_attempt() {
+        // With a very low limit, no position can complete.
+        let re = Regex::compile(r".{5}").unwrap();
+        re.set_max_steps(Some(3)); // Too low to match 5 chars
+        assert!(re.find_first("abcdefgh").is_none());
+    }
+
+    // === A2: Memory limits ===
+
+    #[test]
+    fn backtrack_frame_limit_prevents_stack_explosion() {
+        // a* generates one backtrack frame per character matched.
+        let re = Regex::compile(r"a*b").unwrap();
+        re.set_max_backtrack_frames(Some(5));
+        // Input with many 'a's but no 'b' — forces many backtrack frames.
+        let result = re.find_first("aaaaaaaaaaaaaaaa");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn backtrack_frame_limit_does_not_prevent_valid_matches() {
+        let re = Regex::compile(r"a*b").unwrap();
+        re.set_max_backtrack_frames(Some(100));
+        let m = re.find_first("aaab").unwrap();
+        assert_eq!(&"aaab"[m.start..m.end], "aaab");
+    }
+
+    #[test]
+    fn recursion_depth_limit_custom() {
+        // (a(?1)?b): each nesting level = one recursion call.
+        // "ab" = 0 calls, "aabb" = 1, "aaabbb" = 2, "aaaabbbb" = 3, etc.
+        // set_max_recursion_depth(Some(N)) allows up to N recursion calls.
+        let re = Regex::compile(r"(a(?1)?b)").unwrap();
+
+        // Limit 1: allows 1 recursion call → "aabb" matches, "aaabbb" degrades to "aabb"
+        re.set_max_recursion_depth(Some(1));
+        let m = re.find_first("aabb").unwrap();
+        assert_eq!(&"aabb"[m.start..m.end], "aabb");
+        let m = re.find_first("aaabbb").unwrap();
+        assert_eq!(&"aaabbb"[m.start..m.end], "aabb");
+
+        // Limit 3: allows 3 recursion calls → "aaaabbbb" matches fully
+        re.set_max_recursion_depth(Some(3));
+        let m = re.find_first("aaaabbbb").unwrap();
+        assert_eq!(&"aaaabbbb"[m.start..m.end], "aaaabbbb");
+        // But "aaaaabbbbb" (4 calls) degrades to "aaaabbbb"
+        let m = re.find_first("aaaaabbbbb").unwrap();
+        assert_eq!(&"aaaaabbbbb"[m.start..m.end], "aaaabbbb");
+    }
+
+    #[test]
+    fn recursion_depth_limit_none_uses_default() {
+        let re = Regex::compile(r"(a(?1)?b)").unwrap();
+        re.set_max_recursion_depth(None); // Uses default (1024)
+        let m = re.find_first("aabb");
+        assert!(m.is_some());
     }
 }

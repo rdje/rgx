@@ -322,6 +322,26 @@ impl Engine {
         &self.vm.program.named_groups
     }
 
+    /// Set the maximum number of opcode steps per match attempt.
+    ///
+    /// Prevents exponential backtracking from hanging the engine on
+    /// pathological patterns like `(a+)+b`. When the limit is reached,
+    /// the match attempt fails (returns no-match). Pass `None` to
+    /// remove the limit (default).
+    pub fn set_max_steps(&self, limit: Option<u64>) {
+        self.vm.set_max_steps(limit);
+    }
+
+    /// Set the maximum backtrack stack depth per match attempt.
+    pub fn set_max_backtrack_frames(&self, limit: Option<u64>) {
+        self.vm.set_max_backtrack_frames(limit);
+    }
+
+    /// Set the maximum recursion depth per match attempt.
+    pub fn set_max_recursion_depth(&self, limit: Option<u64>) {
+        self.vm.set_max_recursion_depth(limit);
+    }
+
     /// Register a native callback on the engine's execution manager.
     ///
     /// # Errors

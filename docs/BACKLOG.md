@@ -232,9 +232,9 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### Tier 1 — Do now (production blockers + quick wins)
 | Item | Effort | Why |
 |------|--------|-----|
-| A1 Step limits | `small` | Production blocker — DoS prevention |
-| A2 Memory limits | `small` | Defense-in-depth |
-| B1 (= A1) | `small` | Same as A1 |
+| ~~A1 Step limits~~ | `small` | ✅ Shipped — `set_max_steps` |
+| ~~A2 Memory limits~~ | `small` | ✅ Shipped — `set_max_backtrack_frames` + `set_max_recursion_depth` |
+| ~~B1 (= A1)~~ | `small` | ✅ Shipped |
 | ~~B8 `split`/`splitn`~~ | `trivial` | ✅ Shipped |
 | ~~B10 `find_at`~~ | `trivial` | ✅ Shipped |
 | ~~B6 Replacer with `$1` interpolation~~ | `small` | ✅ Shipped |

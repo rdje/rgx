@@ -411,6 +411,16 @@ pub struct ExecContext<'a> {
     /// instruction pointer are captured here so the scanning loop can build
     /// a `MatchContinuation`. `None` on the synchronous path.
     pub suspension: Option<(String, usize)>,
+    /// Opcode steps executed so far in this match attempt. Incremented per
+    /// opcode dispatch. When `max_steps > 0` and `step_count` exceeds it,
+    /// the match attempt aborts.
+    pub step_count: u64,
+    /// Maximum opcode steps permitted per match attempt. 0 = unlimited.
+    pub max_steps: u64,
+    /// Maximum backtrack stack depth. 0 = unlimited.
+    pub max_backtrack_frames: u64,
+    /// Maximum recursion depth. 0 = unlimited.
+    pub max_recursion_depth: u64,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -517,6 +527,13 @@ pub struct RegexVM {
     literal_finder: Option<memchr::memmem::Finder<'static>>,
     /// Optional event observer for structured match events.
     event_observer: RwLock<Option<EventObserver>>,
+    /// Maximum opcode steps per match attempt. 0 = unlimited (default).
+    /// Prevents exponential backtracking from hanging the engine.
+    max_steps: std::sync::atomic::AtomicU64,
+    /// Maximum backtrack stack depth per match attempt. 0 = unlimited (default).
+    max_backtrack_frames: std::sync::atomic::AtomicU64,
+    /// Maximum recursion depth per match attempt. 0 = unlimited (default).
+    max_recursion_depth: std::sync::atomic::AtomicU64,
 }
 
 /// Runtime SIMD capability detection
@@ -572,6 +589,9 @@ impl RegexVM {
             prefix_filter: PrefixFilter::None,
             literal_finder: None,
             event_observer: RwLock::new(None),
+            max_steps: std::sync::atomic::AtomicU64::new(0),
+            max_backtrack_frames: std::sync::atomic::AtomicU64::new(0),
+            max_recursion_depth: std::sync::atomic::AtomicU64::new(0),
         };
         vm.prefix_filter = vm.extract_prefix_filter();
         vm.literal_finder = vm.extract_literal_finder();
@@ -584,6 +604,31 @@ impl RegexVM {
             vm.simd_support.neon
         );
         vm
+    }
+
+    /// Set the maximum number of opcode steps per match attempt.
+    ///
+    /// When the limit is reached the current match attempt fails (returns
+    /// no-match). The scanning loop may still try the next start position,
+    /// so the limit applies per-attempt, not per-call.
+    ///
+    /// Pass `None` to remove the limit (default). Pass `Some(n)` to cap
+    /// each attempt at `n` opcode steps.
+    pub fn set_max_steps(&self, limit: Option<u64>) {
+        self.max_steps
+            .store(limit.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set the maximum backtrack stack depth per match attempt.
+    pub fn set_max_backtrack_frames(&self, limit: Option<u64>) {
+        self.max_backtrack_frames
+            .store(limit.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set the maximum recursion depth per match attempt.
+    pub fn set_max_recursion_depth(&self, limit: Option<u64>) {
+        self.max_recursion_depth
+            .store(limit.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Detect available SIMD instruction sets
@@ -691,6 +736,14 @@ impl RegexVM {
             skip_position: None,
             suspendable: false,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -791,6 +844,14 @@ impl RegexVM {
             skip_position: None,
             suspendable: false,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -850,6 +911,14 @@ impl RegexVM {
             skip_position: None,
             suspendable: false,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -1570,6 +1639,10 @@ impl RegexVM {
             skip_position: ctx.skip_position,
             suspendable: ctx.suspendable,
             suspension: None,
+            step_count: ctx.step_count,
+            max_steps: ctx.max_steps,
+            max_backtrack_frames: ctx.max_backtrack_frames,
+            max_recursion_depth: ctx.max_recursion_depth,
         }
     }
 
@@ -1579,7 +1652,12 @@ impl RegexVM {
             return false;
         };
 
-        if ctx.recursion_stack.len() >= MAX_RECURSION_DEPTH {
+        let effective_limit = if ctx.max_recursion_depth > 0 {
+            ctx.max_recursion_depth as usize
+        } else {
+            MAX_RECURSION_DEPTH
+        };
+        if ctx.recursion_stack.len() >= effective_limit {
             return false;
         }
 
@@ -1634,10 +1712,23 @@ impl RegexVM {
         ctx.match_start_override = None;
         ctx.committed = false;
         ctx.skip_position = None;
+        ctx.step_count = 0;
         let mut ip = 0;
         let code = &self.program.code;
 
         loop {
+            // Step limit check — abort if the match attempt has exceeded max_steps.
+            if ctx.max_steps > 0 && ctx.step_count >= ctx.max_steps {
+                return false;
+            }
+            // Backtrack stack depth check.
+            if ctx.max_backtrack_frames > 0
+                && ctx.backtrack_stack.len() as u64 > ctx.max_backtrack_frames
+            {
+                return false;
+            }
+            ctx.step_count += 1;
+
             if ip >= code.len() {
                 trace_log!(
                     "vm",
@@ -3121,6 +3212,14 @@ impl RegexVM {
             skip_position: None,
             suspendable: false,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         let mut matches = Vec::new();
@@ -3375,6 +3474,14 @@ impl RegexVM {
             skip_position: None,
             suspendable: true,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -3525,6 +3632,14 @@ impl RegexVM {
             skip_position: state.skip_position,
             suspendable: true,
             suspension: None,
+            step_count: 0,
+            max_steps: self.max_steps.load(std::sync::atomic::Ordering::Relaxed),
+            max_backtrack_frames: self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_recursion_depth: self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
 
         // Determine the CodeBlockOutcome from the callback result.

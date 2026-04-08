@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship step limits, backtrack frame limits, and configurable recursion depth
+- Scope: Tier 1 backlog items A1 (step limits) and A2 (memory limits).
+- Changes:
+  - `Regex::set_max_steps(Option<u64>)` — configurable per-attempt opcode step counter. Prevents exponential backtracking DoS on pathological patterns like `(a+)+b`.
+  - `Regex::set_max_backtrack_frames(Option<u64>)` — configurable backtrack stack depth limit.
+  - `Regex::set_max_recursion_depth(Option<u64>)` — configurable recursion depth limit (default: 1024).
+  - All limits use `AtomicU64` for interior mutability (`&self`, zero-lock overhead).
+  - 8 new tests covering catastrophic backtracking, per-attempt semantics, stack/recursion control.
+- Validation:
+  - `cargo test -p rgx-core` (522 pass), `cargo test -p rgx-cli` (30 pass), `cargo test -p rgx-bench` (39 pass). Zero clippy errors.
+- Notes/impact: closes A1 and A2. Production-grade DoS protection now available.
+
 ### 2026-04-08 - Ship find_at, split, splitn, replace with capture interpolation, and MatchResult groups
 - Scope: Tier 1 backlog items B10, B8, B6, B7 (partial — groups on MatchResult).
 - Changes:
