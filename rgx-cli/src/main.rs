@@ -109,6 +109,10 @@ struct Cli {
     #[arg(long)]
     stats: bool,
 
+    /// Colorize output: auto (detect terminal), always, never
+    #[arg(long, value_parser = ["auto", "always", "never"], default_value = "auto")]
+    color: String,
+
     /// Pattern to match
     pattern: String,
 
@@ -371,6 +375,69 @@ fn collect_matches(regex: &Regex, input: &str) -> Vec<MatchResult> {
     regex.find_all(input)
 }
 
+// ANSI color codes for match highlighting
+const COLOR_MATCH_START: &str = "\x1b[1;31m"; // bold red
+const COLOR_LINE_NUM: &str = "\x1b[1;32m"; // bold green
+const COLOR_FILE: &str = "\x1b[1;35m"; // bold magenta
+const COLOR_SEP: &str = "\x1b[36m"; // cyan
+const COLOR_RESET: &str = "\x1b[0m";
+
+/// Resolve the `--color` flag to a boolean.
+fn should_color(flag: &str) -> bool {
+    match flag {
+        "always" => true,
+        "never" => false,
+        _ => std::io::IsTerminal::is_terminal(&std::io::stdout()),
+    }
+}
+
+/// Highlight matched portions within a line.
+///
+/// Given a line and the match spans (relative to the line start), wrap each
+/// matched region in ANSI color codes.
+fn highlight_line(line: &str, matches: &[MatchResult], line_offset: usize) -> String {
+    if matches.is_empty() {
+        return line.to_string();
+    }
+    let mut result = String::with_capacity(line.len() + matches.len() * 20);
+    let mut pos = 0;
+    for m in matches {
+        let rel_start = m.start.saturating_sub(line_offset);
+        let rel_end = m.end.saturating_sub(line_offset).min(line.len());
+        if rel_start > pos {
+            result.push_str(&line[pos..rel_start]);
+        }
+        result.push_str(COLOR_MATCH_START);
+        result.push_str(&line[rel_start..rel_end]);
+        result.push_str(COLOR_RESET);
+        pos = rel_end;
+    }
+    if pos < line.len() {
+        result.push_str(&line[pos..]);
+    }
+    result
+}
+
+/// Wrap text in match highlight color.
+fn color_match(text: &str) -> String {
+    format!("{COLOR_MATCH_START}{text}{COLOR_RESET}")
+}
+
+/// Format a filename with color.
+fn color_file(text: &str) -> String {
+    format!("{COLOR_FILE}{text}{COLOR_RESET}")
+}
+
+/// Format a line number with color.
+fn color_line_num(n: usize) -> String {
+    format!("{COLOR_LINE_NUM}{n}{COLOR_RESET}")
+}
+
+/// Format a separator with color.
+fn color_sep(text: &str) -> String {
+    format!("{COLOR_SEP}{text}{COLOR_RESET}")
+}
+
 fn format_code_result(value: &CodeBlockValue) -> String {
     match value {
         CodeBlockValue::Replacement(text) => format!("replacement:{text:?}"),
@@ -595,6 +662,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let use_color = should_color(&cli.color);
+
     let mode = match cli.mode.as_str() {
         "pure" => ExecutionMode::Pure,
         "safe" => ExecutionMode::Safe,
@@ -762,13 +831,21 @@ fn main() -> anyhow::Result<()> {
                 &format!("Line-mode file scan: {} matches", file_matches.len()),
             );
             for fm in &file_matches {
+                let text = &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
                 if cli.only_matching {
-                    let text =
-                        &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
-                    println!("{text}");
+                    if use_color {
+                        println!("{}", color_match(text));
+                    } else {
+                        println!("{text}");
+                    }
+                } else if use_color {
+                    println!(
+                        "{}{}{}",
+                        color_line_num(fm.line_number),
+                        color_sep(":"),
+                        color_match(text)
+                    );
                 } else {
-                    let text =
-                        &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
                     println!("{}: {}", fm.line_number, text);
                 }
             }
@@ -799,7 +876,15 @@ fn main() -> anyhow::Result<()> {
         for m in &file_matches {
             if cli.only_matching {
                 let text = &contents[m.start..m.end.min(contents.len())];
-                println!("{text}");
+                if use_color {
+                    println!("{}", color_match(text));
+                } else {
+                    println!("{text}");
+                }
+            } else if use_color {
+                let text = &contents[m.start..m.end.min(contents.len())];
+                print!("{}..{} ", m.start, m.end);
+                println!("{}", color_match(text));
             } else {
                 println!("{}", format_match_line(m, cli.show_details));
             }
@@ -907,7 +992,11 @@ fn main() -> anyhow::Result<()> {
     if cli.only_matching {
         for m in &matches {
             let text = &input[m.start..m.end.min(input.len())];
-            println!("{text}");
+            if use_color {
+                println!("{}", color_match(text));
+            } else {
+                println!("{text}");
+            }
         }
         rgx_core::trace_exit!("cli", "main", "ok=true,matched={}", matched);
         return Ok(());
@@ -936,7 +1025,13 @@ fn main() -> anyhow::Result<()> {
         );
 
         for (i, m) in matches.iter().enumerate() {
-            println!("{}", format_match_line(m, cli.show_details));
+            if use_color {
+                let matched_text = &input[m.start..m.end.min(input.len())];
+                print!("{}..{} ", m.start, m.end);
+                println!("{}", color_match(matched_text));
+            } else {
+                println!("{}", format_match_line(m, cli.show_details));
+            }
             LOGGER.lock().unwrap().trace(
                 "main",
                 &format!(

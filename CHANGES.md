@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship CLI --color output with ANSI match highlighting
+- Scope: Tier 2 backlog item A5 (CLI color).
+- Changes:
+  - `--color auto|always|never` flag (default: `auto` = detect terminal via `IsTerminal`)
+  - Matched text highlighted in bold red, line numbers in green, file prefixes in magenta, separators in cyan
+  - Color applies to: `--only-matching`, default span output, file-mode line/span output
+  - Helper functions: `color_match`, `color_file`, `color_line_num`, `color_sep`, `highlight_line`
+- Validation: 30 CLI tests pass. Manual verification of color output.
+
 ### 2026-04-08 - Ship thread-safe compilation cache (RegexCache)
 - Scope: Tier 2 backlog item B3.
 - Changes:
