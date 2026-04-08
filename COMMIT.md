@@ -42,10 +42,14 @@ Live commit workflow contract for `rgx`.
    - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-cli`
    - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets`
    - policy: clippy warnings are currently tolerated; clippy errors are not allowed.
-3. Update live docs as needed (`CHANGES.md`, `MEMORY.md`, `RUST_CODEBASE_ANALYSIS.md`, optionally `DEVELOPMENT_NOTES.md`, `README.md`, and relevant docs).
-   - `README.md` should be updated when project objective, onboarding links, or key path maps change.
-   - `README.md` does not need updates on every commit.
-   - `RUST_CODEBASE_ANALYSIS.md` should be reviewed for every Rust-focused commit and updated whenever the roadmap-alignment picture materially changed.
+3. **MANDATORY live docs sync** — check each file and update if stale:
+   - [ ] `CHANGES.md` — new entry for every shipped feature/fix
+   - [ ] `docs/BACKLOG.md` — mark completed items
+   - [ ] `MEMORY.md` — append dated session notes (never delete old entries)
+   - [ ] `README.md` — PGEN version pins, submodule references, doc index (when changed)
+   - [ ] `RUST_CODEBASE_ANALYSIS.md` — when architecture/roadmap alignment changed
+   - [ ] `DEVELOPMENT_NOTES.md` — when durable engineering understanding changed
+   - **This step is a hard gate. Do not proceed to step 4 without completing it.**
 4. Run pre-commit status:
    - `git --no-pager status --short`
 5. Stage exactly the files shown in that status output (no hidden extras).
