@@ -246,7 +246,7 @@ impl ScalarRangeSet {
     }
 
     fn from_unicode_property(name: &str, negated: bool) -> Result<Self> {
-        let ranges = resolve_unicode_property_class(name, negated).map_err(RgxError::Compile)?;
+        let ranges = resolve_unicode_property_class(name, negated).map_err(RgxError::compile)?;
         Ok(Self::from_char_ranges(&ranges))
     }
 
@@ -497,7 +497,7 @@ impl Compiler {
                 "error={}",
                 msg
             );
-            return Err(RgxError::Compile(msg));
+            return Err(RgxError::compile(msg));
         }
         let total_groups = Self::max_capture_group(&ast);
         let named_groups = Self::collect_named_groups(&ast);
@@ -511,7 +511,7 @@ impl Compiler {
                 "error={}",
                 msg
             );
-            return Err(RgxError::Compile(msg));
+            return Err(RgxError::compile(msg));
         }
         if let Some(msg) = self.feature_validation_message(&ast, total_groups, &named_groups) {
             trace_decision!(
@@ -527,7 +527,7 @@ impl Compiler {
                 "error={}",
                 msg
             );
-            return Err(RgxError::Compile(msg.to_string()));
+            return Err(RgxError::compile(msg.to_string()));
         }
         trace_decision!(
             "compiler",
@@ -593,7 +593,7 @@ impl Compiler {
     }
 
     fn extended_char_class_subset_error() -> RgxError {
-        RgxError::Compile(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
+        RgxError::compile(EXTENDED_CHAR_CLASS_SUBSET_MESSAGE.to_string())
     }
 
     /// Rewrite non-scoped flag toggles so that `FlagGroup { expr: Empty }` in a
@@ -2162,7 +2162,7 @@ impl Compiler {
                         named_override,
                     ))
                 } else if group == 0 || group > total_groups {
-                    Err(RgxError::Compile(format!(
+                    Err(RgxError::compile(format!(
                         "conditional '(?(R{group})...)' refers to missing capture group"
                     )))
                 } else {
@@ -2171,7 +2171,7 @@ impl Compiler {
             }
             crate::ast::ConditionalTest::RecursionNamed(name) => {
                 let group = named_groups.get(&name).copied().ok_or_else(|| {
-                    RgxError::Compile(format!(
+                    RgxError::compile(format!(
                         "conditional '(?(R&{name})...)' refers to missing named capture group"
                     ))
                 })?;
@@ -2207,7 +2207,7 @@ impl Compiler {
         total_groups: u32,
     ) -> Result<u32> {
         let missing_reference = || {
-            RgxError::Compile(format!(
+            RgxError::compile(format!(
                 "conditional '(?({offset:+})...)' refers to missing capture group"
             ))
         };

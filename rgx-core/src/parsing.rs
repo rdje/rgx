@@ -133,7 +133,7 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
 /// feature is required.
 #[cfg(not(feature = "pgen-parser"))]
 pub fn parse_pattern(_pattern: &str) -> Result<Regex> {
-    Err(crate::error::RgxError::Compile(
+    Err(crate::error::RgxError::compile(
         "rgx requires the pgen-parser feature for pattern parsing".to_string(),
     ))
 }
@@ -213,7 +213,7 @@ impl RegexParser for PgenParser {
 
         let contract = parser_embedding_api_contract();
         if !contract.supports_regex_generated_backend {
-            let err = RgxError::Compile(
+            let err = RgxError::compile(
                 "pgen regex generated backend is unavailable; enable the generated backend before using rgx's pgen-parser feature"
                     .to_string(),
             );
@@ -226,7 +226,7 @@ impl RegexParser for PgenParser {
             return Err(err);
         }
         if contract.regex_ast_dump_schema_version != 1 {
-            let err = RgxError::Compile(format!(
+            let err = RgxError::compile(format!(
                 "pgen regex AST-dump schema {} is unsupported by rgx; expected schema 1",
                 contract.regex_ast_dump_schema_version
             ));
@@ -239,7 +239,7 @@ impl RegexParser for PgenParser {
             return Err(err);
         }
         if !version_at_least(&contract.regex_parser_release_version, (1, 1, 1)) {
-            let err = RgxError::Compile(format!(
+            let err = RgxError::compile(format!(
                 "pgen regex parser release {} is too old for rgx integration; require at least 1.1.1",
                 contract.regex_parser_release_version
             ));
@@ -252,7 +252,7 @@ impl RegexParser for PgenParser {
             return Err(err);
         }
         if !version_at_least(&contract.regex_integration_contract_version, (1, 1, 1)) {
-            let err = RgxError::Compile(format!(
+            let err = RgxError::compile(format!(
                 "pgen regex integration contract {} is too old for rgx integration; require at least 1.1.1",
                 contract.regex_integration_contract_version
             ));
@@ -276,8 +276,21 @@ impl RegexParser for PgenParser {
             Some(dump) if dump_outcome.status == ParseStatus::Success => dump,
             _ => {
                 let err = dump_outcome.diagnostic.map_or_else(
-                    || RgxError::Compile("pgen AST dump failed without a diagnostic".to_string()),
-                    |diagnostic| RgxError::Compile(diagnostic.to_string()),
+                    || RgxError::compile("pgen AST dump failed without a diagnostic"),
+                    |diagnostic| {
+                        if let Some(loc) = &diagnostic.location {
+                            RgxError::compile_at(
+                                format!("{}: {}", diagnostic.code, diagnostic.message),
+                                pattern,
+                                loc.byte_offset,
+                            )
+                        } else {
+                            RgxError::compile(format!(
+                                "{}: {}",
+                                diagnostic.code, diagnostic.message
+                            ))
+                        }
+                    },
                 );
                 trace_exit!(
                     "parsing",
@@ -380,7 +393,7 @@ impl<'a> PgenAstAdapter<'a> {
         deserializer.disable_recursion_limit();
         let deserializer = serde_stacker::Deserializer::new(&mut deserializer);
         let root: PgenAstNode = serde::Deserialize::deserialize(deserializer).map_err(|err| {
-            RgxError::Compile(format!("failed to decode pgen regex AST dump JSON: {err}"))
+            RgxError::compile(format!("failed to decode pgen regex AST dump JSON: {err}"))
         })?;
         self.convert_root(&root)
     }
@@ -962,7 +975,7 @@ impl<'a> PgenAstAdapter<'a> {
             "UTF" | "UTF8" | "UTF16" | "UTF32" | "UCP" | "CR" | "LF" | "CRLF" | "ANY"
             | "ANYCRLF" | "NUL" | "BSR_ANYCRLF" | "BSR_UNICODE" => Ok(Regex::Empty),
             // Unrecognized verb
-            other => Err(RgxError::Compile(format!(
+            other => Err(RgxError::compile(format!(
                 "unsupported backtracking verb '(*{other})'"
             ))),
         }
@@ -1006,7 +1019,7 @@ impl<'a> PgenAstAdapter<'a> {
         } else {
             digits
                 .parse::<u32>()
-                .map_err(|_| RgxError::Compile(format!("invalid callout number in '{text}'")))?
+                .map_err(|_| RgxError::compile(format!("invalid callout number in '{text}'")))?
         };
         Ok(Regex::Callout(number))
     }
@@ -1874,7 +1887,7 @@ impl<'a> PgenAstAdapter<'a> {
 
     fn contract_error(&self, message: &str) -> RgxError {
         let _ = self;
-        RgxError::Compile(format!("pgen AST contract mismatch: {message}"))
+        RgxError::compile(format!("pgen AST contract mismatch: {message}"))
     }
 }
 
@@ -2402,7 +2415,7 @@ mod tests {
         let err = parse_pattern("(").expect_err("Unterminated group should fail parsing");
         let msg = err.to_string();
         assert!(
-            msg.starts_with("pattern compile error:"),
+            msg.starts_with("regex compile error:"),
             "expected compile-style error mapping, got: {msg}"
         );
     }

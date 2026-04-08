@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-08 - Ship syntax error diagnostics with span highlighting
+- Scope: Tier 2 backlog item B9 (error diagnostics).
+- Changes:
+  - `CompileError` struct with `message`, `pattern`, `offset` fields
+  - `RgxError::compile()` and `RgxError::compile_at()` constructors
+  - Caret-highlighted error output when PGEN provides byte_offset location
+  - All `RgxError::Compile(String)` sites migrated to `RgxError::compile(msg)` / `RgxError::compile_at(msg, pattern, offset)`
+  - Error format: `regex compile error: <msg>\n  <pattern>\n  <caret>`
+- Validation: 655+ tests pass. Zero clippy errors.
+
 ### 2026-04-08 - Ship CaptureLocations for zero-allocation capture loops
 - Scope: Tier 2 backlog item B20.
 - Changes:

@@ -327,7 +327,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 | A6 Inline-language steering | `small` | Completes the steering story |
 | ~~B3 Compilation caching~~ | `small` | ✅ Shipped — `RegexCache` with LRU eviction |
 | B5 `bytes::Regex` | `medium` | Binary/mixed-encoding support |
-| B9 Error diagnostics | `medium` | Developer experience |
+| ~~B9 Error diagnostics~~ | `medium` | ✅ Shipped — CompileError with caret highlighting |
 | ~~B11 `RegexBuilder`~~ | `small` | ✅ Shipped — fluent builder with flag overrides |
 | ~~B12 Iterator APIs~~ | `small` | ✅ Shipped — find_iter, captures_iter, split_iter, capture_names |
 | ~~B13 `Captures` wrapper~~ | `small` | ✅ Shipped — `Captures<'t>` with index/name/expand/iter |
