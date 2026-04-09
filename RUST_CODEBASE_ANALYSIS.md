@@ -47,16 +47,30 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-wasm` => pass
   - `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` => pass with warnings
   - `./scripts/run-local-ci.sh` => pass (with the `subs/pgen` submodule initialized and the explicit RGX package test matrix enabled)
-- Source code totals ~26K lines across rgx-core (vm 6858, lib 5086, compiler 3359, execution 2914, parsing 2721, lexer 2383, ast 531, vars 521, file 193, events 54) + CLI 1695 lines.
-- PGEN 1.1.8 is the sole parser (all 9 filed issues 0005-0013 closed). Adapter uses structured AST natively; 2 `strip_prefix` calls remain (untagged code block fallback).
-- PCRE2 feature parity: ~95% tracked families, ~90% real-world patterns. 6 deferred gaps (low priority). Full inline flags (`(?imsx)` with enable/disable/scoped/combined), `\K`, `\R`, `\N`, `\G`, `(?C)` callouts, all backtracking verbs, `(?J)`, relative subroutines/backrefs, `(?P<>)`/`(?P=)`, `\k<>`, comment groups, mode settings — all shipped.
-- All 6 host integration layers shipped: data exchange, predicate callbacks (5 backends), match steering, structured events, async I/O (continuation-passing), file-backed matching.
+- Source code totals ~34K lines across rgx-core (vm 7565, lib 7387, compiler 3371, execution 3057, parsing 2820, lexer 2383, parser 1486, log 641, ast 543, vars 521, file 513, engine 469, token 467, regex_set 285, cache 231, bytes 222, error 85, events 54, unicode_support 52, lua 24, rhai 21, pattern 19) + CLI 1825 lines.
+- MSRV is **1.88** (`Cargo.toml` `rust-version = "1.88"`), driven by PGEN 1.1.9's `edition2024` requirement plus a transitive `home@0.5.12` bump.
+- PGEN **1.1.9** at submodule pin `ac2acb365b050cdeaa644db41bec57ab3a82a274` is the sole parser. All filed issues (0005-0015) closed. PGEN-RGX-0014 / 0015 closed in the 2026-04-09 session (0015 = upstream returned-capture subroutine syntax `(?N(grouplist))` for A12).
+- PCRE2 feature parity: **~98%** (per `docs/PCRE2_COMPATIBILITY_MATRIX.md`). Remaining gaps: `VERSION` conditionals, `(*SKIP:name)`, JIT — all explicitly deferred. Full inline flags (`(?imsx)` enable/disable/scoped/combined), `\K`, `\R`, `\N`, `\G`, `\X` (extended grapheme cluster, A10), `(?C)` callouts, all backtracking verbs, `(?J)`, relative subroutines/backrefs, `(?P<>)`/`(?P=)`, `\k<>`, comment groups, mode settings, full Unicode `(?i)` case folding (A7), returned-capture subroutines `(?N(grouplist))` (A12, parse + compile to `Call`; full capture-return VM semantics is follow-up) — all shipped.
+- All 6 host integration layers shipped: data exchange, predicate callbacks (5 backends), match steering (incl. inline-language `rgx.steer_*` helpers, A6), structured events, async I/O (continuation-passing), file-backed matching including `tail_file` with OS-native watching (kqueue/inotify via `notify`, A3) and CLI `--follow` (A4).
+- New public API surface from the 2026-04-08 backlog execution session, all shipped:
+  - `Match<'t>` / `Captures<'t>` ergonomic types with `as_str`/`range`/`len`/index/name/expand/iter
+  - `find`, `find_iter`, `captures`, `captures_iter`, `capture_names`, `find_first_at`/`find_all_at`/`is_match_at`, `shortest_match`/`shortest_match_at`
+  - `split`, `splitn`, `split_iter`, `splitn_iter`
+  - `replace`, `replace_all`, `replacen` with `Replacer` trait, `NoExpand`, closure support, `Cow<str>` returns, `$1`/`$name` interpolation
+  - `RegexBuilder` with zero-arg flag setters (`.case_insensitive()` not `.case_insensitive(true)`)
+  - `RegexSet` (multi-pattern via `SetMatches`), `RegexCache` (thread-safe LRU), `BytesRegex` (`&[u8]` without UTF-8 validation), `CaptureLocations` for zero-allocation loops
+  - `MatchSemantics` (LeftmostFirst/LeftmostLongest), `PartialMatchResult` (Full/Partial/NoMatch streaming)
+  - `escape()`, `Regex::named_groups()`/`as_str()`/`captures_len()` metadata accessors
+  - `CompileError` with caret-highlighted span diagnostics (B9)
+- Production safety: `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth` (AtomicU64-backed) prevent DoS on patterns like `(a+)+b` (A1, A2, B1).
 - Typed values with fluent builder + `vars!`/`value!` macros. `SteerResult` enum. `MatchEvent` observer. `MatchContinuation` (Send+Sync).
-- Release-profile performance (criterion): literal find_first **6.4x** vs PCRE2, email **3.4x**, capture **0.88x** (RGX wins). `ExecContext.text` is borrowed `&[u8]`, trace macros gated behind `cfg(feature = "trace")`, literal patterns bypass VM via `memmem`, trail-based backtracking, binary search Unicode ranges.
-- CLI: full-featured grep-like tool with 15+ flags (file/recursive/context/json/replace/replace-with-code/numeric/events/stats/var-json/only-matching/invert-match). 30 CLI tests.
-- Testing: 343 unit + 44 adversarial + 55 integration + 11 property (256+ cases each) + 21 stress/fuzz + 6 doc + 30 CLI + 39 bench = **~550 tests**, all passing, zero ignored.
-- Documentation: `docs/guide/` (12 files, 5810+ lines, 150+ examples), CLI guide, testing philosophy, host integration architecture, PCRE2 compatibility matrix (feature-by-feature table).
-- Nested recursion bug fixed (zero-width quantifier guard). Events+async bug fixed. Subroutine capture semantics fixed.
+- Release-profile performance (criterion): literal find_first **6.4x** vs PCRE2, email **3.4x**, capture **0.88x** (RGX wins). `ExecContext.text` is borrowed `&[u8]`, trace macros gated behind `cfg(feature = "trace")`, literal patterns bypass VM via `memmem`, trail-based backtracking, binary search Unicode ranges, literal-prefix scan skip.
+- CLI: full-featured grep-like tool with 18+ flags (`--file`, `--recursive`, `--follow`, `--line-mode`, `--count`, `--context`, `--json`, `--replace`, `--replace-with-code`, `--only-matching`, `--invert-match`, `--numeric`, `--var-json`, `--events`, `--stats`, `--mode`, `--var`, `--wasm-module`, `--show-details`, `--color auto|always|never`).
+- Testing: **633 tests** total (per the 2026-04-09 API smoke commit `c147ddc`), all passing. Includes: unit, adversarial, integration, property (256+ cases each), stress/fuzz, doc, CLI, bench, and the new `rgx-core/tests/api_smoke_test.rs` (19 tests) which guards the documented public API surface against drift.
+- Documentation has two tracks now (codified in `CLAUDE.md` and `COMMIT.md`):
+  - **The RGX Book** (`book/`): 45 mdBook chapters across 7 parts (introduction, getting-started, core-api, host-integration, advanced, real-world, internals, appendices). Part VI (internals) shipped 2026-04-09 with 9 chapters / 1,587 lines covering architecture, compilation pipeline, the VM, PGEN integration, performance, sandboxing, testing philosophy, project status, and contributing. **The Book is the public face of the project**, served via mdBook (Pages workflow temporarily removed pending GitHub Pro).
+  - **Live continuity docs** (`MEMORY.md`, `CHANGES.md`, `RUST_CODEBASE_ANALYSIS.md`, `docs/BACKLOG.md`, `DEVELOPMENT_NOTES.md`): for session survival; not user-facing.
+- Nested recursion bug fixed (zero-width quantifier guard). Events+async bug fixed. Subroutine capture semantics fixed. `\X` opcode dispatch bug found via trace and fixed during A10 ship.
 
 ## Executive summary
 - The default Rust workspace is real, green, and centered on `rgx-core`.
@@ -101,7 +115,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
   - `ExecutionMode::Pure` still rejects all code blocks by design
   - `native` code blocks are still Rust-API-only; wasm now has a file-backed CLI registration surface but still no broader external plugin/config story
   - the current wasm ABI now has initial richer-result emission, but it is still intentionally narrow compared with the Lua/JavaScript/native surface
-  - the real PGEN backend is green locally through pinned submodule commit `54ed190437371fdcc8e77751407f5b3d51efbd52` (PGEN 1.1.8)
+  - the real PGEN backend is green locally through pinned submodule commit `ac2acb365b050cdeaa644db41bec57ab3a82a274` (PGEN **1.1.9**)
   - hosted validation now has the right repository shape, but the private-submodule checkout may still need explicit CI credentials (`RGX_SUBMODULES_TOKEN`) if the default `GITHUB_TOKEN` cannot read `rdje/pgen`
   - the default benchmark trend capture is now directional and low-overhead, preserves shared plus mode-scoped latest/history artifacts, emits a cross-mode `overview.*` for latest quick/full state, records an optional revision label for each archived capture, and highlights delta versus either the most recent prior archived capture from the same mode or an explicitly requested unix-timestamp / `label:<text>` baseline instead of only overwriting a one-off latest file
   - the first VM performance optimization (literal-prefix skip in scanning loop) improved literal find_first by ~2x; the scanning loop now skips positions where the first required byte cannot match, which is cached once at VM construction
@@ -162,7 +176,7 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - `ParserConfig` still remains unused scaffolding even after the real PGEN backend rollout, but the older dead `PatternAnalysis` helper has now been removed.
 - The default local CI path now validates the default PGEN-backed RGX-scoped `fmt`, explicit package tests for `rgx-core`, `rgx-cli`, `rgx-bench`, and `rgx-wasm`, `rgx-cli --features pgen-parser`, the local `rgx-core` feature matrix (`pgen-parser`, `lua`, `javascript`, `rhai`, `wasm`), combined-language build coverage (`all-languages`), `clippy`, and a quick benchmark-trend capture summary under `target/benchmark-trends/`.
 - The explicit package matrix is intentional because `cargo test --workspace` has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency, whereas the equivalent RGX package coverage remains stable.
-- The PGEN dependency is now pinned as `subs/pgen` at commit `54ed190437371fdcc8e77751407f5b3d51efbd52` (PGEN 1.1.8).
+- The PGEN dependency is now pinned as `subs/pgen` at commit `ac2acb365b050cdeaa644db41bec57ab3a82a274` (PGEN **1.1.9**, includes the upstream `(?N(grouplist))` returned-capture subroutine syntax used by A12).
 - The root Cargo workspace explicitly excludes `subs/pgen/rust`, which keeps RGX validation scoped to RGX even though the parser dependency now lives under the repository tree.
 - Hosted GitHub CI now checks out submodules recursively; because `subs/pgen` is private, it may still require `RGX_SUBMODULES_TOKEN` if `github.token` cannot access `rdje/pgen`.
 - Benchmark infrastructure now has two tiers:
@@ -207,10 +221,19 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Wasm module storage follows the same shared-runtime model, with compiled modules registered once and instantiated on demand through wasmtime; per-call store data now also retains the last emitted wasm result payload until predicate completion.
 - Unicode property classes are resolved through a small `unicode_support.rs` bridge backed by `regex-syntax`, which keeps RGX aligned with current Unicode property tables without hard-coding those tables locally.
 - Inline subexpression compilation now has to merge and rebase child char-class tables back into the parent compiler state; that fix matters for Unicode property classes inside quantified/lookaround subprograms and closes a broader latent char-class bug.
-- Root `rgx-core/src/javascript.rs` and `rgx-core/src/wasm.rs`, plus `rgx-core/src/cache.rs`, `rgx-core/src/simd.rs`, and `rgx-wasm/src/lib.rs`, remain scaffold-level placeholders despite the real execution logic living elsewhere.
+- Scaffold cleanup landed in the 2026-04-08 backlog session: `rgx-core/src/simd.rs`, `rgx-core/src/javascript.rs`, and `rgx-core/src/wasm.rs` were deleted; `rgx-core/src/cache.rs` is now real (231 lines, hosts the shipped `RegexCache` LRU). `rgx-wasm/src/lib.rs` is the only remaining scaffold-level file in the workspace.
 
 ## High-confidence next actions
-1. Decide whether native registration should stay Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
-2. Tighten the private-submodule CI auth story so hosted builds can always fetch `subs/pgen`.
-3. Deepen the quick benchmark history/delta capture beyond the shipped same-label quick/full pairing plus rolling paired-label history into a fuller release-profile longitudinal story.
-4. RGX-owned clippy warnings are now at zero; the 3 large VM dispatch loops (`execute_at`, `execute_subexpr`, `codegen_pass`) carry targeted `#[allow]` annotations with architectural rationale since they are inherently monolithic state machines.
+
+**Backlog inventory**: 41 of 44 items in `docs/BACKLOG.md` are closed. Only three items remain in the active inventory, plus a few deferred strategic items:
+
+1. **A9 — Language bindings (Python, Node, C)** — `large` per language. Blocked on A8 (crate publishing), which the user has explicitly deferred as "too early." Real value depends on a stable public API surface; the 2026-04-08 session shipped that surface, so the gating concern is now policy/release-readiness, not engineering.
+2. **C1 — JIT compilation** — `major`. Closes the speed gap with PCRE2's JIT. Cranelift is already in the dep tree via wasmtime. Requires a stable bytecode format first.
+3. **C2 — NFA/DFA hybrid for simple patterns** — `major`. Guarantees O(nm) for the common case while keeping backtracking for advanced features. Significant new engine code; pattern-analysis pass would need to detect the no-backtracking subset.
+4. **A12 capture-return VM semantics follow-up** — A12 parsing + `Call` opcode lowering shipped, but full capture-return semantics (preserving the specified groups across the recursive call) is documented as remaining work in `MEMORY.md` 2026-04-09.
+5. **A8 — Crate publishing** — `small` engineering effort but explicitly deferred by user pending API stability decision and final review. The new `api_smoke_test.rs` suite raises confidence that the public surface is now stable enough to commit to.
+6. **GitHub Pages for The RGX Book** — `blocked` on user enabling GitHub Pro. Workflow `.github/workflows/book.yml` was deleted in commit `3ded2e3` and is recoverable from git history.
+7. **Performance push to <10x PCRE2 gap** — current literal/email find_first already beats PCRE2 (6.4x / 3.4x). Capture is at 0.88x. The "Now → Performance: close the PCRE2 gap to <10x" roadmap item has shipped most of its scope (Vec→`&[u8]` borrow, trace gating, literal-prefix scan). Remaining: opcode fusion, per-opcode bounds-check reduction, capture/backtrack pre-allocation.
+8. **PCRE2 10.47+ remaining surface** — `VERSION[...]` conditionals (very low priority), `(*SKIP:name)` (low priority), broader algebraic Perl extended character classes beyond the now-shipped grouped bracket/property/nested-ordinary/POSIX/shorthand/escaped-term subset.
+
+RGX-owned clippy warnings are at zero; the 3 large VM dispatch loops (`execute_at`, `execute_subexpr`, `codegen_pass`) carry targeted `#[allow]` annotations with architectural rationale since they are inherently monolithic state machines.

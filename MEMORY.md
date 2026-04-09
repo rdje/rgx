@@ -1084,3 +1084,21 @@ Live continuity memory for `rgx` sessions.
 - Remaining: A9 (language bindings — large), C1 (JIT — major), C2 (NFA/DFA — major)
 - A12 closed (returned-capture subroutines shipped with PGEN 1.1.9)
 - CI fix: `RGX_SUBMODULES_TOKEN` secret set up for private PGEN submodule access
+
+## 2026-04-09 session — RUST_CODEBASE_ANALYSIS.md staleness sync
+
+### Bootstrap pass
+- New session began with `Read and execute the content of README.md`. Followed `SESSION_BOOTSTRAP.md` order: README → MEMORY → COMMIT → ROADMAP → RUST_CODEBASE_ANALYSIS → BACKLOG → DEVELOPMENT_NOTES → PROJECT_VISION → CHANGES (latest).
+- Verified codebase against the analysis doc: PGEN pin = `ac2acb3` (1.1.9), MSRV 1.88, ~34K lines rgx-core+CLI, working tree clean at `114ef3b`, book has 45 chapters under `book/src/` with the new Part VI internals.
+
+### RUST_CODEBASE_ANALYSIS.md was substantially stale
+- Said PGEN 1.1.8 / commit `54ed190…` (reality: 1.1.9 / `ac2acb3`)
+- Said ~26K lines, ~550 tests (reality: ~34K lines, 633 tests post-API-smoke commit `c147ddc`)
+- Did not mention A10 (`\X`), A12 (returned-capture subroutines), A4 (CLI `--follow`), A3 (`tail_file`), A6 (inline-language steering), A7 (Unicode `(?i)` case folding), the entire 2026-04-08 backlog blitz public API surface (`Match`, `Captures`, `RegexBuilder`, `RegexSet`, `RegexCache`, `BytesRegex`, safety limits, …), or the existence of The RGX Book
+- Said `simd.rs` / `javascript.rs` / `wasm.rs` / `cache.rs` were still scaffolds (reality: first three deleted in 2026-04-08 cleanup; `cache.rs` is now real and hosts shipped `RegexCache`)
+- High-confidence next actions list still pointed at deepening benchmark trends — replaced with current backlog reality (A9 / C1 / C2 / A12-VM-followup / A8 / Pages / perf-push / `VERSION` & `(*SKIP:name)`)
+
+### Approach
+- Targeted edits only — left intact the parts that are still accurate (PGEN-backed parser path description, conditional/recursion/Perl-extended-class status, benchmark trend infrastructure, parser interoperability contract section).
+- Used `MSRV 1.88` per `Cargo.toml`. Used the verified `wc -l` source totals.
+- User chose "Commit doc sync only" via AskUserQuestion when asked which roadmap direction to take next.

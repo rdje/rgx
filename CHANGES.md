@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Sync RUST_CODEBASE_ANALYSIS.md with current workspace reality
+- Scope: Live continuity doc sync — no Rust changes.
+- Changes:
+  - `RUST_CODEBASE_ANALYSIS.md`: brought the verified snapshot, codebase realities, and high-confidence next actions sections back into sync with the actual workspace state after the 2026-04-08 backlog blitz, the A10/A12 ship in 2026-04-09, and The RGX Book Part VI rollout.
+  - Corrected stale facts: PGEN pin (was `54ed190…` 1.1.8 → now `ac2acb3` 1.1.9), source totals (was ~26K → now ~34K with per-file breakdown), test count (was ~550 → now 633 per smoke commit `c147ddc`), MSRV (now noted as 1.88), scaffold inventory (`simd.rs` / `javascript.rs` / `wasm.rs` deleted in 2026-04-08; `cache.rs` is now real and hosts `RegexCache`).
+  - Documented the new public API surface: `Match` / `Captures`, ergonomic + lazy iterator APIs, position-aware matching, `split` family, `Replacer` trait + closure support, `RegexBuilder`, `RegexSet`, `RegexCache`, `BytesRegex`, `MatchSemantics`, `PartialMatchResult`, `CaptureLocations`, `escape()`, metadata accessors, `CompileError` with caret diagnostics, safety limits (`set_max_steps` / `set_max_backtrack_frames` / `set_max_recursion_depth`).
+  - Documented shipped backlog items A3 (`tail_file` with kqueue/inotify), A4 (CLI `--follow`), A6 (inline-language `rgx.steer_*`), A7 (full Unicode `(?i)` case folding), A10 (`\X` extended grapheme cluster), A12 (returned-capture subroutines parse + `Call` lowering, with capture-return VM semantics noted as follow-up).
+  - Documented the two-track documentation rule and that The RGX Book is now a 45-chapter mdBook with the new Part VI internals (architecture, compilation pipeline, the VM, PGEN integration, performance, sandboxing, testing philosophy, project status, contributing).
+  - Replaced the old "high-confidence next actions" list (which still pointed at deepening benchmark trend capture) with the current backlog inventory: A9 bindings, C1 JIT, C2 NFA/DFA hybrid, A12 capture-return VM follow-up, A8 publish prep, GitHub Pages (blocked on Pro), perf push to <10x, remaining `VERSION[...]` and `(*SKIP:name)` PCRE2 surface.
+- Validation: `cargo fmt -- --check` clean (no Rust files touched); `cargo test -p rgx-core`, `cargo test -p rgx-cli`, `cargo clippy --workspace --all-targets` all run as part of the COMMIT.md hard gate.
+- Notes/impact: doc-only commit. The analysis file is now an accurate roadmap-grounded snapshot a fresh AI session can trust without first having to cross-check against `MEMORY.md` and `CHANGES.md`.
+
 ### 2026-04-09 - Fix x86_64 SIMD compile error in vm.rs
 - Scope: CI fix for x86_64 Linux builds.
 - Changes:
