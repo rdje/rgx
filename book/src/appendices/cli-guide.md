@@ -135,6 +135,22 @@ Scan directories recursively when `--file` points to a directory:
 rgx --file src/ --recursive --line-mode 'TODO'
 ```
 
+### --follow
+
+Watch a file for new content, like `tail -f | grep`. Prints matching lines as they are appended:
+
+```bash
+rgx --file /var/log/app.log --follow 'ERROR'
+```
+
+Uses OS-native file watching (kqueue on macOS, inotify on Linux) for near-instant, zero-CPU-idle detection. Color output is supported. Press **Ctrl-C** to stop.
+
+Combine with `--color` for highlighted live monitoring:
+
+```bash
+rgx --file app.log --follow --color always 'WARN|ERROR|FATAL'
+```
+
 ## Code execution flags
 
 ### --mode

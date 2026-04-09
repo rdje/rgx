@@ -227,3 +227,13 @@ handle.stop();
 | `scan_file(path)` | Whole file | `usize` (count) | Count matches, fire callbacks |
 | `scan_file_lines(path)` | Line by line | `usize` (count) | Count matches per line |
 | `tail_file(path, opts, cb)` | Live watching | `TailHandle` | Monitor file for new matches |
+
+## CLI shortcut
+
+From the command line, `--follow` wraps `tail_file` for you:
+
+```bash
+rgx --file /var/log/app.log --follow 'ERROR|WARN'
+```
+
+This is equivalent to the `tail_file` API but accessible without writing Rust code. See [CLI Guide](../appendices/cli-guide.md) for details.
