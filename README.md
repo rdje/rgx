@@ -1,22 +1,96 @@
-# rgx
+# rgx — a programmable regex engine for Rust
+
+**rgx** is a high-performance, programmable regex engine. It does everything a traditional regex engine does — find, capture, replace, split — but it goes further: you can run code *inside* a match, steer the engine from callbacks, watch it work with structured events, suspend matching for async I/O, and tail files in real time.
+
+## Why rgx?
+
+```rust
+use rgx_core::*;
+
+// Familiar regex API
+let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}) (?P<level>ERROR|WARN)")?;
+for caps in re.captures_iter(log_text) {
+    println!("{}/{}/{}: {}", &caps["year"], &caps["month"], &caps["day"], &caps["level"]);
+}
+
+// ...with closure-based replacement
+let result = re.replace_all(log_text, |caps: &Captures| {
+    format!("[{}] {}", &caps["level"], &caps["year"])
+});
+
+// ...and tail a log file with OS-native watching (kqueue/inotify)
+let handle = re.tail_file("app.log", TailOptions::default(), |fm| {
+    eprintln!("line {}: {}", fm.line_number, fm.line);
+});
+
+// ...or run Lua inside the pattern
+let validator = Regex::with_mode(
+    r"(\d+)(?{lua:return tonumber(arg[1]) <= 100})",
+    ExecutionMode::Safe,
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Highlights
+
+- **~98% PCRE2 feature parity** — every PCRE2 feature except JIT compilation
+- **Programmable** — embed Lua, JavaScript, Rhai, WASM, or native Rust callbacks inside patterns
+- **6-layer host integration** — data exchange, predicates, steering, events, async I/O, file matching
+- **Production safety** — `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth` prevent DoS
+- **Live file watching** — `tail_file` uses kqueue/inotify with zero idle CPU
+- **Multi-pattern matching** — `RegexSet` for routing/classification
+- **Idiomatic Rust API** — `Match`, `Captures`, lazy iterators, `Cow<str>` returns, fluent `RegexBuilder`
+- **PGEN-backed parser** — single source of truth for regex syntax
+- **Extensively tested** — 633+ tests across unit, property, adversarial, stress, fuzz, and parity suites
+
+## Quick start
+
+```toml
+[dependencies]
+rgx-core = "0.1"
+```
+
+```rust
+use rgx_core::Regex;
+
+let re = Regex::compile(r"\d+")?;
+let m = re.find("answer is 42")?;
+assert_eq!(m.as_str(), "42");
+```
+
+## Documentation
+
+📖 **[Read The RGX Book](book/src/SUMMARY.md)** — 45 chapters covering every feature with examples. The book is the comprehensive reference: API, internals, design rationale, performance, sandboxing, and more. Build locally with `mdbook serve book`.
+
+CLI usage:
+```bash
+rgx --file app.log --follow 'ERROR|WARN'   # tail -f | grep
+rgx --color always '\d+' "answer is 42"     # colorized matches
+```
+
+---
+
+## For contributors
+
 `rgx` is a Rust regex engine project focused on a high-performance VM backend with a clean compile pipeline.
 
-## Project objective
+### Project objective
 Build a robust, high-performance, extensible regex engine that:
 - compiles patterns through `lexer -> parser -> AST -> compiler -> VM`,
 - targets practical compatibility with mainstream regex behavior (with explicit known gaps),
 - supports strict observability/tracing for fast debugging and safe evolution.
 
-## Start here (fast ramp-up)
+### Start here (fast ramp-up)
 If you are new to the repo, use this order:
 1. `README.md` (this file) for the full navigation map.
 2. **[The RGX Book](book/src/SUMMARY.md)** — comprehensive mdBook documentation covering every feature with examples. Read online at [rdje.github.io/rgx](https://rdje.github.io/rgx) or build locally with `mdbook serve book`.
 3. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
-3. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
-4. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
-5. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
-6. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
-7. [`COMMIT.md`](COMMIT.md) before making/committing changes.
+4. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
+5. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
+6. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
+7. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
+8. [`COMMIT.md`](COMMIT.md) before making/committing changes.
+9. [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants.
 
 ## Repository path map (project files)
 ### Workspace / crates

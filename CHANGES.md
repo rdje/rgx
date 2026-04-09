@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Rewrite README with public-facing top section
+- Scope: README polish for first-time visitors.
+- Changes:
+  - Added compelling top section: tagline, code example, highlights, quick start, doc links
+  - Preserved internal navigation under "For contributors" header
+  - Fixed duplicate `3.` numbering in the ramp-up list
+  - Added CLAUDE.md to the contributor file list
+- Rationale: README is the first thing visitors see. Previous version was internal-doc style ("the repo", "the project") which didn't sell what RGX is or why it matters.
+
 ### 2026-04-09 - Ship Part VI: Internals & Project (9 chapters, 1,587 lines)
 - Scope: complete the book's coverage of every aspect of RGX, not just user features.
 - Changes:
