@@ -139,18 +139,26 @@ Live forward-looking tracker for rgx.
 
 ## Later (strategic)
 
-### Remaining PCRE2 feature gaps (low to very low priority)
-These are the last 6 `rgx-gap` rows in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. They are deferred because they are either very rarely used, very new, or not syntax features.
+### GitHub Pages for The RGX Book
+- Priority: `medium`
+- Status: `blocked` (Pages on private repos requires GitHub Pro)
+- Scope:
+  - User plans to subscribe to GitHub Pro soon, which unlocks Pages on private repos.
+  - Once Pro is active, enable Pages in repo settings → Source: GitHub Actions.
+  - The `.github/workflows/book.yml` workflow is already in place — it will auto-deploy on the next push to main.
+  - Book will publish to `https://rdje.github.io/rgx`.
 
-#### `\X` extended grapheme cluster
-- Priority: `low`
+### Public release preparation
+- Priority: `high` once codebase is ready
 - Status: `planned`
-- Rationale: `\X` matches a full Unicode grapheme cluster (base character + combining marks). Real-world usage is rare outside Unicode-heavy text processing. Implementation requires a grapheme segmentation library such as `unicode-segmentation`. The effort is meaningful and the benefit is narrow.
+- Scope:
+  - **Publish `rgx-core` and `rgx-cli` to crates.io** (backlog item A8). Requires API stability decision and final review.
+  - Open-source license + contribution guidelines.
+  - Public README polish targeting first-time visitors.
+  - Tag v0.1.0 release.
 
-#### Returned-capture subroutines `(?1(grouplist))`
-- Priority: `very low`
-- Status: `planned`
-- Rationale: this is a PCRE2 10.47+ feature (released 2024). It extends subroutine calls to return captures from the called group into specified slots. Adoption in the wild is minimal. RGX already supports the standard `(?1)` / `(?&name)` forms; the returned-capture extension is niche.
+### Remaining PCRE2 feature gaps
+The compatibility matrix is now at ~98% parity. The remaining gaps are:
 
 #### VERSION conditionals `(?(VERSION>=...)...)`
 - Priority: `very low`
@@ -161,11 +169,6 @@ These are the last 6 `rgx-gap` rows in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. The
 - Priority: `low`
 - Status: `planned`
 - Rationale: `(*SKIP)` (without name) is already shipped. The named form `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to the position of a specific mark. This requires wiring the mark name registry into the skip logic. The unnamed form covers the vast majority of use cases.
-
-#### Partial matching API
-- Priority: `low`
-- Status: `planned`
-- Rationale: PCRE2's `PCRE2_PARTIAL_SOFT` and `PCRE2_PARTIAL_HARD` flags report partial matches when the input ends in the middle of a potential match. Useful for streaming/incremental matching. This is an API concern (not a pattern syntax feature) and is better addressed as part of Layer 6 file-backed matching.
 
 #### JIT compilation
 - Priority: `deferred to speed phase`
