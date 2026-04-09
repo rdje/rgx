@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Ship Part VI: Internals & Project (9 chapters, 1,587 lines)
+- Scope: complete the book's coverage of every aspect of RGX, not just user features.
+- Changes:
+  - `book/src/internals/architecture.md` — pipeline diagram, crate map, 6 host layers
+  - `book/src/internals/compilation-pipeline.md` — 4-stage parse→normalize→emit→optimize with worked `\d+` example
+  - `book/src/internals/the-vm.md` — backtracking VM design, dispatch loop, ExecContext, capture trail, scanning strategies
+  - `book/src/internals/pgen-integration.md` — what PGEN is, contract, adapter, pgen-issues workflow, 1.1.9 pin
+  - `book/src/internals/performance.md` — real numbers (6.4x literal, 3.4x email; 0.88x capture), 8 key optimizations, what's not done (JIT/DFA)
+  - `book/src/internals/sandboxing.md` — ExecutionMode, sandbox details per language, threat model, determinism
+  - `book/src/internals/testing-philosophy.md` — hostile skepticism doctrine, 8-layer test taxonomy, claims-to-prove
+  - `book/src/internals/project-status.md` — current snapshot, shipped features, remaining backlog, pre-release checklist
+  - `book/src/internals/contributing.md` — dev setup, test commands, two-track docs, PGEN issue filing
+- Validation: mdbook builds clean. 19/19 API smoke tests pass.
+- Notes: all chapters are grounded in actual repo state — no aspirational claims. Tone is warm, honest, and practical.
+
 ### 2026-04-09 - Codify two-track documentation rule (Book + live docs)
 - Scope: documentation discipline.
 - Changes:
