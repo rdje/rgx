@@ -159,6 +159,7 @@ If you are new to the repo, use this order:
 - [`docs/CLI_GUIDE.md`](docs/CLI_GUIDE.md) — comprehensive CLI user guide with 20+ examples
 - [`docs/TESTING_PHILOSOPHY.md`](docs/TESTING_PHILOSOPHY.md) — hostile skepticism testing approach, known gaps, and process
 - [`docs/BACKLOG.md`](docs/BACKLOG.md) — complete inventory of remaining work (roadmap items, features to port, engineering improvements)
+- [`docs/C2_NFA_DFA_DESIGN.md`](docs/C2_NFA_DFA_DESIGN.md) — SOTA design proposal for the NFA/DFA hybrid engine (C2). Sparse-set Pike-VM, lazy DFA, two-pass capture recovery, differential testing. Step 0 of the C2 active focus.
 ## README maintenance policy
 `README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:
 - project objective/scope,

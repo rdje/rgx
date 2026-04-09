@@ -1126,3 +1126,38 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action (proposed, awaiting user confirmation)
 - Start C2 with a design proposal before any code: classify the no-backtracking subset, sketch the Thompson construction + lazy DFA cache, decide the engine-dispatch boundary in `Regex::find_first` etc., and lay out validation strategy (differential testing against the existing VM path on the no-backtracking subset, then benchmark trend capture against the same workloads).
+
+## 2026-04-09 session — C2 step 0 design proposal landed
+
+### What happened
+- User confirmed the SOTA-first reformulation of the C2 plan and saved a `feedback_sota_first_time.md` auto-memory entry making this a persistent preference for future sessions.
+- I asked the architectural decision for capture group recovery (two-pass via bounded Pike-VM vs tagged transitions in the NFA). User clarified the question once, then said "you pick what you think is best."
+- Picked **two-pass capture recovery via bounded Pike-VM over the matched span** — the SOTA approach used by RE2 and the Rust `regex` crate. Decision recorded in the design doc as §9.
+- Wrote `docs/C2_NFA_DFA_DESIGN.md` — comprehensive design doc covering goals/non-goals, architectural overview, module layout, no-backtracking subset definition (full inclusion/exclusion table with reasons), byte-class equivalence partitioning, forward + reverse Thompson NFA construction with anchored/unanchored variants, sparse-set Pike-VM (Russ Cox design from day one — explicitly framed as the permanent NFA simulator and lazy DFA fallback, not a prototype), lazy DFA cache with clear-on-overflow + retry budget policy, two-pass capture recovery, engine dispatch boundary in `c2/dispatch.rs`, what the existing VM path does NOT lose (every PCRE2 feature outside the subset, all host integration layers, all public API), differential testing strategy, benchmark strategy, phased implementation plan (steps 0-8), 10 open architectural questions with current leans, risks and mitigations, references.
+
+### Module layout decided in the design doc
+- New code lives under `rgx-core/src/c2/` with modules: `mod.rs`, `classifier.rs`, `byte_class.rs`, `nfa.rs`, `pike.rs`, `dfa.rs`, `dispatch.rs`, `tests/`. Existing modules (`compiler.rs`, `vm.rs`, `engine.rs`, `lib.rs`) get only small additions to store classification metadata on `Program` and route classified-positive patterns to `c2::dispatch`. Backtracking VM internals are not touched.
+
+### Cohabitation rule (non-negotiable)
+- The existing backtracking VM stays in place forever and handles every pattern outside the no-backtracking subset (backreferences, recursion, lookaround, conditionals, atomic groups, possessive quantifiers, `\K`, backtracking verbs, inline code blocks, callouts, branch-reset, Perl extended classes). All host integration layers stay on the VM path. All public API stays unchanged. If anything regresses, it's a merge blocker. Spelled out in design doc §12.
+
+### Differential testing is the merge gate
+- New `rgx-core/tests/c2_differential.rs` and `c2_proptest.rs` test files land in step 4 (Pike-VM). From that step onward, every C2 commit must produce zero differential failures against the existing VM on classifier-positive patterns. The existing 633-test suite plus the PCRE2 parity corpus plus the proptest harness form the corpus. There is no "C2 testing mode" that can be skipped.
+
+### Phased implementation plan (recap)
+- Step 0: this design doc — current commit, awaits user sign-off
+- Step 1: pattern classifier (metadata-only on `Program`, no runtime dispatch yet)
+- Step 2: byte-class equivalence partitioning
+- Step 3: forward + reverse Thompson NFA construction with anchored/unanchored variants
+- Step 4: sparse-set Pike-VM with differential gate active
+- Step 5: lazy forward DFA with cache + clear-on-overflow + retry budget + Pike-VM fallback
+- Step 6: lazy reverse DFA for start-of-match recovery
+- Step 7: literal prefix integration with C2 dispatch
+- Step 8: production cutover, benchmark sweep, new `book/src/internals/nfa-dfa-engine.md` chapter
+- Estimated 8 minimum / 12-15 realistic commits, multi-week timeline
+
+### Open architectural questions (documented in design doc §16, awaiting decisions)
+- Q1 full Unicode case folding scope, Q2 ASCII vs Unicode `\b`, Q3 LeftmostFirst vs LeftmostLongest, Q4 per-instance vs thread-local DFA cache, Q5 default `dfa_size_limit`, Q6 Pike-VM fallback restart policy, Q7 debug-mode parallel-engine equivalence assertion, Q8 public `regex.uses_c2()` introspection, Q9 RegexSet C2 integration, Q10 long-span Pike-VM capture pass cost.
+
+### Sign-off gate
+- The design doc is committed but C2 step 1 cannot start until the user approves §20 sign-off. No code lands until then.

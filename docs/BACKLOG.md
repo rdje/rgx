@@ -319,10 +319,10 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 > **Active focus as of 2026-04-09**: C2 (NFA/DFA hybrid) first, C1 (JIT) second. RGX is currently too slow on the patterns where most users live; the strategic call is to fix the algorithmic class with C2, then add C1's constant-factor JIT win on top. A9 (language bindings) is deferred pending real demand signal — see its entry above for the full reasoning.
 
 ### Tier 0 — Active focus (perf push, started 2026-04-09)
-| Item | Effort | Why |
-|------|--------|-----|
-| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. |
-| **C1 JIT compilation** | `major` | Constant-factor multiplier (~5-10x) on whichever engine runs. Sequenced after C2 so wins compound. |
+| Item | Effort | Why | Status |
+|------|--------|-----|--------|
+| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. | **Step 0 design doc landed** — `docs/C2_NFA_DFA_DESIGN.md`. Awaiting user sign-off before step 1 (pattern classifier) can start. 8-step phased plan, multi-week timeline. |
+| **C1 JIT compilation** | `major` | Constant-factor multiplier (~5-10x) on whichever engine runs. Sequenced after C2 so wins compound. | Planned. Starts after C2 production cutover. |
 
 ### Tier 1 — Do now (production blockers + quick wins)
 | Item | Effort | Why |
