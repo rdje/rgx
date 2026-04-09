@@ -7,6 +7,61 @@ struct ParityCase {
     input: &'static str,
 }
 
+/// Returns `true` if the runtime PCRE2 build supports the Perl extended
+/// character class syntax `(?[...])`.
+///
+/// Available by default in PCRE2 >= 10.45 (March 2025). Older builds, including
+/// Ubuntu 24.04's stock `libpcre2-dev 10.42`, were not configured with
+/// `--enable-pcre2-perl-extended-class` and reject `(?[...]` at parse time
+/// with "unrecognized character after (?". Detection runs once at first call
+/// via `OnceLock` and is cached for the rest of the process.
+///
+/// RGX still validates Perl extended character classes unconditionally via
+/// its own unit and integration tests in `rgx-core`. The differential parity
+/// check here is a *secondary* validation that only makes sense when both
+/// engines implement the feature.
+fn pcre2_supports_perl_extended_class() -> bool {
+    static SUPPORTS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTS.get_or_init(|| PcreRegex::new(r"(?[[a-z]])").is_ok())
+}
+
+/// Returns `true` if the case's pattern uses a regex feature the runtime
+/// PCRE2 build doesn't support, so the differential parity check would
+/// fail at PCRE2 compile time on a feature gap rather than a real
+/// behaviour mismatch.
+///
+/// Currently only the Perl extended character class syntax `(?[...])` is
+/// gated this way. The check is a substring match — `pattern.contains("(?[")` —
+/// because it's both correct (the syntax always begins with that 3-char
+/// prefix) and trivially auditable.
+fn requires_unavailable_pcre2_feature(pattern: &str) -> bool {
+    if pattern.contains("(?[") && !pcre2_supports_perl_extended_class() {
+        return true;
+    }
+    false
+}
+
+/// Print a stderr notice and return `true` when a parity case must be
+/// skipped because the runtime PCRE2 lacks the feature it exercises.
+/// Returns `false` otherwise so callers can use it as a `continue` guard:
+///
+/// ```ignore
+/// if skip_if_unavailable(&case) { continue; }
+/// ```
+fn skip_if_unavailable(case: &ParityCase) -> bool {
+    if requires_unavailable_pcre2_feature(case.pattern) {
+        eprintln!(
+            "[{}] skipping differential parity case: runtime PCRE2 build does not support \
+             the syntax used by pattern '{}' (Perl extended character classes require \
+             PCRE2 >= 10.45 with --enable-pcre2-perl-extended-class). RGX still validates \
+             this feature via its own unit tests in rgx-core.",
+            case.name, case.pattern
+        );
+        return true;
+    }
+    false
+}
+
 #[test]
 fn pcre2_parity_supported_syntax_find_all_spans() {
     let cases = [
@@ -308,6 +363,9 @@ fn pcre2_parity_supported_syntax_find_all_spans() {
     ];
 
     for case in cases {
+        if skip_if_unavailable(&case) {
+            continue;
+        }
         let rgx = rgx_all_spans(case.pattern, case.input)
             .unwrap_or_else(|e| panic!("[{}] rgx error: {e}", case.name));
         let pcre2 = pcre2_all_spans(case.pattern, case.input)
@@ -521,6 +579,9 @@ fn pcre2_parity_supported_syntax_no_match_consistency() {
     ];
 
     for case in cases {
+        if skip_if_unavailable(&case) {
+            continue;
+        }
         let rgx_first = rgx_first_span(case.pattern, case.input)
             .unwrap_or_else(|e| panic!("[{}] rgx first error: {e}", case.name));
         let pcre2_first = pcre2_first_span(case.pattern, case.input)
@@ -845,6 +906,9 @@ fn pcre2_parity_supported_syntax_first_match_span() {
     ];
 
     for case in cases {
+        if skip_if_unavailable(&case) {
+            continue;
+        }
         let rgx = rgx_first_span(case.pattern, case.input)
             .unwrap_or_else(|e| panic!("[{}] rgx error: {e}", case.name));
         let pcre2 = pcre2_first_span(case.pattern, case.input)

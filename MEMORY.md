@@ -1182,3 +1182,22 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 2 = byte-class equivalence partitioning. Standalone module, no engine wiring. Compute the byte-class map from the AST at compile time so steps 3+ (NFA construction, DFA cache) can use it.
+
+## 2026-04-10 session — CI hotfix for PCRE2 parity tests on older PCRE2
+
+### What broke
+- User pointed at `~/Downloads/job-logs-rgx-ci-error.txt` showing 3 PCRE2 parity tests failing on `origin/main` HEAD `114ef3b`. This was a pre-existing failure on origin/main; none of the local-only session commits caused it.
+- CI runs on Ubuntu 24.04 with `libpcre2-dev 10.42-4ubuntu2.1`. PCRE2 10.42 doesn't recognize `(?[...])` Perl extended character classes — that syntax was experimental/opt-in until PCRE2 10.45 (March 2025) when it became default-on.
+- Local dev (macOS homebrew) has newer PCRE2 so the tests pass there.
+
+### Fix
+- `rgx-bench/tests/pcre2_parity.rs`: added `pcre2_supports_perl_extended_class()` helper using `OnceLock` to cache a single canonical-pattern compile attempt. Added `skip_if_unavailable(&case)` guard at the top of each of the three affected test loops. When the runtime PCRE2 doesn't support `(?[...])`, cases using that syntax are skipped with a clear stderr notice. On dev machines and future CI with PCRE2 >= 10.45, the cases run unchanged.
+- No CI workflow changes. No new dependencies. No PCRE2 vendoring (which `pcre2-sys` doesn't cleanly support).
+- The fix is correct by construction: only skips when PCRE2 itself rejects the canonical pattern. RGX still validates `(?[...])` unconditionally via its own unit tests in `rgx-core`.
+
+### Validation
+- `cargo test -p rgx-bench --test pcre2_parity` 13 passing locally (skip is a no-op on local PCRE2 which supports the syntax).
+- Full quality gates green: `cargo fmt --check`, `cargo test -p rgx-bench`, `-p rgx-core`, `-p rgx-cli`, `cargo clippy --workspace --all-targets`.
+
+### Note on push
+- Per the persistent no-auto-push rule, this commit lands locally only. User pushes when ready. Once pushed, the next CI run on origin/main will validate the fix on Ubuntu 24.04's PCRE2 10.42.
