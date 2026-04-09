@@ -19,7 +19,7 @@
 //! - Unicode properties (`\p{L}`) may produce unexpected results
 //! - Match positions are byte offsets
 
-use crate::engine::{Engine, ExecutionMode, MatchResult};
+use crate::engine::{Engine, ExecutionMode};
 use crate::error::Result;
 use crate::pattern::CompiledPattern;
 use crate::Compiler;

@@ -5684,7 +5684,8 @@ impl RegexVM {
             return false;
         }
 
-        let _len = a.len();
+        #[cfg(target_arch = "x86_64")]
+        let len = a.len();
 
         #[cfg(target_arch = "x86_64")]
         {

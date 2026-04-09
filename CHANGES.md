@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Fix x86_64 SIMD compile error in vm.rs
+- Scope: CI fix for x86_64 Linux builds.
+- Changes:
+  - `rgx-core/src/vm.rs`: SIMD bytes-equal helper had `let _len = a.len();` but referenced `len` inside the AVX2 block. The `_` prefix marks unused, which Rust accepts on non-x86_64 platforms but fails to resolve on x86_64 where the SIMD path is compiled.
+  - Fix: gate the binding to `#[cfg(target_arch = "x86_64")]` and rename to `len`. Both the binding and the use are now under the same cfg, so non-x86_64 platforms see neither (no unused warning) and x86_64 sees both (no missing variable).
+  - Also removed unused `MatchResult` import from `bytes.rs`.
+- Why this wasn't caught locally: development is on aarch64 (M1), so `cfg(target_arch = "x86_64")` blocks never compile. Cross-checking with `cargo check --target x86_64-unknown-linux-gnu` would have caught it but requires `x86_64-linux-gnu-gcc`.
+- Validation: 483 lib tests pass on aarch64.
+
 ### 2026-04-09 - Bump MSRV to 1.88 and remove Pages workflow until GitHub Pro
 - Scope: CI fixes.
 - Changes:
