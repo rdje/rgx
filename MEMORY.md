@@ -1102,3 +1102,27 @@ Live continuity memory for `rgx` sessions.
 - Targeted edits only — left intact the parts that are still accurate (PGEN-backed parser path description, conditional/recursion/Perl-extended-class status, benchmark trend infrastructure, parser interoperability contract section).
 - Used `MSRV 1.88` per `Cargo.toml`. Used the verified `wc -l` source totals.
 - User chose "Commit doc sync only" via AskUserQuestion when asked which roadmap direction to take next.
+
+## 2026-04-09 session — strategic reprioritization: defer A9, elevate C1+C2
+
+### The decision
+- User asked the genuine question "why A9?" after I listed it as the largest remaining adoption lever in the post-bootstrap status summary.
+- I gave an honest assessment: the "10x user base" rationale in `docs/BACKLOG.md` is generic and doesn't fit RGX specifically. RGX's killer feature is host integration (predicates, steering, events, async I/O, embedded Lua/JS/Rhai/Wasm), and that surface translates poorly across FFI — Python callbacks are GIL territory, the async story assumes Rust's model, and "embed Lua inside a regex from Python" is a weaker pitch than from C/C++ because Python users already have a scripting host. Plus A9 is gated on A8 (publish, also deferred), is `large` per language, and the maintenance tail competes with engine work that strengthens the actual differentiator.
+- User responded: **push A9 to the back of the backlog and switch to C1 + C2 because RGX is currently too slow.**
+
+### Strategic ordering: C2 first, C1 second
+- **C2** (NFA/DFA hybrid) changes the algorithmic class. Detect patterns that don't use backtracking-only features (no backreferences, no recursion, no lookaround, no inline code blocks, no atomic groups, no possessive quantifiers, no `\K`, no backtracking verbs) at compile time and run them through Thompson NFA + lazy DFA cache instead of the backtracking VM. Gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator. Typically 10x-100x improvement on regular patterns where it applies.
+- **C1** (JIT compilation) is then a constant-factor multiplier (~5-10x) on whichever engine runs. Cranelift is already in the dep tree via wasmtime.
+- In this order, the wins compound: NFA/DFA on the common case + JIT'd backtracking for the rest. If C1 went first, pathological backtracking patterns would still be exponential (just JIT'd exponential).
+
+### Capture-handling design lesson from the Rust `regex` crate
+- Standard solution: use the DFA only for *finding* the overall match span, then re-run a small bounded NFA simulation over the matched span to recover capture group positions. Avoids the full DFA-with-captures complexity that would otherwise sink the project.
+
+### Doc updates
+- `ROADMAP.md`: new "Now" entry "Performance: NFA/DFA hybrid (C2) + JIT compilation (C1)" with the strategic ordering and rationale. A9 (under "Binding/runtime expansion") annotated as deferred with reactivation criteria.
+- `docs/BACKLOG.md`: new "Tier 0 — Active focus" at top of priority tiers. A9 entry rewritten with full deprioritization reasoning. C1/C2 entries rewritten with active-focus annotations and design notes. A9 moved from Tier 3 to Tier 4. Banner added.
+- `MEMORY.md`: this entry.
+- `CHANGES.md`: new entry at top.
+
+### Next concrete action (proposed, awaiting user confirmation)
+- Start C2 with a design proposal before any code: classify the no-backtracking subset, sketch the Thompson construction + lazy DFA cache, decide the engine-dispatch boundary in `Regex::find_first` etc., and lay out validation strategy (differential testing against the existing VM path on the no-backtracking subset, then benchmark trend capture against the same workloads).

@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Reprioritize: defer A9 (language bindings), elevate C1+C2 (perf) to active focus
+- Scope: Roadmap/backlog reprioritization. No Rust changes.
+- Decision: A9 (language bindings) deferred pending real demand signal; C2 (NFA/DFA hybrid) and C1 (JIT compilation) promoted to active focus, sequenced C2-first.
+- Rationale for deferring A9: the conventional "10x user base because most regex users aren't Rust devs" argument is generic and doesn't fit RGX specifically. RGX's killer feature is host integration (predicates, steering, events, async I/O, embedded Lua/JS/Rhai/Wasm), which translates poorly across FFI — Python callbacks become GIL territory, the async story assumes Rust's model, and "embed Lua inside a regex from Python" is a weaker pitch than from C/C++ because Python users already have a scripting host. A9 is also gated on A8 (publish, deferred), is `large` per language, and the maintenance tail (packaging, prebuilds, version skew, per-binding CI) competes with engine work that strengthens the actual differentiator. Reactivation criteria: a real user pulling for a specific binding. If reactivated, start with C bindings via cbindgen (cheapest, unlocks every other FFI host for free).
+- Rationale for C2-first ordering: C2 changes the algorithmic class — patterns that don't use backtracking-only features (no backreferences, no recursion, no lookaround, no inline code blocks, no atomic groups, no possessive quantifiers, no `\K`, no backtracking verbs) run through a Thompson NFA + lazy DFA cache instead of the backtracking VM. Gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator and typically delivers 10x-100x speedup on regular patterns. C1 then provides a constant-factor multiplier (~5-10x via Cranelift, already in the dep tree via wasmtime) on whichever engine runs, so the wins compound. Doing C1 first would still leave pathological backtracking patterns exponential.
+- Capture-handling design note for C2: the standard solution from the Rust `regex` crate is to use the DFA only for finding the overall match span, then re-run a small bounded NFA simulation over the matched span to recover capture group positions. This avoids the full DFA-with-captures complexity.
+- Changes:
+  - `ROADMAP.md`: new "Now" entry "Performance: NFA/DFA hybrid (C2) + JIT compilation (C1)" with strategic ordering and rationale. "Binding/runtime expansion (A9)" in Later annotated as `deferred` with full reasoning and reactivation criteria.
+  - `docs/BACKLOG.md`: new "Tier 0 — Active focus" added at top of priority tiers with C2 first, C1 second. A9 entry rewritten with deprioritization reasoning, status `deferred pending demand signal`, and "if reactivated, start with C bindings via cbindgen" note. A9 moved from Tier 3 to Tier 4. C1 and C2 entries rewritten with active-focus annotations, design notes, dependencies, and open design questions.
+  - `MEMORY.md`: dated session entry recording the decision, the strategic ordering rationale, the capture-handling design lesson, and the proposed next concrete action.
+  - This entry.
+- Validation: doc-only commit. `cargo fmt --check` clean (no Rust files touched). Quality gates re-run per COMMIT.md hard gate.
+- Notes/impact: this is a planning commit, not a feature commit. The actual C2 design proposal and implementation will follow as separate commits. The Tier 0 banner in `docs/BACKLOG.md` plus the new ROADMAP "Now" entry mean a fresh AI session will know the current focus without having to scan recent MEMORY.md entries.
+
 ### 2026-04-09 - Sync RUST_CODEBASE_ANALYSIS.md with current workspace reality
 - Scope: Live continuity doc sync — no Rust changes.
 - Changes:

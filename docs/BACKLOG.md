@@ -66,11 +66,12 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Clean up Cargo.toml metadata, add README, `cargo publish`.
 - **Dependencies**: Decide on public API stability guarantees.
 
-### A9. Language bindings (Python, Node, C)
+### A9. Language bindings (Python, Node, C) — DEFERRED 2026-04-09
 - **What**: Use rgx from Python, JavaScript/Node, and C/C++ programs.
 - **Effort**: `large` per language
-- **Rationale**: 10x the user base. Most regex users aren't Rust developers.
-- **How**: Python via `pyo3`/`maturin`. Node via `napi-rs`. C via `cbindgen` + `extern "C"` wrapper.
+- **Status**: `deferred pending demand signal`. The "10x user base" rationale is generic and doesn't fit RGX specifically — RGX's killer feature is host integration (predicates, steering, events, async I/O, embedded scripting), and that surface translates poorly across FFI: Python callbacks become GIL territory, the async story assumes Rust's model, and the "embed Lua inside a regex from Python" pitch is weaker than from C/C++ because Python users already have a scripting host. Plus A9 is gated on A8 (publish, also deferred), is `large` per language, and the maintenance tail (packaging, version skew, prebuilds, per-binding CI) competes for time against engine work that strengthens the actual differentiator.
+- **Reactivation criteria**: a real user or use case pulling for a specific binding. **If reactivated, start with C bindings via cbindgen** — cheapest of the three and unlocks every other FFI host (PHP, Ruby, etc.) for free.
+- **How (when reactivated)**: Python via `pyo3`/`maturin`. Node via `napi-rs`. C via `cbindgen` + `extern "C"` wrapper.
 - **Dependencies**: A8 (stable public API).
 
 ### A10. `\X` extended grapheme cluster
@@ -262,19 +263,28 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ## C. Engineering improvements
 
-### C1. JIT compilation
+### C1. JIT compilation — ACTIVE FOCUS 2026-04-09 (second after C2)
 - **What**: Compile regex bytecode to native machine code for ~5-10x speedup.
 - **Effort**: `major`
+- **Status**: `planned, sequenced after C2`. C1 multiplies whatever engine is running by a constant factor; C2 changes the algorithmic class. Doing C2 first means C1's constant-factor win compounds on top of the NFA/DFA wins for the common case + the JIT'd backtracking path for everything else.
 - **Rationale**: Closes the speed gap with PCRE2's JIT. Makes rgx competitive with C engines.
 - **How**: Use `cranelift` (already in dependency tree via wasmtime) to translate bytecode to native code. Or `dynasm-rs` for lower-level control.
-- **Dependencies**: Stable bytecode format.
+- **Dependencies**: Stable bytecode format. C2 should land first so C1 has both engines to JIT.
+- **Open design questions**: binary-size impact, debug story, cross-platform validation matrix, fallback path when JIT compilation itself fails.
 
-### C2. NFA/DFA hybrid for simple patterns
-- **What**: Detect patterns that don't use backtracking features and run them through a Thompson NFA.
+### C2. NFA/DFA hybrid for simple patterns — ACTIVE FOCUS 2026-04-09 (first)
+- **What**: Detect patterns that don't use backtracking-only features and run them through a Thompson NFA + lazy DFA cache instead of the backtracking VM.
 - **Effort**: `major`
+- **Status**: `active focus`. Promoted from Tier 4 to top priority on 2026-04-09 because RGX is currently too slow on the patterns where most users live. C2 changes the algorithmic class, gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator, and typically delivers 10x-100x improvement on regular patterns where it applies.
 - **Rationale**: Guarantees O(nm) for the common case while keeping backtracking for advanced features.
-- **How**: Pattern analysis at compile time. If no backreferences/lookaround/recursion, use NFA path.
-- **Dependencies**: Significant new engine code.
+- **How**:
+  1. Pattern-analysis pass at compile time: classify each compiled program as "no-backtracking subset" (no backrefs, no recursion, no lookaround, no inline code blocks, no atomic groups, no possessive quantifiers, no `\K`, no backtracking verbs) vs "needs the VM."
+  2. For the no-backtracking subset, build a Thompson NFA from the AST.
+  3. Run a lazy DFA cache (RE2-style) over the NFA. The DFA delivers the match span.
+  4. **Capture handling**: the standard solution (per the Rust `regex` crate) is to use the DFA only for *finding* the overall match, then re-run a small bounded NFA simulation over the matched span to recover capture group positions. This avoids the full DFA-with-captures complexity.
+  5. Engine dispatch in `Regex::find_first` etc. picks NFA/DFA or VM based on the compiled program's classification.
+- **Dependencies**: Significant new engine code, but the existing AST is sufficient — no parser changes needed.
+- **Open design questions**: DFA cache eviction policy, when to bail out of the lazy DFA back to NFA simulation, how to expose runtime stats, whether to run NFA/DFA + VM in parallel for comparison during development.
 
 ### C3. Fuzzing infrastructure
 - **What**: `cargo-fuzz` integration for continuous fuzzing.
@@ -305,6 +315,14 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ---
 
 ## Priority tiers
+
+> **Active focus as of 2026-04-09**: C2 (NFA/DFA hybrid) first, C1 (JIT) second. RGX is currently too slow on the patterns where most users live; the strategic call is to fix the algorithmic class with C2, then add C1's constant-factor JIT win on top. A9 (language bindings) is deferred pending real demand signal — see its entry above for the full reasoning.
+
+### Tier 0 — Active focus (perf push, started 2026-04-09)
+| Item | Effort | Why |
+|------|--------|-----|
+| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. |
+| **C1 JIT compilation** | `major` | Constant-factor multiplier (~5-10x) on whichever engine runs. Sequenced after C2 so wins compound. |
 
 ### Tier 1 — Do now (production blockers + quick wins)
 | Item | Effort | Why |
@@ -347,15 +365,13 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 |------|--------|-----|
 | ~~A3 `tail_file`~~ | `medium` | ✅ Shipped — OS-native event-driven watching (kqueue/inotify) |
 | ~~A7 Unicode case folding~~ | `medium` | ✅ Shipped — `(?i:café)` matches `CAFÉ` |
-| A9 Language bindings | `large` | 10x user base |
 | ~~B2 `RegexSet`~~ | `large` | ✅ Shipped — multi-pattern matching with SetMatches |
 | ~~B4 Match semantics~~ | `medium` | ✅ Shipped — MatchSemantics API; compiler-level alternation reorder is follow-up |
 
-### Tier 4 — Long-term (architecture)
+### Tier 4 — Long-term (architecture / deferred)
 | Item | Effort | Why |
 |------|--------|-----|
-| C1 JIT | `major` | Ultimate speed |
-| C2 NFA/DFA hybrid | `major` | Guaranteed linear time for simple patterns |
 | ~~A10 `\X`~~ | `medium` | ✅ Shipped — extended grapheme cluster via unicode-segmentation |
 | ~~A12 Returned-capture subroutines~~ | `medium` | ✅ Shipped — parsing + compilation; full capture-return VM semantics is follow-up |
 | ~~A14 Partial matching~~ | `medium` | ✅ Shipped — PartialMatchResult with hit_end detection |
+| **A9 Language bindings** | `large` per language | **Deferred 2026-04-09** — pending real demand signal. RGX's host-integration killer feature translates poorly across FFI; the maintenance tail competes with engine work. If reactivated, start with C bindings via cbindgen. See A9 entry above for the full reasoning. |
