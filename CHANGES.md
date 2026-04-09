@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Auto-deploy The RGX Book to GitHub Pages
+- Scope: documentation infrastructure.
+- Changes:
+  - Added `.github/workflows/book.yml` — builds and deploys mdBook on every push to main
+  - Triggers only when `book/**` changes
+  - Uses `actions/deploy-pages@v4` with proper permissions
+  - Book will be available at `https://rdje.github.io/rgx` after first successful run
+  - README updated with the public URL
+- Setup required: enable GitHub Pages in repo settings (Source: GitHub Actions)
+
 ### 2026-04-09 - Bump MSRV to 1.85 for PGEN 1.1.9 edition2024 requirement
 - Scope: CI fix following PGEN 1.1.9 update.
 - Changes:
