@@ -39,7 +39,8 @@ Live continuity memory for `rgx` sessions.
 - New AI/LLM sessions should bootstrap through `SESSION_BOOTSTRAP.md`; `README.md` now ends with an explicit reminder to read that file and start there.
 - Run `cargo fmt --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm` before commit; keep external dependencies out of the RGX formatting gate.
 - Run `cargo clippy --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml --workspace --all-targets` before commit and fix all clippy errors first (warnings tolerated for now).
-- Include `Co-Authored-By: Oz <oz-agent@warp.dev>` in commit messages.
+- **Do NOT include `Co-Authored-By` trailers in commit messages.** Neither for Oz nor for Claude. User directive 2026-04-09; supersedes the prior workflow agreement.
+- Keep commit messages brief: concise title + 2–5 line body. The gory details go in `CHANGES.md`, the engineering rationale in `DEVELOPMENT_NOTES.md`.
 - After commit:
   - clear `git_message_brief.txt`
   - verify `git_message_brief.txt` stays untracked (`TRACKED:1` check).

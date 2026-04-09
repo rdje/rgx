@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Drop Co-Authored-By trailers from commit workflow
+- Scope: commit-workflow rule change. Doc only.
+- User directive: do not include `Co-Authored-By:` trailers in RGX commit messages. Supersedes the prior workflow agreement that required them.
+- Updated `COMMIT.md` Step 6 (brief preparation) to forbid trailers and reinforce brevity.
+- Updated `MEMORY.md` workflow agreements section to reflect the new rule and remove the prior `Oz` trailer requirement.
+- Persistent preference saved to auto-memory `feedback_no_coauthored_by.md` so future sessions inherit it.
+
 ### 2026-04-09 - C2 step 0: NFA/DFA hybrid engine design proposal
 - Scope: SOTA-quality design proposal for the NFA/DFA hybrid engine. No code changes; design doc only.
 - New file: `docs/C2_NFA_DFA_DESIGN.md` — comprehensive design covering goals/non-goals, architectural overview with module layout, no-backtracking subset definition (full inclusion/exclusion table), byte-class equivalence partitioning, forward + reverse Thompson NFA construction with anchored/unanchored variants, sparse-set Pike-VM (Russ Cox design from day one — not a prototype, the permanent NFA simulator and lazy DFA fallback), lazy DFA cache with clear-on-overflow + retry budget policy, two-pass capture recovery (the architectural decision recorded in this commit), engine dispatch boundary, what the existing VM path does NOT lose, differential testing strategy, benchmark strategy, phased implementation plan (steps 0-8), 10 open architectural questions with leans, risks and mitigations, and references.

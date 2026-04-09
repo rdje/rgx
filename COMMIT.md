@@ -60,9 +60,10 @@ Live commit workflow contract for `rgx`.
    - `git --no-pager status --short`
 5. Stage exactly the files shown in that status output (no hidden extras).
 6. Prepare `git_message_brief.txt` with:
-   - concise title
-   - brief bullet summary
-   - required `Co-Authored-By` trailer(s)
+   - concise title (≤70 characters, active voice)
+   - 2–5 line body explaining the *why* at a high level (the diff shows the *what*)
+   - **No `Co-Authored-By` trailers.** Per user preference, RGX commit messages do not carry agent co-authorship trailers.
+   - **Keep it brief.** The gory details belong in `CHANGES.md`; engineering rationale belongs in `DEVELOPMENT_NOTES.md`. The commit message is the headline, not the full ledger entry.
 7. Commit:
    - `git commit -F git_message_brief.txt`
 8. Post-commit cleanup:
