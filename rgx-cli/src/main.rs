@@ -73,6 +73,10 @@ struct Cli {
     #[arg(long, short = 'r', requires = "file")]
     recursive: bool,
 
+    /// Follow the file for new content (like tail -f | grep). Press Ctrl-C to stop.
+    #[arg(long, short = 'f', requires = "file")]
+    follow: bool,
+
     /// Show N lines of context before and after each match (line-mode only)
     #[arg(long = "context", short = 'C', value_name = "N")]
     context: Option<usize>,
@@ -742,6 +746,34 @@ fn main() -> anyhow::Result<()> {
         // Recursive directory scanning
         if cli.recursive || file_path.is_dir() {
             return run_recursive(&cli, &regex, file_path);
+        }
+
+        // --follow mode: tail the file for new matches
+        if cli.follow {
+            use rgx_core::file::TailOptions;
+            let use_color = should_color(&cli.color);
+            let handle = regex.tail_file(file_path.clone(), TailOptions::default(), move |fm| {
+                let text = &fm.line[fm.match_result.start..fm.match_result.end.min(fm.line.len())];
+                if use_color {
+                    println!(
+                        "{}{}{}",
+                        color_line_num(fm.line_number),
+                        color_sep(":"),
+                        color_match(text)
+                    );
+                } else {
+                    println!("{}:{}", fm.line_number, text);
+                }
+            });
+            // Block until Ctrl-C
+            let (tx, rx) = std::sync::mpsc::channel();
+            ctrlc::set_handler(move || {
+                tx.send(()).ok();
+            })
+            .ok();
+            rx.recv().ok();
+            handle.stop();
+            return Ok(());
         }
 
         // --replace on a single file

@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Ship CLI --follow mode (tail -f | grep)
+- Scope: Backlog item A4.
+- Changes:
+  - `rgx --file app.log --follow` — watches a file and prints matches as new lines are appended
+  - Uses `tail_file` with OS-native watching (kqueue/inotify)
+  - Color output supported (`--color`)
+  - Clean shutdown on Ctrl-C via `ctrlc` crate
+  - Added `ctrlc = "3"` dependency to rgx-cli
+- Validation: 30 CLI tests pass. Manual testing confirmed.
+
 ### 2026-04-09 - Ship The RGX Book (mdBook, 30 chapters, 7,300+ lines)
 - Scope: comprehensive documentation covering every user-facing feature.
 - Changes:

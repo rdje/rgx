@@ -32,11 +32,11 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Platform-specific file watching (`kqueue` on macOS, `inotify` on Linux, polling fallback). Chunked reading with overlap for cross-chunk matches.
 - **Dependencies**: Layer 6 core (shipped).
 
-### A4. CLI `--follow` mode
+### ~~A4. CLI `--follow` mode~~ ✅ Shipped
 - **What**: `rgx-cli --file app.log --follow` that tails a file like `tail -f | grep`.
 - **Effort**: `small` (once A3 is done)
 - **Rationale**: The most common CLI use case for log monitoring.
-- **Dependencies**: A3 (`tail_file`).
+- **Dependencies**: A3 (`tail_file`) — shipped.
 
 ### A5. CLI `--color` output
 - **What**: ANSI color highlighting for matches, line numbers, filenames.
