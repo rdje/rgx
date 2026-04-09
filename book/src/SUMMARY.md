@@ -48,6 +48,18 @@
 - [Data Pipeline](./real-world/data-pipeline.md)
 - [WAF Rule Engine](./real-world/waf-engine.md)
 
+# Part VI: Internals & Project
+
+- [Architecture Overview](./internals/architecture.md)
+- [Compilation Pipeline](./internals/compilation-pipeline.md)
+- [The VM](./internals/the-vm.md)
+- [PGEN Integration](./internals/pgen-integration.md)
+- [Performance](./internals/performance.md)
+- [Sandboxing & Security](./internals/sandboxing.md)
+- [Testing Philosophy](./internals/testing-philosophy.md)
+- [Project Status & Roadmap](./internals/project-status.md)
+- [Contributing](./internals/contributing.md)
+
 ---
 
 # Appendices

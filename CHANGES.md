@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Codify two-track documentation rule (Book + live docs)
+- Scope: documentation discipline.
+- Changes:
+  - `CLAUDE.md`: split documentation rules into two clear tracks — The Book (user-facing, for the world) and live continuity docs (internal, for session survival)
+  - `COMMIT.md`: Step 3 now explicitly checks both tracks; the two are non-interchangeable
+  - Added Part VI: Internals & Project to The RGX Book SUMMARY (architecture, compilation pipeline, VM, PGEN integration, performance, sandboxing, testing philosophy, project status, contributing) — chapters being written
+- Rationale: the user clarified that updating live docs does NOT satisfy the requirement to update the book. The book is what the world sees; the live docs are internal infrastructure. Both must be maintained.
+
 ### 2026-04-09 - Add API smoke test to catch book/code drift
 - Scope: regression test infrastructure.
 - Changes:
