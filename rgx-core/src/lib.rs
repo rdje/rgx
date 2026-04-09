@@ -52,6 +52,12 @@
 pub mod ast;
 /// Byte-oriented regex matching on `&[u8]` without requiring valid UTF-8.
 pub mod bytes;
+/// C2: NFA/DFA hybrid engine for the no-backtracking subset.
+///
+/// See `docs/C2_NFA_DFA_DESIGN.md` for the full design proposal. Currently
+/// at step 1 of the §15 phased plan: pattern classifier only, metadata
+/// only, no runtime dispatch yet.
+pub mod c2;
 /// Thread-safe compilation cache for regex patterns.
 pub mod cache;
 /// Pattern-to-program compiler logic.
@@ -891,6 +897,26 @@ impl Regex {
         };
         trace_exit!("api", "Regex::compile", "ok=true");
         Ok(regex)
+    }
+
+    /// C2 engine classification for this compiled pattern.
+    ///
+    /// Returns the `Classification` decided by the C2 pattern classifier
+    /// at compile time. At C2 step 1 this is metadata only — the engine
+    /// still always dispatches through the backtracking VM. Runtime
+    /// dispatch on this field lands in C2 step 4 (Pike-VM).
+    ///
+    /// This accessor is doc-hidden because the public introspection API
+    /// (e.g. `uses_c2() -> bool`) is design doc Q8 and lands in C2 step 8
+    /// alongside the production cutover. Until then, this method exists
+    /// for tests, internal callers, and the differential testing harness.
+    ///
+    /// See `docs/C2_NFA_DFA_DESIGN.md` §4 for the no-backtracking subset
+    /// definition.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn classification(&self) -> &c2::Classification {
+        self.engine.classification()
     }
 
     /// Compile a regex with specific execution mode.

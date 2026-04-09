@@ -1,5 +1,6 @@
 use crate::ast::Regex as RegexAst;
 use crate::ast::{CharClass, CharRange};
+use crate::c2;
 use crate::engine::ExecutionMode;
 use crate::error::{Result, RgxError};
 use crate::parsing;
@@ -541,6 +542,16 @@ impl Compiler {
         let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
         let mut program = vm_compiler.compile(&ast);
         program.named_groups = named_groups;
+
+        // C2 step 1: classify the AST against the no-backtracking subset.
+        // Stored as metadata only at this stage; no runtime dispatch reads
+        // it yet. See `docs/C2_NFA_DFA_DESIGN.md` §4 and `c2::classifier`.
+        program.classification = c2::classify(&ast);
+        debug_log!(
+            "compiler",
+            "  - C2 classification: {:?}",
+            program.classification
+        );
 
         debug_log!("compiler", "Program compiled:");
         debug_log!(

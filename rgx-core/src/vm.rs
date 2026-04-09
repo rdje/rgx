@@ -12,6 +12,7 @@ use crate::ast::{
     AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, RecursionTarget,
     Regex,
 };
+use crate::c2::Classification;
 use crate::events::MatchEvent;
 use crate::execution::{
     CodeBlockValue, ExecContext as CodeExecContext, ExecContextSnapshot, ExecResult,
@@ -328,6 +329,16 @@ pub struct Program {
     pub flags: ProgramFlags,
     /// Performance statistics from compilation
     pub stats: CompilationStats,
+    /// C2 engine classification — decides whether this pattern can dispatch
+    /// to the NFA/DFA hybrid engine or must use the backtracking VM.
+    ///
+    /// At C2 step 1 this is metadata only; no runtime dispatch reads it yet.
+    /// Populated by the compiler in `compile_ast_with_label` after VM
+    /// bytecode generation. Defaults to `NeedsVm { NotYetClassified }` so
+    /// any code path that bypasses the classifier still routes safely to
+    /// the existing VM. See `docs/C2_NFA_DFA_DESIGN.md` §4 for the full
+    /// subset definition.
+    pub classification: Classification,
 }
 
 /// Program optimization flags
@@ -5838,6 +5849,7 @@ impl OptimizingCompiler {
             num_groups: self.group_counter,
             flags: self.flags,
             stats: self.stats,
+            classification: Classification::default(),
         };
         trace_exit!(
             "vm",

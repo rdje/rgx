@@ -321,7 +321,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### Tier 0 — Active focus (perf push, started 2026-04-09)
 | Item | Effort | Why | Status |
 |------|--------|-----|--------|
-| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. | **Step 0 design doc landed** — `docs/C2_NFA_DFA_DESIGN.md`. Awaiting user sign-off before step 1 (pattern classifier) can start. 8-step phased plan, multi-week timeline. |
+| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. | **Step 1 shipped** — pattern classifier in `rgx-core/src/c2/`, metadata-only on `Program`, doc-hidden `Regex::classification()` accessor, 43 new unit + 26 new integration tests. Step 0 design doc: `docs/C2_NFA_DFA_DESIGN.md`. Next: step 2 (byte-class equivalence partitioning). 8-step phased plan, multi-week timeline. |
 | **C1 JIT compilation** | `major` | Constant-factor multiplier (~5-10x) on whichever engine runs. Sequenced after C2 so wins compound. | Planned. Starts after C2 production cutover. |
 
 ### Tier 1 — Do now (production blockers + quick wins)

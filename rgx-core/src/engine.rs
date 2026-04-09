@@ -1,3 +1,4 @@
+use crate::c2::Classification;
 use crate::error::Result;
 use crate::events::MatchEvent;
 use crate::execution::{
@@ -117,6 +118,16 @@ impl Engine {
         };
         trace_exit!("engine", "Engine::new", "ok=true,mode={:?}", engine.mode);
         Ok(engine)
+    }
+
+    /// C2 classification of the compiled pattern this engine was built for.
+    ///
+    /// At C2 step 1, this is metadata only — the engine still always
+    /// dispatches through the backtracking VM. Runtime dispatch on this
+    /// field lands in C2 step 4 (Pike-VM).
+    #[doc(hidden)]
+    pub fn classification(&self) -> &Classification {
+        &self.vm.program.classification
     }
 
     /// Find all non-overlapping matches in the input

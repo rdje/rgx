@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-10 - C2 step 1: pattern classifier (metadata only, no runtime dispatch)
+- Scope: First code commit for the C2 NFA/DFA hybrid engine. SOTA-quality from day one per `feedback_sota_first_time.md`.
+- New module: `rgx-core/src/c2/{mod.rs, classifier.rs}`. Defines `Classification` (NoBacktracking | NeedsVm { reason }) and `ExclusionReason`. Single linear-time AST visitor classifies patterns against the no-backtracking subset defined in `docs/C2_NFA_DFA_DESIGN.md` §4. Conservative — any node it isn't certain about returns NeedsVm.
+- New `Program.classification` field on `vm::Program`. Initialized via `Default` to `NeedsVm { NotYetClassified }` so any code path that bypasses the classifier still routes safely to the existing VM. Populated in `compile_ast_with_label` after VM bytecode generation.
+- New doc-hidden accessor `Regex::classification() -> &c2::Classification` on the public Regex type, plus a doc-hidden `Engine::classification()` plumbing method. The user-facing `uses_c2() -> bool` introspection (design doc Q8) is intentionally deferred to step 8.
+- 43 new unit tests in `rgx-core/src/c2/classifier.rs::tests` covering every supported leaf, every supported recursive construct, every excluded construct, exclusions reached through recursion, first-encountered semantics, and two realistic hand-built ASTs.
+- 26 new integration tests in `rgx-core/tests/c2_classifier.rs` covering the full compile pipeline (parser → classifier → metadata on Program → public accessor) with real pattern strings: literals, character classes, shorthand classes, dot, alternation, greedy/lazy quantifiers, capturing/non-capturing groups, anchors, word boundaries, Unicode property classes, flag groups, two realistic patterns, plus all the major exclusions (numeric/named backreferences, positive/negative lookahead/lookbehind, atomic groups, possessive quantifiers, recursion, numbered subroutines, conditionals).
+- No runtime dispatch wired in. Existing backtracking VM continues to handle every pattern unchanged. Step 1 is metadata only by design — the field can be validated in isolation before step 4 (Pike-VM) starts depending on it.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core` 721 passing (was 633, +88: 43 new unit + 26 new integration + 19 small delta from re-counted suites), `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` clean, `cargo build` clean (29 pre-existing warnings, no new ones).
+
 ### 2026-04-09 - Drop Co-Authored-By trailers from commit workflow
 - Scope: commit-workflow rule change. Doc only.
 - User directive: do not include `Co-Authored-By:` trailers in RGX commit messages. Supersedes the prior workflow agreement that required them.
