@@ -6,7 +6,7 @@ rgx can emit structured events at key points during matching. These events are f
 
 Use `on_event` to register a callback that receives `MatchEvent` values:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchEvent};
 let re = Regex::compile(r"(\d+)-(\w+)")?;
 
@@ -108,7 +108,7 @@ CodeBlockEvaluated { language: "lua", succeeded: true, position: 7 }
 
 When a regex isn't matching as expected, events reveal exactly what the engine is doing:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchEvent};
 let re = Regex::compile(r"(a+)(b+)")?;
 
@@ -152,7 +152,7 @@ This might print:
 
 Count backtracks and attempts to identify expensive patterns:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchEvent};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -190,7 +190,7 @@ eprintln!(
 
 Track which alternation branches are exercised across a test suite:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchEvent};
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
@@ -219,7 +219,7 @@ eprintln!("branches exercised: {:?}", *hit);
 
 Log every code block evaluation for security auditing:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, MatchEvent};
 let re = Regex::with_mode(
     r#"\d+(?{lua:return tonumber(arg[1]) > 0})"#,

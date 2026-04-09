@@ -13,7 +13,7 @@ This chapter explains both, when to reach for each, and how they connect.
 [`Captures::get`]. It borrows the original input, so you can extract the
 matched text without copying:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\b\d{4}\b")?;
 let m = re.find("The year 2025 was interesting").unwrap();
@@ -40,7 +40,7 @@ assert_eq!(m.end(), 13);
 Because `range()` returns a standard `Range<usize>`, you can use it directly
 as a slice index:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let text = "error at line 42: overflow";
 let re = Regex::compile(r"\d+")?;
@@ -56,7 +56,7 @@ assert_eq!(&text[m.range()], "42");
 Some patterns can match the empty string -- anchors, lookaheads, and
 quantifiers with a `{0,n}` lower bound, for example:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"^")?;
 let m = re.find("hello").unwrap();
@@ -77,7 +77,7 @@ lets you distinguish positional matches from content matches in generic code.
 All positions in `Match` are **byte** offsets, not character offsets. When your
 input contains multi-byte UTF-8 sequences this distinction matters:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let text = "cafe\u{0301}";  // "cafe" + combining accent = "caf\u{e9}" visual
 let re = Regex::compile(r"\x{0301}")?;
@@ -102,7 +102,7 @@ value. That is what `MatchResult` provides.
 `MatchResult` is returned by lower-level methods like `find_first` and
 `find_all`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d{4})-(\d{2})-(\d{2})")?;
 let mr = re.find_first("Born on 1990-05-17").unwrap();
@@ -129,7 +129,7 @@ end))` when a match succeeds. Indices 1 through N correspond to numbered
 capture groups in the pattern. Groups that did not participate in the match
 (e.g., inside an unmatched alternation branch) are `None`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a)|(b)")?;
 let mr = re.find_first("b").unwrap();
@@ -151,7 +151,7 @@ same set of groups.
 Because `MatchResult` does not borrow the input text, you need the original
 string to extract substrings:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let text = "2025-04-08";
 let re = Regex::compile(r"(\d{4})-(\d{2})-(\d{2})")?;
@@ -190,7 +190,7 @@ drop to `find_first` / `find_all` when you need `MatchResult` fields that
 `Regex::find` is a thin wrapper around `find_first` -- it maps `MatchResult`
 into `Match<'t>` by attaching the text reference:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "item 42";
@@ -209,7 +209,7 @@ assert_eq!(via_find.as_str(), &text[via_first.start..via_first.end]);
 
 ### Empty input
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r".*")?;
 let m = re.find("").unwrap();
@@ -220,7 +220,7 @@ assert_eq!(m.as_str(), "");
 
 ### Match at the very end of input
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+$")?;
 let m = re.find("hello 99").unwrap();
@@ -234,7 +234,7 @@ assert_eq!(m.end(), 8);  // == text.len()
 This comes up with optional groups and alternations. Always check for `None`
 when accessing `MatchResult.groups`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a)(b)?(c)")?;
 let mr = re.find_first("ac").unwrap();

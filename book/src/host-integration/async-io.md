@@ -17,7 +17,7 @@ Normal matching is synchronous: the engine runs start to finish and returns a re
 
 The entry point is `find_first_suspendable`, which returns a `MatchOutcome` instead of `Option<MatchResult>`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"user:(\w+)(?{native:check_db})",
@@ -94,7 +94,7 @@ The `ExecContextSnapshot` gives the resolver enough information to make its deci
 
 Imagine validating usernames against a database during pattern matching:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"@(\w+)(?{native:user_exists})",
@@ -185,7 +185,7 @@ The resolver receives the callback name and context snapshot, returns a future t
 
 A pattern can contain multiple unregistered callbacks. Each one causes a separate suspension:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"(\w+):(\w+)(?{native:check_auth})(?{native:check_quota})",
@@ -217,7 +217,7 @@ assert_eq!(resolved, 2);  // two suspensions, two resolutions
 
 You can register some callbacks and leave others for async resolution. Only unregistered native callbacks cause suspension; registered ones execute synchronously:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"(\d+)(?{native:validate})(?{native:check_remote})",

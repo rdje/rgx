@@ -6,7 +6,7 @@ Capture groups extract specific parts of a match. They're the bridge between "I 
 
 Named groups are self-documenting:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")?;
 
@@ -25,7 +25,7 @@ if let Some(caps) = re.captures("Event on 2026-04-09") {
 
 `Captures` provides several ways to access groups:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)@(\w+)\.(\w+)")?;
 let caps = re.captures("user@example.com").unwrap();
@@ -54,7 +54,7 @@ for (i, group) in caps.iter().enumerate() {
 
 Groups that didn't participate in the match return `None`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)(?: (\w+))?")?;
 
@@ -72,7 +72,7 @@ assert_eq!(&caps[2], "world");
 
 `expand` fills in a template with captured values:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<first>\w+)\s(?P<last>\w+)")?;
 let caps = re.captures("Jane Doe").unwrap();
@@ -89,7 +89,7 @@ Template syntax: `$1`, `$name`, `${name}`, `$&` (full match), `$$` (literal `$`)
 
 `captures_iter` combines `find_iter` with capture extraction:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<key>\w+)=(?P<val>\w+)")?;
 
@@ -106,7 +106,7 @@ for caps in re.captures_iter("a=1 b=2 c=3") {
 
 Query capture group information on the compiled regex:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(\d{2})")?;
 

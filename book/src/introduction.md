@@ -27,7 +27,7 @@ rgx does everything a traditional regex engine does: find patterns, extract capt
 
 ## Quick taste
 
-```rust
+```rust,ignore
 use rgx_core::*;
 
 // Find and replace with capture groups

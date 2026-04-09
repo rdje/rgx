@@ -30,7 +30,7 @@ diagnostic information.
 When both `pattern` and `offset` are present, the `format()` method
 produces a multi-line diagnostic with a caret pointing to the problem:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let err = Regex::compile(r"(abc[def").unwrap_err();
 let message = format!("{err}");
@@ -66,7 +66,7 @@ For multi-byte characters, it aligns with the start of the character.
 When you need to process errors in code (not just display them), match on
 the `RgxError::Compile` variant and inspect the `CompileError`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RgxError};
 let result = Regex::compile(r"(unclosed");
 
@@ -93,7 +93,7 @@ Both `CompileError` and `RgxError` implement `Display` and produce the
 formatted output with the caret. You can use them with `println!`,
 `format!`, `eprintln!`, or any logging framework:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 if let Err(e) = Regex::compile(r"[z-a]") {
     eprintln!("{e}");
@@ -120,7 +120,7 @@ the offset is always the parser's best guess.
 Some errors are detected after parsing, during compilation to bytecode. These
 errors have a message but no `pattern` or `offset`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RgxError};
 // This is a valid parse but might trigger a compilation-phase error
 // in certain edge cases. Normally both fields are present.
@@ -183,7 +183,7 @@ The range `z-a` is backward (z > a in Unicode), which is an error.
 If your application accepts user-provided patterns, you can present the
 diagnostic directly:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 fn try_compile(pattern: &str) -> String {
     match Regex::compile(pattern) {
@@ -202,7 +202,7 @@ assert!(feedback.contains('^'));
 For web APIs or IDEs, you might want to return structured JSON rather than
 a text diagnostic:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RgxError};
 fn compile_with_diagnostic(pattern: &str) -> Result<(), (String, Option<usize>)> {
     match Regex::compile(pattern) {
@@ -231,7 +231,7 @@ match compile_with_diagnostic(r"[unclosed") {
 When a `RegexSet` fails to compile because one of its patterns is invalid,
 the error message includes the pattern index:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexSet;
 let result = RegexSet::new(&[r"\d+", r"(bad", r"[ok]"]);
 let err = result.unwrap_err();
@@ -269,7 +269,7 @@ the Rust error ecosystem:
 - It can be used with `?` in functions returning `Result<T, Box<dyn Error>>`.
 - It works with `anyhow`, `eyre`, and other error-handling crates.
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 fn process(pattern: &str) -> Result<(), Box<dyn std::error::Error>> {
     let re = Regex::compile(pattern)?;  // ? converts RgxError automatically

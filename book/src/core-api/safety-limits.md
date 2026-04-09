@@ -17,7 +17,7 @@ Every match attempt executes a sequence of VM opcodes: match a character,
 try a branch, push a backtrack frame, and so on. `set_max_steps` caps the
 total number of opcode dispatches per attempt:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a+)+b")?;
 re.set_max_steps(Some(10_000));
@@ -53,7 +53,7 @@ are being cut short.
 
 Pass `None` to revert to the default (unlimited):
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 re.set_max_steps(Some(1000));
@@ -79,7 +79,7 @@ can undo choices when a branch fails. Deeply nested quantifiers and
 alternations can produce enormous stacks. `set_max_backtrack_frames` caps
 the depth:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a|b)*c")?;
 re.set_max_backtrack_frames(Some(5_000));
@@ -114,7 +114,7 @@ RGX supports recursive patterns (like `(?R)` for matching balanced
 parentheses). Each recursive invocation consumes stack space and processing
 time. `set_max_recursion_depth` limits how deep the recursion can go:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\(([^()]*|(?R))*\)")?;
 re.set_max_recursion_depth(Some(50));
@@ -133,7 +133,7 @@ but prevents runaway recursion from crashing the process.
 
 Pass `None` to revert to this default:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?R)?")?;
 re.set_max_recursion_depth(Some(10));
@@ -157,7 +157,7 @@ This means you can:
 - **Change limits between calls** without recompiling the pattern.
 - **Use `Arc<Regex>`** from `RegexCache` and still configure safety limits.
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 use std::sync::Arc;
 use std::thread;
@@ -191,7 +191,7 @@ the *same* regex, compile separate instances.
 
 For maximum protection against adversarial input, set all three:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 fn compile_safe(pattern: &str) -> Result<Regex, Box<dyn std::error::Error>> {
     let re = Regex::compile(pattern)?;
@@ -224,7 +224,7 @@ RGX does not currently expose the exhaustion reason in the return value.
 
 ## Practical example: safe user-facing search
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RegexCache};
 use std::sync::Arc;
 

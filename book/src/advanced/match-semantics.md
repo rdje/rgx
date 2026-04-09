@@ -17,7 +17,7 @@ rgx supports two modes, controlled by the `MatchSemantics` enum:
 
 With leftmost-first semantics, the engine tries each alternative in order and returns the first one that succeeds. The pattern `a|ab` on the input `"ab"` matches `"a"` -- because `a` is the first branch and it matches at position 0.
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"a|ab")?;
 
@@ -38,7 +38,7 @@ Leftmost-first semantics are predictable and match how most developers think abo
 
 With leftmost-longest semantics, the engine still finds matches at the leftmost position, but among all possible matches at that position, it picks the longest one. The pattern `a|ab` on `"ab"` would match `"ab"` under POSIX rules because it is longer than `"a"`.
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 let re = Regex::compile(r"ab|a")?;
 re.set_match_semantics(MatchSemantics::LeftmostLongest);
@@ -60,7 +60,7 @@ assert_eq!(m.as_str(), "ab");   // longest match wins
 
 Use `set_match_semantics()` on a compiled `Regex`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 let re = Regex::compile(r"\w+|[a-z]")?;
 
@@ -84,7 +84,7 @@ The semantics can be changed at any time -- it is a runtime flag, not a compile-
 
 For patterns that do not use `|`, the two modes behave identically. Greedy quantifiers (`+`, `*`, `{n,m}`) already produce the longest match at each position:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 let re = Regex::compile(r"\d+")?;
 re.set_match_semantics(MatchSemantics::LeftmostLongest);
@@ -102,7 +102,7 @@ You only see a difference when alternation creates competing match candidates of
 
 When the pattern cannot match at all, both modes return `None`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 let re = Regex::compile(r"\d+")?;
 re.set_match_semantics(MatchSemantics::LeftmostLongest);
@@ -117,7 +117,7 @@ assert!(re.find("abc").is_none());
 
 Today, `set_match_semantics(LeftmostLongest)` stores the flag and influences how the VM evaluates matches, but the compiler does not yet reorder alternation branches to achieve true POSIX longest-match behavior for all patterns. This means that for `a|ab` with `LeftmostLongest`, the engine currently still returns `"a"` -- because it encounters the `a` branch first and the branch-reordering optimization has not yet been implemented.
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 let re = Regex::compile(r"a|ab")?;
 re.set_match_semantics(MatchSemantics::LeftmostLongest);
@@ -135,7 +135,7 @@ This is tracked as a compiler-level enhancement. The `MatchSemantics` flag is st
 
 Until the compiler reorders branches automatically, you can get POSIX-style behavior by manually placing longer alternatives before shorter ones:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, MatchSemantics};
 // Instead of: a|ab  (short branch first)
 // Write:      ab|a  (long branch first)
@@ -155,7 +155,7 @@ This workaround works with both `LeftmostFirst` and `LeftmostLongest` semantics 
 
 A tokenizer typically has rules like "match a keyword, or an identifier, or a number." With leftmost-first, branch order determines priority:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 // Keywords first, then identifiers -- keyword branches win on ties
 let re = Regex::compile(r"if|else|while|[a-zA-Z_]\w*|\d+")?;

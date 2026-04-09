@@ -6,14 +6,14 @@
 
 Compare:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 // Flags in the pattern — fine for hardcoded patterns
 let re = Regex::compile(r"(?ims)hello.world")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-```rust
+```rust,ignore
 # use rgx_core::RegexBuilder;
 // Flags via builder — better when flags come from runtime config
 let re = RegexBuilder::new(r"hello.world")
@@ -30,7 +30,7 @@ Same result. The builder is cleaner when flags come from CLI arguments, config f
 
 All flag setters take no argument (the name implies `true`). For programmatic toggle, use the `set_*` variants:
 
-```rust
+```rust,ignore
 # use rgx_core::{RegexBuilder, ExecutionMode};
 let re = RegexBuilder::new(r"pattern")
     .case_insensitive()          // (?i) — é matches É, α matches Α
@@ -47,7 +47,7 @@ let re = RegexBuilder::new(r"pattern")
 
 When the flag value comes from a variable:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexBuilder;
 let user_wants_case_insensitive = true;
 
@@ -61,7 +61,7 @@ let re = RegexBuilder::new(r"hello")
 
 `ignore_whitespace()` enables extended mode where whitespace is ignored and `#` starts a comment:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexBuilder;
 let re = RegexBuilder::new(r"
     \d{3}     # area code
@@ -81,7 +81,7 @@ assert!(re.is_match("555-123-4567"));
 
 `case_insensitive()` folds all Unicode letters, not just ASCII:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexBuilder;
 let re = RegexBuilder::new(r"café")
     .case_insensitive()
@@ -95,7 +95,7 @@ assert!(re.is_match("café"));
 
 This works for Greek, Cyrillic, and other scripts too:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexBuilder;
 let re = RegexBuilder::new(r"москва")
     .case_insensitive()

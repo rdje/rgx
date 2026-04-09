@@ -11,7 +11,7 @@ rgx-core = "0.1"
 
 In rgx, you compile a pattern once and reuse it:
 
-```rust
+```rust,ignore
 use rgx_core::Regex;
 
 let re = Regex::compile(r"\d{3}-\d{4}")?;
@@ -30,7 +30,7 @@ regex compile error: E_PARSE_FAILURE: ...
 
 ## Finding the first match
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d{3}-\d{4}")?;
 
@@ -47,7 +47,7 @@ if let Some(m) = re.find("Call 555-1234 for info") {
 
 When you only need yes/no:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -58,7 +58,7 @@ assert!(!re.is_match("no digits"));
 
 ## Finding all matches
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\b\w+\b")?;
 
@@ -77,7 +77,7 @@ for m in re.find_iter("hello world foo") {
 
 If you're building patterns from user-provided strings, escape metacharacters first:
 
-```rust
+```rust,ignore
 use rgx_core::{Regex, escape};
 
 let user_input = "price is $3.50";

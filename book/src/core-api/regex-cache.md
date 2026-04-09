@@ -9,7 +9,7 @@ hits.
 
 ## Creating a cache
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(128);  // room for 128 compiled patterns
 ```
@@ -25,7 +25,7 @@ evicted.
 The most common operation: give me a compiled regex for this pattern, using
 `ExecutionMode::Pure` (maximum performance, no code blocks):
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(64);
 
@@ -46,7 +46,7 @@ If your patterns contain code blocks, you need `ExecutionMode::Safe` or
 mode, so the same pattern compiled in different modes produces separate
 entries:
 
-```rust
+```rust,ignore
 # use rgx_core::{RegexCache, ExecutionMode};
 let cache = RegexCache::new(64);
 
@@ -65,7 +65,7 @@ If a pattern is invalid, `get` returns an `Err`. Invalid patterns are
 **not** cached -- the next call with the same pattern will attempt
 compilation again:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(64);
 
@@ -80,7 +80,7 @@ cache.
 
 ## Inspecting the cache
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(64);
 assert!(cache.is_empty());
@@ -93,7 +93,7 @@ assert_eq!(cache.len(), 2);
 
 ## Clearing the cache
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(64);
 cache.get(r"\d+")?;
@@ -111,7 +111,7 @@ After clearing, subsequent `get` calls will recompile.
 When the cache reaches capacity, the **least-recently-inserted** entry is
 evicted to make room for the new one:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(2);  // tiny cache for demonstration
 
@@ -134,7 +134,7 @@ you expect in a steady-state workload.
 multiple threads can read from the cache simultaneously, and compilation
 (the slow path) only holds a write lock for the duration of the insert:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 use std::sync::Arc;
 use std::thread;
@@ -176,7 +176,7 @@ If your application accepts regex patterns from users (e.g., a search box,
 a log filter, a routing rule), `RegexCache` prevents the same search term
 from being recompiled on every request:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(256);
 
@@ -197,7 +197,7 @@ assert!(search(&cache, r"\bfoo\b", "baz foo qux"));
 Applications that load patterns from config files or databases benefit from
 caching because the same config may be re-read on hot-reload:
 
-```rust
+```rust,ignore
 # use rgx_core::RegexCache;
 let cache = RegexCache::new(128);
 

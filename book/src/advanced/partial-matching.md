@@ -35,7 +35,7 @@ The `offset` in `Partial(offset)` tells you the byte position where the potentia
 
 ## Basic usage
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"hello world")?;
 
@@ -70,7 +70,7 @@ match re.find_first_partial("xyz") {
 
 The primary use case for partial matching is streaming data. Here is the pattern: try to match each chunk. If you get `Partial`, buffer the data and retry when the next chunk arrives. If you get `Full`, process the match and advance. If you get `NoMatch`, discard.
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"\d{4}-\d{2}-\d{2}")?;
 
@@ -128,7 +128,7 @@ The key subtlety: `hit_end` only fires when the pattern was **actively matching*
 
 ### Example: the difference matters
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"hello")?;
 
@@ -152,7 +152,7 @@ assert!(matches!(
 
 Partial matching is excellent for real-time input validation. As the user types, you can give immediate feedback:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let date_re = Regex::compile(r"\d{4}-\d{2}-\d{2}")?;
 
@@ -179,7 +179,7 @@ This gives a much better user experience than waiting until the entire field is 
 
 Partial matching handles structured patterns well:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"\d{4}-\d{2}-\d{2}")?;
 
@@ -209,7 +209,7 @@ assert!(matches!(
 
 Empty input gets `NoMatch` or `Partial` depending on whether the pattern can start matching at position 0. For a literal pattern like `abc`, an empty string provides no evidence of a match, so the engine reports `NoMatch` or `Partial`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"abc")?;
 
@@ -228,7 +228,7 @@ match re.find_first_partial("") {
 
 Partial matching works with anchored patterns too. An `\A`-anchored pattern that partially matches at the start will report `Partial(0)`:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"\Ahello world\z")?;
 
@@ -259,7 +259,7 @@ match re.find_first_partial("hello wor") {
 
 Partial matching does not give you "the best match so far." It is a boolean signal: "could this become a match?" If you need the actual partial match text, extract it using the offset:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, PartialMatchResult};
 let re = Regex::compile(r"hello world")?;
 

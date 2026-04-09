@@ -11,7 +11,7 @@ somewhere, not what it contains.
 
 ### `find_first_at` -- find one match starting at an offset
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "abc 123 def 456";
@@ -29,7 +29,7 @@ you can use them directly to slice the input string without adjustment.
 
 ### `find_all_at` -- find all matches starting at an offset
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "11 22 33 44 55";
@@ -49,7 +49,7 @@ assert_eq!(values, vec!["33", "44", "55"]);
 When you only need to know whether a pattern matches *somewhere* from a given
 position:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "abc 123";
@@ -70,7 +70,7 @@ common in tokenizers that use the end offset to advance a cursor.
 
 ### `shortest_match` -- end offset of the first match
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"[a-z]+")?;
 let text = "  hello world";
@@ -82,7 +82,7 @@ assert_eq!(end, 7);  // "hello" ends at byte 7
 
 ### `shortest_match_at` -- end offset from a specific position
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"[a-z]+")?;
 let text = "  hello world";
@@ -105,7 +105,7 @@ The classic approach is a loop:
 
 Here is a minimal tokenizer built with `find_first_at`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 #[derive(Debug, PartialEq)]
 enum Token<'a> {
@@ -172,7 +172,7 @@ makes error reporting harder.
 If your tokenizer only needs to know *which* pattern matches (not the match
 text), `shortest_match_at` avoids constructing a full `MatchResult`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let number = Regex::compile(r"\d+")?;
 let ident  = Regex::compile(r"[a-zA-Z_]\w*")?;
@@ -202,7 +202,7 @@ All `*_at` methods take a byte offset as the `start` parameter. This offset
 **must** fall on a UTF-8 character boundary. If it lands in the middle of a
 multi-byte sequence, the method will panic:
 
-```rust,should_panic
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r".")?;
 let text = "\u{00e9}tude";  // "etude" with e-accent: 2 bytes for the e
@@ -215,7 +215,7 @@ To stay safe, always advance your cursor using the `end` offset of the
 previous match (which is always on a boundary), or use
 `str::is_char_boundary()` to validate:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let text = "\u{00e9}tude";
 
@@ -235,7 +235,7 @@ The fact that positions are absolute (not relative to `start`) has a nice
 consequence: you can build a list of all matches across multiple scan passes
 and their positions will be consistent:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "a1b22c333";

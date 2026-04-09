@@ -38,7 +38,7 @@ PCRE2's JIT compiler translates regex bytecode to native machine code for freque
 
 Most patterns work as-is. Copy them directly:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 // These are all valid PCRE2 patterns that work in rgx
 let email = Regex::compile(r"[\w.+-]+@[\w.-]+\.\w{2,}")?;

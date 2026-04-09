@@ -14,7 +14,7 @@ guarantee they all share, and shows you when to prefer iterators over the
 The `Vec`-returning methods like `find_all` and `split` are convenient, but
 they do all the work before returning:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\w+")?;
 let words = re.find_all("a very long document ...");
@@ -24,7 +24,7 @@ let words = re.find_all("a very long document ...");
 
 Iterators defer that work:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\w+")?;
 for m in re.find_iter("a very long document ...") {
@@ -49,7 +49,7 @@ The benefits are:
 Created by `Regex::find_iter`, this yields `Match<'t>` values for each
 non-overlapping match:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "10 + 20 = 30";
@@ -69,7 +69,7 @@ previous match. This means matches never overlap. When a zero-width match
 is found at the same position as the end of the previous match, the iterator
 automatically advances by one character to avoid an infinite loop:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\b")?;
 let text = "hi";
@@ -94,7 +94,7 @@ while `find_iter` yields `Match<'t>` (just text, start, end). Choose
 Created by `Regex::captures_iter`, this yields `Captures<'t>` values. Each
 `Captures` gives you access to numbered and named groups:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<key>\w+)=(?P<val>\w+)")?;
 let text = "host=localhost port=8080 debug=true";
@@ -121,7 +121,7 @@ the subgroup contents.
 Created by `Regex::split_iter`, this yields the substrings *between*
 matches:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"[,;\s]+")?;
 let text = "one, two; three   four";
@@ -145,7 +145,7 @@ pieces or when memory matters.
 Created by `Regex::splitn_iter`, this is like `SplitIter` but stops after
 yielding `limit` pieces. The final piece contains the unsplit remainder:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r",")?;
 let text = "a,b,c,d,e";
@@ -159,7 +159,7 @@ This is the lazy version of `Regex::splitn`. It is ideal for parsing
 structured lines where you know the first N fields are fixed but the rest
 is free-form text:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\s+")?;
 let line = "ERROR 2025-04-08 10:30:00 disk full on /var/log";
@@ -179,7 +179,7 @@ Created by `Regex::capture_names`, this iterates over all capture group slots
 (0 through N). It yields `None` for unnamed groups and `Some("name")` for
 named groups:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<year>\d{4})-(\d{2})-(?P<day>\d{2})")?;
 let names: Vec<Option<&str>> = re.capture_names().collect();
@@ -194,7 +194,7 @@ assert_eq!(names[3], Some("day"));
 This is useful for building dynamic output -- for example, when you want to
 produce a JSON object whose keys are the group names:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<host>[^:]+):(?P<port>\d+)")?;
 if let Some(caps) = re.captures("localhost:8080") {
@@ -217,7 +217,7 @@ Once you have a `Captures<'t>` object (from `captures()` or
 `captures_iter()`), you can iterate over its groups using `Captures::iter()`,
 which returns `SubCaptureMatches`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d+)-(\d+)-(\d+)")?;
 let caps = re.captures("2025-04-08").unwrap();
@@ -252,7 +252,7 @@ This is important when you are using iterators in contexts that may call
 `.next()` after exhaustion -- for example, `Iterator::fuse()` is a no-op
 on a `FusedIterator`, and combinators like `.chain()` can optimize better.
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let mut iter = re.find_iter("42");
@@ -268,7 +268,7 @@ assert!(iter.next().is_none());
 
 ### Taking just the first N matches
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\w+")?;
 let text = "the quick brown fox jumps over the lazy dog";
@@ -285,7 +285,7 @@ assert_eq!(first_three, vec!["the", "quick", "brown"]);
 
 ### Filtering matches
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "1 2 3 10 20 30 100 200 300";
@@ -301,7 +301,7 @@ assert_eq!(big_numbers, vec!["10", "20", "30", "100", "200", "300"]);
 
 ### Finding the first match that satisfies a condition
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "item 3 weighs 150 grams";

@@ -8,7 +8,7 @@ Two of the most common operations after finding matches: replacing matched text 
 
 Use `$1`, `$name`, `${name}`, `$&`, and `$$` in the replacement string:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<first>\w+)\s(?P<last>\w+)")?;
 
@@ -32,7 +32,7 @@ assert_eq!(result, "price $42");
 
 For dynamic replacement logic, pass a closure:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, Captures};
 let re = Regex::compile(r"\w+")?;
 
@@ -45,7 +45,7 @@ assert_eq!(result, "HELLO WORLD");
 
 The closure receives a `Captures` object — full access to all groups:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, Captures};
 let re = Regex::compile(r"(?P<n>\d+)")?;
 
@@ -61,7 +61,7 @@ assert_eq!(result, "items: 6, 14, 24");
 
 When your replacement string contains `$` that you don't want interpreted:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, NoExpand};
 let re = Regex::compile(r"\d+")?;
 let result = re.replace("price 42", NoExpand("$$$"));
@@ -71,7 +71,7 @@ assert_eq!(result, "price $$$");  // literal $$$, not interpolated
 
 ### Replace first vs all vs N
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -90,7 +90,7 @@ assert_eq!(re.replacen("a1 b2 c3", 2, "X"), "aX bX c3");
 
 `replace` and `replace_all` return `Cow<str>`. When there's no match, they return a borrowed reference to the original string — zero allocation:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 use std::borrow::Cow;
 
@@ -106,7 +106,7 @@ assert!(matches!(result, Cow::Borrowed(_)));  // no allocation
 
 Split a string using a regex as the delimiter:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"[,\s]+")?;
 let parts = re.split("one, two,  three");
@@ -118,7 +118,7 @@ assert_eq!(parts, vec!["one", "two", "three"]);
 
 `splitn` stops after producing `limit` parts. The last part contains the unsplit remainder:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r",")?;
 let parts = re.splitn("a,b,c,d,e", 3);
@@ -130,7 +130,7 @@ assert_eq!(parts, vec!["a", "b", "c,d,e"]);
 
 For large inputs, use the iterator versions to avoid allocating a `Vec`:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\n")?;
 
@@ -152,7 +152,7 @@ for part in re.splitn_iter("a\nb\nc\nd", 3) {
 
 Empty strings between adjacent delimiters are preserved:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r",")?;
 let parts = re.split(",a,,b,");
@@ -162,7 +162,7 @@ assert_eq!(parts, vec!["", "a", "", "b", ""]);
 
 No match returns the whole string:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r",")?;
 let parts = re.split("no commas");

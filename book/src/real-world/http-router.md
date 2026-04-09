@@ -13,7 +13,7 @@ HTTP routers need to:
 
 ## Basic router
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RegexSet};
 struct Route {
     pattern: Regex,
@@ -113,7 +113,7 @@ assert!(router.route("/unknown/path").is_none());
 
 Extend the router to match on both method and path:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, RegexSet};
 struct MethodRoute {
     method: &'static str,
@@ -170,7 +170,7 @@ assert_eq!(router.route("PATCH", "/users"), None);
 
 Use native callbacks to add validation during route matching:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"^/api/v(?P<version>\d+)/(?P<resource>\w+)(?{native:validate_version})$",

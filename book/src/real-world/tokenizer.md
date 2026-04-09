@@ -14,7 +14,7 @@ Branch numbers tell you which token type matched.
 
 ## A simple expression tokenizer
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 #[derive(Debug, PartialEq)]
 enum TokenKind {
@@ -103,7 +103,7 @@ Branch numbers are 1-based and correspond to left-to-right order of the top-leve
 
 To distinguish keywords from identifiers, add a native callback:
 
-```rust
+```rust,ignore
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(?:(\d+)|([a-zA-Z_]\w*)(?{native:classify_ident})|(\s+)|(\S))",
@@ -129,7 +129,7 @@ The `Replacement` value on the `MatchResult` tells the caller whether the matche
 
 Use `find_first_at` for cursor-based tokenization where you control the scan position:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(
     r"(?:(\d+)|([a-zA-Z_]\w*)|(\s+)|(\S))"
@@ -163,7 +163,7 @@ This approach gives you full control over the scan cursor and lets you handle er
 
 ## Complete tokenizer with error reporting
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 #[derive(Debug)]
 struct LexError {

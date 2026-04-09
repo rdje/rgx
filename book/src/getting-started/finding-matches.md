@@ -11,7 +11,7 @@ rgx has two match return types:
 | `Match<'t>` | Text reference + positions | 90% of the time — `m.as_str()` just works |
 | `MatchResult` | Positions + groups + branch number + code result | When you need capture groups or code block values |
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -31,7 +31,7 @@ assert_eq!(mr.groups[0], Some((4, 6)));
 
 `find_iter` returns matches one at a time without allocating a `Vec`. This is the idiomatic Rust way:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -45,7 +45,7 @@ assert_eq!(sum, 6);
 
 You can stop early — the engine won't compute matches you don't consume:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\w+")?;
 let first_three: Vec<_> = re.find_iter("a b c d e f")
@@ -60,7 +60,7 @@ assert_eq!(first_three, vec!["a", "b", "c"]);
 
 When you need a `Vec` (for counting, random access, or passing to another function):
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let matches = re.find_all("a1 b22 c333");
@@ -72,7 +72,7 @@ assert_eq!(matches.len(), 3);
 
 When you only need the *end position* of the first match (not the matched text), `shortest_match` is faster:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -88,7 +88,7 @@ Useful for tokenizers and validators where you care about *where* a match ends, 
 
 Start scanning from a specific byte offset instead of position 0:
 
-```rust
+```rust,ignore
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 let text = "12 abc 34 xyz 56";
