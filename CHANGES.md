@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Bump MSRV to 1.85 for PGEN 1.1.9 edition2024 requirement
+- Scope: CI fix following PGEN 1.1.9 update.
+- Changes:
+  - `Cargo.toml`: `rust-version = "1.85"` (was 1.75)
+  - `.github/workflows/ci.yml`: pinned toolchain bumped to 1.85.0 (both jobs)
+  - PGEN 1.1.9 uses Rust edition 2024 which requires Rust ≥1.85
+- Validation: 483 lib tests pass with Rust 1.89 locally.
+
 ### 2026-04-09 - Ship CLI --follow mode (tail -f | grep)
 - Scope: Backlog item A4.
 - Changes:
