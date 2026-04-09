@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Bump MSRV to 1.88 and remove Pages workflow until GitHub Pro
+- Scope: CI fixes.
+- Changes:
+  - `Cargo.toml`: rust-version 1.85 → 1.88 (transitive dep `home@0.5.12` requires 1.88)
+  - `.github/workflows/ci.yml`: toolchain 1.85.0 → 1.88.0
+  - **Removed `.github/workflows/book.yml`** — Pages on private repos requires GitHub Pro, which user plans to enable later. Workflow can be re-added from git history when Pro is active.
+  - `ROADMAP.md`: noted that book.yml needs to be re-added when Pages is enabled
+- Validation: 483 lib tests pass with Rust 1.89 locally.
+
 ### 2026-04-09 - Rewrite README with public-facing top section
 - Scope: README polish for first-time visitors.
 - Changes:

@@ -144,8 +144,8 @@ Live forward-looking tracker for rgx.
 - Status: `blocked` (Pages on private repos requires GitHub Pro)
 - Scope:
   - User plans to subscribe to GitHub Pro soon, which unlocks Pages on private repos.
-  - Once Pro is active, enable Pages in repo settings → Source: GitHub Actions.
-  - The `.github/workflows/book.yml` workflow is already in place — it will auto-deploy on the next push to main.
+  - **Re-add `.github/workflows/book.yml`** (was deleted to stop CI failures — git history has the working version, see commit that removed it).
+  - Enable Pages in repo settings → Source: GitHub Actions.
   - Book will publish to `https://rdje.github.io/rgx`.
 
 ### Public release preparation
