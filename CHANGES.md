@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-09 - Add API smoke test to catch book/code drift
+- Scope: regression test infrastructure.
+- Changes:
+  - New `rgx-core/tests/api_smoke_test.rs` — 19 tests exercising every public API method documented in The RGX Book
+  - Tests: compile, find/find_iter/find_all, captures, replace/replace_all/replacen with closures and NoExpand, split, RegexBuilder, escape, position-aware (find_first_at/find_all_at/is_match_at/shortest_match), RegexSet, RegexCache, BytesRegex, safety limits, MatchSemantics, PartialMatchResult, CaptureLocations, metadata accessors, error diagnostics, \X grapheme cluster, Unicode case folding
+  - If a public API is renamed/removed/changed, this test fails and the commit is blocked
+  - Found and fixed one wrong assertion in the test itself (closure replace returns the closure's value for the entire match)
+- Validation: 19/19 smoke tests pass. Total test count now 633 across all suites.
+
 ### 2026-04-09 - Auto-deploy The RGX Book to GitHub Pages
 - Scope: documentation infrastructure.
 - Changes:
