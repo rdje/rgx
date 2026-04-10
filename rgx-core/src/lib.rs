@@ -842,24 +842,6 @@ impl RegexBuilder {
     }
 }
 
-/// Convert a [`crate::c2::PikeMatch`] (returned by the C2 Pike-VM) into
-/// the public [`MatchResult`] shape used throughout the rest of the API.
-///
-/// `matched_branch_number` is always `None` for C2-dispatched patterns
-/// because the dispatch eligibility check excludes top-level alternation
-/// — patterns with that shape route through the existing backtracking VM.
-/// `code_result` is always `None` because patterns containing inline
-/// code blocks are excluded from the C2 subset by the classifier.
-fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
-    MatchResult {
-        start: m.start,
-        end: m.end,
-        groups: m.groups,
-        matched_branch_number: None,
-        code_result: None,
-    }
-}
-
 /// High-performance regex matcher with optional code execution capabilities.
 ///
 /// This is the main entry point for the `rgx` regex engine. It provides
@@ -1050,15 +1032,17 @@ impl Regex {
     #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
-        // C2 step 6: 3-tier dispatch — try the lazy DFA first, then
-        // Pike-VM, then the existing backtracking VM.
+        // C2 step 8: 3-tier dispatch — try the lazy DFA first, then
+        // Pike-VM (with the same `PrefixScanner` skip acceleration the
+        // existing backtracking VM uses), then the existing backtracking
+        // VM. The Pike-VM tier now goes through `Engine::try_pike_find_all`
+        // instead of calling `pike_captures_all` directly so that
+        // `Digit` / `Word` / `Space` / `CharClass` prefixes don't scan
+        // every byte position.
         let matches = if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
             dfa_result
-        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
-            crate::c2::pike_captures_all(c2, text.as_bytes())
-                .into_iter()
-                .map(pike_match_to_match_result)
-                .collect()
+        } else if let Some(pike_result) = self.engine.try_pike_find_all(text.as_bytes()) {
+            pike_result
         } else {
             self.engine.find_all(text.as_bytes())
         };
@@ -1084,14 +1068,15 @@ impl Regex {
     #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
-        // C2 step 6: 3-tier dispatch — try the lazy DFA first (faster
+        // C2 step 8: 3-tier dispatch — try the lazy DFA first (faster
         // per-byte for DFA-eligible patterns), then Pike-VM (for
-        // patterns DFA can't handle), then the existing backtracking
-        // VM (for patterns outside the C2 subset).
+        // patterns DFA can't handle, with `PrefixScanner` skip
+        // acceleration), then the existing backtracking VM (for
+        // patterns outside the C2 subset).
         let first = if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
             dfa_result
-        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
-            crate::c2::pike_captures(c2, text.as_bytes()).map(pike_match_to_match_result)
+        } else if let Some(pike_result) = self.engine.try_pike_find_first(text.as_bytes()) {
+            pike_result
         } else {
             self.engine.find_first(text.as_bytes())
         };
@@ -1329,14 +1314,15 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
-        // C2 step 5b: prefer the lazy DFA when available; fall back to
-        // Pike-VM on cache exhaustion or when the pattern isn't
-        // DFA-eligible. Pike-VM in turn falls back to the existing
-        // backtracking VM when the pattern isn't C2-eligible.
+        // C2 step 8: prefer the lazy DFA when available; fall back to
+        // Pike-VM (with `PrefixScanner` skip acceleration) on cache
+        // exhaustion or when the pattern isn't DFA-eligible. Pike-VM
+        // in turn falls back to the existing backtracking VM when the
+        // pattern isn't C2-eligible.
         let matched = if let Some(matched) = self.engine.try_dfa_is_match(text.as_bytes()) {
             matched
-        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
-            crate::c2::pike_is_match(c2, text.as_bytes())
+        } else if let Some(matched) = self.engine.try_pike_is_match(text.as_bytes()) {
+            matched
         } else {
             self.engine.is_match(text.as_bytes())
         };

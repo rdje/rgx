@@ -6,19 +6,21 @@ This chapter is about what "fast enough" means, how we measured it, and what we 
 
 ## Honest numbers
 
-Here is where RGX sits against PCRE2 on the current benchmark suite, measured by `rgx-bench` against PCRE2 10.x:
+Here is where RGX sits against PCRE2 on the current benchmark suite (after the C2 NFA/DFA hybrid production cutover), measured by `rgx-bench` against PCRE2 10.x:
 
 | Benchmark | RGX vs PCRE2 | Interpretation |
 |-----------|--------------|----------------|
-| `find_first` literal 1K | **~6.4x faster** | memmem fast path beats PCRE2's interpreter |
-| `find_all` literal 1K | **~3.4x faster** | scanning loop is tight, memmem dominates |
-| `find_first` email 1K | **~3.4x faster** | strong literal prefix (`\b\w+@`) |
-| `find_first` capture 1K | **~0.88x** | 12% slower — VM-heavy, no literal shortcut |
-| `find_all` capture 1K | competitive | in-place scanning helps |
+| `find_all` literal 1K | **~3.20x faster** | memmem fast path; preserved by C2 dispatch gates |
+| `find_all` literal 10K | **~3.16x faster** | same fast path scales linearly |
+| `find_first` capture 1K | **~1.91x faster** | DFA dispatch via the C2 hybrid |
+| `find_all` capture 1K | **~1.93x faster** | DFA scan + Pike-VM capture recovery |
+| `find_all` capture 10K | **~1.96x faster** | DFA dispatch dominates |
+| `find_first` email 1K | ~3.09x slower | existing VM, no DFA dispatch (has `\b`) |
+| `find_all` email 1K | ~2.63x slower | same; no nested quantifier so Pike-VM also skipped |
 
-These are **wins** in several cases. On patterns with strong literal content — which is most real-world patterns — the memmem fast path is so effective that RGX outruns PCRE2 by several times. On patterns dominated by VM interpretation, RGX is within 15% of PCRE2 despite having no JIT.
+These are **wins** in most cases. On patterns with strong literal content the memmem fast path is so effective that RGX outruns PCRE2 by several times. On patterns the C2 lazy DFA can handle (no zero-width assertions, no lazy quantifiers), the dispatch chain delivers another factor-of-two over PCRE2 — see [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the dispatch design. On patterns the C2 path can't handle, RGX falls back to the existing backtracking VM and pays its honest cost (still without JIT).
 
-Older versions of this chapter would have shown a very different story. Before the optimizations described below, RGX was roughly **50-70x slower** than PCRE2 on the same suite. The path from "50x slower" to "3x faster" is the subject of the rest of this chapter.
+Older versions of this chapter would have shown a very different story. Before the optimizations described below, RGX was roughly **50-70x slower** than PCRE2 on the same suite. The path from "50x slower" to "3x faster" is the subject of the rest of this chapter, and the most recent stretch of that path is the C2 production cutover described in the dedicated chapter.
 
 ## Methodology: rgx-bench
 

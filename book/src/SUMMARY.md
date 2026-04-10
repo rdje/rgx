@@ -53,6 +53,7 @@
 - [Architecture Overview](./internals/architecture.md)
 - [Compilation Pipeline](./internals/compilation-pipeline.md)
 - [The VM](./internals/the-vm.md)
+- [The NFA/DFA Hybrid Engine](./internals/nfa-dfa-engine.md)
 - [PGEN Integration](./internals/pgen-integration.md)
 - [Performance](./internals/performance.md)
 - [Sandboxing & Security](./internals/sandboxing.md)

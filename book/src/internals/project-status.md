@@ -53,9 +53,9 @@ These are the remaining items, grouped by priority.
 
 ### Tier 2: Performance headroom
 
-**C1 — JIT compilation.** The biggest remaining performance investment. Translates RGX bytecode into native machine code via Cranelift (already in our dependency tree via wasmtime) or dynasm-rs. Expected speedup: 5-10x on VM-bound patterns. Effort: major (weeks of work). Rationale: closes the gap with PCRE2's JIT and makes RGX competitive on every benchmark, not just literal-heavy ones. Deferred until the engineering-optimization wins are exhausted and we are sure JIT is the best remaining investment.
+**C1 — JIT compilation.** The biggest remaining performance investment, and the next major engineering push now that C2 has shipped. Translates RGX bytecode into native machine code via Cranelift (already in our dependency tree via wasmtime) or dynasm-rs. Expected speedup: 5-10x on VM-bound patterns. Effort: major (weeks of work). Rationale: closes the gap with PCRE2's JIT and makes RGX competitive on every benchmark, not just literal-heavy and DFA-eligible ones. Sequenced after C2 so the constant-factor win compounds on top of the algorithmic-class improvement.
 
-**C2 — NFA/DFA hybrid.** For patterns without backrefs/lookaround/recursion, run a Thompson NFA and guarantee `O(nm)`. This is what makes Rust's `regex` crate unable to hang. Effort: major. Requires a full second compiler path and runtime. Significant engineering but very high payoff on the "safe for untrusted input" story.
+**C2 — NFA/DFA hybrid.** ✅ Shipped. The C2 production cutover landed the full sparse-set Pike-VM, lazy DFA cache, byte-class equivalence partitioning, two-pass capture recovery, and a 3-tier dispatch chain (DFA → Pike-VM → existing backtracking VM) that automatically routes each pattern through the engine that handles it best. Patterns the DFA can handle now run **~1.9x faster than PCRE2**; pure-literal patterns **~3.2x faster than PCRE2**; pathological backtracking patterns gain the O(nm) Pike-VM bound. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the design.
 
 ### Tier 3: Parity edge cases
 
@@ -148,7 +148,7 @@ Zooming out: RGX's next year is shaped by four themes.
 
 1. **Make it available.** Publish to crates.io (A8). Tag v0.1.0. Enable GitHub Pages for the book once Pro is active.
 2. **Make it reachable.** Language bindings (A9). Python first, then Node, then C. This is what turns RGX from "a Rust crate" into "a regex engine."
-3. **Make it faster.** JIT (C1), NFA/DFA hybrid (C2), opcode fusion. Engineering-grade performance improvements, each benchmarked against the parity suite.
+3. **Make it faster.** JIT (C1) is the next major engineering push now that the NFA/DFA hybrid (C2) has shipped. Beyond C1: opcode fusion, multi-byte literal prefix in C2 dispatch, smarter Pike-VM heuristics. Each benchmarked against the parity suite.
 4. **Keep the parity number honest.** PCRE2 keeps shipping. We track new syntax as it appears, update the matrix, and add fixtures. "98%" should stay roughly true over time.
 
 These themes are tracked concretely in `ROADMAP.md` and `docs/BACKLOG.md`. This chapter is a human-readable overview; those documents are the definitive planning sources.

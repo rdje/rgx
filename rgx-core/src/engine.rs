@@ -6,7 +6,7 @@ use crate::execution::{
     CodeBlockValue, ExecContext, ExecResult, ExecutionManager, MatchContinuation, MatchOutcome,
 };
 use crate::pattern::CompiledPattern;
-use crate::vm::RegexVM;
+use crate::vm::{CompiledCharClass, PrefixFilter, RegexVM};
 use crate::{trace_decision, trace_enter, trace_exit};
 use std::sync::{Arc, Mutex};
 
@@ -118,6 +118,113 @@ fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
     }
 }
 
+/// Position-iterator that skips bytes the pattern's prefix can't match.
+///
+/// Wraps the existing [`RegexVM`]'s compile-time prefix filter so the C2
+/// dispatch path (DFA + Pike-VM) reuses the same scan-skip the existing
+/// backtracking VM uses. Without this, classifier-positive patterns
+/// like `\b\w+@\w+\.\w+\b` (filter = `Word`) and `(\d{4})-(\d{2})-(\d{2})`
+/// (filter = `Digit`) would scan every byte instead of jumping to
+/// candidate positions, which makes the C2 dispatch ~2-3x slower than
+/// the existing VM on those patterns.
+///
+/// Resolution rules per filter variant:
+/// - `Byte(b)` → SIMD-accelerated `memchr::memchr`
+/// - `Digit` / `Word` / `Space` → tight scalar loop testing the byte
+/// - `CharClass(id)` → tight scalar loop calling
+///   [`PrefixFilter::matches`] with the program's char-class table
+/// - `None` → identity (every position is a candidate)
+struct PrefixScanner<'a> {
+    filter: PrefixFilter,
+    char_classes: &'a [CompiledCharClass],
+}
+
+impl<'a> PrefixScanner<'a> {
+    /// Build a scanner from a VM. Combines the C2 program's
+    /// `c2_prefix_byte` with the VM's `PrefixFilter` — the former is
+    /// always at least as precise as `PrefixFilter::Byte`, so we prefer
+    /// the byte form when both are available (no behaviour change, but
+    /// keeps the byte-oriented hot path consistent across all dispatch
+    /// loops). Returns a scanner that the dispatch loops use to find
+    /// the next candidate scan position.
+    fn new(vm: &'a RegexVM, c2_prefix_byte: Option<u8>) -> Self {
+        let filter = match c2_prefix_byte {
+            Some(byte) => PrefixFilter::Byte(byte),
+            None => vm.prefix_filter(),
+        };
+        Self {
+            filter,
+            char_classes: vm.char_classes(),
+        }
+    }
+
+    /// Find the next byte position at-or-after `start` (inclusive) that
+    /// might match the pattern's prefix. Returns `None` when no
+    /// candidate position exists in `input[start..]`. The returned
+    /// position is always `<= input.len()`; for filters that test
+    /// byte content the returned position is always `< input.len()`.
+    #[inline]
+    fn next_candidate(&self, input: &[u8], start: usize) -> Option<usize> {
+        match self.filter {
+            PrefixFilter::None => {
+                if start <= input.len() {
+                    Some(start)
+                } else {
+                    None
+                }
+            }
+            PrefixFilter::Byte(b) => {
+                if start >= input.len() {
+                    None
+                } else {
+                    memchr::memchr(b, &input[start..]).map(|offset| start + offset)
+                }
+            }
+            PrefixFilter::Digit => {
+                let mut pos = start;
+                while pos < input.len() {
+                    if input[pos].is_ascii_digit() {
+                        return Some(pos);
+                    }
+                    pos += 1;
+                }
+                None
+            }
+            PrefixFilter::Word => {
+                let mut pos = start;
+                while pos < input.len() {
+                    let b = input[pos];
+                    if b.is_ascii_alphanumeric() || b == b'_' {
+                        return Some(pos);
+                    }
+                    pos += 1;
+                }
+                None
+            }
+            PrefixFilter::Space => {
+                let mut pos = start;
+                while pos < input.len() {
+                    if input[pos].is_ascii_whitespace() {
+                        return Some(pos);
+                    }
+                    pos += 1;
+                }
+                None
+            }
+            PrefixFilter::CharClass(_) => {
+                let mut pos = start;
+                while pos < input.len() {
+                    if self.filter.matches(input[pos], self.char_classes) {
+                        return Some(pos);
+                    }
+                    pos += 1;
+                }
+                None
+            }
+        }
+    }
+}
+
 /// Build a `Mutex<LazyDfa>` for the given AST + C2 program if the
 /// pattern is DFA-eligible. Returns `None` if the pattern lacks a C2
 /// program (Pike-VM not eligible) or if the AST contains constructs
@@ -178,6 +285,11 @@ impl Engine {
     /// observer, no runtime safety limits — same constraints as
     /// [`Engine::should_dispatch_to_c2`]).
     ///
+    /// Also returns `None` for pure-literal patterns: the existing VM
+    /// has a `memchr::memmem::Finder` fast path that bypasses the VM
+    /// entirely for those, and that fast path is faster than anything
+    /// the C2 engines can do for a pure literal pattern.
+    ///
     /// The returned `Mutex` must be locked by the caller. The DFA's
     /// `transition` method mutates its state cache, so the lock is
     /// required even from `&self`.
@@ -188,6 +300,9 @@ impl Engine {
             return None;
         }
         if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
             return None;
         }
         Some(dfa)
@@ -230,33 +345,22 @@ impl Engine {
     /// C2 step 6 dispatch path. Uses per-position anchored DFA scan
     /// (mirroring `try_dfa_is_match` plus capture recovery via
     /// `pike_captures_at` at the matched scan position). The
-    /// design-doc-proposed unanchored+reverse-DFA pipeline is deferred
-    /// because it has subtle "earliest end vs longest end" semantics
-    /// for greedy matching that need separate DFA modes; the
-    /// per-position approach is correct for greedy semantics and is
-    /// O(n × per-position) with the per-position cost being DFA-fast
-    /// (one byte-class lookup + one transition table lookup per byte)
-    /// rather than Pike-VM-fast (epsilon-closure-bounded per byte).
+    /// per-position scan is bounded by the [`PrefixScanner`] so that
+    /// `Digit` / `Word` / `Space` / `CharClass` / `Byte` prefixes skip
+    /// non-candidate positions instead of running the DFA simulator at
+    /// every byte.
     #[doc(hidden)]
     pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
-        let prefix = c2.c2_prefix_byte;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
         let mut dfa = dfa_mutex.lock().ok()?;
         let mut start = 0usize;
         while start <= input.len() {
-            // C2 step 7: literal prefix skip via memchr. Jump to the
-            // next position where the prefix byte appears so the DFA
-            // doesn't waste cycles on impossible scan positions.
-            if let Some(byte) = prefix {
-                if start >= input.len() {
-                    break;
-                }
-                match memchr::memchr(byte, &input[start..]) {
-                    Some(offset) => start += offset,
-                    None => return Some(None),
-                }
-            }
+            let Some(candidate) = scanner.next_candidate(input, start) else {
+                return Some(None);
+            };
+            start = candidate;
             match dfa.find_match_at(input, start) {
                 DfaSearchOutcome::Match(_) => {
                     // DFA confirms a match starts at this position.
@@ -281,26 +385,21 @@ impl Engine {
     /// Same advance rules as `pike_find_all` and the existing VM:
     /// after a non-empty match next scan starts at end, after an empty
     /// match next scan starts one byte later, and an empty match
-    /// adjacent to a previous non-empty match is dropped.
+    /// adjacent to a previous non-empty match is dropped. The scan
+    /// loop is bounded by the [`PrefixScanner`] for skip acceleration.
     #[doc(hidden)]
     pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
-        let prefix = c2.c2_prefix_byte;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
         while start <= input.len() {
-            // C2 step 7: literal prefix skip via memchr.
-            if let Some(byte) = prefix {
-                if start >= input.len() {
-                    break;
-                }
-                match memchr::memchr(byte, &input[start..]) {
-                    Some(offset) => start += offset,
-                    None => break,
-                }
-            }
+            let Some(candidate) = scanner.next_candidate(input, start) else {
+                break;
+            };
+            start = candidate;
             let outcome = {
                 let mut dfa = dfa_mutex.lock().ok()?;
                 dfa.find_match_at(input, start)
@@ -320,6 +419,110 @@ impl Engine {
                 DfaSearchOutcome::NoMatch => start += 1,
                 DfaSearchOutcome::Exhausted => return None,
             }
+        }
+        Some(results)
+    }
+
+    /// Pike-VM `is_match` dispatch with `PrefixScanner` skip acceleration.
+    ///
+    /// Mirrors [`Self::try_dfa_is_match`] for patterns that are Pike-VM
+    /// eligible but DFA-ineligible (i.e., contain zero-width assertions
+    /// like `\b` / `^` / `\A`, or contain lazy quantifiers). Returns
+    /// `Some(true)` / `Some(false)` if the Pike-VM produced a definitive
+    /// answer, or `None` if Pike-VM dispatch is disabled (the caller
+    /// falls back to the existing backtracking VM).
+    #[doc(hidden)]
+    pub fn try_pike_is_match(&self, input: &[u8]) -> Option<bool> {
+        let c2 = self.should_dispatch_to_c2()?;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
+        let mut start = 0usize;
+        while let Some(candidate) = scanner.next_candidate(input, start) {
+            if crate::c2::pike::pike_is_match_at(c2, input, candidate) {
+                return Some(true);
+            }
+            start = candidate + 1;
+        }
+        // The scanner consumes positions strictly less than `input.len()`
+        // for byte-content filters; for an empty-match pattern with
+        // `PrefixFilter::None` we still need to try `start == input.len()`.
+        if matches!(scanner.filter, PrefixFilter::None) {
+            for pos in 0..=input.len() {
+                if crate::c2::pike::pike_is_match_at(c2, input, pos) {
+                    return Some(true);
+                }
+            }
+        }
+        Some(false)
+    }
+
+    /// Pike-VM `find_first` dispatch with `PrefixScanner` skip acceleration.
+    ///
+    /// Mirrors [`Self::try_dfa_find_first`] for the Pike-VM tier:
+    /// scans only candidate positions reported by [`PrefixScanner`],
+    /// runs the capture-tracking simulator at each, returns the first
+    /// match (or `Some(None)` if none). Returns `None` when Pike-VM
+    /// dispatch is disabled.
+    #[doc(hidden)]
+    pub fn try_pike_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
+        let c2 = self.should_dispatch_to_c2()?;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
+        let mut start = 0usize;
+        while let Some(candidate) = scanner.next_candidate(input, start) {
+            if let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, candidate) {
+                return Some(Some(pike_match_to_match_result(pike_match)));
+            }
+            start = candidate + 1;
+        }
+        // For zero-width patterns the scanner stops one byte short of
+        // input.len(). Re-try the trailing position with `PrefixFilter::None`.
+        if matches!(scanner.filter, PrefixFilter::None) {
+            if let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, input.len()) {
+                return Some(Some(pike_match_to_match_result(pike_match)));
+            }
+        }
+        Some(None)
+    }
+
+    /// Pike-VM `find_all` dispatch with `PrefixScanner` skip acceleration.
+    ///
+    /// Same advance rules as [`Self::try_dfa_find_all`]: after a
+    /// non-empty match the next scan starts at the match end; after
+    /// an empty match the next scan starts one byte later; an empty
+    /// match adjacent to a previous non-empty match is dropped.
+    /// Returns `None` when Pike-VM dispatch is disabled.
+    #[doc(hidden)]
+    pub fn try_pike_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
+        let c2 = self.should_dispatch_to_c2()?;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
+        let mut results = Vec::new();
+        let mut start = 0usize;
+        let mut prev_non_empty_end: Option<usize> = None;
+        while start <= input.len() {
+            let candidate = match scanner.next_candidate(input, start) {
+                Some(c) => c,
+                None => {
+                    // For zero-width / empty-match patterns the
+                    // PrefixFilter::None scanner reports every position
+                    // already, so there's nothing to retry. For
+                    // byte-content filters there's nothing left to
+                    // examine.
+                    break;
+                }
+            };
+            start = candidate;
+            let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, start) else {
+                start += 1;
+                continue;
+            };
+            let end = pike_match.end;
+            let is_empty = end == start;
+            if is_empty && Some(start) == prev_non_empty_end {
+                start += 1;
+                continue;
+            }
+            results.push(pike_match_to_match_result(pike_match));
+            prev_non_empty_end = if is_empty { None } else { Some(end) };
+            start = if is_empty { start + 1 } else { end };
         }
         Some(results)
     }
@@ -348,11 +551,31 @@ impl Engine {
 
     /// Returns `Some(c2_program)` iff this engine should route the
     /// next API call through the C2 Pike-VM. Combines the compile-time
-    /// `c2_program` presence check with the runtime state checks for
-    /// features the Pike-VM doesn't yet implement: match event
-    /// observers ([`crate::vm::RegexVM::has_event_observer`]) and
-    /// runtime safety limits
-    /// ([`crate::vm::RegexVM::has_runtime_match_limits`]).
+    /// `c2_program` presence check with several gates:
+    ///
+    /// - **Runtime feature gates**: skips Pike-VM dispatch when an event
+    ///   observer or any runtime safety limit (`max_steps`,
+    ///   `max_backtrack_frames`, `max_recursion_depth`) is active. The
+    ///   Pike-VM doesn't emit structured match events and isn't bounded
+    ///   by these limits — patterns relying on either continue to run
+    ///   on the existing backtracking VM.
+    /// - **Pure-literal gate**: skips Pike-VM for patterns that the
+    ///   existing VM handles via its `memchr::memmem::Finder` fast
+    ///   path. That bypass is faster than anything Pike-VM can do for
+    ///   a pure literal.
+    /// - **Nested-quantifier gate**: Pike-VM dispatch only fires for
+    ///   patterns with structurally nested quantifiers (`(a+)+`,
+    ///   `(\w+\s+)+`, …). Those are the patterns where the existing
+    ///   backtracking VM can blow up exponentially and Pike-VM's O(nm)
+    ///   bound provides a strict improvement. Classifier-positive
+    ///   patterns WITHOUT nested quantifiers — like `\b\w+@\w+\.\w+\b`
+    ///   or `\d{3}-\d{2}-\d{4}` — run efficiently on the existing VM
+    ///   (no exponential risk by construction) and dispatching them to
+    ///   Pike-VM would be a 2-3x regression because Pike-VM's per-trial
+    ///   cost (epsilon-closure of the start set, sparse-set ops per
+    ///   byte) is higher than the existing VM's tight bytecode
+    ///   interpreter loop. The nested-quantifier check is computed once
+    ///   at compile time on the AST.
     ///
     /// When `None`, the caller falls back to the existing backtracking
     /// VM. The runtime checks are read on every call so that
@@ -365,6 +588,12 @@ impl Engine {
             return None;
         }
         if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
+            return None;
+        }
+        if !c2.c2_has_nested_quantifier {
             return None;
         }
         Some(c2)

@@ -72,8 +72,9 @@ Inside `rgx-core/src/`, the pipeline stages map directly onto files:
 | AST | `ast.rs` | The shared regex syntax tree that both parser backends produce. |
 | Compiler | `compiler.rs`, `vm.rs::OptimizingCompiler` | Walks the AST and emits VM bytecode. Does prefix/literal analysis. |
 | Bytecode | `pattern.rs` | The `Program` type — opcodes, capture metadata, prefix hints. |
-| VM | `vm.rs` | The backtracking interpreter that executes bytecode against input. |
-| Engine | `engine.rs` | Runtime dispatch, limits, scanning strategies. |
+| Backtracking VM | `vm.rs` | Interpreter that executes bytecode against input. The full-featured engine. |
+| C2 hybrid | `c2/` | Sparse-set Pike-VM, lazy DFA cache, byte-class partitioning. The fast path for the no-backtracking subset. |
+| Engine | `engine.rs` | Runtime dispatch (DFA → Pike-VM → backtracking VM), limits, scanning strategies. |
 | Public API | `lib.rs` | `Regex`, `Captures`, `Match`, iterators — everything users actually touch. |
 
 Around those are supporting modules: `events.rs` (Layer 4 observer API), `execution.rs` (code-block runtime and callback registration), `file.rs` (Layer 6 file-backed matching), `regex_set.rs` (multi-pattern matching), `bytes.rs` (`&[u8]` API), `cache.rs` (compilation cache), `error.rs`, and `log.rs`.
@@ -155,7 +156,8 @@ These rules sound bureaucratic. In practice they are the reason RGX can claim ~9
 ## What to read next
 
 - If you want to see how a pattern becomes bytecode, read [Compilation Pipeline](./compilation-pipeline.md).
-- If you want to understand the execution model, read [The VM](./the-vm.md).
+- If you want to understand the backtracking execution model, read [The VM](./the-vm.md).
+- If you want to understand the second engine that runs alongside the VM, read [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md).
 - If you want the details of the parser boundary, read [PGEN Integration](./pgen-integration.md).
 - If you want to see the numbers, read [Performance](./performance.md).
 

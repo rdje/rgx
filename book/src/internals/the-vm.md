@@ -177,12 +177,12 @@ Several patterns get their own specialized execution paths:
 
 Honest accounting matters. RGX is fast, but it is not PCRE2 with JIT enabled.
 
-The main thing RGX does not have is **JIT compilation**. PCRE2's JIT translates bytecode into native machine code, giving roughly a 5-10x speedup on top of its interpreter. RGX has no JIT today. This is tracked in the backlog as item **C1 — JIT compilation** and is deferred until the engineering-optimization wins are exhausted.
+The main thing RGX does not have is **JIT compilation**. PCRE2's JIT translates bytecode into native machine code, giving roughly a 5-10x speedup on top of its interpreter. RGX has no JIT today. This is tracked in the backlog as item **C1 — JIT compilation** and is the next major engineering push after the C2 cutover.
 
-The other missing piece is a **DFA hybrid**. For patterns that do not use backreferences, lookaround, or recursion, a Thompson NFA gives guaranteed linear time. RGX does not have this yet — every pattern runs through the backtracking VM. This is backlog item **C2 — NFA/DFA hybrid** and is a significant engineering project because the algorithms are fundamentally different.
+RGX does have a **DFA hybrid** as of the C2 production cutover. For patterns in the no-backtracking subset, a Thompson NFA + lazy DFA cache runs alongside this VM and is preferred whenever it can deliver the answer. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the full design — that chapter explains the dispatch chain, the per-position skip acceleration, and the two-pass capture recovery trick.
 
-Without JIT or DFA, RGX still hits **~6.4x faster than PCRE2 on literals** and **~3.4x faster on emails** thanks to the memmem fast path. The capture-heavy benchmark is **~0.88x** (i.e., 12% slower than PCRE2), which is close enough to PCRE2 that adding the extra host integration capabilities is a clear win. See [Performance](./performance.md) for the full numbers and methodology.
+The C2 hybrid pushes RGX to **3.16x faster than PCRE2 on literals** and **1.96x faster than PCRE2 on capture_groups** in the benchmark suite, while keeping the backtracking VM permanently in place for patterns that need its features.
 
-## Next: the parser boundary
+## Next: the second engine
 
-The VM is half the engine. The other half is the parser — and in RGX, the parser is an external project called PGEN. Head to [PGEN Integration](./pgen-integration.md) to understand how that boundary works.
+The backtracking VM is half the run-time story. The other half is the C2 hybrid that runs alongside it. Head to [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the design, then on to [PGEN Integration](./pgen-integration.md) for the parser boundary.

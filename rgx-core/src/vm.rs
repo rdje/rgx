@@ -491,8 +491,9 @@ pub struct Match {
 ///
 /// Used by the scanning loop to skip positions where the first required
 /// atom cannot match, avoiding full VM invocations at impossible offsets.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
-enum PrefixFilter {
+pub enum PrefixFilter {
     /// No usable prefix — must try every position.
     None,
     /// Pattern starts with a specific single byte.
@@ -509,8 +510,9 @@ enum PrefixFilter {
 
 impl PrefixFilter {
     /// Test whether a byte could match this filter.
+    #[doc(hidden)]
     #[inline]
-    fn matches(self, b: u8, char_classes: &[CompiledCharClass]) -> bool {
+    pub fn matches(self, b: u8, char_classes: &[CompiledCharClass]) -> bool {
         match self {
             Self::None => true,
             Self::Byte(expected) => b == expected,
@@ -735,6 +737,37 @@ impl RegexVM {
         if let Some(ref observer) = *self.event_observer.read().unwrap() {
             observer(event);
         }
+    }
+
+    /// Compile-time prefix filter for this VM. Exposed to the engine
+    /// dispatch layer so the C2 path (DFA / Pike-VM) can reuse the same
+    /// scan-skip the existing backtracking VM uses for `Digit` / `Word` /
+    /// `Space` / `CharClass` prefixes (the C2 path already handles
+    /// `Byte` via `c2_prefix_byte`, but the byte-class prefixes are
+    /// significantly faster than scanning every position).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn prefix_filter(&self) -> PrefixFilter {
+        self.prefix_filter
+    }
+
+    /// Compiled char classes for this VM. Used together with
+    /// [`Self::prefix_filter`] by the C2 dispatch layer to evaluate
+    /// `PrefixFilter::CharClass` candidates.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn char_classes(&self) -> &[CompiledCharClass] {
+        &self.program.char_classes
+    }
+
+    /// Returns `true` if this VM has a pure-literal `memmem::Finder`
+    /// fast path. The C2 dispatch layer skips Pike-VM/DFA dispatch when
+    /// this is true because the existing memmem fast path is faster
+    /// than anything the C2 engines can do for a pure literal pattern.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn has_literal_finder(&self) -> bool {
+        self.literal_finder.is_some()
     }
 
     /// Returns `true` if a match-event observer has been registered on

@@ -324,6 +324,20 @@ pub fn pike_is_match(program: &CompiledC2Program, input: &[u8]) -> bool {
     pike_match_at(nfa, bcm, input, 0).is_some()
 }
 
+/// Returns `true` iff the pattern matches at the **specific** scan
+/// position `start` in `input`.
+///
+/// Uses the **forward anchored** NFA — the simulator runs at exactly
+/// one position rather than scanning the whole input. Used by the
+/// engine dispatch layer's `try_pike_is_match` together with the
+/// `PrefixScanner` to skip non-candidate scan positions.
+#[must_use]
+pub fn pike_is_match_at(program: &CompiledC2Program, input: &[u8], start: usize) -> bool {
+    let nfa = &program.forward_anchored;
+    let bcm = &program.byte_class_map;
+    pike_match_at(nfa, bcm, input, start).is_some()
+}
+
 /// Returns the leftmost match in `input` as `(start, end)` byte
 /// positions, or `None` if there is no match.
 ///

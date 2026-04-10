@@ -80,6 +80,21 @@ pub struct CompiledC2Program {
     ///
     /// Computed at construction time by [`first_literal_byte`].
     pub c2_prefix_byte: Option<u8>,
+
+    /// Pike-VM dispatch heuristic: `true` iff the pattern contains a
+    /// quantifier whose subtree itself contains another quantifier
+    /// (e.g., `(a+)+`, `(\w+\s+)+`). Computed once at construction
+    /// time by [`has_nested_quantifier`].
+    ///
+    /// The engine dispatch layer uses this to decide whether Pike-VM
+    /// is worth invoking on a Pike-VM-eligible-but-DFA-ineligible
+    /// pattern: classifier-positive patterns without nested
+    /// quantifiers run efficiently on the existing backtracking VM
+    /// (no risk of exponential blow-up by construction), so Pike-VM
+    /// dispatch would be a measurable regression. Patterns with
+    /// nested quantifiers benefit from Pike-VM's O(nm) bound and
+    /// the per-trial overhead is justified.
+    pub c2_has_nested_quantifier: bool,
 }
 
 impl CompiledC2Program {
@@ -113,6 +128,13 @@ impl CompiledC2Program {
         // scan acceleration in dispatch.
         let c2_prefix_byte = first_literal_byte(ast);
 
+        // C2 step 8: precompute the nested-quantifier dispatch
+        // heuristic. Patterns with nested quantifiers route through
+        // Pike-VM (DFA-ineligible case) because their backtracking
+        // worst case is exponential. Patterns without nested
+        // quantifiers stay on the existing backtracking VM.
+        let c2_has_nested_quantifier = has_nested_quantifier(ast);
+
         Self {
             byte_class_map,
             forward_anchored,
@@ -121,6 +143,7 @@ impl CompiledC2Program {
             reverse_unanchored,
             num_capture_groups,
             c2_prefix_byte,
+            c2_has_nested_quantifier,
         }
     }
 
@@ -367,6 +390,72 @@ fn contains_zero_width_assertion(ast: &Regex) -> bool {
 /// `Regex::Quantified` node has its `lazy` flag set. The DFA's subset
 /// construction can't express lazy semantics, so any pattern containing
 /// a lazy quantifier must route through the Pike-VM.
+/// Returns `true` if the AST contains a quantifier whose subtree
+/// itself contains another quantifier — i.e., a structurally nested
+/// quantifier like `(a+)+`, `(\w+\s+)+`, or `(?:foo|bar+)+`.
+///
+/// This is the Pike-VM dispatch heuristic: classifier-positive patterns
+/// without nested quantifiers run efficiently on the existing
+/// backtracking VM (no risk of exponential blow-up by construction
+/// — there's no nesting that can interleave alternative paths). For
+/// those, the existing VM's per-trial cost is lower than Pike-VM's,
+/// so dispatching to Pike-VM would be a measurable regression on
+/// common patterns like `\b\w+@\w+\.\w+\b`.
+///
+/// Patterns with nested quantifiers are at risk of catastrophic
+/// backtracking on some inputs, and Pike-VM's O(nm) bound becomes
+/// strictly better than the existing VM's exponential worst case.
+/// Those are the patterns that benefit from Pike-VM dispatch.
+///
+/// This is a **structural** property of the AST, not a runtime
+/// determination — it's evaluated once at compile time.
+#[must_use]
+pub fn has_nested_quantifier(ast: &Regex) -> bool {
+    match ast {
+        Regex::Quantified { expr, .. } => contains_quantifier(expr),
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(has_nested_quantifier)
+        }
+        Regex::Group { expr, .. } | Regex::FlagGroup { expr, .. } => has_nested_quantifier(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            has_nested_quantifier(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            has_nested_quantifier(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| has_nested_quantifier(fb))
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if the AST contains any quantified node anywhere in
+/// its subtree. Helper for [`has_nested_quantifier`].
+fn contains_quantifier(ast: &Regex) -> bool {
+    match ast {
+        Regex::Quantified { .. } => true,
+        Regex::Sequence(items) | Regex::Alternation(items) => items.iter().any(contains_quantifier),
+        Regex::Group { expr, .. } | Regex::FlagGroup { expr, .. } => contains_quantifier(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => contains_quantifier(expr),
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_quantifier(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_quantifier(fb))
+        }
+        _ => false,
+    }
+}
+
 fn contains_lazy_quantifier(ast: &Regex) -> bool {
     match ast {
         Regex::Quantified { quantifier, expr } => {
@@ -738,6 +827,108 @@ mod dispatch_tests {
         // ERROR — five literals
         let ast = Regex::Sequence(vec![lit('E'), lit('R'), lit('R'), lit('O'), lit('R')]);
         assert_eq!(first_literal_byte(&ast), Some(b'E'));
+    }
+
+    // ============================================================
+    // C2 step 8: nested-quantifier dispatch heuristic
+    // ============================================================
+
+    fn one_or_more(expr: Regex) -> Regex {
+        Regex::Quantified {
+            quantifier: Quantifier::OneOrMore { lazy: false },
+            expr: Box::new(expr),
+        }
+    }
+
+    fn zero_or_more(expr: Regex) -> Regex {
+        Regex::Quantified {
+            quantifier: Quantifier::ZeroOrMore { lazy: false },
+            expr: Box::new(expr),
+        }
+    }
+
+    #[test]
+    fn nested_quantifier_detected_for_classic_pathological_pattern() {
+        // (a+)+ — the classic exponential-blowup pattern
+        let inner = one_or_more(lit('a'));
+        let outer = one_or_more(group_capturing(inner));
+        assert!(has_nested_quantifier(&outer));
+    }
+
+    #[test]
+    fn nested_quantifier_detected_through_sequence() {
+        // ((a+)b)+ — nested via a sequence inside the group
+        let inner = Regex::Sequence(vec![one_or_more(lit('a')), lit('b')]);
+        let outer = one_or_more(group_capturing(inner));
+        assert!(has_nested_quantifier(&outer));
+    }
+
+    #[test]
+    fn nested_quantifier_detected_through_alternation() {
+        // (a|b+)+ — quantifier inside an alternation branch
+        let inner = alt(vec![lit('a'), one_or_more(lit('b'))]);
+        let outer = one_or_more(group_capturing(inner));
+        assert!(has_nested_quantifier(&outer));
+    }
+
+    #[test]
+    fn nested_quantifier_detected_for_zero_or_more_outer() {
+        // (a+)* — outer star, inner plus
+        let inner = one_or_more(lit('a'));
+        let outer = zero_or_more(group_capturing(inner));
+        assert!(has_nested_quantifier(&outer));
+    }
+
+    #[test]
+    fn no_nested_quantifier_for_flat_email_like_pattern() {
+        // \w+@\w+.\w+ — three quantifiers but none nested inside
+        // another quantifier. This is the email-style pattern that
+        // should NOT route through Pike-VM (the existing VM is faster).
+        let word = Regex::Word { negated: false };
+        let dot = Regex::Char('.');
+        let at = Regex::Char('@');
+        let ast = Regex::Sequence(vec![
+            one_or_more(word.clone()),
+            at,
+            one_or_more(word.clone()),
+            dot,
+            one_or_more(word),
+        ]);
+        assert!(!has_nested_quantifier(&ast));
+    }
+
+    #[test]
+    fn no_nested_quantifier_for_flat_date_like_pattern() {
+        // (\d){4}-(\d){2}-(\d){2}-style pattern: each capturing group
+        // has a quantifier but the groups themselves aren't quantified.
+        // Should NOT be routed to Pike-VM.
+        let digit = Regex::Digit { negated: false };
+        let ast = Regex::Sequence(vec![
+            group_capturing_idx(1, one_or_more(digit.clone())),
+            lit('-'),
+            group_capturing_idx(2, one_or_more(digit.clone())),
+            lit('-'),
+            group_capturing_idx(3, one_or_more(digit)),
+        ]);
+        assert!(!has_nested_quantifier(&ast));
+    }
+
+    #[test]
+    fn no_nested_quantifier_for_simple_literal_or_alternation() {
+        assert!(!has_nested_quantifier(&lit('a')));
+        assert!(!has_nested_quantifier(&alt(vec![lit('a'), lit('b')])));
+    }
+
+    #[test]
+    fn nested_quantifier_recorded_on_compiled_program() {
+        // Sanity-check the field is computed at construction time. Use
+        // try_compile so the full compile pipeline runs (including the
+        // capture-index assignment).
+        let nested = CompiledC2Program::try_compile("(a+)+").expect("nested compiles");
+        assert!(nested.c2_has_nested_quantifier);
+
+        let flat = CompiledC2Program::try_compile("a+b+").expect("flat compiles");
+        assert!(!flat.c2_has_nested_quantifier);
     }
 }
 
