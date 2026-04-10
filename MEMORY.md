@@ -1396,3 +1396,31 @@ After adding `contains_lazy_quantifier` and `contains_zero_width_assertion` excl
   - In `Regex::find_first` etc., check DFA availability first, run DFA, fall back to Pike-VM on None or for capture recovery
   - Run the existing 856-test suite — the differential gate now also covers the DFA path
   - Fix any DFA bugs that surface from the broader corpus
+
+## 2026-04-10 session — C2 step 5b shipped (DFA dispatch for is_match) — Step 5 COMPLETE
+
+### Scope decision
+Minimum viable wiring: only `Regex::is_match` dispatches to DFA. `find_first`/`find_all` stay on Pike-VM because they need captures, and proper DFA-driven scan needs the reverse DFA (step 6). This still exercises the DFA via every is_match call in the 880-test suite.
+
+### What landed
+- Refactored `LazyDfa::find_match_at` to return new `DfaSearchOutcome` enum (Match/NoMatch/Exhausted). The old `Option<usize>` conflated "no match" with "cache exhausted" which would have caused unnecessary fallbacks.
+- New `is_c2_dfa_eligible(ast)` with `contains_zero_width_assertion` and `contains_lazy_quantifier` exclusions. DFA can't handle anchors/word-boundaries (no context tracking) or lazy quantifiers (subset construction is leftmost-longest by nature).
+- New `Option<Mutex<LazyDfa>>` field on `Engine`, built by `Engine::new` via `build_dfa_if_eligible(ast, c2_program)`. Mutex needed because DFA's transition mutates its cache and public API methods are `&self`.
+- New `Engine::should_dispatch_to_dfa()` and `Engine::try_dfa_is_match(input)` accessors. Same runtime exclusions as `should_dispatch_to_c2` (no event observer, no runtime safety limits).
+- `Regex::is_match` now has 3-tier dispatch: DFA → Pike-VM → existing VM.
+
+### Zero new failures from the broader differential gate
+This is significant. The existing 880-test suite caught zero DFA bugs when wired via `is_match`. The DFA correctness work in step 5a (and the eligibility exclusions) was solid enough that nothing broke when the entire test corpus started routing through the DFA.
+
+### What's dispatched to DFA
+DFA-eligible patterns are: literals (ASCII or non-ASCII single chars), ASCII char classes, ASCII shorthand classes (without `\b`), sequences, alternations within groups (not top-level), GREEDY quantifiers only (`?`/`*`/`+`/`{n,m}` greedy), `Dot`, `\R`, capturing groups (no captures needed for is_match).
+
+NOT dispatched (still go to Pike-VM): anchored patterns (`\A`/`\z`/`\Z`/`^`/`$`), word boundary patterns (`\b`/`\B`), lazy quantifiers, top-level alternation, flag groups, multi-byte char classes, runtime event observers, runtime safety limits.
+
+### Step 5 is complete
+- 5a (lazy DFA core, standalone): ✅
+- 5b (DFA dispatch for is_match): ✅
+- The DFA is wired into production for is_match. Next: step 6 wires it for find_first/find_all via the reverse DFA pipeline.
+
+### Next concrete action
+- C2 step 6: lazy reverse DFA cache. Mirrors step 5 but for the reverse NFA. Once landed, find_first/find_all can use the proper DFA-driven scan: forward DFA finds the match end, reverse DFA finds the match start, Pike-VM bounded over the matched span recovers captures. This is the design doc §9 "two-pass capture recovery" approach. Engine dispatch updates accordingly. The find paths finally deliver the DFA performance win.

@@ -99,6 +99,40 @@ pub type DfaStateId = u32;
 /// tables. The simulator stops on entry to the dead state.
 const DEAD_STATE: DfaStateId = u32::MAX;
 
+/// Outcome of a single-position DFA match attempt.
+///
+/// Distinguishes "definitively no match" (`NoMatch`) from "couldn't
+/// finish — fall back to a slower engine" (`Exhausted`). Engine
+/// dispatch in C2 step 5b uses this to decide whether to return the
+/// answer or fall back to the Pike-VM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DfaSearchOutcome {
+    /// A match was found ending at the given byte position.
+    Match(usize),
+    /// No match exists at this scan position. The simulator ran to
+    /// completion (either the input was exhausted or it entered a
+    /// dead state).
+    NoMatch,
+    /// The DFA cache filled up before the simulator could finish.
+    /// The caller should fall back to a slower engine (Pike-VM) for
+    /// this match attempt.
+    Exhausted,
+}
+
+/// Outcome of a single transition lookup. Internal to the DFA — the
+/// public `find_match_at` API surfaces this as `DfaSearchOutcome`.
+#[derive(Debug, Clone, Copy)]
+enum TransitionResult {
+    /// Successfully transitioned to the given DFA state.
+    Next(DfaStateId),
+    /// No transition exists for this byte class from the source state.
+    /// The simulator stops here (current `matched_end` is the answer).
+    Dead,
+    /// The DFA cache is full and a new state would have been allocated.
+    /// The simulator stops and the caller should fall back to Pike-VM.
+    Exhausted,
+}
+
 /// A single DFA state. Stores its transition table indexed by byte
 /// class plus a precomputed `is_accept` flag for the simulation hot
 /// path. The `nfa_states` field is the NFA state set this DFA state
@@ -226,22 +260,22 @@ impl LazyDfa {
     }
 
     /// Compute the transition `(state, byte_class)`, lazily allocating
-    /// a new DFA state if needed.
+    /// a new DFA state if needed. Returns one of three outcomes:
     ///
-    /// Returns:
-    /// - `Some(target_id)` for a successful transition (cached or freshly allocated)
-    /// - `None` if the transition leads to a dead state OR if allocating
-    ///   a new state would exceed `state_limit`. The caller (eventually
-    ///   engine dispatch in step 5b) treats both cases as "stop the
-    ///   DFA simulation"; cache exhaustion specifically signals "fall
-    ///   back to Pike-VM".
-    pub fn transition(&mut self, state: DfaStateId, cls: u8) -> Option<DfaStateId> {
+    /// - [`TransitionResult::Next`] for a successful transition (cached
+    ///   or freshly allocated)
+    /// - [`TransitionResult::Dead`] if no transition exists from the
+    ///   source state for this byte class (the simulator stops here)
+    /// - [`TransitionResult::Exhausted`] if a new state would have to
+    ///   be allocated but the cache is full (the simulator stops and
+    ///   the caller falls back to Pike-VM)
+    fn transition(&mut self, state: DfaStateId, cls: u8) -> TransitionResult {
         if state == DEAD_STATE {
-            return None;
+            return TransitionResult::Dead;
         }
         let cached = self.states[state as usize].transitions[cls as usize];
         if cached != DEAD_STATE {
-            return Some(cached);
+            return TransitionResult::Next(cached);
         }
         // No cached transition. Compute the next NFA state set by
         // following byte transitions for `cls` from every NFA state in
@@ -251,7 +285,7 @@ impl LazyDfa {
             // Genuinely dead — record DEAD_STATE in the transition
             // table so future lookups skip the recomputation.
             self.states[state as usize].transitions[cls as usize] = DEAD_STATE;
-            return None;
+            return TransitionResult::Dead;
         }
         // Look up or allocate the target DFA state.
         let key = DfaStateKey {
@@ -262,22 +296,26 @@ impl LazyDfa {
         } else {
             if self.states.len() >= self.state_limit {
                 // Cache full. Don't allocate, signal fallback.
-                return None;
+                return TransitionResult::Exhausted;
             }
             self.allocate_state(next_set)
         };
         self.states[state as usize].transitions[cls as usize] = target_id;
-        Some(target_id)
+        TransitionResult::Next(target_id)
     }
 
     /// Run the DFA simulator over `input` starting at byte position
-    /// `start`. Returns the END position of the longest match found at
-    /// `start`, or `None` if no match exists or the simulator hit a
-    /// dead state / cache exhaustion before reaching one.
+    /// `start`. Returns a [`DfaSearchOutcome`] distinguishing match,
+    /// no-match, and cache-exhausted cases.
     ///
-    /// Mirrors the public API of `c2::pike::pike_match_at` so engine
-    /// dispatch can swap between the two implementations seamlessly.
-    pub fn find_match_at(&mut self, input: &[u8], start: usize) -> Option<usize> {
+    /// On `Match(end)`, `end` is the END byte position of the longest
+    /// match the simulator found at `start`. On `Exhausted`, the
+    /// caller (engine dispatch) should fall back to the Pike-VM for
+    /// this match attempt — the DFA can't give a definitive answer.
+    ///
+    /// Mirrors the contract of `c2::pike::pike_match_at` plus the
+    /// exhaustion signal.
+    pub fn find_match_at(&mut self, input: &[u8], start: usize) -> DfaSearchOutcome {
         let mut state = self.start_state();
         // The DFA could already accept the empty string at the start
         // position (e.g., for patterns like `a*`). Record that as a
@@ -291,16 +329,24 @@ impl LazyDfa {
         while pos < input.len() {
             let byte = input[pos];
             let cls = self.byte_class_map.class_of(byte);
-            let Some(next_state) = self.transition(state, cls) else {
-                break;
-            };
-            state = next_state;
-            pos += 1;
-            if self.is_accept(state) {
-                matched_end = Some(pos);
+            match self.transition(state, cls) {
+                TransitionResult::Next(next_state) => {
+                    state = next_state;
+                    pos += 1;
+                    if self.is_accept(state) {
+                        matched_end = Some(pos);
+                    }
+                }
+                TransitionResult::Dead => break,
+                TransitionResult::Exhausted => {
+                    return DfaSearchOutcome::Exhausted;
+                }
             }
         }
-        matched_end
+        match matched_end {
+            Some(end) => DfaSearchOutcome::Match(end),
+            None => DfaSearchOutcome::NoMatch,
+        }
     }
 
     // ============================================================
@@ -397,10 +443,14 @@ mod tests {
 
     /// Run the DFA at every scan position in the input and return the
     /// leftmost match span, mirroring `pike_find_first`'s contract.
+    /// Returns `None` for both no-match and exhaustion (tests use a
+    /// large enough state limit that exhaustion shouldn't happen).
     fn dfa_find_first(dfa: &mut LazyDfa, input: &[u8]) -> Option<(usize, usize)> {
         for start in 0..=input.len() {
-            if let Some(end) = dfa.find_match_at(input, start) {
-                return Some((start, end));
+            match dfa.find_match_at(input, start) {
+                DfaSearchOutcome::Match(end) => return Some((start, end)),
+                DfaSearchOutcome::NoMatch => continue,
+                DfaSearchOutcome::Exhausted => return None,
             }
         }
         None
@@ -585,7 +635,21 @@ mod tests {
     }
 
     #[test]
-    fn cache_exhaustion_returns_none_from_simulator() {
+    fn dfa_search_outcome_match_variant() {
+        let (mut dfa, _) = try_build_dfa("ab").expect("buildable");
+        let result = dfa.find_match_at(b"ab", 0);
+        assert_eq!(result, DfaSearchOutcome::Match(2));
+    }
+
+    #[test]
+    fn dfa_search_outcome_no_match_variant() {
+        let (mut dfa, _) = try_build_dfa("ab").expect("buildable");
+        let result = dfa.find_match_at(b"xy", 0);
+        assert_eq!(result, DfaSearchOutcome::NoMatch);
+    }
+
+    #[test]
+    fn cache_exhaustion_signals_fallback() {
         // Build a DFA with state_limit=1 so any new state allocation
         // beyond the start state fails.
         let prog = CompiledC2Program::try_compile("abc").expect("compilable");
@@ -598,10 +662,10 @@ mod tests {
         // After construction, only the start state exists. Trying to
         // run the simulator on input "abc" should hit cache exhaustion
         // immediately when the first byte transition tries to allocate
-        // a new state. With state_limit=1 and no match available from
-        // the start state alone, the result is None.
+        // a new state. The simulator returns Exhausted, signalling the
+        // caller (engine dispatch in step 5b) to fall back to Pike-VM.
         let result = dfa.find_match_at(b"abc", 0);
-        assert_eq!(result, None);
+        assert_eq!(result, DfaSearchOutcome::Exhausted);
     }
 
     // ============================================================

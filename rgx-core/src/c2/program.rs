@@ -284,6 +284,101 @@ fn contains_multi_byte_char_class(ast: &Regex) -> bool {
     }
 }
 
+/// Returns `true` iff the AST is eligible for C2 **DFA** dispatch
+/// (Pike-VM dispatch is governed by [`is_c2_dispatch_eligible`]).
+///
+/// DFA eligibility is **stricter** than Pike-VM eligibility because
+/// the lazy DFA's subset construction can't express two regex
+/// semantics that Pike-VM handles correctly:
+///
+/// - **Zero-width assertions** (`\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`,
+///   `\G`): subset construction has no notion of "context" between
+///   transitions. The DFA could be extended to track look-behind bytes
+///   per state, but that's a significant refactor not yet done.
+/// - **Lazy quantifiers** (`a*?`, `a+?`, `a??`, `{n,m}?`): the DFA is
+///   leftmost-longest by construction; it cannot express the priority
+///   order Pike-VM uses for lazy semantics. For `a+?` on `"baaab"` the
+///   DFA returns end=4 but PCRE2/Pike-VM return end=2.
+///
+/// Patterns excluded from DFA dispatch continue to run on the Pike-VM
+/// (which handles both assertions and lazy quantifiers correctly).
+/// As the DFA gains support for each excluded feature, the
+/// corresponding check can be removed.
+pub fn is_c2_dfa_eligible(ast: &Regex) -> bool {
+    is_c2_dispatch_eligible(ast)
+        && !contains_zero_width_assertion(ast)
+        && !contains_lazy_quantifier(ast)
+}
+
+/// Recursively walks the AST and returns `true` if any node is a
+/// zero-width assertion: `Regex::Anchor` (any kind), `Regex::WordBoundary`,
+/// or `\G` (`AnchorType::PreviousMatchEnd`, already excluded by
+/// `is_c2_dispatch_eligible` but included here for completeness so
+/// the check is self-contained).
+fn contains_zero_width_assertion(ast: &Regex) -> bool {
+    match ast {
+        Regex::Anchor(_) | Regex::WordBoundary { .. } => true,
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_zero_width_assertion)
+        }
+        Regex::Quantified { expr, .. } => contains_zero_width_assertion(expr),
+        Regex::Group { expr, .. } => contains_zero_width_assertion(expr),
+        Regex::FlagGroup { expr, .. } => contains_zero_width_assertion(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_zero_width_assertion(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_zero_width_assertion(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_zero_width_assertion(fb))
+        }
+        _ => false,
+    }
+}
+
+/// Recursively walks the AST and returns `true` if any
+/// `Regex::Quantified` node has its `lazy` flag set. The DFA's subset
+/// construction can't express lazy semantics, so any pattern containing
+/// a lazy quantifier must route through the Pike-VM.
+fn contains_lazy_quantifier(ast: &Regex) -> bool {
+    match ast {
+        Regex::Quantified { quantifier, expr } => {
+            let lazy = matches!(
+                quantifier,
+                crate::ast::Quantifier::ZeroOrOne { lazy: true }
+                    | crate::ast::Quantifier::ZeroOrMore { lazy: true }
+                    | crate::ast::Quantifier::OneOrMore { lazy: true }
+                    | crate::ast::Quantifier::Range { lazy: true, .. }
+            );
+            lazy || contains_lazy_quantifier(expr)
+        }
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_lazy_quantifier)
+        }
+        Regex::Group { expr, .. } => contains_lazy_quantifier(expr),
+        Regex::FlagGroup { expr, .. } => contains_lazy_quantifier(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_lazy_quantifier(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_lazy_quantifier(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_lazy_quantifier(fb))
+        }
+        _ => false,
+    }
+}
+
 /// Returns `true` if a [`crate::ast::CharClass`] involves multi-byte
 /// UTF-8 contents — Unicode property class or any non-ASCII codepoint
 /// range.

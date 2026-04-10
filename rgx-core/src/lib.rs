@@ -1325,8 +1325,13 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
-        // C2 step 4c: dispatch through the Pike-VM for C2-eligible patterns.
-        let matched = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+        // C2 step 5b: prefer the lazy DFA when available; fall back to
+        // Pike-VM on cache exhaustion or when the pattern isn't
+        // DFA-eligible. Pike-VM in turn falls back to the existing
+        // backtracking VM when the pattern isn't C2-eligible.
+        let matched = if let Some(matched) = self.engine.try_dfa_is_match(text.as_bytes()) {
+            matched
+        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
             crate::c2::pike_is_match(c2, text.as_bytes())
         } else {
             self.engine.is_match(text.as_bytes())

@@ -1,3 +1,4 @@
+use crate::c2::dfa::{DfaSearchOutcome, LazyDfa};
 use crate::c2::Classification;
 use crate::error::Result;
 use crate::events::MatchEvent;
@@ -7,7 +8,7 @@ use crate::execution::{
 use crate::pattern::CompiledPattern;
 use crate::vm::RegexVM;
 use crate::{trace_decision, trace_enter, trace_exit};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -79,6 +80,12 @@ pub struct Engine {
     vm: RegexVM,
     /// Execution mode for this engine
     mode: ExecutionMode,
+    /// C2 lazy DFA for `is_match` dispatch (step 5b). Built in
+    /// [`Engine::new`] only when the pattern's AST is DFA-eligible
+    /// (`c2::program::is_c2_dfa_eligible`). Wrapped in `Mutex` because
+    /// the DFA's `transition` method mutates its state cache, and
+    /// public `Regex` API methods are `&self`.
+    c2_dfa: Option<Mutex<LazyDfa>>,
 }
 
 /// Convert a VM-level `Match` into a public `MatchResult`.
@@ -90,6 +97,29 @@ pub(crate) fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
         matched_branch_number: m.matched_alternative.map(|id| id + 1),
         code_result: m.code_result,
     }
+}
+
+/// Build a `Mutex<LazyDfa>` for the given AST + C2 program if the
+/// pattern is DFA-eligible. Returns `None` if the pattern lacks a C2
+/// program (Pike-VM not eligible) or if the AST contains constructs
+/// the DFA can't handle (assertions, lazy quantifiers — see
+/// [`crate::c2::program::is_c2_dfa_eligible`]). C2 step 5b.
+fn build_dfa_if_eligible(
+    ast: &crate::ast::Regex,
+    c2_program: &Option<crate::c2::CompiledC2Program>,
+) -> Option<Mutex<LazyDfa>> {
+    let c2 = c2_program.as_ref()?;
+    if !crate::c2::program::is_c2_dfa_eligible(ast) {
+        return None;
+    }
+    // Clone the NFA and byte-class map into Arcs so the DFA can own
+    // shared references. Cloning is O(states + transitions) — small
+    // for typical patterns.
+    let nfa = Arc::new(c2.forward_anchored.clone());
+    let bcm = Arc::new(c2.byte_class_map.clone());
+    LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT)
+        .ok()
+        .map(Mutex::new)
 }
 
 impl Engine {
@@ -111,13 +141,64 @@ impl Engine {
             } else {
                 None
             };
+        // C2 step 5b: build the lazy DFA if the pattern is DFA-eligible.
+        // The DFA serves `is_match` dispatch via `should_dispatch_to_dfa`.
+        let c2_dfa = build_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
         let vm = RegexVM::with_execution_manager(pattern.program.clone(), execution_manager);
         let engine = Self {
             vm,
             mode: pattern.mode,
+            c2_dfa,
         };
         trace_exit!("engine", "Engine::new", "ok=true,mode={:?}", engine.mode);
         Ok(engine)
+    }
+
+    /// Returns the lazy DFA for this engine if the pattern is DFA-
+    /// eligible AND the runtime state allows DFA dispatch (no event
+    /// observer, no runtime safety limits — same constraints as
+    /// [`Engine::should_dispatch_to_c2`]).
+    ///
+    /// The returned `Mutex` must be locked by the caller. The DFA's
+    /// `transition` method mutates its state cache, so the lock is
+    /// required even from `&self`.
+    #[doc(hidden)]
+    pub fn should_dispatch_to_dfa(&self) -> Option<&Mutex<LazyDfa>> {
+        let dfa = self.c2_dfa.as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        Some(dfa)
+    }
+
+    /// Try to answer `is_match` via the lazy DFA. Returns:
+    /// - `Some(true)` / `Some(false)` if the DFA produced a definitive answer
+    /// - `None` if the DFA isn't available, the pattern isn't DFA-
+    ///   eligible, runtime state forbids DFA dispatch, or the cache
+    ///   exhausted during the scan
+    ///
+    /// The caller (`Regex::is_match` in `lib.rs`) falls back to the
+    /// Pike-VM (and ultimately the existing backtracking VM) when this
+    /// returns `None`.
+    #[doc(hidden)]
+    pub fn try_dfa_is_match(&self, input: &[u8]) -> Option<bool> {
+        let dfa_mutex = self.should_dispatch_to_dfa()?;
+        let mut dfa = dfa_mutex.lock().ok()?;
+        // Scan from each position. The DFA finds the first scan
+        // position that yields a match. The simulator might exhaust
+        // its cache mid-scan; in that case bail and let the caller
+        // fall back.
+        for start in 0..=input.len() {
+            match dfa.find_match_at(input, start) {
+                DfaSearchOutcome::Match(_) => return Some(true),
+                DfaSearchOutcome::NoMatch => continue,
+                DfaSearchOutcome::Exhausted => return None,
+            }
+        }
+        Some(false)
     }
 
     /// C2 classification of the compiled pattern this engine was built for.
