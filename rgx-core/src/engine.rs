@@ -122,12 +122,48 @@ impl Engine {
 
     /// C2 classification of the compiled pattern this engine was built for.
     ///
-    /// At C2 step 1, this is metadata only — the engine still always
-    /// dispatches through the backtracking VM. Runtime dispatch on this
-    /// field lands in C2 step 4 (Pike-VM).
+    /// At C2 step 4c, this remains the source of truth for "is the
+    /// pattern classifier-positive". Engine dispatch is decided by
+    /// [`Engine::c2_program`] which adds a structural eligibility check
+    /// on top of the classification.
     #[doc(hidden)]
     pub fn classification(&self) -> &Classification {
         &self.vm.program.classification
+    }
+
+    /// The compiled C2 program for this engine, if the pattern is
+    /// **structurally** eligible for Pike-VM dispatch (classifier
+    /// positive plus the C2 structural eligibility checks). This is the
+    /// raw compile-time check; runtime state (event observers, step
+    /// limits) is not considered. Use [`Engine::should_dispatch_to_c2`]
+    /// for the full dispatch decision.
+    #[doc(hidden)]
+    pub fn c2_program(&self) -> Option<&crate::c2::CompiledC2Program> {
+        self.vm.program.c2_program.as_ref()
+    }
+
+    /// Returns `Some(c2_program)` iff this engine should route the
+    /// next API call through the C2 Pike-VM. Combines the compile-time
+    /// `c2_program` presence check with the runtime state checks for
+    /// features the Pike-VM doesn't yet implement: match event
+    /// observers ([`crate::vm::RegexVM::has_event_observer`]) and
+    /// runtime safety limits
+    /// ([`crate::vm::RegexVM::has_runtime_match_limits`]).
+    ///
+    /// When `None`, the caller falls back to the existing backtracking
+    /// VM. The runtime checks are read on every call so that
+    /// `Regex::on_event(...)` and `Regex::set_max_steps(...)` take
+    /// effect immediately even if invoked AFTER `Regex::compile`.
+    #[doc(hidden)]
+    pub fn should_dispatch_to_c2(&self) -> Option<&crate::c2::CompiledC2Program> {
+        let c2 = self.vm.program.c2_program.as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        Some(c2)
     }
 
     /// Find all non-overlapping matches in the input

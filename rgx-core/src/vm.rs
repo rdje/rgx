@@ -332,13 +332,22 @@ pub struct Program {
     /// C2 engine classification — decides whether this pattern can dispatch
     /// to the NFA/DFA hybrid engine or must use the backtracking VM.
     ///
-    /// At C2 step 1 this is metadata only; no runtime dispatch reads it yet.
     /// Populated by the compiler in `compile_ast_with_label` after VM
     /// bytecode generation. Defaults to `NeedsVm { NotYetClassified }` so
     /// any code path that bypasses the classifier still routes safely to
     /// the existing VM. See `docs/C2_NFA_DFA_DESIGN.md` §4 for the full
     /// subset definition.
     pub classification: Classification,
+    /// C2 engine compiled program — `Some` iff the pattern is eligible
+    /// for C2 dispatch (classifier-positive AND structurally compatible
+    /// with the Pike-VM's metadata surface; see
+    /// [`crate::c2::program::is_c2_dispatch_eligible`]).
+    ///
+    /// Populated by the compiler in `compile_ast_with_label`. Read by
+    /// the public `Regex` API methods to route `is_match` / `find_first`
+    /// / `find_all` through the Pike-VM when present, falling back to
+    /// the existing VM otherwise. See `docs/C2_NFA_DFA_DESIGN.md` §11.
+    pub c2_program: Option<crate::c2::CompiledC2Program>,
 }
 
 /// Program optimization flags
@@ -726,6 +735,39 @@ impl RegexVM {
         if let Some(ref observer) = *self.event_observer.read().unwrap() {
             observer(event);
         }
+    }
+
+    /// Returns `true` if a match-event observer has been registered on
+    /// this VM. Used by the C2 dispatch decision in
+    /// [`crate::engine::Engine::should_dispatch_to_c2`] — the Pike-VM
+    /// doesn't emit structured match events, so patterns whose tests
+    /// expect events must continue to run on the existing backtracking
+    /// VM.
+    #[doc(hidden)]
+    pub fn has_event_observer(&self) -> bool {
+        self.event_observer
+            .read()
+            .map(|o| o.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if any of the runtime safety limits
+    /// (`max_steps`, `max_backtrack_frames`, `max_recursion_depth`)
+    /// have been set to a non-zero value. Used by the C2 dispatch
+    /// decision — the Pike-VM is bounded by O(nm) and doesn't enforce
+    /// these limits, so patterns whose tests assert limit-triggered
+    /// errors must continue to run on the existing backtracking VM.
+    #[doc(hidden)]
+    pub fn has_runtime_match_limits(&self) -> bool {
+        self.max_steps.load(std::sync::atomic::Ordering::Relaxed) > 0
+            || self
+                .max_backtrack_frames
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+            || self
+                .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
     }
 
     /// Find first match using adaptive execution strategy
@@ -5850,6 +5892,7 @@ impl OptimizingCompiler {
             flags: self.flags,
             stats: self.stats,
             classification: Classification::default(),
+            c2_program: None,
         };
         trace_exit!(
             "vm",

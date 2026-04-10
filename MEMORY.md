@@ -1329,3 +1329,41 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 4c. Add a `Option<CompiledC2Program>` field to `CompiledPattern` (or `Regex`). Build it during `Regex::compile` when classification is NoBacktracking. In each public API method on `Regex`, check the classification and route accordingly. Run the full existing test suite — any disagreement is a Pike-VM bug to fix before the commit lands.
+
+## 2026-04-10 session — C2 step 4c shipped (engine dispatch wiring) — Step 4 COMPLETE
+
+### What landed
+- `vm::Program.c2_program: Option<CompiledC2Program>` field, populated in `compile_ast_with_label` after classification.
+- `is_c2_dispatch_eligible(ast)` function with structural exclusions: top-level alternation, flag groups (`(?i)` etc.), `\G` (`PreviousMatchEnd`), multi-byte char classes (UnicodeClass + non-ASCII Custom).
+- `Engine::should_dispatch_to_c2()` adds runtime checks: no event observer, no runtime safety limits.
+- `Regex::is_match`, `Regex::find_first`, `Regex::find_all` now dispatch through the Pike-VM when eligible. The existing 633+ test suite is now a deeper differential gate.
+- All 856 tests in rgx-core pass with C2 dispatch active.
+
+### Two correctness bugs caught by the broader differential gate
+The 12 corpus suites passed but the larger test surface caught more:
+
+1. **Multi-byte char class precision bug**. Byte-class partition in `c2/byte_class.rs` collapses all byte ranges from a multi-range character class into one oracle. Too coarse to distinguish per-position byte constraints. For `\P{L}` this caused `is_match("β")` → true (wrong; β is a letter). Quick fix: added `contains_multi_byte_char_class` exclusion. Proper fix (per-Utf8Sequence-per-position oracles, or building the partition from NFA transitions) is a documented follow-up.
+
+2. **Dot longest-match bug**. `Regex::Dot` builds an alternation of byte chains for 1/2/3/4-byte UTF-8 sequences. With the coarse byte-class, all chains fire on every byte. The 1-byte chain reaches accept first, the priority cutoff kills longer chains, `find_first(".", "é")` returns 1-byte instead of 2-byte. Fix: sort `Utf8Sequences` by length descending in `build_char_ranges`. Longest chain gets highest priority slot (lowest dense position), survives the cutoff, greedy semantics restored.
+
+### Bugs excluded from dispatch (route to existing VM)
+- Top-level alternation (`cat|dog`) — Pike-VM doesn't track `matched_branch_number`
+- Flag groups (`(?i)`, `(?s)`, `(?m)`, `(?x)`) — Pike-VM doesn't apply flag semantics
+- `\G` (`PreviousMatchEnd`) — Pike-VM only handles \G at pos 0, not after previous match end
+- Multi-byte char classes (`\p{L}`, `[α-ω]` etc.) — coarse byte-class precision bug
+- Patterns with event observers set at runtime — Pike-VM doesn't emit events
+- Patterns with runtime safety limits set — Pike-VM is bounded, doesn't enforce them
+
+These exclusions are SOTA-correct: routing affected patterns through the existing VM preserves all test behaviour. Each exclusion can be lifted as Pike-VM gains the corresponding feature.
+
+### What's dispatched
+The remaining patterns ARE dispatched: literals, ASCII char classes, ASCII shorthand classes, sequences, alternations within groups (not top-level), greedy/lazy quantifiers, range quantifiers, `Dot`, anchors (`\A`, `\z`, `\Z`, `^`, `$`), word boundaries, `\R`, capturing groups (with capture position recovery via the bounded Pike-VM capture pass).
+
+### Step 4 is complete
+- 4a (Pike-VM core + span differential): ✅
+- 4b (capture tracking + extended differential): ✅
+- 4c (engine dispatch wiring + broader differential): ✅
+- The Pike-VM is now the runtime engine for classifier-positive patterns. Next: lazy DFA caches in steps 5–6.
+
+### Next concrete action
+- C2 step 5: lazy forward DFA cache. New `c2/dfa.rs` with the lazy DFA construction from the forward NFA. State cache with size limit, byte-class compression, graceful fallback to Pike-VM on cache exhaustion. Engine dispatch picks DFA over Pike-VM for the find paths when available. Pike-VM stays as the bounded capture-recovery pass per design doc §9.

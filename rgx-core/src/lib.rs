@@ -842,6 +842,24 @@ impl RegexBuilder {
     }
 }
 
+/// Convert a [`crate::c2::PikeMatch`] (returned by the C2 Pike-VM) into
+/// the public [`MatchResult`] shape used throughout the rest of the API.
+///
+/// `matched_branch_number` is always `None` for C2-dispatched patterns
+/// because the dispatch eligibility check excludes top-level alternation
+/// — patterns with that shape route through the existing backtracking VM.
+/// `code_result` is always `None` because patterns containing inline
+/// code blocks are excluded from the C2 subset by the classifier.
+fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
+    MatchResult {
+        start: m.start,
+        end: m.end,
+        groups: m.groups,
+        matched_branch_number: None,
+        code_result: None,
+    }
+}
+
 /// High-performance regex matcher with optional code execution capabilities.
 ///
 /// This is the main entry point for the `rgx` regex engine. It provides
@@ -1032,7 +1050,15 @@ impl Regex {
     #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
-        let matches = self.engine.find_all(text.as_bytes());
+        // C2 step 4c: dispatch through the Pike-VM for C2-eligible patterns.
+        let matches = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+            crate::c2::pike_captures_all(c2, text.as_bytes())
+                .into_iter()
+                .map(pike_match_to_match_result)
+                .collect()
+        } else {
+            self.engine.find_all(text.as_bytes())
+        };
         trace_decision!(
             "api",
             "matches.is_empty()",
@@ -1055,7 +1081,16 @@ impl Regex {
     #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
-        let first = self.engine.find_first(text.as_bytes());
+        // C2 step 4c: dispatch through the Pike-VM when the pattern is
+        // C2-eligible. The Pike-VM tracks captures, so it can fully
+        // populate `MatchResult.groups`. `matched_branch_number` is
+        // always None for C2-dispatched patterns by construction (the
+        // dispatch eligibility check excludes top-level alternations).
+        let first = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+            crate::c2::pike_captures(c2, text.as_bytes()).map(pike_match_to_match_result)
+        } else {
+            self.engine.find_first(text.as_bytes())
+        };
         trace_decision!(
             "api",
             "first.is_some()",
@@ -1290,7 +1325,12 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
-        let matched = self.engine.is_match(text.as_bytes());
+        // C2 step 4c: dispatch through the Pike-VM for C2-eligible patterns.
+        let matched = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+            crate::c2::pike_is_match(c2, text.as_bytes())
+        } else {
+            self.engine.is_match(text.as_bytes())
+        };
         trace_decision!(
             "api",
             "engine.is_match(text)",

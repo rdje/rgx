@@ -117,8 +117,9 @@ impl CompiledC2Program {
     ///
     /// Convenience for tests, benchmarks, and the differential testing
     /// harness in `tests/c2_pike_differential.rs`. The normal compile
-    /// pipeline (`Regex::compile`) doesn't go through this method —
-    /// engine dispatch is wired in at C2 step 4c.
+    /// pipeline goes through `Compiler::compile_ast_with_label` which
+    /// builds the C2 program automatically when the pattern is C2-
+    /// dispatch-eligible (see [`is_c2_dispatch_eligible`]).
     ///
     /// # Capture index assignment
     ///
@@ -142,6 +143,254 @@ impl CompiledC2Program {
             crate::c2::Classification::NoBacktracking => Some(Self::build_from_ast(&ast)),
             crate::c2::Classification::NeedsVm { .. } => None,
         }
+    }
+}
+
+/// Returns `true` iff the AST is eligible for engine dispatch through
+/// the C2 Pike-VM via the public `Regex` API.
+///
+/// At C2 step 4c the eligibility check is **stricter than classification**
+/// because the Pike-VM doesn't yet track every metadata field that
+/// `MatchResult` carries and doesn't yet handle every regex semantic.
+/// The check excludes:
+///
+/// - **Top-level alternation**: patterns whose AST root (after
+///   unwrapping single capturing / non-capturing / flag groups) is
+///   `Regex::Alternation(_)`. These patterns set
+///   `MatchResult.matched_branch_number` on the existing backtracking
+///   VM, but the Pike-VM doesn't track which branch matched. Lift by
+///   adding branch tracking to the Pike-VM.
+/// - **Flag groups**: any pattern containing `Regex::FlagGroup { ... }`
+///   anywhere in its AST. The flags `(?i)` (case-insensitive),
+///   `(?s)` (dot-all), `(?m)` (multiline), and `(?x)` (extended
+///   whitespace) require runtime semantic adjustments the Pike-VM
+///   doesn't apply yet. Lift by extending the NFA construction to
+///   honour the flag context (case-folded char classes, dot-newline,
+///   per-line anchor semantics).
+/// - **`\G` anchor (`PreviousMatchEnd`)**: the Pike-VM's `\G` check
+///   only fires at byte position 0; it doesn't thread the previous
+///   match end through `find_all`. Lift by passing the previous end
+///   into the simulator and updating `check_assertion`.
+/// - **Non-ASCII character classes**: `Regex::UnicodeClass { ... }` at
+///   any position, `CharClass::UnicodeClass`, and `CharClass::Custom`
+///   with any non-ASCII codepoint range. The Pike-VM's byte-class
+///   partition (built from the AST in `c2/byte_class.rs`) collapses
+///   all byte ranges from a multi-range character class into a single
+///   oracle, which is too coarse to distinguish per-position byte
+///   constraints across UTF-8 sequences. For `\P{L}` this manifests
+///   as false positives like `is_match("β")` returning true (β is a
+///   Greek LETTER but its second byte 0xB2 also appears as a second
+///   byte of `\xC2\xB2 = ²` which is a non-letter, so the coarse
+///   partition collapses them). Lift by refactoring `byte_class.rs`
+///   to emit per-Utf8Sequence-per-position oracles, or by computing
+///   the byte-class partition from the NFA transitions instead of
+///   from the AST.
+///
+/// Single literal non-ASCII characters (`Regex::Char(c)` where `c >
+/// 0x7F`) are still dispatchable because they produce a single
+/// Utf8Sequence with no inter-sequence overlap, so the coarse oracle
+/// is precise enough.
+///
+/// The classifier's own check (`Classification::NoBacktracking`) is a
+/// necessary condition that the caller must verify separately. This
+/// function only adds the structural eligibility checks on top.
+///
+/// The exclusions here are SOTA-correct: they preserve every existing
+/// test behaviour by routing affected patterns through the existing
+/// backtracking VM. As Pike-VM gains support for each excluded
+/// feature, the corresponding check can be removed.
+pub fn is_c2_dispatch_eligible(ast: &Regex) -> bool {
+    !has_top_level_alternation(ast)
+        && !contains_flag_group(ast)
+        && !contains_previous_match_end_anchor(ast)
+        && !contains_multi_byte_char_class(ast)
+}
+
+/// Returns `true` if the "top level" of the AST is an alternation node.
+///
+/// "Top level" means: walk through any number of capturing /
+/// non-capturing / flag-group wrappers and see if the unwrapped node
+/// is `Alternation`. Used by [`is_c2_dispatch_eligible`] to detect
+/// patterns whose `matched_branch_number` field would be lost on
+/// engine dispatch.
+fn has_top_level_alternation(ast: &Regex) -> bool {
+    match ast {
+        Regex::Alternation(_) => true,
+        Regex::Group { expr, .. } => has_top_level_alternation(expr),
+        Regex::FlagGroup { expr, .. } => has_top_level_alternation(expr),
+        _ => false,
+    }
+}
+
+/// Recursively walks the AST and returns `true` if any node is a
+/// `Regex::FlagGroup`. The Pike-VM doesn't apply flag semantics
+/// (case-insensitive, dot-all, multiline, extended) yet, so any
+/// pattern containing one must route through the existing VM.
+fn contains_flag_group(ast: &Regex) -> bool {
+    match ast {
+        Regex::FlagGroup { .. } => true,
+        Regex::Sequence(items) | Regex::Alternation(items) => items.iter().any(contains_flag_group),
+        Regex::Quantified { expr, .. } => contains_flag_group(expr),
+        Regex::Group { expr, .. } => contains_flag_group(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => contains_flag_group(expr),
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_flag_group(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_flag_group(fb))
+        }
+        _ => false,
+    }
+}
+
+/// Recursively walks the AST and returns `true` if any node is a
+/// character class that involves multi-byte UTF-8 contents — either a
+/// `Regex::UnicodeClass` / `CharClass::UnicodeClass`, or a
+/// `CharClass::Custom` with at least one non-ASCII codepoint range.
+/// See [`is_c2_dispatch_eligible`] for the rationale.
+///
+/// Single literal non-ASCII characters (`Regex::Char(c)` where `c` is
+/// non-ASCII) are NOT excluded — they produce one Utf8Sequence with
+/// non-overlapping byte ranges, which the coarse oracle handles
+/// correctly.
+fn contains_multi_byte_char_class(ast: &Regex) -> bool {
+    match ast {
+        Regex::UnicodeClass { .. } => true,
+        Regex::CharClass(cc) => char_class_is_multi_byte(cc),
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_multi_byte_char_class)
+        }
+        Regex::Quantified { expr, .. } => contains_multi_byte_char_class(expr),
+        Regex::Group { expr, .. } => contains_multi_byte_char_class(expr),
+        Regex::FlagGroup { expr, .. } => contains_multi_byte_char_class(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_multi_byte_char_class(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_multi_byte_char_class(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_multi_byte_char_class(fb))
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if a [`crate::ast::CharClass`] involves multi-byte
+/// UTF-8 contents — Unicode property class or any non-ASCII codepoint
+/// range.
+fn char_class_is_multi_byte(cc: &crate::ast::CharClass) -> bool {
+    match cc {
+        crate::ast::CharClass::UnicodeClass { .. } => true,
+        crate::ast::CharClass::Custom { ranges, .. } => ranges
+            .iter()
+            .any(|r| !r.start.is_ascii() || !r.end.is_ascii()),
+        crate::ast::CharClass::Digit { .. }
+        | crate::ast::CharClass::Word { .. }
+        | crate::ast::CharClass::Space { .. } => false,
+    }
+}
+
+/// Recursively walks the AST and returns `true` if any node is the
+/// `\G` anchor (`Regex::Anchor(AnchorType::PreviousMatchEnd)`). The
+/// Pike-VM's `\G` check only fires at position 0, so any pattern
+/// using `\G` for `find_all`-style continuation matching must route
+/// through the existing VM.
+fn contains_previous_match_end_anchor(ast: &Regex) -> bool {
+    match ast {
+        Regex::Anchor(crate::ast::AnchorType::PreviousMatchEnd) => true,
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_previous_match_end_anchor)
+        }
+        Regex::Quantified { expr, .. } => contains_previous_match_end_anchor(expr),
+        Regex::Group { expr, .. } => contains_previous_match_end_anchor(expr),
+        Regex::FlagGroup { expr, .. } => contains_previous_match_end_anchor(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_previous_match_end_anchor(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_previous_match_end_anchor(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_previous_match_end_anchor(fb))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+    use crate::ast::{GroupKind, Regex};
+
+    fn lit(c: char) -> Regex {
+        Regex::Char(c)
+    }
+
+    fn alt(items: Vec<Regex>) -> Regex {
+        Regex::Alternation(items)
+    }
+
+    fn group_capturing(expr: Regex) -> Regex {
+        Regex::Group {
+            expr: Box::new(expr),
+            kind: GroupKind::Capturing,
+            index: Some(1),
+            name: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_eligible_for_simple_literal() {
+        assert!(is_c2_dispatch_eligible(&lit('a')));
+    }
+
+    #[test]
+    fn dispatch_ineligible_for_top_level_alternation() {
+        assert!(!is_c2_dispatch_eligible(&alt(vec![lit('a'), lit('b')])));
+    }
+
+    #[test]
+    fn dispatch_ineligible_for_alternation_wrapped_in_capturing_group() {
+        let inner = alt(vec![lit('a'), lit('b')]);
+        let outer = group_capturing(inner);
+        assert!(!is_c2_dispatch_eligible(&outer));
+    }
+
+    #[test]
+    fn dispatch_ineligible_for_alternation_wrapped_in_flag_group() {
+        let inner = alt(vec![lit('a'), lit('b')]);
+        let outer = Regex::FlagGroup {
+            flags: "i".to_string(),
+            expr: Box::new(inner),
+        };
+        assert!(!is_c2_dispatch_eligible(&outer));
+    }
+
+    #[test]
+    fn dispatch_eligible_for_sequence_containing_alternation() {
+        // Alternation is NOT at the top level here — it's wrapped by
+        // a sequence with anchors. matched_branch_number is None on
+        // the existing VM for this shape, so dispatch is safe.
+        let inner = group_capturing(alt(vec![lit('a'), lit('b')]));
+        let seq = Regex::Sequence(vec![
+            Regex::Anchor(crate::ast::AnchorType::AbsStart),
+            inner,
+            Regex::Anchor(crate::ast::AnchorType::AbsEndNoNL),
+        ]);
+        assert!(is_c2_dispatch_eligible(&seq));
     }
 }
 

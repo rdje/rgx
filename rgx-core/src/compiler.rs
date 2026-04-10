@@ -544,13 +544,31 @@ impl Compiler {
         program.named_groups = named_groups;
 
         // C2 step 1: classify the AST against the no-backtracking subset.
-        // Stored as metadata only at this stage; no runtime dispatch reads
-        // it yet. See `docs/C2_NFA_DFA_DESIGN.md` §4 and `c2::classifier`.
+        // See `docs/C2_NFA_DFA_DESIGN.md` §4 and `c2::classifier`.
         program.classification = c2::classify(&ast);
         debug_log!(
             "compiler",
             "  - C2 classification: {:?}",
             program.classification
+        );
+
+        // C2 step 4c: build the C2 program for dispatch when the pattern
+        // is classifier-positive AND structurally eligible for Pike-VM
+        // dispatch (see `c2::program::is_c2_dispatch_eligible`). Stored
+        // on `Program.c2_program`; the public `Regex` API methods read
+        // this field to route `is_match` / `find_first` / `find_all`
+        // through the Pike-VM when present.
+        program.c2_program = if matches!(program.classification, c2::Classification::NoBacktracking)
+            && c2::program::is_c2_dispatch_eligible(&ast)
+        {
+            Some(c2::CompiledC2Program::build_from_ast(&ast))
+        } else {
+            None
+        };
+        debug_log!(
+            "compiler",
+            "  - C2 dispatch eligible: {}",
+            program.c2_program.is_some()
         );
 
         debug_log!("compiler", "Program compiled:");

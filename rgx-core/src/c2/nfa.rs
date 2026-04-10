@@ -663,29 +663,54 @@ impl<'a> NfaBuilder<'a> {
     /// Build a fragment that matches any of the given character ranges.
     /// Used for `Char` classes, shorthands, `Dot`, Unicode property
     /// classes, and so on.
+    ///
+    /// Decomposes every codepoint range into UTF-8 byte sequences via
+    /// `regex_syntax::utf8::Utf8Sequences`, then builds the NFA
+    /// fragment as an alternation of byte chains sharing a single
+    /// `start` and `accept` state.
+    ///
+    /// **Sequences are sorted by length DESCENDING before chain
+    /// construction** so that longer sequences get the higher priority
+    /// slots on the shared start state. This is critical for `Dot`
+    /// (which has chains of length 1 / 2 / 3 / 4 simultaneously): when
+    /// the byte-class partition is too coarse to distinguish per-
+    /// position byte ranges across sequences (a known limitation
+    /// documented in `c2/program.rs::is_c2_dispatch_eligible`), all
+    /// chain transitions fire on every input byte. Without the sort,
+    /// the 1-byte chain would reach accept first, the priority cutoff
+    /// would kill the longer chains, and `find_first(".", "é")` would
+    /// return a 1-byte match instead of the full 2-byte codepoint.
+    /// With the sort, the longest chain has the lowest dense position
+    /// and the priority cutoff lets it run to completion. Greedy
+    /// "longest match" semantics are preserved.
     fn build_char_ranges(&mut self, char_ranges: &[CharRange], negated: bool) -> Fragment {
         let resolved = if negated {
             invert_char_ranges(char_ranges)
         } else {
             char_ranges.to_vec()
         };
-        // Decompose every codepoint range into UTF-8 byte sequences,
-        // then build the NFA fragment as an alternation of byte chains
-        // sharing a single start and accept state.
-        let start = self.new_state();
-        let accept = self.new_state();
-        let mut any_branch = false;
+        // Collect all Utf8Sequences across all char ranges so we can
+        // sort them globally by length descending.
+        let mut all_sequences: Vec<Vec<regex_syntax::utf8::Utf8Range>> = Vec::new();
         for range in &resolved {
             for utf8_seq in Utf8Sequences::new(range.start, range.end) {
-                let byte_ranges = utf8_seq.as_slice();
-                self.build_byte_range_chain_into(start, accept, byte_ranges);
-                any_branch = true;
+                all_sequences.push(utf8_seq.as_slice().to_vec());
             }
         }
-        if !any_branch {
-            // Empty character class — unmatchable. Leave start/accept
-            // disconnected so no input can transition.
+        // Sort by sequence length descending. Longer chains get
+        // higher priority slots on the shared start state. See the
+        // method-level doc comment for the rationale.
+        all_sequences.sort_by_key(|seq| std::cmp::Reverse(seq.len()));
+
+        let start = self.new_state();
+        let accept = self.new_state();
+        for byte_ranges in &all_sequences {
+            self.build_byte_range_chain_into(start, accept, byte_ranges);
         }
+        // If `all_sequences` is empty (e.g., negated universal char
+        // class), the fragment is unmatchable: `start` has no outgoing
+        // transitions and can't reach `accept`. That's the correct
+        // semantics for an empty character class.
         Fragment { start, accept }
     }
 
@@ -798,9 +823,17 @@ impl<'a> NfaBuilder<'a> {
     }
 
     fn build_anchor(&mut self, t: AnchorType) -> Fragment {
+        // Note: `^` and `$` map to StartOfText / EndOfTextOrFinalNewline
+        // (NOT StartOfLine / EndOfLine) because the C2 dispatch
+        // eligibility check excludes patterns containing flag groups,
+        // including `(?m)` (multiline). Without `(?m)`, PCRE2/Perl's
+        // `^` only matches the start of input and `$` only matches
+        // the end of input (or just before a final newline). Multiline
+        // patterns continue to run on the existing backtracking VM
+        // which handles `(?m)` semantics correctly.
         let assertion = match t {
-            AnchorType::Start => ZeroWidthAssertion::StartOfLine,
-            AnchorType::End => ZeroWidthAssertion::EndOfLine,
+            AnchorType::Start => ZeroWidthAssertion::StartOfText,
+            AnchorType::End => ZeroWidthAssertion::EndOfTextOrFinalNewline,
             AnchorType::AbsStart => ZeroWidthAssertion::StartOfText,
             AnchorType::AbsEnd => ZeroWidthAssertion::EndOfTextOrFinalNewline,
             AnchorType::AbsEndNoNL => ZeroWidthAssertion::EndOfText,
