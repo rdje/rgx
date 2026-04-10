@@ -37,12 +37,14 @@
 
 pub mod byte_class;
 pub mod classifier;
+pub mod dfa;
 pub mod nfa;
 pub mod pike;
 pub mod program;
 
 pub use byte_class::ByteClassMap;
 pub use classifier::{classify, Classification, ExclusionReason};
+pub use dfa::{DfaStateId, LazyDfa};
 pub use nfa::{reverse_ast, CaptureTag, Nfa, NfaState, NfaStateId, ZeroWidthAssertion};
 pub use pike::{
     pike_captures, pike_captures_all, pike_find_all, pike_find_first, pike_is_match, PikeMatch,

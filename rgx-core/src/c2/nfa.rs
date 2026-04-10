@@ -460,6 +460,20 @@ impl Nfa {
     pub fn num_capture_groups(&self) -> u32 {
         self.num_capture_groups
     }
+
+    /// Returns `true` if any epsilon edge in the NFA carries a
+    /// zero-width assertion (`\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`,
+    /// `\G`). Used by [`crate::c2::dfa::LazyDfa::new`] to refuse
+    /// construction for assertion-bearing NFAs at C2 step 5a — the
+    /// lazy DFA's subset construction doesn't yet handle context-
+    /// dependent transitions. Patterns with assertions continue to
+    /// run on the Pike-VM via dispatch.
+    #[must_use]
+    pub fn has_assertions(&self) -> bool {
+        self.states
+            .iter()
+            .any(|s| s.epsilons.iter().any(|e| e.assertion.is_some()))
+    }
 }
 
 // ============================================================

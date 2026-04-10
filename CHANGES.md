@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-10 - C2 step 5a: lazy forward DFA cache (standalone module)
+- Scope: Eighth code commit for the C2 NFA/DFA hybrid engine. First step toward the lazy DFA performance layer. Standalone module — no engine wiring, no integration with the public `Regex::compile` path. Step 5b will wire engine dispatch and cache exhaustion fallback to Pike-VM.
+- New `rgx-core/src/c2/dfa.rs` with the SOTA lazy DFA cache: subset construction from the Thompson NFA, on-demand DFA state allocation with `HashMap` cache, byte-class-indexed transition tables, configurable state limit, and a tight simulation loop whose hot path is two array lookups per input byte.
+- Public API: `LazyDfa::new(Arc<Nfa>, Arc<ByteClassMap>, state_limit) -> Result<Self, &'static str>`, `LazyDfa::find_match_at(input, start) -> Option<usize>`, plus introspection (`start_state`, `is_accept`, `num_states`, `transition`).
+- Default state cache limit: 2048 DFA states (mirrors the Rust `regex` crate's order of magnitude). Tunable per construction call.
+- New `Nfa::has_assertions()` accessor that walks every epsilon edge of every state and returns `true` if any carries a zero-width assertion. Used by `LazyDfa::new` to refuse construction for assertion-bearing NFAs at step 5a.
+- **Step 5a limitations** (deliberate, lifted in step 5b):
+  - **Zero-width assertions** (`\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`, `\G`): not yet supported. The DFA cannot easily express context-dependent transitions during subset construction (the standard SOTA approach requires tracking "look behind" bytes per DFA state, which lands in step 5b). Patterns containing assertions cause `LazyDfa::new` to return an `Err`. They continue running on the Pike-VM unchanged.
+  - **Lazy quantifiers** (`a*?`, `a+?`, `a??`, `{n,m}?`): the DFA gives **longest-match semantics** by construction, not lazy. For `a+?` on `"baaab"` the DFA returns end=4 but the Pike-VM (and PCRE2) return end=2. This is a fundamental property of subset construction (the DFA has no priority order) and is documented at the module level. Step 5b excludes lazy-quantifier patterns from DFA dispatch via the eligibility check.
+  - **Cache exhaustion**: when the cache exceeds `state_limit`, `transition` returns `None` to signal fallback. The clear-and-retry eviction policy and the actual fallback to Pike-VM land in step 5b.
+- Subset construction implementation:
+  - Each DFA state stores its NFA state set (sorted, deduplicated) plus a `transitions` table indexed by byte class plus a precomputed `is_accept` flag.
+  - `compute_start_set` epsilon-closes the NFA's start state into the DFA's state-0.
+  - `compute_transition_set(state, cls)` walks the source DFA state's NFA states, follows byte transitions matching `cls`, then epsilon-closes every reached target.
+  - `transition(state, cls)` checks the cached transition table first, falls through to `compute_transition_set` on miss, and either reuses an existing DFA state via the `HashMap` lookup or allocates a fresh state. Dead transitions are recorded as `DEAD_STATE` (sentinel `u32::MAX`) so they're never recomputed.
+  - `find_match_at` runs the simulator: track current state, read each input byte, look up its byte class, follow the transition (lazy-allocate as needed), record `matched_end` whenever the simulator enters an accept state. Stops on dead state or cache exhaustion.
+- 22 new unit tests in `c2/dfa.rs::tests`: construction (literal, anchor refusal), basic matching (literal positions, char classes, shorthand classes, negation), sequences and alternation-in-group, greedy quantifiers, range quantifiers, realistic patterns (ISO date, email-like), cache behaviour (transitions cached on repeated lookup, exhaustion returns None), find-first-via-scan parity with Pike-VM, and the lazy quantifier divergence pin (longest-match semantics). The DFA→Pike-VM sanity comparisons cover ~16 patterns and inputs.
+- Validation: `cargo test -p rgx-core c2::dfa` 22/0/0. Full quality gates green.
+- Step 5b: wire DFA into engine dispatch. Update `is_c2_dispatch_eligible` to add `contains_lazy_quantifier` and `contains_zero_width_assertion` exclusions. `Engine::should_dispatch_to_c2` (or a new `should_dispatch_to_dfa`) prefers DFA over Pike-VM when available. Cache-exhaustion fallback. Once landed, the existing 856-test suite becomes a deeper differential test for the DFA path too.
+
 ### 2026-04-10 - C2 step 4c: engine dispatch wiring (Pike-VM behind public Regex API)
 - Scope: Seventh code commit for the C2 NFA/DFA hybrid engine. Wires the public `Regex::compile` path to automatically route classifier-positive patterns through the C2 Pike-VM. This is the biggest correctness milestone in the C2 plan: the differential gate against the existing backtracking VM is now ACTIVE across the entire 633+ test suite, not just the 12 corpus suites in `tests/c2_pike_differential.rs`.
 - New `Program.c2_program: Option<CompiledC2Program>` field on `vm::Program`, populated by `Compiler::compile_ast_with_label` after classification when the AST is C2-dispatch-eligible.

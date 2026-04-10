@@ -1367,3 +1367,32 @@ The remaining patterns ARE dispatched: literals, ASCII char classes, ASCII short
 
 ### Next concrete action
 - C2 step 5: lazy forward DFA cache. New `c2/dfa.rs` with the lazy DFA construction from the forward NFA. State cache with size limit, byte-class compression, graceful fallback to Pike-VM on cache exhaustion. Engine dispatch picks DFA over Pike-VM for the find paths when available. Pike-VM stays as the bounded capture-recovery pass per design doc §9.
+
+## 2026-04-10 session — C2 step 5a shipped (lazy forward DFA, standalone)
+
+### What landed
+- New `rgx-core/src/c2/dfa.rs` with the SOTA lazy DFA: subset construction, byte-class-indexed transition tables, HashMap cache, configurable state limit (default 2048), `find_match_at` simulation loop. Public API mirrors `pike_match_at` so step 5b can swap dispatch in transparently.
+- New `Nfa::has_assertions()` accessor used by `LazyDfa::new` to refuse construction for assertion-bearing NFAs.
+- 22 unit tests covering construction, matching, cache behaviour, and DFA→Pike-VM sanity comparisons on ~16 patterns.
+
+### Three deliberate step-5a limitations
+1. **No zero-width assertions**: `LazyDfa::new` returns Err for NFAs containing `\A`/`\z`/`\Z`/`^`/`$`/`\b`/`\B`/`\G`. Step 5b will lift this either by tracking look-behind context per DFA state or by excluding assertion patterns from DFA dispatch entirely.
+2. **No lazy quantifier support**: subset construction is leftmost-longest by nature; the DFA can't express the priority order Pike-VM uses for lazy semantics. For `a+?` on "baaab" DFA returns end=4 (longest) but Pike-VM returns end=2 (lazy/shortest). Pinned in `lazy_quantifier_diverges_from_pike_by_design` test. Step 5b excludes lazy-quantifier patterns from DFA dispatch.
+3. **No cache eviction**: `transition` returns None on cache exhaustion. Step 5b adds clear-and-retry policy + Pike-VM fallback.
+
+### What's dispatchable to DFA in step 5b
+After adding `contains_lazy_quantifier` and `contains_zero_width_assertion` exclusions to `is_c2_dispatch_eligible`, the DFA-eligible patterns are: literals, ASCII char classes, shorthand classes (without `\b`), sequences, alternations within groups, GREEDY quantifiers (`?`/`*`/`+`/`{n,m}` greedy only), `Dot`, `\R`, capturing groups (with capture position recovery via the bounded Pike-VM pass per design doc §9).
+
+### Engine dispatch design for step 5b
+- Add `c2_dfa: Option<LazyDfa>` (or `Mutex<LazyDfa>` for interior mutability) to `Engine` or `Regex`. The DFA is built once at compile time when the pattern is DFA-eligible.
+- Or: build the DFA lazily on first call. The DFA is `&mut self` for transition (since it mutates the cache), so it needs interior mutability via `Mutex<LazyDfa>`.
+- Probably want: `Engine::find_match_via_dfa(input, start) -> Option<usize>` that holds the Mutex briefly. Falls back to Pike-VM on `None`.
+- Captures still come from the Pike-VM bounded recovery pass — DFA gives match end, Pike-VM gives capture positions.
+
+### Next concrete action
+- C2 step 5b: wire LazyDfa into engine dispatch with:
+  - Add `Mutex<LazyDfa>` to Engine (or interior mutability via RwLock)
+  - Add `contains_lazy_quantifier` and `contains_zero_width_assertion` to `is_c2_dispatch_eligible`
+  - In `Regex::find_first` etc., check DFA availability first, run DFA, fall back to Pike-VM on None or for capture recovery
+  - Run the existing 856-test suite — the differential gate now also covers the DFA path
+  - Fix any DFA bugs that surface from the broader corpus
