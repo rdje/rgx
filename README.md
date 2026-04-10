@@ -159,7 +159,8 @@ If you are new to the repo, use this order:
 - [`docs/CLI_GUIDE.md`](docs/CLI_GUIDE.md) — comprehensive CLI user guide with 20+ examples
 - [`docs/TESTING_PHILOSOPHY.md`](docs/TESTING_PHILOSOPHY.md) — hostile skepticism testing approach, known gaps, and process
 - [`docs/BACKLOG.md`](docs/BACKLOG.md) — complete inventory of remaining work (roadmap items, features to port, engineering improvements)
-- [`docs/C2_NFA_DFA_DESIGN.md`](docs/C2_NFA_DFA_DESIGN.md) — SOTA design proposal for the NFA/DFA hybrid engine (C2). Sparse-set Pike-VM, lazy DFA, two-pass capture recovery, differential testing. Step 0 of the C2 active focus.
+- [`docs/C2_NFA_DFA_DESIGN.md`](docs/C2_NFA_DFA_DESIGN.md) — SOTA design proposal for the NFA/DFA hybrid engine (C2). Sparse-set Pike-VM, lazy DFA, two-pass capture recovery, differential testing. **C2 shipped 2026-04-11** (steps 0–8 complete).
+- [`docs/C1_JIT_COMPILATION_DESIGN.md`](docs/C1_JIT_COMPILATION_DESIGN.md) — SOTA design proposal for the JIT compiler (C1). Cranelift-based code generator, JIT'd backtracking VM, runtime helper layer, 4-tier dispatch chain, cross-platform validation matrix, 9-step phased plan. Step 0 of the C1 active focus.
 ## README maintenance policy
 `README.md` is the project’s single entry point and should be updated when it becomes stale, including changes to:
 - project objective/scope,
