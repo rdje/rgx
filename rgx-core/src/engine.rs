@@ -241,8 +241,22 @@ impl Engine {
     pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
+        let prefix = c2.c2_prefix_byte;
         let mut dfa = dfa_mutex.lock().ok()?;
-        for start in 0..=input.len() {
+        let mut start = 0usize;
+        while start <= input.len() {
+            // C2 step 7: literal prefix skip via memchr. Jump to the
+            // next position where the prefix byte appears so the DFA
+            // doesn't waste cycles on impossible scan positions.
+            if let Some(byte) = prefix {
+                if start >= input.len() {
+                    break;
+                }
+                match memchr::memchr(byte, &input[start..]) {
+                    Some(offset) => start += offset,
+                    None => return Some(None),
+                }
+            }
             match dfa.find_match_at(input, start) {
                 DfaSearchOutcome::Match(_) => {
                     // DFA confirms a match starts at this position.
@@ -251,7 +265,7 @@ impl Engine {
                     let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
                     return Some(Some(pike_match_to_match_result(pike_match)));
                 }
-                DfaSearchOutcome::NoMatch => continue,
+                DfaSearchOutcome::NoMatch => start += 1,
                 DfaSearchOutcome::Exhausted => return None,
             }
         }
@@ -272,10 +286,21 @@ impl Engine {
     pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
+        let prefix = c2.c2_prefix_byte;
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
         while start <= input.len() {
+            // C2 step 7: literal prefix skip via memchr.
+            if let Some(byte) = prefix {
+                if start >= input.len() {
+                    break;
+                }
+                match memchr::memchr(byte, &input[start..]) {
+                    Some(offset) => start += offset,
+                    None => break,
+                }
+            }
             let outcome = {
                 let mut dfa = dfa_mutex.lock().ok()?;
                 dfa.find_match_at(input, start)

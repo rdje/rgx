@@ -1451,3 +1451,25 @@ All three primitive find methods (is_match, find_first, find_all) for DFA-eligib
 
 ### Next concrete action
 - C2 step 7: literal prefix integration. The existing memmem fast path (in vm.rs) skips positions where the pattern's first literal byte can't match. Wire this into the C2 dispatch path so the DFA scan also benefits — instead of trying every position 0..=len, jump to the next memmem-match position before invoking the DFA. Combines the existing literal acceleration with the new DFA simulation. Potentially more impactful than the reverse DFA for patterns with literal prefixes.
+
+## 2026-04-10 session — C2 step 7 shipped (literal prefix integration via memchr)
+
+### What landed
+- New `first_literal_byte(ast)` in c2/program.rs. Conservative AST walker that detects single literal byte at the start of a match. Handles Char (ASCII + non-ASCII first UTF-8 byte), Sequence with leading literal (walking past zero-width anchors), Group/FlagGroup wrappers, Quantified with min>=1.
+- New `c2_prefix_byte: Option<u8>` field on CompiledC2Program, computed at build time.
+- Updated `pike_captures` / `pike_captures_all` / `Engine::try_dfa_find_first` / `Engine::try_dfa_find_all` to use memchr-based skip. Instead of iterating every position 0..=len, the loop calls memchr::memchr(prefix, &input[start..]) and jumps directly to the next candidate.
+- 14 new unit tests covering all cases (ASCII, non-ASCII, sequences with leading anchors, alternations, quantifiers with min=0/1, char classes, Dot, realistic log pattern).
+
+### Zero new failures from the broader differential gate
+894 tests pass (up from 880, +14 from new prefix tests). The literal prefix optimization is correct on every classifier-positive pattern in the test suite. All three primitive find methods (is_match, find_first, find_all) benefit on both DFA and Pike-VM dispatch tiers.
+
+### Performance benefit
+For sparse-match patterns where the prefix byte is rare in the input (e.g., `ERROR` in a long log file, `2026-` in source code), the dispatch now skips most input bytes via SIMD-accelerated memchr. The previous DFA cost was two array lookups per byte; with prefix skip, it becomes "memchr to next candidate + DFA simulation only at confirmed positions". 
+
+### Deferred follow-ups
+- Multi-byte literal prefix via memmem (e.g., scan for "abc" instead of just "a") — handles pure-literal patterns more efficiently
+- Full literal extraction (multiple alternatives, suffix detection) — like the regex crate's literal optimizer
+
+### C2 step 7 is complete
+- The dispatch path now has its hottest optimization for the common case (patterns with literal prefixes).
+- Next: step 8 (production cutover, benchmarks, Book chapter).

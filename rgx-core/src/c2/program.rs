@@ -63,6 +63,23 @@ pub struct CompiledC2Program {
     /// Number of capture groups in the original pattern. Used to size
     /// capture buffers for the bounded Pike-VM capture pass.
     pub num_capture_groups: u32,
+
+    /// C2 step 7: literal prefix byte for memchr-based scan acceleration.
+    ///
+    /// If the pattern's match must start with a specific byte (e.g.,
+    /// `abc` starts with `b'a'`, `ERROR.*` starts with `b'E'`), this
+    /// field holds that byte. Engine dispatch (`try_dfa_find_*` and
+    /// the Pike-VM `pike_captures*` family) uses [`memchr::memchr`] to
+    /// jump to the next candidate position rather than scanning every
+    /// byte 0..len. Pure-prefix patterns get the largest speedup.
+    ///
+    /// `None` when the pattern's leading element is a character class,
+    /// quantifier with min=0, alternation, or any other construct
+    /// where the first byte isn't fixed. The dispatch falls through
+    /// to the regular per-position scan in that case.
+    ///
+    /// Computed at construction time by [`first_literal_byte`].
+    pub c2_prefix_byte: Option<u8>,
 }
 
 impl CompiledC2Program {
@@ -92,6 +109,10 @@ impl CompiledC2Program {
         // forward anchored NFA as the source of truth.
         let num_capture_groups = forward_anchored.num_capture_groups();
 
+        // C2 step 7: precompute the literal prefix byte for memchr-based
+        // scan acceleration in dispatch.
+        let c2_prefix_byte = first_literal_byte(ast);
+
         Self {
             byte_class_map,
             forward_anchored,
@@ -99,6 +120,7 @@ impl CompiledC2Program {
             reverse_anchored,
             reverse_unanchored,
             num_capture_groups,
+            c2_prefix_byte,
         }
     }
 
@@ -379,6 +401,96 @@ fn contains_lazy_quantifier(ast: &Regex) -> bool {
     }
 }
 
+/// Returns the first byte that any match of `ast` MUST begin with, or
+/// `None` if the pattern doesn't have a fixed first byte.
+///
+/// Used by C2 step 7 dispatch to accelerate per-position scans via
+/// [`memchr::memchr`]: instead of trying every position 0..=len, the
+/// dispatch jumps to the next position where the prefix byte appears.
+///
+/// Detected cases (return `Some(byte)`):
+/// - `Regex::Char(c)` where `c` is any codepoint — first byte of the
+///   UTF-8 encoding (so non-ASCII literals like `α` and `🎉` benefit too)
+/// - `Regex::WhitespaceLiteral(c)` — same
+/// - `Regex::Sequence([first, ...])` where `first` (after walking
+///   through any leading zero-width assertions like `\A`, `^`, `\b`)
+///   has a fixed first literal byte
+/// - `Regex::Group { kind, expr, .. }` for `Capturing` and
+///   `NonCapturing` — recurses into `expr`
+/// - `Regex::FlagGroup { expr, .. }` — recurses into `expr`
+///
+/// Non-detected cases (return `None`):
+/// - Character classes (`[a-z]`, `\d`, `\w`, `\p{L}`, `Dot`)
+/// - Alternations (different branches may start with different bytes)
+/// - Quantifiers with `min == 0` (the leading element may be skipped)
+/// - Backreferences, recursion, lookaround, etc. (not in C2 subset)
+///
+/// The detection is **conservative**: any case it isn't sure about
+/// returns `None`. False negatives (missing an optimization
+/// opportunity) are a perf miss but never a correctness risk. False
+/// positives (claiming a fixed first byte that doesn't actually
+/// constrain matches) would silently drop matches and are forbidden.
+#[must_use]
+pub fn first_literal_byte(ast: &Regex) -> Option<u8> {
+    match ast {
+        Regex::Char(c) | Regex::WhitespaceLiteral(c) => {
+            let mut buf = [0u8; 4];
+            let bytes = c.encode_utf8(&mut buf);
+            bytes.as_bytes().first().copied()
+        }
+        Regex::Sequence(items) => {
+            // Walk through leading zero-width nodes (anchors, word
+            // boundaries) until we find a real literal or run out.
+            for item in items {
+                if let Some(b) = first_literal_byte(item) {
+                    return Some(b);
+                }
+                if !is_zero_width_node(item) {
+                    return None;
+                }
+            }
+            None
+        }
+        Regex::Group { kind, expr, .. } => match kind {
+            crate::ast::GroupKind::Capturing | crate::ast::GroupKind::NonCapturing => {
+                first_literal_byte(expr)
+            }
+            // Atomic and BranchReset aren't in the C2 subset (the
+            // classifier rejects them), so this branch is defensive.
+            _ => None,
+        },
+        Regex::FlagGroup { expr, .. } => first_literal_byte(expr),
+        // Quantifier with min >= 1: the leading element MUST appear,
+        // so its first literal byte (if any) is the prefix. min == 0
+        // means the leading element might be skipped — no fixed prefix.
+        Regex::Quantified { expr, quantifier } => {
+            let min = match quantifier {
+                crate::ast::Quantifier::OneOrMore { .. } => 1,
+                crate::ast::Quantifier::ZeroOrOne { .. }
+                | crate::ast::Quantifier::ZeroOrMore { .. } => 0,
+                crate::ast::Quantifier::Range { min, .. } => *min,
+            };
+            if min >= 1 {
+                first_literal_byte(expr)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Returns `true` if `ast` is a zero-width node — consumes no input
+/// bytes during matching. Used by [`first_literal_byte`] to walk past
+/// leading anchors and word boundaries when looking for the first
+/// literal byte in a sequence.
+fn is_zero_width_node(ast: &Regex) -> bool {
+    matches!(
+        ast,
+        Regex::Anchor(_) | Regex::WordBoundary { .. } | Regex::Empty
+    )
+}
+
 /// Returns `true` if a [`crate::ast::CharClass`] involves multi-byte
 /// UTF-8 contents — Unicode property class or any non-ASCII codepoint
 /// range.
@@ -428,7 +540,7 @@ fn contains_previous_match_end_anchor(ast: &Regex) -> bool {
 #[cfg(test)]
 mod dispatch_tests {
     use super::*;
-    use crate::ast::{GroupKind, Regex};
+    use crate::ast::{CharRange, GroupKind, Quantifier, Regex};
 
     fn lit(c: char) -> Regex {
         Regex::Char(c)
@@ -436,6 +548,15 @@ mod dispatch_tests {
 
     fn alt(items: Vec<Regex>) -> Regex {
         Regex::Alternation(items)
+    }
+
+    fn group_capturing_idx(idx: u32, expr: Regex) -> Regex {
+        Regex::Group {
+            expr: Box::new(expr),
+            kind: GroupKind::Capturing,
+            index: Some(idx),
+            name: None,
+        }
     }
 
     fn group_capturing(expr: Regex) -> Regex {
@@ -486,6 +607,137 @@ mod dispatch_tests {
             Regex::Anchor(crate::ast::AnchorType::AbsEndNoNL),
         ]);
         assert!(is_c2_dispatch_eligible(&seq));
+    }
+
+    // ============================================================
+    // first_literal_byte (C2 step 7)
+    // ============================================================
+
+    #[test]
+    fn first_literal_byte_for_ascii_char() {
+        assert_eq!(first_literal_byte(&lit('a')), Some(b'a'));
+        assert_eq!(first_literal_byte(&lit('z')), Some(b'z'));
+        assert_eq!(first_literal_byte(&lit('0')), Some(b'0'));
+    }
+
+    #[test]
+    fn first_literal_byte_for_non_ascii_char_returns_first_utf8_byte() {
+        // 'α' = U+03B1 = 0xCE 0xB1 in UTF-8.
+        assert_eq!(first_literal_byte(&lit('α')), Some(0xCE));
+        // '🎉' = U+1F389 = 0xF0 0x9F 0x8E 0x89 in UTF-8.
+        assert_eq!(first_literal_byte(&lit('🎉')), Some(0xF0));
+    }
+
+    #[test]
+    fn first_literal_byte_for_sequence_of_literals() {
+        let ast = Regex::Sequence(vec![lit('h'), lit('i')]);
+        assert_eq!(first_literal_byte(&ast), Some(b'h'));
+    }
+
+    #[test]
+    fn first_literal_byte_for_capturing_group_wrapping_literal() {
+        let ast = group_capturing_idx(1, lit('q'));
+        assert_eq!(first_literal_byte(&ast), Some(b'q'));
+    }
+
+    #[test]
+    fn first_literal_byte_skips_leading_zero_width_anchor() {
+        // \Aabc — the AbsStart anchor is zero-width, the next item is
+        // the literal 'a'.
+        let ast = Regex::Sequence(vec![
+            Regex::Anchor(crate::ast::AnchorType::AbsStart),
+            lit('a'),
+            lit('b'),
+            lit('c'),
+        ]);
+        assert_eq!(first_literal_byte(&ast), Some(b'a'));
+    }
+
+    #[test]
+    fn first_literal_byte_skips_leading_word_boundary() {
+        let ast = Regex::Sequence(vec![Regex::WordBoundary { positive: true }, lit('w')]);
+        assert_eq!(first_literal_byte(&ast), Some(b'w'));
+    }
+
+    #[test]
+    fn first_literal_byte_for_alternation_returns_none() {
+        let ast = alt(vec![lit('a'), lit('b')]);
+        assert_eq!(first_literal_byte(&ast), None);
+    }
+
+    #[test]
+    fn first_literal_byte_for_quantifier_with_min_zero_returns_none() {
+        // a*b — leading 'a*' could be skipped, so no fixed first byte.
+        let ast = Regex::Sequence(vec![
+            Regex::Quantified {
+                expr: Box::new(lit('a')),
+                quantifier: Quantifier::ZeroOrMore { lazy: false },
+            },
+            lit('b'),
+        ]);
+        assert_eq!(first_literal_byte(&ast), None);
+    }
+
+    #[test]
+    fn first_literal_byte_for_quantifier_with_min_one_returns_inner() {
+        // a+ — leading 'a' is mandatory.
+        let ast = Regex::Quantified {
+            expr: Box::new(lit('a')),
+            quantifier: Quantifier::OneOrMore { lazy: false },
+        };
+        assert_eq!(first_literal_byte(&ast), Some(b'a'));
+    }
+
+    #[test]
+    fn first_literal_byte_for_range_with_min_zero_returns_none() {
+        // a{0,3}b
+        let ast = Regex::Sequence(vec![
+            Regex::Quantified {
+                expr: Box::new(lit('a')),
+                quantifier: Quantifier::Range {
+                    min: 0,
+                    max: Some(3),
+                    lazy: false,
+                },
+            },
+            lit('b'),
+        ]);
+        assert_eq!(first_literal_byte(&ast), None);
+    }
+
+    #[test]
+    fn first_literal_byte_for_range_with_min_one_returns_inner() {
+        // a{1,3}b
+        let ast = Regex::Quantified {
+            expr: Box::new(lit('a')),
+            quantifier: Quantifier::Range {
+                min: 1,
+                max: Some(3),
+                lazy: false,
+            },
+        };
+        assert_eq!(first_literal_byte(&ast), Some(b'a'));
+    }
+
+    #[test]
+    fn first_literal_byte_for_char_class_returns_none() {
+        let ast = Regex::CharClass(crate::ast::CharClass::Custom {
+            ranges: vec![CharRange::range('a', 'z')],
+            negated: false,
+        });
+        assert_eq!(first_literal_byte(&ast), None);
+    }
+
+    #[test]
+    fn first_literal_byte_for_dot_returns_none() {
+        assert_eq!(first_literal_byte(&Regex::Dot), None);
+    }
+
+    #[test]
+    fn first_literal_byte_for_realistic_log_pattern() {
+        // ERROR — five literals
+        let ast = Regex::Sequence(vec![lit('E'), lit('R'), lit('R'), lit('O'), lit('R')]);
+        assert_eq!(first_literal_byte(&ast), Some(b'E'));
     }
 }
 

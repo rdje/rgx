@@ -688,7 +688,19 @@ pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMa
     let nfa = &program.forward_anchored;
     let bcm = &program.byte_class_map;
     let num_slots = slot_count(program);
-    for start in 0..=input.len() {
+    let prefix = program.c2_prefix_byte;
+    let mut start = 0usize;
+    while start <= input.len() {
+        // C2 step 7: literal prefix skip via memchr.
+        if let Some(byte) = prefix {
+            if start >= input.len() {
+                break;
+            }
+            match memchr::memchr(byte, &input[start..]) {
+                Some(offset) => start += offset,
+                None => return None,
+            }
+        }
         if let Some((end, mut caps)) =
             pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
         {
@@ -702,6 +714,7 @@ pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMa
                 groups: captures_to_groups(&caps),
             });
         }
+        start += 1;
     }
     None
 }
@@ -753,10 +766,21 @@ pub fn pike_captures_all(program: &CompiledC2Program, input: &[u8]) -> Vec<PikeM
     let nfa = &program.forward_anchored;
     let bcm = &program.byte_class_map;
     let num_slots = slot_count(program);
+    let prefix = program.c2_prefix_byte;
     let mut results = Vec::new();
     let mut start = 0usize;
     let mut prev_non_empty_end: Option<usize> = None;
     while start <= input.len() {
+        // C2 step 7: literal prefix skip via memchr.
+        if let Some(byte) = prefix {
+            if start >= input.len() {
+                break;
+            }
+            match memchr::memchr(byte, &input[start..]) {
+                Some(offset) => start += offset,
+                None => break,
+            }
+        }
         let Some((end, mut caps)) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
         else {
             start += 1;
