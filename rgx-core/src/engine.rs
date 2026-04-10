@@ -99,6 +99,25 @@ pub(crate) fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
     }
 }
 
+/// Convert a `PikeMatch` (from `c2::pike`) into the public
+/// [`MatchResult`] shape used throughout the rest of the API. Mirrors
+/// the helper in `lib.rs`; duplicated here so the engine-internal
+/// dispatch methods (`try_dfa_find_first` / `try_dfa_find_all`) don't
+/// have to round-trip through `lib.rs`.
+///
+/// `matched_branch_number` and `code_result` are always `None` for
+/// C2-dispatched patterns by construction (the dispatch eligibility
+/// checks exclude top-level alternation and inline code blocks).
+fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
+    MatchResult {
+        start: m.start,
+        end: m.end,
+        groups: m.groups,
+        matched_branch_number: None,
+        code_result: None,
+    }
+}
+
 /// Build a `Mutex<LazyDfa>` for the given AST + C2 program if the
 /// pattern is DFA-eligible. Returns `None` if the pattern lacks a C2
 /// program (Pike-VM not eligible) or if the AST contains constructs
@@ -199,6 +218,85 @@ impl Engine {
             }
         }
         Some(false)
+    }
+
+    /// Try to answer `find_first` via the lazy DFA. Returns:
+    /// - `Some(Some(match))` if the DFA found a match (captures
+    ///   recovered via Pike-VM at the matched start position)
+    /// - `Some(None)` if the DFA confirmed no match exists
+    /// - `None` if the DFA isn't available or the cache exhausted —
+    ///   the caller falls back to Pike-VM
+    ///
+    /// C2 step 6 dispatch path. Uses per-position anchored DFA scan
+    /// (mirroring `try_dfa_is_match` plus capture recovery via
+    /// `pike_captures_at` at the matched scan position). The
+    /// design-doc-proposed unanchored+reverse-DFA pipeline is deferred
+    /// because it has subtle "earliest end vs longest end" semantics
+    /// for greedy matching that need separate DFA modes; the
+    /// per-position approach is correct for greedy semantics and is
+    /// O(n × per-position) with the per-position cost being DFA-fast
+    /// (one byte-class lookup + one transition table lookup per byte)
+    /// rather than Pike-VM-fast (epsilon-closure-bounded per byte).
+    #[doc(hidden)]
+    pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
+        let dfa_mutex = self.should_dispatch_to_dfa()?;
+        let c2 = self.vm.program.c2_program.as_ref()?;
+        let mut dfa = dfa_mutex.lock().ok()?;
+        for start in 0..=input.len() {
+            match dfa.find_match_at(input, start) {
+                DfaSearchOutcome::Match(_) => {
+                    // DFA confirms a match starts at this position.
+                    // Recover captures via Pike-VM at this exact start.
+                    drop(dfa);
+                    let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+                    return Some(Some(pike_match_to_match_result(pike_match)));
+                }
+                DfaSearchOutcome::NoMatch => continue,
+                DfaSearchOutcome::Exhausted => return None,
+            }
+        }
+        Some(None)
+    }
+
+    /// Try to answer `find_all` via the lazy DFA. Returns:
+    /// - `Some(matches)` if the DFA produced a definitive list of all
+    ///   non-overlapping matches (captures recovered via Pike-VM)
+    /// - `None` if the DFA isn't available or the cache exhausted at
+    ///   any point during the scan
+    ///
+    /// Same advance rules as `pike_find_all` and the existing VM:
+    /// after a non-empty match next scan starts at end, after an empty
+    /// match next scan starts one byte later, and an empty match
+    /// adjacent to a previous non-empty match is dropped.
+    #[doc(hidden)]
+    pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
+        let dfa_mutex = self.should_dispatch_to_dfa()?;
+        let c2 = self.vm.program.c2_program.as_ref()?;
+        let mut results = Vec::new();
+        let mut start = 0usize;
+        let mut prev_non_empty_end: Option<usize> = None;
+        while start <= input.len() {
+            let outcome = {
+                let mut dfa = dfa_mutex.lock().ok()?;
+                dfa.find_match_at(input, start)
+            };
+            match outcome {
+                DfaSearchOutcome::Match(end) => {
+                    let is_empty = end == start;
+                    if is_empty && Some(start) == prev_non_empty_end {
+                        start += 1;
+                        continue;
+                    }
+                    let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+                    results.push(pike_match_to_match_result(pike_match));
+                    prev_non_empty_end = if is_empty { None } else { Some(end) };
+                    start = if is_empty { start + 1 } else { end };
+                }
+                DfaSearchOutcome::NoMatch => start += 1,
+                DfaSearchOutcome::Exhausted => return None,
+            }
+        }
+        Some(results)
     }
 
     /// C2 classification of the compiled pattern this engine was built for.

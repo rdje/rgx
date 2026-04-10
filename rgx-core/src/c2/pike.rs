@@ -706,6 +706,40 @@ pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMa
     None
 }
 
+/// Returns the match at a **specific** scan position with capture
+/// group positions, or `None` if the pattern doesn't match starting at
+/// `start`.
+///
+/// Mirrors [`pike_captures`] but runs the simulator at exactly one scan
+/// position rather than scanning every position from 0 to `input.len()`.
+/// Used by C2 step 6 engine dispatch to recover capture positions
+/// after the lazy DFA has confirmed a match exists at a specific scan
+/// position. Avoids the wasted scan that calling `pike_captures` would
+/// do for the same caller.
+///
+/// This is the bounded-Pike-VM-pass building block from
+/// `docs/C2_NFA_DFA_DESIGN.md` §9 with the START position known.
+#[must_use]
+pub fn pike_captures_at(
+    program: &CompiledC2Program,
+    input: &[u8],
+    start: usize,
+) -> Option<PikeMatch> {
+    let nfa = &program.forward_anchored;
+    let bcm = &program.byte_class_map;
+    let num_slots = slot_count(program);
+    let (end, mut caps) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots)?;
+    // Populate the overall match span (slots 0 and 1) from the known
+    // start position and the simulator's matched end.
+    caps[0] = Some(start);
+    caps[1] = Some(end);
+    Some(PikeMatch {
+        start,
+        end,
+        groups: captures_to_groups(&caps),
+    })
+}
+
 /// Returns all non-overlapping matches in `input` with capture group
 /// positions in left-to-right order.
 ///

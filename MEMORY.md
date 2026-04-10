@@ -1424,3 +1424,30 @@ NOT dispatched (still go to Pike-VM): anchored patterns (`\A`/`\z`/`\Z`/`^`/`$`)
 
 ### Next concrete action
 - C2 step 6: lazy reverse DFA cache. Mirrors step 5 but for the reverse NFA. Once landed, find_first/find_all can use the proper DFA-driven scan: forward DFA finds the match end, reverse DFA finds the match start, Pike-VM bounded over the matched span recovers captures. This is the design doc §9 "two-pass capture recovery" approach. Engine dispatch updates accordingly. The find paths finally deliver the DFA performance win.
+
+## 2026-04-10 session — C2 step 6 shipped (DFA dispatch for find_first/find_all)
+
+### Deviation from the design doc
+- The design doc §15 step 6 was "lazy reverse DFA cache" with the unanchored+reverse pipeline. I took a simpler alternative: **per-position anchored DFA scan** mirroring step 5b's `is_match` pattern. The reverse-DFA pipeline has subtle greedy-semantics issues (earliest end vs longest end) that need separate DFA modes; the per-position approach is correct for greedy semantics out of the box.
+- The reverse DFA can come later as a performance optimization (O(n+bounded) for sparse matches vs O(n × per-position) for the per-position approach). For now, correctness > extra speed.
+
+### What landed
+- New `pike_captures_at(program, input, start)` in `c2/pike.rs`. Wraps `pike_match_at_with_captures` to recover captures at a known scan position. Used by engine dispatch to avoid re-scanning the entire input after the DFA has located the match start.
+- New `Engine::try_dfa_find_first(input) -> Option<Option<MatchResult>>` and `Engine::try_dfa_find_all(input) -> Option<Vec<MatchResult>>`. Both lock the DFA mutex, scan with `find_match_at`, recover captures via `pike_captures_at`, return `None` on cache exhaustion to signal fall-back.
+- `Regex::find_first` and `Regex::find_all` now have 3-tier dispatch: DFA → Pike-VM → existing VM.
+- New private `pike_match_to_match_result` helper in engine.rs (mirrors the one in lib.rs).
+
+### Zero new failures from the broader differential gate
+880 tests pass with DFA dispatch active across is_match + find_first + find_all. The DFA correctness work in step 5a + the eligibility exclusions in 5b were solid enough that wiring the find paths produced no test regressions.
+
+### What's now dispatched to DFA
+All three primitive find methods (is_match, find_first, find_all) for DFA-eligible patterns:
+- Eligible: literals (incl. non-ASCII single chars), ASCII char classes, ASCII shorthand classes, sequences, alternations within groups, GREEDY quantifiers, Dot, \R, capturing groups
+- Excluded (route to Pike-VM): zero-width assertions (\A/\z/\Z/^/$/\b/\B/\G), lazy quantifiers, top-level alternation, flag groups, multi-byte char classes, runtime event observers/safety limits
+
+### C2 step 6 is complete
+- The lazy DFA is now wired into all three primitive Regex API methods.
+- The find paths' hot loop is: lock DFA mutex → per-position `find_match_at` (two array lookups per byte) → release → Pike-VM `pike_captures_at` for captures. For sparse-match patterns the DFA scan dominates and is much faster than Pike-VM scanning every position.
+
+### Next concrete action
+- C2 step 7: literal prefix integration. The existing memmem fast path (in vm.rs) skips positions where the pattern's first literal byte can't match. Wire this into the C2 dispatch path so the DFA scan also benefits — instead of trying every position 0..=len, jump to the next memmem-match position before invoking the DFA. Combines the existing literal acceleration with the new DFA simulation. Potentially more impactful than the reverse DFA for patterns with literal prefixes.

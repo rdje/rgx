@@ -47,6 +47,7 @@ pub use classifier::{classify, Classification, ExclusionReason};
 pub use dfa::{DfaStateId, LazyDfa};
 pub use nfa::{reverse_ast, CaptureTag, Nfa, NfaState, NfaStateId, ZeroWidthAssertion};
 pub use pike::{
-    pike_captures, pike_captures_all, pike_find_all, pike_find_first, pike_is_match, PikeMatch,
+    pike_captures, pike_captures_all, pike_captures_at, pike_find_all, pike_find_first,
+    pike_is_match, PikeMatch,
 };
 pub use program::CompiledC2Program;

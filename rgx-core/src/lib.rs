@@ -1050,8 +1050,11 @@ impl Regex {
     #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
-        // C2 step 4c: dispatch through the Pike-VM for C2-eligible patterns.
-        let matches = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+        // C2 step 6: 3-tier dispatch — try the lazy DFA first, then
+        // Pike-VM, then the existing backtracking VM.
+        let matches = if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
+            dfa_result
+        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
             crate::c2::pike_captures_all(c2, text.as_bytes())
                 .into_iter()
                 .map(pike_match_to_match_result)
@@ -1081,12 +1084,13 @@ impl Regex {
     #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
-        // C2 step 4c: dispatch through the Pike-VM when the pattern is
-        // C2-eligible. The Pike-VM tracks captures, so it can fully
-        // populate `MatchResult.groups`. `matched_branch_number` is
-        // always None for C2-dispatched patterns by construction (the
-        // dispatch eligibility check excludes top-level alternations).
-        let first = if let Some(c2) = self.engine.should_dispatch_to_c2() {
+        // C2 step 6: 3-tier dispatch — try the lazy DFA first (faster
+        // per-byte for DFA-eligible patterns), then Pike-VM (for
+        // patterns DFA can't handle), then the existing backtracking
+        // VM (for patterns outside the C2 subset).
+        let first = if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
+            dfa_result
+        } else if let Some(c2) = self.engine.should_dispatch_to_c2() {
             crate::c2::pike_captures(c2, text.as_bytes()).map(pike_match_to_match_result)
         } else {
             self.engine.find_first(text.as_bytes())
