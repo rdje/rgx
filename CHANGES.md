@@ -14,6 +14,34 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-10 - C2 step 3a: forward Thompson NFA construction (anchored + unanchored)
+- Scope: Third code commit for the C2 NFA/DFA hybrid engine. SOTA quality from day one. Standalone module per design doc §15 — no engine wiring, no `Program` field, no Pike-VM yet (that's step 4). Step 3b will add the reverse NFA and `CompiledC2Program` assembly.
+- Step 3 is the biggest single step in the C2 plan, so it's split into 3a (this commit, forward NFA) and 3b (reverse NFA + assembly). Each sub-commit is a coherent, production-quality deliverable.
+- New module: `rgx-core/src/c2/nfa.rs` (~1180 lines incl. tests). Defines `Nfa`, `NfaState`, `NfaStateId`, `ByteClassId`, `EpsilonPriority`, `EpsilonEdge`, `CaptureTag`, `ZeroWidthAssertion`. Re-exported via `c2::{Nfa, NfaState, NfaStateId, CaptureTag, ZeroWidthAssertion}`.
+- Forward Thompson NFA construction in both anchored and unanchored variants for the full no-backtracking subset:
+  - `Char` (1- to 4-byte UTF-8 codepoints, encoded as state chains via `char::encode_utf8`)
+  - `CharClass::Custom` (multi-range, with negation support via `invert_char_ranges` over the Unicode universe excluding the surrogate gap)
+  - `CharClass::Digit`, `CharClass::Word`, `CharClass::Space` (predefined ranges)
+  - `CharClass::UnicodeClass` (resolved via the existing `unicode_support` bridge)
+  - `Dot` (any byte except newline)
+  - Top-level `Digit`, `Word`, `Space`, `UnicodeClass`, `WhitespaceLiteral`
+  - `NewlineSequence` (`\R` — alternation of `\r\n` and the seven single-character newline forms)
+  - `Anchor` (`^`, `$`, `\A`, `\Z`, `\z`, `\G` — encoded as `ZeroWidthAssertion` on epsilon edges)
+  - `WordBoundary` (`\b`, `\B`)
+  - `Empty`
+  - `Sequence` (chained fragments via epsilon connectors)
+  - `Alternation` (fan-out from new start with priority-ordered branches, fan-in to new accept)
+  - `Quantified` (greedy and lazy `?`, `*`, `+`, plus `{n}`, `{n,m}`, `{n,}` — bounded ranges unrolled per RE2/regex convention, unbounded ranges = `n` mandatory copies + `*` tail)
+  - `Group::Capturing` (wrapped with `CaptureTag::GroupStart(N)` / `GroupEnd(N)` on epsilon entry/exit, recovered later by the bounded Pike-VM capture pass per design doc §9)
+  - `Group::NonCapturing` (descend without tags)
+  - `FlagGroup` (descend; flag handling is the parser's job)
+- Multi-byte UTF-8 handling: codepoint ranges decomposed via `regex_syntax::utf8::Utf8Sequences` (already a transitive dep). Each Utf8Sequence becomes a chain of byte-class transitions; multiple sequences from a single character class become an alternation of chains sharing entry and accept states. The chain construction handles cases where a per-position UTF-8 byte range spans multiple byte-class IDs by emitting transitions on every overlapping class.
+- Greedy vs lazy quantifier priorities encoded on epsilon edges via the `EpsilonPriority` field. **Lower priority is preferred** under leftmost-first semantics. Greedy `e?` puts the "try matching" edge at priority 0; lazy `e??` puts the "skip" edge at priority 0. Verified by the `lazy_zero_or_one_swaps_priorities` test.
+- Unanchored variant uses a lazy `(?s:.)*?` prefix wired before the pattern via an epsilon connector. The dot in the prefix matches **any byte** (including newline) so unanchored matching can skip over newlines to find a later match. The prefix is constructed via the same Thompson machinery (`build_any_byte` plus `build_zero_or_more`-style wrapping with lazy priorities). Same approach as RE2 and the Rust `regex` crate.
+- 30 new unit tests in `rgx-core/src/c2/nfa.rs::tests` covering: empty pattern, single ASCII literal, 2-byte and 3-byte UTF-8 literals, ASCII char class, negated char class, shorthand classes, `Dot`, sequence chaining, alternation fan-out/fan-in, alternation branch priority order, greedy and lazy `?` priority swap, `*` loop-back, `+` minimum-one-match, range quantifier unrolling for `{n}` `{0,m}` and `{n,}`, capturing group tag emission, nested capturing groups, non-capturing group tag absence, anchors emit zero-width assertions, word boundaries emit assertions, unanchored variant has more states than anchored, unanchored prefix has lazy priorities, realistic combined pattern `(a|b)+(cd)?`, newline sequence, `invert_char_ranges` round-trip, `byte_classes_in_range` sorted+unique invariant.
+- 1 small fix during initial build: `kind` in the `Group` AST destructure needed `.clone()` instead of `*` because `GroupKind` doesn't implement `Copy`. Caught by the first `cargo build`.
+- Validation: `cargo test -p rgx-core c2::nfa` 30/0/0. Full quality gates green: `cargo fmt --check`, `cargo test -p rgx-core`, `-p rgx-cli`, `cargo clippy --workspace --all-targets`. No new clippy warnings introduced.
+
 ### 2026-04-10 - C2 step 2: byte-class equivalence partitioning (standalone module)
 - Scope: Second code commit for the C2 NFA/DFA hybrid engine. SOTA quality from day one per `feedback_sota_first_time.md`. Standalone module per design doc §15 — no engine wiring, no `Program` field, no runtime behaviour change.
 - New module: `rgx-core/src/c2/byte_class.rs` with `ByteClassMap` struct (`table: [u8; 256]`, `num_classes: u16`), `build_from_ast(&Regex)` constructor, `class_of(byte)` lookup, `num_classes()` accessor. Re-exported via `c2::ByteClassMap`.

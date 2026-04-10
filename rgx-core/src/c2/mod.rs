@@ -18,9 +18,11 @@
 //!
 //! - **Step 0**: design proposal landed. ✅
 //! - **Step 1**: pattern classifier — metadata only, no runtime dispatch. ✅
-//! - **Step 2 (this commit)**: byte-class equivalence partitioning —
-//!   standalone module, no engine wiring. ✅
-//! - **Step 3**: forward + reverse Thompson NFA construction. (planned)
+//! - **Step 2**: byte-class equivalence partitioning — standalone module. ✅
+//! - **Step 3a (this commit)**: forward Thompson NFA construction
+//!   (anchored + unanchored variants). ✅
+//! - **Step 3b**: reverse NFA construction + `CompiledC2Program`
+//!   assembly. (planned)
 //! - **Step 4**: sparse-set Pike-VM with differential gate active. (planned)
 //! - **Step 5**: lazy forward DFA cache. (planned)
 //! - **Step 6**: lazy reverse DFA cache. (planned)
@@ -29,6 +31,8 @@
 
 pub mod byte_class;
 pub mod classifier;
+pub mod nfa;
 
 pub use byte_class::ByteClassMap;
 pub use classifier::{classify, Classification, ExclusionReason};
+pub use nfa::{CaptureTag, Nfa, NfaState, NfaStateId, ZeroWidthAssertion};

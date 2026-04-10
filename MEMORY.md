@@ -1222,3 +1222,26 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 3 = forward + reverse Thompson NFA construction. New `rgx-core/src/c2/nfa.rs` module. Builds a forward NFA from the AST (anchored and unanchored variants) and a reverse NFA from the AST (anchored and unanchored variants). Uses `ByteClassMap` to label transitions by class ID rather than raw byte. Standalone module — no Pike-VM yet (that's step 4).
+
+## 2026-04-10 session — C2 step 3a shipped (forward Thompson NFA)
+
+### Split decision
+- Step 3 is the biggest step in the C2 plan, so I split it into 3a (forward NFA, anchored + unanchored) and 3b (reverse NFA + CompiledC2Program assembly). Each sub-commit is a coherent, production-quality deliverable. The user said "PNT" so I rolled with this split rather than asking for sign-off.
+
+### What landed
+- `rgx-core/src/c2/nfa.rs` (~1180 lines incl. tests). Forward Thompson NFA construction for the full no-backtracking subset.
+- Data structures: `Nfa`, `NfaState`, `NfaStateId`, `ByteClassId`, `EpsilonPriority`, `EpsilonEdge`, `CaptureTag`, `ZeroWidthAssertion`. Internal `Fragment` and `NfaBuilder`.
+- Thompson rules implemented for every supported AST node: `Char` (1-4 byte UTF-8), `CharClass` (Custom with negation, Digit/Word/Space, UnicodeClass), `Dot`, `Digit`/`Word`/`Space` top-level, `UnicodeClass` top-level, `NewlineSequence`, `Anchor`, `WordBoundary`, `Empty`, `WhitespaceLiteral`, `Sequence`, `Alternation`, `Quantified` (?, *, +, {n}, {n,m}, {n,} greedy and lazy), `Group` (Capturing with capture tags, NonCapturing), `FlagGroup` (descend).
+- Multi-byte UTF-8 via `regex_syntax::utf8::Utf8Sequences`. Codepoint ranges decompose into per-position byte ranges; each chain of byte-class transitions can fan out when a per-position range spans multiple byte classes.
+- Greedy/lazy priority encoding on epsilon edges. Lower priority preferred (leftmost-first semantics).
+- Unanchored variant via lazy `(?s:.)*?` prefix that matches any byte (including newline). Same approach as RE2 and the Rust `regex` crate.
+- 30 unit tests covering structural correctness, multi-byte chains, alternation priority, greedy/lazy swaps, range unrolling, capture tag placement, anchor emission, unanchored prefix priorities, realistic combined patterns, helper invariants.
+- 1 small build error caught immediately: `GroupKind` doesn't implement `Copy`, so `*kind` in the destructure had to be `kind.clone()`. Fixed in the same edit cycle.
+
+### Pending items deferred to step 3b
+- Reverse NFA construction (mirrors forward, swaps concatenation order, swaps anchors `^` ↔ `$`, `\A` ↔ `\z`)
+- `CompiledC2Program` struct holding all 4 NFAs (forward+anchored, forward+unanchored, reverse+anchored, reverse+unanchored) + ByteClassMap + capture metadata
+- `GraphemeCluster` (`\X`) handling — currently classified as NoBacktracking by the classifier but the NFA builder produces an unmatchable fragment for it. Needs to be either properly implemented in step 3b or moved out of the subset by adding `ExclusionReason::GraphemeCluster` to the classifier. Decision deferred until step 3b.
+
+### Next concrete action
+- C2 step 3b = reverse NFA construction + CompiledC2Program assembly. The reverse NFA is structurally symmetric to the forward NFA (concatenation reversed, anchors swapped, alternation/quantifiers unchanged because they're symmetric). CompiledC2Program holds all 4 NFAs plus the ByteClassMap and capture metadata. Decide on \X handling.
