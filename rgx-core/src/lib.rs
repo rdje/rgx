@@ -52,11 +52,23 @@
 pub mod ast;
 /// Byte-oriented regex matching on `&[u8]` without requiring valid UTF-8.
 pub mod bytes;
+/// C1: JIT compilation backend (Cranelift).
+///
+/// See `docs/C1_JIT_COMPILATION_DESIGN.md` for the full design proposal.
+/// Currently at step 1 of the §14 phased plan: standalone JIT host plumbing
+/// (Cranelift `JITModule` wrapper, runtime helper skeleton, smoke test).
+/// No engine wiring, no opcode lowering, no dispatch — that lands in steps
+/// 3–5. Gated behind the `jit` Cargo feature; opt-in until the production
+/// cutover at step 8.
+#[cfg(feature = "jit")]
+pub mod c1;
 /// C2: NFA/DFA hybrid engine for the no-backtracking subset.
 ///
-/// See `docs/C2_NFA_DFA_DESIGN.md` for the full design proposal. Currently
-/// at step 1 of the §15 phased plan: pattern classifier only, metadata
-/// only, no runtime dispatch yet.
+/// See `docs/C2_NFA_DFA_DESIGN.md` for the full design proposal. Shipped
+/// 2026-04-11 — all 9 steps (0–8) complete. The dispatch chain in
+/// [`engine::Engine`] routes classifier-positive patterns through the lazy
+/// DFA (DFA-eligible) or the sparse-set Pike-VM (nested-quantifier) and
+/// falls back to the existing backtracking VM otherwise.
 pub mod c2;
 /// Thread-safe compilation cache for regex patterns.
 pub mod cache;

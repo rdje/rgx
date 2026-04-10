@@ -40,6 +40,18 @@ serde_stacker = { version = "0.1", optional = true }
 regex-syntax = "0.8.6"
 pgen = { path = "../subs/pgen/rust", default-features = false, features = ["generated_parsers"], optional = true }
 
+# C1 JIT compilation backend (Cranelift). Gated behind the `jit` feature.
+# Pinned to the same minor version Wasmtime 14 already pulls in transitively
+# so the workspace dependency graph stays single-version. See
+# `docs/C1_JIT_COMPILATION_DESIGN.md` §4.2 for the rationale and §11 for the
+# feature gating story.
+cranelift-codegen = { version = "0.101", optional = true, default-features = false, features = ["std"] }
+cranelift-frontend = { version = "0.101", optional = true, default-features = false, features = ["std"] }
+cranelift-module = { version = "0.101", optional = true }
+cranelift-jit = { version = "0.101", optional = true }
+cranelift-native = { version = "0.101", optional = true }
+target-lexicon = { version = "0.12", optional = true }
+
 [features]
 default = ["std", "pgen-parser"]
 std = []
@@ -50,6 +62,18 @@ lua = ["mlua"]
 javascript = ["rquickjs"]
 rhai = ["dep:rhai"]
 all-languages = ["wasm", "lua", "javascript", "rhai"]
+# C1 JIT compilation. Opt-in for step 1 (the standalone host plumbing).
+# Will become default-on at the C1 production cutover (step 8) once the
+# differential gate has verified end-to-end correctness on every supported
+# target. Gated dependencies bring in Cranelift for native code generation.
+jit = [
+    "dep:cranelift-codegen",
+    "dep:cranelift-frontend",
+    "dep:cranelift-module",
+    "dep:cranelift-jit",
+    "dep:cranelift-native",
+    "dep:target-lexicon",
+]
 
 [dev-dependencies]
 criterion = { workspace = true }
