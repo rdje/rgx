@@ -321,7 +321,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### Tier 0 — Active focus (perf push, started 2026-04-09)
 | Item | Effort | Why | Status |
 |------|--------|-----|--------|
-| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. | **Steps 1-3a shipped** — pattern classifier (step 1), byte-class equivalence partitioning (step 2), forward Thompson NFA construction with anchored+unanchored variants (step 3a) in `rgx-core/src/c2/`. All standalone, no engine wiring yet. Step 0 design doc: `docs/C2_NFA_DFA_DESIGN.md`. Next: step 3b (reverse NFA + `CompiledC2Program` assembly). 8-step phased plan, multi-week timeline. |
+| **C2 NFA/DFA hybrid** | `major` | Algorithmic class change. "Can't hang" guarantee for the common no-backtracking subset. 10x-100x typical speedup on regular patterns. | **Steps 1-3 shipped** — pattern classifier (step 1), byte-class equivalence partitioning (step 2), forward + reverse Thompson NFA construction with anchored+unanchored variants and `CompiledC2Program` assembly (step 3a + 3b) in `rgx-core/src/c2/`. All standalone, no engine wiring yet. `\X` moved out of the subset (falls back to existing VM). Step 0 design doc: `docs/C2_NFA_DFA_DESIGN.md`. Next: step 4 (sparse-set Pike-VM with the differential gate against the existing VM going active). 8-step phased plan, multi-week timeline. |
 | **C1 JIT compilation** | `major` | Constant-factor multiplier (~5-10x) on whichever engine runs. Sequenced after C2 so wins compound. | Planned. Starts after C2 production cutover. |
 
 ### Tier 1 — Do now (production blockers + quick wins)

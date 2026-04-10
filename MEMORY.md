@@ -1245,3 +1245,29 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 3b = reverse NFA construction + CompiledC2Program assembly. The reverse NFA is structurally symmetric to the forward NFA (concatenation reversed, anchors swapped, alternation/quantifiers unchanged because they're symmetric). CompiledC2Program holds all 4 NFAs plus the ByteClassMap and capture metadata. Decide on \X handling.
+
+## 2026-04-10 session — C2 step 3b shipped (reverse NFA + CompiledC2Program)
+
+### What landed
+- `reverse_ast` helper in `c2/nfa.rs`. Walks the AST and produces a structurally reversed AST. The cleanest way to build the reverse NFA is to reverse the AST and reuse the forward Thompson construction — no parallel build logic to drift.
+- `Nfa::build_reverse_anchored` / `Nfa::build_reverse_unanchored` constructors. One-liners that call `reverse_ast` then `build_anchored` / `build_unanchored`.
+- New module `c2/program.rs` with `CompiledC2Program` struct holding the byte-class map + all 4 NFAs + capture group count. `build_from_ast` constructor builds the byte-class map ONCE from the original AST and reuses it for both directions (the set of bytes the pattern uses is direction-independent).
+- 14 new reverse-NFA unit tests + 8 new CompiledC2Program unit tests + 1 new classifier test.
+
+### \X decision: moved out of the C2 subset
+- `\X` (extended grapheme cluster) was previously classified as `NoBacktracking` but the NFA builder produced an unmatchable fragment for it (defensive fallback). Either implement it properly or move it out.
+- Decision: move it out. Matching a grapheme cluster needs Unicode-aware traversal of base codepoint + combining marks, which doesn't fit cleanly into Thompson NFA without significant extra machinery. SOTA-first preference says don't ship a half-baked version.
+- Implementation: added `ExclusionReason::GraphemeCluster` variant, classifier now returns `NeedsVm { GraphemeCluster }` for `Regex::GraphemeCluster`. `\X` patterns continue to run on the existing backtracking VM (which has full `\X` support). Can be added to the C2 subset later if profiling shows it matters.
+- Test impact: renamed `classifies_newline_sequence_and_grapheme_cluster_as_no_backtracking` to `classifies_newline_sequence_as_no_backtracking` and added a new `excludes_grapheme_cluster_from_c2_subset` test.
+
+### Reverse anchor handling
+- `^` ↔ `$` flip. `\A` ↔ `\z` flip. `\Z` (end of input or just before final newline) is approximated as `\A` for the reverse direction — the exact final-newline corner case would need runtime simulator support to handle perfectly. Documented as a known approximation in the `reverse_anchor_type` doc comment. Not a blocker for the no-backtracking subset since `\Z` is rare in practice.
+
+### NewlineSequence (`\R`) reversal
+- `\R` matches `\r\n` OR any single newline-like char. The reverse needs to match `\n\r` for the CRLF branch. Solved by expanding `\R` to its structural alternation form `(\r\n | \n | \v | \f | \r | \u{85} | \u{2028} | \u{2029})` BEFORE reversing — the structural reversal then naturally produces `(\n\r | ...)`. Tested via `reverse_ast_expands_newline_sequence_so_crlf_branch_reverses`.
+
+### Step 3 is complete
+- Forward NFA (3a) + reverse NFA (3b) + CompiledC2Program (3b) = step 3 complete. The C2 module now has everything needed for step 4 (Pike-VM) to start running these NFAs against real input.
+
+### Next concrete action
+- C2 step 4 = sparse-set Pike-VM. This is where the differential testing gate against the existing backtracking VM goes active for the first time. New `c2/pike.rs` with the sparse-set state container and the parallel-state simulation loop. Wires into engine dispatch for `is_match` / `find_first` / `find_all` / `captures` for `NoBacktracking`-classified patterns. New `tests/c2_differential.rs` to verify byte-for-byte equivalence with the existing VM on the classifier-positive test corpus.

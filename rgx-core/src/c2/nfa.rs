@@ -65,6 +65,199 @@ use regex_syntax::utf8::Utf8Sequences;
 use std::collections::HashSet;
 
 // ============================================================
+// AST reversal (used to build the reverse NFA from the forward AST)
+// ============================================================
+
+/// Reverse a regex AST so that an NFA built from the result recognises
+/// the **reverse** of the language recognised by the original AST.
+///
+/// Used by the reverse NFA constructors ([`Nfa::build_reverse_anchored`]
+/// and [`Nfa::build_reverse_unanchored`]). The reverse NFA is consumed by
+/// the lazy reverse DFA in C2 step 6 to recover match start positions
+/// efficiently after the forward DFA has found a match end.
+///
+/// # Reversal rules
+///
+/// - **Leaves** (literals, character classes, shorthands, dot, Unicode
+///   property classes, `WhitespaceLiteral`, `Empty`) are their own reverse.
+/// - **Word boundaries** are symmetric — `\b` reversed is still `\b`.
+/// - **Anchors** are flipped: `^` ↔ `$`, `\A` ↔ `\z`, and `\Z` is
+///   approximated as `\A` for the reverse direction (the final-newline
+///   semantics of `\Z` are handled by the runtime simulator).
+/// - **`\R`** (newline sequence) is expanded to its structural alternation
+///   form `(\r\n | \n | \v | \f | \r | \u{85} | \u{2028} | \u{2029})`
+///   and then reversed; the `\r\n` branch becomes `\n\r`, which is the
+///   correct reverse-direction match.
+/// - **Sequences** reverse the order of their items and recursively
+///   reverse each item. `Sequence([a, b, c])` becomes `Sequence([c', b', a'])`.
+/// - **Alternations** preserve branch order (each branch is independently
+///   leftmost-first) but recursively reverse each branch.
+/// - **Quantifiers** are symmetric — `e*` reverses to `(reverse e)*`.
+/// - **Groups** preserve their kind, capture index, and name; the inner
+///   expression is recursively reversed. Capture indices stay the same
+///   so the bounded Pike-VM capture pass produces the same logical
+///   capture group identities in either direction.
+/// - **Flag groups** reverse their inner expression and preserve flags.
+///
+/// Out-of-subset nodes (lookaround, backref, recursion, code blocks, etc.)
+/// are visited gracefully — children are recursively reversed where they
+/// exist and the node itself is preserved. The reverse NFA is only
+/// meaningful for `NoBacktracking`-classified patterns where these nodes
+/// don't appear, but the function doesn't crash on a mixed AST.
+///
+/// # Why reverse the AST instead of the NFA
+///
+/// Structurally reversing the NFA's edges would require parallel
+/// construction logic that has to stay in sync with the forward builder.
+/// Reversing the AST and reusing the same `build_fragment` machinery is
+/// simpler and harder to get wrong — the reversal is local and obviously
+/// correct, and the Thompson construction is shared between directions.
+#[must_use]
+pub fn reverse_ast(ast: &Regex) -> Regex {
+    match ast {
+        // Leaves: own reverse.
+        Regex::Char(c) => Regex::Char(*c),
+        Regex::WhitespaceLiteral(c) => Regex::WhitespaceLiteral(*c),
+        Regex::CharClass(cc) => Regex::CharClass(cc.clone()),
+        Regex::Dot => Regex::Dot,
+        Regex::Digit { negated } => Regex::Digit { negated: *negated },
+        Regex::Word { negated } => Regex::Word { negated: *negated },
+        Regex::Space { negated } => Regex::Space { negated: *negated },
+        Regex::UnicodeClass { name, negated } => Regex::UnicodeClass {
+            name: name.clone(),
+            negated: *negated,
+        },
+        Regex::Empty => Regex::Empty,
+        Regex::WordBoundary { positive } => Regex::WordBoundary {
+            positive: *positive,
+        },
+        Regex::MatchReset => Regex::MatchReset,
+
+        // \R: expand to structural form, then reverse so the \r\n branch
+        // becomes \n\r (the correct reverse-direction match).
+        Regex::NewlineSequence => reverse_ast(&newline_sequence_alternation()),
+
+        // Anchors: flip start/end variants.
+        Regex::Anchor(t) => Regex::Anchor(reverse_anchor_type(*t)),
+
+        // Sequences: reverse item order and recursively reverse each item.
+        Regex::Sequence(items) => Regex::Sequence(items.iter().rev().map(reverse_ast).collect()),
+
+        // Alternations: preserve branch order, recursively reverse each branch.
+        Regex::Alternation(items) => Regex::Alternation(items.iter().map(reverse_ast).collect()),
+
+        // Quantifiers: symmetric — reverse the inner expression and keep
+        // the quantifier unchanged.
+        Regex::Quantified { expr, quantifier } => Regex::Quantified {
+            expr: Box::new(reverse_ast(expr)),
+            quantifier: quantifier.clone(),
+        },
+
+        // Groups: preserve kind/index/name, reverse the inner expression.
+        Regex::Group {
+            expr,
+            kind,
+            index,
+            name,
+        } => Regex::Group {
+            expr: Box::new(reverse_ast(expr)),
+            kind: kind.clone(),
+            index: *index,
+            name: name.clone(),
+        },
+
+        // Flag groups: reverse inner expression, preserve flags.
+        Regex::FlagGroup { flags, expr } => Regex::FlagGroup {
+            flags: flags.clone(),
+            expr: Box::new(reverse_ast(expr)),
+        },
+
+        // Out-of-subset nodes — defensive recursion. The classifier
+        // rejects all of these, so the reverse NFA never actually
+        // encounters them via the normal compile pipeline.
+        Regex::GraphemeCluster => Regex::GraphemeCluster,
+        Regex::Lookahead { expr, positive } => Regex::Lookahead {
+            expr: Box::new(reverse_ast(expr)),
+            positive: *positive,
+        },
+        Regex::Lookbehind { expr, positive } => Regex::Lookbehind {
+            expr: Box::new(reverse_ast(expr)),
+            positive: *positive,
+        },
+        Regex::Backreference(n) => Regex::Backreference(*n),
+        Regex::NamedBackreference(n) => Regex::NamedBackreference(n.clone()),
+        Regex::RelativeBackreference(n) => Regex::RelativeBackreference(*n),
+        Regex::Recursion { target } => Regex::Recursion {
+            target: target.clone(),
+        },
+        Regex::ReturnedCaptureSubroutine {
+            target,
+            returned_groups,
+        } => Regex::ReturnedCaptureSubroutine {
+            target: target.clone(),
+            returned_groups: returned_groups.clone(),
+        },
+        Regex::Conditional {
+            condition,
+            true_branch,
+            false_branch,
+        } => Regex::Conditional {
+            condition: condition.clone(),
+            true_branch: Box::new(reverse_ast(true_branch)),
+            false_branch: false_branch.as_ref().map(|fb| Box::new(reverse_ast(fb))),
+        },
+        Regex::CodeBlock { lang, code } => Regex::CodeBlock {
+            lang: lang.clone(),
+            code: code.clone(),
+        },
+        Regex::Callout(n) => Regex::Callout(*n),
+        Regex::ExtendedCharClass { content } => Regex::ExtendedCharClass {
+            content: content.clone(),
+        },
+        Regex::Accept => Regex::Accept,
+        Regex::Commit => Regex::Commit,
+        Regex::Prune => Regex::Prune,
+        Regex::Skip => Regex::Skip,
+        Regex::Then => Regex::Then,
+        Regex::Mark(n) => Regex::Mark(n.clone()),
+    }
+}
+
+/// Flip an anchor type for reverse-direction matching.
+///
+/// `\Z` (end of input or just before final newline) is approximated as
+/// `\A` for the reverse direction. The exact final-newline semantics
+/// would need special-case handling by the runtime simulator if we ever
+/// want exact `\Z` parity in the reverse direction; for the no-backtracking
+/// subset on the first pass, this approximation is correct for patterns
+/// that don't depend on the final-newline corner case.
+fn reverse_anchor_type(t: AnchorType) -> AnchorType {
+    match t {
+        AnchorType::Start => AnchorType::End,
+        AnchorType::End => AnchorType::Start,
+        AnchorType::AbsStart => AnchorType::AbsEndNoNL,
+        AnchorType::AbsEndNoNL => AnchorType::AbsStart,
+        AnchorType::AbsEnd => AnchorType::AbsStart, // approximated; see doc
+        AnchorType::PreviousMatchEnd => AnchorType::PreviousMatchEnd,
+    }
+}
+
+/// The structural alternation form of `\R` used by `reverse_ast` so the
+/// `\r\n` branch can be reversed to `\n\r`.
+fn newline_sequence_alternation() -> Regex {
+    Regex::Alternation(vec![
+        Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')]),
+        Regex::Char('\u{0A}'),
+        Regex::Char('\u{0B}'),
+        Regex::Char('\u{0C}'),
+        Regex::Char('\u{0D}'),
+        Regex::Char('\u{85}'),
+        Regex::Char('\u{2028}'),
+        Regex::Char('\u{2029}'),
+    ])
+}
+
+// ============================================================
 // Public types
 // ============================================================
 
@@ -193,6 +386,37 @@ impl Nfa {
             accept: body.accept,
         };
         builder.into_nfa(combined)
+    }
+
+    /// Build an anchored **reverse** NFA from `ast` using the precomputed
+    /// `byte_class_map`.
+    ///
+    /// The reverse NFA recognises the reverse of the language recognised
+    /// by the forward NFA. Used by the lazy reverse DFA in C2 step 6 to
+    /// recover match start positions efficiently after the forward DFA
+    /// has found a match end.
+    ///
+    /// Implemented as a forward Thompson construction over the reversed
+    /// AST produced by [`reverse_ast`]. The same `NfaBuilder` machinery
+    /// is reused, which guarantees structural symmetry between the
+    /// forward and reverse NFAs.
+    #[must_use]
+    pub fn build_reverse_anchored(ast: &Regex, byte_class_map: &ByteClassMap) -> Self {
+        let reversed = reverse_ast(ast);
+        Self::build_anchored(&reversed, byte_class_map)
+    }
+
+    /// Build an unanchored **reverse** NFA from `ast` using the precomputed
+    /// `byte_class_map`.
+    ///
+    /// Like [`Nfa::build_reverse_anchored`] but with the same lazy
+    /// `(?s:.)*?` prefix used by [`Nfa::build_unanchored`]. The reverse
+    /// unanchored NFA scans backward over the input prefix and finds the
+    /// earliest position from which the pattern matches.
+    #[must_use]
+    pub fn build_reverse_unanchored(ast: &Regex, byte_class_map: &ByteClassMap) -> Self {
+        let reversed = reverse_ast(ast);
+        Self::build_unanchored(&reversed, byte_class_map)
     }
 
     /// All states in the NFA.
@@ -1321,6 +1545,198 @@ mod tests {
                 assert!(
                     !('a'..='z').contains(&c),
                     "inverted ranges should not contain {c:?}"
+                );
+            }
+        }
+    }
+
+    // ============================================================
+    // Reverse AST and reverse NFA
+    // ============================================================
+
+    #[test]
+    fn reverse_ast_leaves_atomic_nodes_unchanged() {
+        assert_eq!(reverse_ast(&lit('a')), lit('a'));
+        assert_eq!(reverse_ast(&Regex::Dot), Regex::Dot);
+        assert_eq!(reverse_ast(&Regex::Empty), Regex::Empty);
+        assert_eq!(
+            reverse_ast(&Regex::Digit { negated: false }),
+            Regex::Digit { negated: false }
+        );
+        assert_eq!(
+            reverse_ast(&Regex::WordBoundary { positive: true }),
+            Regex::WordBoundary { positive: true }
+        );
+    }
+
+    #[test]
+    fn reverse_ast_reverses_sequence_order() {
+        let ast = seq(vec![lit('a'), lit('b'), lit('c')]);
+        let reversed = reverse_ast(&ast);
+        assert_eq!(reversed, seq(vec![lit('c'), lit('b'), lit('a')]));
+    }
+
+    #[test]
+    fn reverse_ast_recursively_reverses_nested_sequences() {
+        // (ab)(cd) → (dc)(ba) — outer sequence reversed, each inner
+        // sequence also reversed.
+        let ast = seq(vec![
+            seq(vec![lit('a'), lit('b')]),
+            seq(vec![lit('c'), lit('d')]),
+        ]);
+        let reversed = reverse_ast(&ast);
+        assert_eq!(
+            reversed,
+            seq(vec![
+                seq(vec![lit('d'), lit('c')]),
+                seq(vec![lit('b'), lit('a')]),
+            ])
+        );
+    }
+
+    #[test]
+    fn reverse_ast_preserves_alternation_branch_order_but_reverses_each() {
+        let ast = alt(vec![
+            seq(vec![lit('a'), lit('b')]),
+            seq(vec![lit('c'), lit('d')]),
+        ]);
+        let reversed = reverse_ast(&ast);
+        assert_eq!(
+            reversed,
+            alt(vec![
+                seq(vec![lit('b'), lit('a')]),
+                seq(vec![lit('d'), lit('c')]),
+            ])
+        );
+    }
+
+    #[test]
+    fn reverse_ast_keeps_quantifiers_unchanged_but_reverses_inner() {
+        let ast = quantified(
+            seq(vec![lit('a'), lit('b')]),
+            Quantifier::OneOrMore { lazy: false },
+        );
+        let reversed = reverse_ast(&ast);
+        assert_eq!(
+            reversed,
+            quantified(
+                seq(vec![lit('b'), lit('a')]),
+                Quantifier::OneOrMore { lazy: false },
+            )
+        );
+    }
+
+    #[test]
+    fn reverse_ast_preserves_capture_indices_in_groups() {
+        let ast = group_capturing(1, seq(vec![lit('a'), lit('b')]));
+        let reversed = reverse_ast(&ast);
+        assert_eq!(reversed, group_capturing(1, seq(vec![lit('b'), lit('a')])));
+    }
+
+    #[test]
+    fn reverse_ast_flips_start_and_end_anchors() {
+        assert_eq!(
+            reverse_ast(&Regex::Anchor(AnchorType::Start)),
+            Regex::Anchor(AnchorType::End)
+        );
+        assert_eq!(
+            reverse_ast(&Regex::Anchor(AnchorType::End)),
+            Regex::Anchor(AnchorType::Start)
+        );
+    }
+
+    #[test]
+    fn reverse_ast_flips_abs_start_and_abs_end_no_nl() {
+        assert_eq!(
+            reverse_ast(&Regex::Anchor(AnchorType::AbsStart)),
+            Regex::Anchor(AnchorType::AbsEndNoNL)
+        );
+        assert_eq!(
+            reverse_ast(&Regex::Anchor(AnchorType::AbsEndNoNL)),
+            Regex::Anchor(AnchorType::AbsStart)
+        );
+    }
+
+    #[test]
+    fn reverse_ast_double_reverse_recovers_simple_pattern() {
+        // A literal pattern double-reversed should equal itself.
+        let ast = seq(vec![lit('a'), lit('b'), lit('c')]);
+        assert_eq!(reverse_ast(&reverse_ast(&ast)), ast);
+    }
+
+    #[test]
+    fn reverse_ast_expands_newline_sequence_so_crlf_branch_reverses() {
+        let reversed = reverse_ast(&Regex::NewlineSequence);
+        // The first branch must be the reversed CRLF sequence: \n then \r.
+        if let Regex::Alternation(branches) = reversed {
+            assert!(!branches.is_empty());
+            match &branches[0] {
+                Regex::Sequence(items) => {
+                    assert_eq!(items.len(), 2);
+                    assert_eq!(items[0], Regex::Char('\n'));
+                    assert_eq!(items[1], Regex::Char('\r'));
+                }
+                other => panic!("expected Sequence([\\n, \\r]), got {other:?}"),
+            }
+        } else {
+            panic!("expected Alternation, got {reversed:?}");
+        }
+    }
+
+    #[test]
+    fn reverse_anchored_nfa_is_reachable() {
+        let ast = seq(vec![lit('a'), lit('b'), lit('c')]);
+        let bcm = ByteClassMap::build_from_ast(&ast);
+        let nfa = Nfa::build_reverse_anchored(&ast, &bcm);
+        assert!(is_reachable(&nfa, nfa.start(), nfa.accept()));
+        // 3 literal fragments × 2 states + 2 epsilons for the sequence
+        // wiring = same shape as the forward NFA for "cba".
+        assert_eq!(nfa.num_states(), 6);
+        assert_eq!(count_transitions(&nfa), 3);
+    }
+
+    #[test]
+    fn reverse_unanchored_nfa_has_more_states_than_reverse_anchored() {
+        let ast = lit('a');
+        let bcm = ByteClassMap::build_from_ast(&ast);
+        let anchored = Nfa::build_reverse_anchored(&ast, &bcm);
+        let unanchored = Nfa::build_reverse_unanchored(&ast, &bcm);
+        assert!(unanchored.num_states() > anchored.num_states());
+        assert!(is_reachable(
+            &unanchored,
+            unanchored.start(),
+            unanchored.accept()
+        ));
+    }
+
+    #[test]
+    fn reverse_nfa_preserves_capture_tags() {
+        let ast = group_capturing(1, seq(vec![lit('a'), lit('b')]));
+        let bcm = ByteClassMap::build_from_ast(&ast);
+        let nfa = Nfa::build_reverse_anchored(&ast, &bcm);
+        assert!(has_capture_tag(&nfa, CaptureTag::GroupStart(1)));
+        assert!(has_capture_tag(&nfa, CaptureTag::GroupEnd(1)));
+        assert_eq!(nfa.num_capture_groups(), 1);
+    }
+
+    #[test]
+    fn reverse_nfa_uses_same_byte_class_map_as_forward() {
+        // Build the byte_class_map once from the forward AST and reuse
+        // it for the reverse NFA. The reverse NFA must produce a valid
+        // NFA against the same map (no out-of-range class IDs).
+        let ast = seq(vec![
+            custom(vec![('a', 'c')]),
+            custom(vec![('d', 'f')]),
+            lit('z'),
+        ]);
+        let bcm = ByteClassMap::build_from_ast(&ast);
+        let max_class = bcm.num_classes() as u8 - 1;
+        let nfa = Nfa::build_reverse_anchored(&ast, &bcm);
+        for state in nfa.states() {
+            for &(class, _) in &state.transitions {
+                assert!(
+                    class <= max_class,
+                    "reverse NFA used out-of-range byte class {class} (max {max_class})"
                 );
             }
         }

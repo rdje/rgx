@@ -120,6 +120,17 @@ pub enum ExclusionReason {
 
     /// Pattern contains a `(?C)` callout.
     Callout,
+
+    /// Pattern contains `\X` (extended grapheme cluster).
+    ///
+    /// Matching a grapheme cluster requires Unicode-aware traversal of
+    /// base codepoint plus combining marks, which doesn't fit cleanly into
+    /// a Thompson NFA without significant additional machinery. Excluded
+    /// from the C2 subset on the first pass; can be added later if
+    /// profiling shows it's worth the engineering effort. Patterns with
+    /// `\X` continue to run on the existing backtracking VM (which has
+    /// full `\X` support).
+    GraphemeCluster,
 }
 
 /// Classify a regex AST against the C2 no-backtracking subset.
@@ -155,9 +166,13 @@ fn first_exclusion(ast: &Regex) -> Option<ExclusionReason> {
         | Regex::Anchor(_)
         | Regex::WordBoundary { .. }
         | Regex::NewlineSequence
-        | Regex::GraphemeCluster
         | Regex::Empty
         | Regex::WhitespaceLiteral(_) => None,
+
+        // \X is excluded from the C2 subset on the first pass — see the
+        // doc comment on `ExclusionReason::GraphemeCluster` for the
+        // rationale. Falls back to the existing backtracking VM.
+        Regex::GraphemeCluster => Some(ExclusionReason::GraphemeCluster),
 
         // ============================================================
         // Supported recursive constructs — descend into children.
@@ -330,9 +345,15 @@ mod tests {
     }
 
     #[test]
-    fn classifies_newline_sequence_and_grapheme_cluster_as_no_backtracking() {
+    fn classifies_newline_sequence_as_no_backtracking() {
         assert_no_backtracking(&Regex::NewlineSequence);
-        assert_no_backtracking(&Regex::GraphemeCluster);
+    }
+
+    #[test]
+    fn excludes_grapheme_cluster_from_c2_subset() {
+        // \X is excluded on the first pass — Thompson NFA doesn't model
+        // base codepoint + combining marks cleanly. Falls back to VM.
+        assert_needs_vm(&Regex::GraphemeCluster, ExclusionReason::GraphemeCluster);
     }
 
     #[test]
