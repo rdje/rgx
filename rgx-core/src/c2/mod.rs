@@ -17,9 +17,9 @@
 //! ships production-quality code; nothing here is throwaway.
 //!
 //! - **Step 0**: design proposal landed. ✅
-//! - **Step 1 (this commit)**: pattern classifier — metadata only, no
-//!   runtime dispatch. ✅
-//! - **Step 2**: byte-class equivalence partitioning. (planned)
+//! - **Step 1**: pattern classifier — metadata only, no runtime dispatch. ✅
+//! - **Step 2 (this commit)**: byte-class equivalence partitioning —
+//!   standalone module, no engine wiring. ✅
 //! - **Step 3**: forward + reverse Thompson NFA construction. (planned)
 //! - **Step 4**: sparse-set Pike-VM with differential gate active. (planned)
 //! - **Step 5**: lazy forward DFA cache. (planned)
@@ -27,6 +27,8 @@
 //! - **Step 7**: literal prefix integration. (planned)
 //! - **Step 8**: production cutover, benchmarks, Book chapter. (planned)
 
+pub mod byte_class;
 pub mod classifier;
 
+pub use byte_class::ByteClassMap;
 pub use classifier::{classify, Classification, ExclusionReason};

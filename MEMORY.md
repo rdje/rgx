@@ -1201,3 +1201,24 @@ Live continuity memory for `rgx` sessions.
 
 ### Note on push
 - Per the persistent no-auto-push rule, this commit lands locally only. User pushes when ready. Once pushed, the next CI run on origin/main will validate the fix on Ubuntu 24.04's PCRE2 10.42.
+
+## 2026-04-10 session — C2 step 2 shipped (byte-class equivalence partitioning)
+
+### How this got triggered
+- User said "PNT" (= "Pick the next task and roll with it"). C2 step 1 had just shipped on origin/main, so the natural next step was C2 step 2 per the design doc §15 phased plan.
+
+### What landed
+- New module `rgx-core/src/c2/byte_class.rs` with `ByteClassMap` (`table: [u8; 256]`, `num_classes: u16`), `build_from_ast(&Regex)` constructor, `class_of(byte)` and `num_classes()` accessors. Re-exported via `c2::ByteClassMap`.
+- Algorithm: boundary-points partition with per-character-class membership oracles. Two bytes are in the same class iff every oracle (one per character class / literal / shorthand / Dot / etc.) gives the same membership answer for both. Multi-byte UTF-8 ranges are decomposed via `regex_syntax::utf8::Utf8Sequences` into per-position byte ranges, all added to the same oracle.
+- 25 new unit tests covering ASCII patterns, non-ASCII patterns, shorthand classes, Dot newline distinction, structural nodes, realistic log pattern, class ID density, edge cases (byte 0x00, 0xFF, full universe, duplicates, adjacent ranges).
+- No engine wiring (per design doc step 2 scope). The map is consumed by step 3 NFA construction.
+- 1 design-doc fix: `num_classes` was `u8` in the original sketch but the count can be 256, so it was bumped to `u16` in `docs/C2_NFA_DFA_DESIGN.md` §5 with an explanatory note.
+
+### Critical correctness lesson learned during implementation
+- First draft of the partition algorithm treated each byte range as a separate "membership oracle". This was wrong: `[abc]` would yield 4 classes (one per char + "other") instead of the correct 2 (`[abc]` and "everything else"). The fix is that each character class in the AST is ONE oracle that contains multiple ranges, and the partition signature is per-oracle, not per-range. Bytes within one character class share the same membership signature and therefore the same byte class. Documented the rule prominently in the module docstring and CHANGES entry to prevent future regressions.
+
+### API call mistake caught early
+- First draft called `crate::unicode_support::resolve_unicode_property_class(name)` (1 arg, returning `Option`). The actual signature is `(name: &str, negated: bool) -> Result<Vec<CharRange>, String>` (2 args, returning `Result`). Build errors caught it immediately. Fixed by passing the pattern's `negated` flag through and switching `if let Some` to `if let Ok`. No tests needed updating because the unit tests for byte_class don't exercise Unicode property class paths heavily.
+
+### Next concrete action
+- C2 step 3 = forward + reverse Thompson NFA construction. New `rgx-core/src/c2/nfa.rs` module. Builds a forward NFA from the AST (anchored and unanchored variants) and a reverse NFA from the AST (anchored and unanchored variants). Uses `ByteClassMap` to label transitions by class ID rather than raw byte. Standalone module — no Pike-VM yet (that's step 4).

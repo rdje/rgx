@@ -214,16 +214,18 @@ This is computed once at compile time. The lookup table is `[u8; 256]`. For UTF-
 pub struct ByteClassMap {
     /// byte → class id
     table: [u8; 256],
-    /// number of distinct classes
-    num_classes: u8,
+    /// number of distinct classes (1..=256)
+    num_classes: u16,
 }
 
 impl ByteClassMap {
-    pub fn build_from_ast(ast: &Ast) -> Self { /* ... */ }
+    pub fn build_from_ast(ast: &Regex) -> Self { /* ... */ }
     pub fn class_of(&self, byte: u8) -> u8 { self.table[byte as usize] }
-    pub fn num_classes(&self) -> u8 { self.num_classes }
+    pub fn num_classes(&self) -> u16 { self.num_classes }
 }
 ```
+
+> **Note**: `num_classes` is `u16` rather than `u8` because the count can be exactly 256 (one class per byte) which doesn't fit in `u8`. Class IDs themselves are always in `0..256` and fit in `u8`, which is why the table values stay `u8`. (Corrected from the original sketch in C2 step 2.)
 
 ---
 
