@@ -1271,3 +1271,31 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 4 = sparse-set Pike-VM. This is where the differential testing gate against the existing backtracking VM goes active for the first time. New `c2/pike.rs` with the sparse-set state container and the parallel-state simulation loop. Wires into engine dispatch for `is_match` / `find_first` / `find_all` / `captures` for `NoBacktracking`-classified patterns. New `tests/c2_differential.rs` to verify byte-for-byte equivalence with the existing VM on the classifier-positive test corpus.
+
+## 2026-04-10 session — C2 step 4a shipped (Pike-VM + differential test)
+
+### Split decision
+- Step 4 is the biggest correctness milestone, so I split it into 4a (Pike-VM core handling is_match/find_first/find_all WITHOUT captures + differential test for match spans) and 4b (capture tracking + engine dispatch wiring). Each is a coherent SOTA deliverable.
+
+### What landed
+- New `rgx-core/src/c2/pike.rs` with the sparse-set Pike-VM. Russ Cox / Briggs–Torczon design. Two arrays of size num_states, O(1) add/contains/clear. Public API: `pike_is_match`, `pike_find_first`, `pike_find_all`.
+- Zero-width assertions: `\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`, `\G`. ASCII word semantics. `\G` evaluates to true at pos 0 only (full threading deferred to 4b).
+- New `CompiledC2Program::try_compile(pattern)` helper that parses + classifies + builds in one call. Returns Some only for NoBacktracking patterns.
+- New integration test `rgx-core/tests/c2_pike_differential.rs` with 12 corpus suites (~70 differential cases). Compiles via both `Regex::compile` (existing VM) and `CompiledC2Program::try_compile` (C2 path), runs both engines on the input, asserts byte-for-byte agreement on is_match / find_first / find_all. Patterns outside the C2 subset are skipped silently. **All 12 corpus suites pass.** This is the differential gate going active for the first time.
+- 29 Pike-VM unit tests covering sparse set ops, literals, character classes (ASCII + multi-byte UTF-8), shorthand classes, sequences, alternations, greedy/lazy quantifiers, range quantifiers, anchors, word boundaries, find_all, empty-match advance, realistic patterns (ISO date, email, log levels).
+
+### Two SOTA correctness fixes during testing
+1. **Lazy quantifier priority bug**. The closure walker iterates `state.epsilons` in SLOT order. The quantifier builders were inserting lazy edges in semantic order, not slot=priority order, so for lazy `a+?` the loop edge ended up at a lower dense position than accept and the priority-cutoff didn't apply. Fix: enforce slot==priority in build_zero_or_one / build_zero_or_more / build_one_or_more. The `EpsilonEdge.priority` field is now informational only — slot order is what the simulator honours. **Lesson saved**: this is a subtle invariant that must be maintained whenever new builder methods are added. Documented prominently.
+2. **find_all empty-match adjacency rule**. For `a*` on `aaab`, the existing VM returns `[(0, 3), (4, 4)]` — skipping the empty match at position 3 immediately adjacent to the non-empty match. Fix: track prev_non_empty_end and skip empty matches at that exact position. Matches the existing VM and the Rust `regex` crate convention.
+
+### The dense-position-as-priority trick
+- The Pike-VM uses leftmost-first semantics by exploiting the sparse set's insertion order: when accept is in current at dense position `p`, only states at positions `0..=p` are extended in the next iteration. Higher dense positions were added by lower-priority epsilon edges and cannot win. This works because the closure walker visits edges in priority order, so dense order encodes priority. Lazy quantifiers terminate at the earliest accept position without a separate kill-pass.
+
+### Pending for step 4b
+- Capture tracking inside the Pike-VM (per-thread capture buffers, copy semantics on epsilon forks)
+- Engine dispatch wiring: `Regex::compile` → if classifier says NoBacktracking, route through Pike-VM for is_match/find_first/find_all/captures; otherwise existing VM unchanged
+- Extend differential test to compare capture group positions
+- Once dispatch is wired, the existing 633+ test suite effectively becomes a deeper differential test — every existing test runs through Pike-VM for classifier-positive patterns
+
+### Next concrete action
+- C2 step 4b: capture tracking + engine dispatch wiring. The Pike-VM tracks captures via per-thread capture buffers (Vec<Option<usize>>). On epsilon edges with capture tags, the buffer is updated with the current position. Engine dispatch lives in c2/dispatch.rs (new file). Public API methods on Regex check the program's classification and route accordingly.

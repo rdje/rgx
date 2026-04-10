@@ -20,11 +20,11 @@
 //! - **Step 1**: pattern classifier — metadata only, no runtime dispatch. ✅
 //! - **Step 2**: byte-class equivalence partitioning — standalone module. ✅
 //! - **Step 3a**: forward Thompson NFA construction (anchored + unanchored). ✅
-//! - **Step 3b (this commit)**: reverse NFA construction (via AST
-//!   reversal) + `CompiledC2Program` assembly tying all 4 NFAs together.
-//!   `\X` moved out of the C2 subset; falls back to the existing
-//!   backtracking VM. ✅
-//! - **Step 4**: sparse-set Pike-VM with differential gate active. (planned)
+//! - **Step 3b**: reverse NFA construction + `CompiledC2Program` assembly. ✅
+//! - **Step 4a (this commit)**: sparse-set Pike-VM (`is_match` /
+//!   `find_first` / `find_all` without captures yet) plus a differential
+//!   test against the existing backtracking VM for match spans. ✅
+//! - **Step 4b**: capture tracking + engine dispatch wiring. (planned)
 //! - **Step 5**: lazy forward DFA cache. (planned)
 //! - **Step 6**: lazy reverse DFA cache. (planned)
 //! - **Step 7**: literal prefix integration. (planned)
@@ -33,9 +33,11 @@
 pub mod byte_class;
 pub mod classifier;
 pub mod nfa;
+pub mod pike;
 pub mod program;
 
 pub use byte_class::ByteClassMap;
 pub use classifier::{classify, Classification, ExclusionReason};
 pub use nfa::{reverse_ast, CaptureTag, Nfa, NfaState, NfaStateId, ZeroWidthAssertion};
+pub use pike::{pike_find_all, pike_find_first, pike_is_match};
 pub use program::CompiledC2Program;

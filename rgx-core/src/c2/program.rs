@@ -108,6 +108,31 @@ impl CompiledC2Program {
     pub fn num_byte_classes(&self) -> u16 {
         self.byte_class_map.num_classes()
     }
+
+    /// Compile a pattern string into a `CompiledC2Program` if (and only if)
+    /// the pattern lies inside the no-backtracking subset that C2 can
+    /// handle. Returns `None` for patterns that the classifier tags as
+    /// `NeedsVm` (those continue to run on the existing backtracking VM
+    /// via the normal `Regex::compile` path).
+    ///
+    /// Convenience for tests, benchmarks, and the differential testing
+    /// harness in `tests/c2_pike_differential.rs`. The normal compile
+    /// pipeline (`Regex::compile`) doesn't go through this method —
+    /// engine dispatch is wired in at C2 step 4b.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the pattern fails to parse or fails to classify
+    /// as `NoBacktracking`. Both cases mean the pattern can't be handled
+    /// by the C2 engine.
+    #[must_use]
+    pub fn try_compile(pattern: &str) -> Option<Self> {
+        let ast = crate::parsing::parse_pattern(pattern).ok()?;
+        match crate::c2::classify(&ast) {
+            crate::c2::Classification::NoBacktracking => Some(Self::build_from_ast(&ast)),
+            crate::c2::Classification::NeedsVm { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]

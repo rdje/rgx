@@ -309,13 +309,24 @@ pub enum ZeroWidthAssertion {
 }
 
 /// An epsilon edge. Carries an optional capture tag and/or zero-width
-/// assertion. Edges are stored in priority order (lower index = higher
-/// priority); the simulator follows them in that order.
+/// assertion. Edges are stored in priority order (lower slot index =
+/// higher priority); the simulator follows them in that order.
 #[derive(Debug, Clone)]
 pub struct EpsilonEdge {
+    /// Target NFA state.
     pub target: NfaStateId,
+    /// Informational priority value. The Pike-VM honours **slot order**
+    /// within a state's epsilon list, not this field — the field is kept
+    /// for diagnostics and for any future builder that wants to assert
+    /// the slot/priority invariant.
     pub priority: EpsilonPriority,
+    /// Optional capture group tag applied when crossing this edge during
+    /// the bounded Pike-VM capture-recovery pass. C2 step 4a does not
+    /// track captures yet; this field is populated by the NFA builder
+    /// for use in step 4b.
     pub capture_tag: Option<CaptureTag>,
+    /// Optional zero-width assertion that must hold for the edge to be
+    /// followed during epsilon closure expansion.
     pub assertion: Option<ZeroWidthAssertion>,
 }
 
@@ -867,13 +878,27 @@ impl<'a> NfaBuilder<'a> {
         }
     }
 
+    // Note: epsilon edges below are inserted in **slot == priority** order
+    // because the Pike-VM's epsilon closure walks edges in slot order to
+    // get O(1) priority resolution without a runtime sort. Greedy
+    // quantifiers connect the "try matching" edge first (slot 0); lazy
+    // quantifiers connect the "skip / exit" edge first. The `connect`
+    // priority argument is informational only — the slot order is what
+    // the closure walker honours.
+
     fn build_zero_or_one(&mut self, expr: &Regex, lazy: bool) -> Fragment {
         let body = self.build_fragment(expr);
         let start = self.new_state();
         let accept = self.new_state();
-        let (try_priority, skip_priority) = if lazy { (1, 0) } else { (0, 1) };
-        self.connect(start, body.start, try_priority);
-        self.connect(start, accept, skip_priority);
+        if lazy {
+            // Lazy: prefer to skip (slot 0), then try matching (slot 1).
+            self.connect(start, accept, 0);
+            self.connect(start, body.start, 1);
+        } else {
+            // Greedy: prefer to try matching (slot 0), then skip (slot 1).
+            self.connect(start, body.start, 0);
+            self.connect(start, accept, 1);
+        }
         self.connect(body.accept, accept, 0);
         Fragment { start, accept }
     }
@@ -882,9 +907,13 @@ impl<'a> NfaBuilder<'a> {
         let body = self.build_fragment(expr);
         let start = self.new_state();
         let accept = self.new_state();
-        let (try_priority, skip_priority) = if lazy { (1, 0) } else { (0, 1) };
-        self.connect(start, body.start, try_priority);
-        self.connect(start, accept, skip_priority);
+        if lazy {
+            self.connect(start, accept, 0);
+            self.connect(start, body.start, 1);
+        } else {
+            self.connect(start, body.start, 0);
+            self.connect(start, accept, 1);
+        }
         // Loop back: after matching the body, return to `start` so we
         // can decide again whether to loop or exit.
         self.connect(body.accept, start, 0);
@@ -897,10 +926,14 @@ impl<'a> NfaBuilder<'a> {
         // The state after matching the body decides whether to loop or exit.
         let decision = self.new_state();
         let accept = self.new_state();
-        let (try_priority, skip_priority) = if lazy { (1, 0) } else { (0, 1) };
         self.connect(body.accept, decision, 0);
-        self.connect(decision, body.start, try_priority);
-        self.connect(decision, accept, skip_priority);
+        if lazy {
+            self.connect(decision, accept, 0);
+            self.connect(decision, body.start, 1);
+        } else {
+            self.connect(decision, body.start, 0);
+            self.connect(decision, accept, 1);
+        }
         Fragment {
             start: body.start,
             accept,
