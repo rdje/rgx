@@ -30,7 +30,10 @@
 //!
 //! Any disagreement is a Pike-VM correctness bug.
 
-use rgx_core::c2::{pike_find_all, pike_find_first, pike_is_match, CompiledC2Program};
+use rgx_core::c2::{
+    pike_captures, pike_captures_all, pike_find_all, pike_find_first, pike_is_match,
+    CompiledC2Program,
+};
 use rgx_core::Regex as RgxRegex;
 
 /// One differential test case: a pattern, an input string, and a short
@@ -87,6 +90,40 @@ fn assert_pike_matches_vm(case: &Case) {
     assert_eq!(
         vm_all, pike_all,
         "[{}] find_all disagreement: vm={vm_all:?}, pike={pike_all:?} \
+         for pattern '{}' on '{}'",
+        case.name, case.pattern, case.input
+    );
+
+    // captures agreement (first match): both engines should agree on the
+    // overall span AND on each capture group's span (or `None` for
+    // groups that didn't participate).
+    let vm_captures_first = vm_regex
+        .find_first(case.input)
+        .map(|m| (m.start, m.end, m.groups.clone()));
+    let pike_captures_first =
+        pike_captures(&c2_program, input_bytes).map(|m| (m.start, m.end, m.groups));
+    assert_eq!(
+        vm_captures_first, pike_captures_first,
+        "[{}] captures(first) disagreement: vm={vm_captures_first:?}, pike={pike_captures_first:?} \
+         for pattern '{}' on '{}'",
+        case.name, case.pattern, case.input
+    );
+
+    // captures agreement (all matches): same comparison applied across
+    // every non-overlapping match.
+    let vm_captures_all_vec: Vec<(usize, usize, Vec<Option<(usize, usize)>>)> = vm_regex
+        .find_all(case.input)
+        .into_iter()
+        .map(|m| (m.start, m.end, m.groups))
+        .collect();
+    let pike_captures_all_vec: Vec<(usize, usize, Vec<Option<(usize, usize)>>)> =
+        pike_captures_all(&c2_program, input_bytes)
+            .into_iter()
+            .map(|m| (m.start, m.end, m.groups))
+            .collect();
+    assert_eq!(
+        vm_captures_all_vec, pike_captures_all_vec,
+        "[{}] captures(all) disagreement: vm={vm_captures_all_vec:?}, pike={pike_captures_all_vec:?} \
          for pattern '{}' on '{}'",
         case.name, case.pattern, case.input
     );

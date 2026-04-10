@@ -1466,7 +1466,7 @@ impl Compiler {
         ScalarRangeSet::from_char_class(char_class)
     }
 
-    fn assign_capture_indices(ast: RegexAst) -> RegexAst {
+    pub(crate) fn assign_capture_indices(ast: RegexAst) -> RegexAst {
         let (ast, _) = Self::assign_capture_indices_inner(ast, 1);
         ast
     }

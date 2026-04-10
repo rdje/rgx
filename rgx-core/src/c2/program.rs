@@ -118,7 +118,16 @@ impl CompiledC2Program {
     /// Convenience for tests, benchmarks, and the differential testing
     /// harness in `tests/c2_pike_differential.rs`. The normal compile
     /// pipeline (`Regex::compile`) doesn't go through this method —
-    /// engine dispatch is wired in at C2 step 4b.
+    /// engine dispatch is wired in at C2 step 4c.
+    ///
+    /// # Capture index assignment
+    ///
+    /// The PGEN parser emits capture groups with `index: None`; capture
+    /// indices are assigned later in the compile pipeline by
+    /// `Compiler::assign_capture_indices`. This method runs the same
+    /// assignment pass before classification and NFA construction so
+    /// the resulting `CompiledC2Program` has correct group numbering
+    /// for the bounded Pike-VM capture pass.
     ///
     /// # Errors
     ///
@@ -128,6 +137,7 @@ impl CompiledC2Program {
     #[must_use]
     pub fn try_compile(pattern: &str) -> Option<Self> {
         let ast = crate::parsing::parse_pattern(pattern).ok()?;
+        let ast = crate::compiler::Compiler::assign_capture_indices(ast);
         match crate::c2::classify(&ast) {
             crate::c2::Classification::NoBacktracking => Some(Self::build_from_ast(&ast)),
             crate::c2::Classification::NeedsVm { .. } => None,

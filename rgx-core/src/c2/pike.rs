@@ -67,7 +67,7 @@
 //! - The Rust `regex-automata` crate's `pikevm` module
 
 use crate::c2::byte_class::ByteClassMap;
-use crate::c2::nfa::{Nfa, NfaStateId, ZeroWidthAssertion};
+use crate::c2::nfa::{CaptureTag, Nfa, NfaStateId, ZeroWidthAssertion};
 use crate::c2::program::CompiledC2Program;
 
 // ============================================================
@@ -388,6 +388,364 @@ pub fn pike_find_all(program: &CompiledC2Program, input: &[u8]) -> Vec<(usize, u
     results
 }
 
+// ============================================================
+// Capture-tracking simulation (step 4b)
+// ============================================================
+//
+// The capture-tracking path is a parallel implementation of the
+// no-captures path above. The simulation loop is structurally
+// identical, but each thread carries its own capture buffer alongside
+// its state ID. The two paths are kept separate so the no-captures
+// fast path doesn't pay the cost of capture-buffer allocation, copies,
+// or per-edge tag application.
+//
+// # Slot layout
+//
+// Capture buffers are flat slices of `2 * (num_capture_groups + 1)`
+// `Option<usize>` slots. Slot indexing:
+//
+// - `slots[0]` = overall match start (group 0 start)
+// - `slots[1]` = overall match end (group 0 end)
+// - `slots[2k]` = group `k` start (for `k >= 1`)
+// - `slots[2k+1]` = group `k` end
+//
+// Slots 0 and 1 (overall match) are populated by the caller from the
+// scan position and the simulator's matched end position — the NFA
+// builder doesn't emit `CaptureTag::GroupStart(0)` / `GroupEnd(0)` for
+// the overall match.
+
+/// A match span with capture group positions.
+///
+/// Returned by [`pike_captures`] and [`pike_captures_all`]. The
+/// `groups` vector is indexed the same way as the existing
+/// `MatchResult.groups`: index 0 is the overall match span, indices
+/// `1..=N` are the explicit capture groups (`None` for groups that
+/// didn't participate in the match).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PikeMatch {
+    /// Overall match start (byte offset).
+    pub start: usize,
+    /// Overall match end (byte offset).
+    pub end: usize,
+    /// Capture group spans. Index 0 is the overall match, indices
+    /// 1..=N are explicit capture groups. `None` means the group did
+    /// not participate in the match.
+    pub groups: Vec<Option<(usize, usize)>>,
+}
+
+/// Sparse-set thread container that carries a capture buffer per
+/// active state. Used by the capture-tracking simulation path.
+///
+/// Structurally a parallel implementation of [`SparseSet`] with an
+/// extra `dense_captures` array indexed by dense position. Each
+/// capture buffer is a fixed-length slice of `Option<usize>` slots
+/// pre-allocated at construction time so the simulation loop never
+/// allocates.
+#[derive(Debug)]
+struct ThreadSet {
+    sparse: Vec<u32>,
+    dense_states: Vec<NfaStateId>,
+    /// Per-thread capture buffers, parallel to `dense_states`. Each
+    /// inner slice has length `num_slots`.
+    dense_captures: Vec<Vec<Option<usize>>>,
+    len: usize,
+    num_slots: usize,
+}
+
+impl ThreadSet {
+    fn new(num_states: usize, num_slots: usize) -> Self {
+        Self {
+            sparse: vec![0u32; num_states],
+            dense_states: vec![0u32; num_states],
+            dense_captures: vec![vec![None; num_slots]; num_states],
+            len: 0,
+            num_slots,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline]
+    fn contains(&self, state: NfaStateId) -> bool {
+        let i = self.sparse[state as usize] as usize;
+        i < self.len && self.dense_states[i] == state
+    }
+
+    /// Add `state` with `captures` to the set if not already present.
+    /// First-insertion-wins, mirroring [`SparseSet::insert`].
+    fn add(&mut self, state: NfaStateId, captures: &[Option<usize>]) {
+        debug_assert_eq!(captures.len(), self.num_slots);
+        if self.contains(state) {
+            return;
+        }
+        self.sparse[state as usize] = self.len as u32;
+        self.dense_states[self.len] = state;
+        self.dense_captures[self.len].copy_from_slice(captures);
+        self.len += 1;
+    }
+
+    fn position_of(&self, state: NfaStateId) -> Option<usize> {
+        if self.contains(state) {
+            Some(self.sparse[state as usize] as usize)
+        } else {
+            None
+        }
+    }
+
+    fn state_at(&self, dense_pos: usize) -> NfaStateId {
+        debug_assert!(dense_pos < self.len);
+        self.dense_states[dense_pos]
+    }
+
+    fn captures_at(&self, dense_pos: usize) -> &[Option<usize>] {
+        debug_assert!(dense_pos < self.len);
+        &self.dense_captures[dense_pos]
+    }
+}
+
+/// Apply a capture tag to a buffer at the given position.
+///
+/// `slot_for_tag` maps a capture group number to its start/end slot
+/// indices according to the layout in the module-level comment above.
+fn apply_capture_tag(captures: &mut [Option<usize>], tag: CaptureTag, pos: usize) {
+    match tag {
+        CaptureTag::GroupStart(n) => {
+            let slot = 2 * (n as usize);
+            if slot < captures.len() {
+                captures[slot] = Some(pos);
+            }
+        }
+        CaptureTag::GroupEnd(n) => {
+            let slot = 2 * (n as usize) + 1;
+            if slot < captures.len() {
+                captures[slot] = Some(pos);
+            }
+        }
+    }
+}
+
+/// Capture-aware epsilon closure.
+///
+/// Mirrors [`epsilon_closure`] but threads a capture buffer through
+/// the recursion. When an epsilon edge carries a capture tag, the
+/// buffer is cloned and the tag is applied; the modified buffer is
+/// then passed to the recursive call. Edges without tags pass the
+/// buffer through unchanged, which avoids the per-edge clone on the
+/// common case (most epsilon edges don't carry tags).
+fn epsilon_closure_with_captures(
+    set: &mut ThreadSet,
+    nfa: &Nfa,
+    state: NfaStateId,
+    captures: &[Option<usize>],
+    pos: usize,
+    input: &[u8],
+) {
+    if set.contains(state) {
+        return;
+    }
+    set.add(state, captures);
+
+    let state_obj = &nfa.states()[state as usize];
+
+    for edge in &state_obj.epsilons {
+        if let Some(assertion) = edge.assertion {
+            if !check_assertion(assertion, input, pos) {
+                continue;
+            }
+        }
+        if let Some(tag) = edge.capture_tag {
+            // Tagged edge: clone the buffer, apply the tag, recurse
+            // with the modified buffer. The clone is unavoidable
+            // because the tagged target needs different captures than
+            // any sibling target reached through a non-tagged edge.
+            let mut new_captures = captures.to_vec();
+            apply_capture_tag(&mut new_captures, tag, pos);
+            epsilon_closure_with_captures(set, nfa, edge.target, &new_captures, pos, input);
+        } else {
+            // No tag: pass the buffer through unchanged. Same buffer
+            // contents reach the target, no allocation.
+            epsilon_closure_with_captures(set, nfa, edge.target, captures, pos, input);
+        }
+    }
+}
+
+/// Capture-aware single-position match.
+///
+/// Mirrors [`pike_match_at`] but tracks capture group positions per
+/// thread and returns the winning capture buffer alongside the match
+/// end position. Slots 0 and 1 (the overall match span) are populated
+/// by the caller from `start` and the returned end position.
+fn pike_match_at_with_captures(
+    nfa: &Nfa,
+    byte_class_map: &ByteClassMap,
+    input: &[u8],
+    start: usize,
+    num_slots: usize,
+) -> Option<(usize, Vec<Option<usize>>)> {
+    let num_states = nfa.num_states();
+    let mut current = ThreadSet::new(num_states, num_slots);
+    let mut next = ThreadSet::new(num_states, num_slots);
+    let initial_captures = vec![None; num_slots];
+    let mut matched: Option<(usize, Vec<Option<usize>>)> = None;
+
+    epsilon_closure_with_captures(
+        &mut current,
+        nfa,
+        nfa.start(),
+        &initial_captures,
+        start,
+        input,
+    );
+
+    let mut pos = start;
+    loop {
+        let accept_priority = current.position_of(nfa.accept());
+
+        if let Some(p) = accept_priority {
+            // Snapshot the captures from the highest-priority thread
+            // that reached accept. The dense order encodes priority,
+            // so the captures at position `p` are the winning ones.
+            matched = Some((pos, current.captures_at(p).to_vec()));
+        }
+
+        if pos >= input.len() || current.len == 0 {
+            break;
+        }
+
+        let byte = input[pos];
+        let cls = byte_class_map.class_of(byte);
+        next.clear();
+
+        // Same priority-cutoff trick as the no-captures path: only
+        // extend threads at dense positions ≤ accept's position.
+        let limit = match accept_priority {
+            Some(p) => p + 1,
+            None => current.len,
+        };
+
+        for i in 0..limit {
+            let state_id = current.state_at(i);
+            let state_captures = current.captures_at(i).to_vec();
+            let state_obj = &nfa.states()[state_id as usize];
+            for &(transition_cls, target) in &state_obj.transitions {
+                if transition_cls == cls {
+                    epsilon_closure_with_captures(
+                        &mut next,
+                        nfa,
+                        target,
+                        &state_captures,
+                        pos + 1,
+                        input,
+                    );
+                }
+            }
+        }
+
+        std::mem::swap(&mut current, &mut next);
+        pos += 1;
+    }
+
+    matched
+}
+
+/// Compute the slot count for a compiled program: two slots per
+/// group, plus two slots for the overall match (group 0).
+fn slot_count(program: &CompiledC2Program) -> usize {
+    2 * (program.num_capture_groups as usize + 1)
+}
+
+/// Convert a flat capture buffer into a `Vec<Option<(usize, usize)>>`
+/// for the [`PikeMatch.groups`] field. Pairs adjacent slots into
+/// `(start, end)` tuples; both slots must be `Some` for the group to
+/// be reported as having participated in the match.
+fn captures_to_groups(captures: &[Option<usize>]) -> Vec<Option<(usize, usize)>> {
+    captures
+        .chunks(2)
+        .map(|pair| match (pair[0], pair[1]) {
+            (Some(s), Some(e)) => Some((s, e)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Returns the leftmost match in `input` with capture group
+/// positions, or `None` if there is no match.
+///
+/// This is the capture-tracking variant of [`pike_find_first`]. It
+/// runs the capture-aware simulator at every scan position from 0 to
+/// `input.len()` and returns the first position where the anchored
+/// NFA reaches its accept state, along with the winning thread's
+/// capture buffer.
+///
+/// Slots 0 and 1 of the returned `PikeMatch.groups` (the overall
+/// match span) are populated from the scan position and the
+/// simulator's matched end. Capture groups 1..=N are populated from
+/// the winning thread's capture buffer.
+#[must_use]
+pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMatch> {
+    let nfa = &program.forward_anchored;
+    let bcm = &program.byte_class_map;
+    let num_slots = slot_count(program);
+    for start in 0..=input.len() {
+        if let Some((end, mut caps)) =
+            pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
+        {
+            // Populate the overall match span (group 0) from the
+            // scan position and the simulator's matched end.
+            caps[0] = Some(start);
+            caps[1] = Some(end);
+            return Some(PikeMatch {
+                start,
+                end,
+                groups: captures_to_groups(&caps),
+            });
+        }
+    }
+    None
+}
+
+/// Returns all non-overlapping matches in `input` with capture group
+/// positions in left-to-right order.
+///
+/// Capture-tracking variant of [`pike_find_all`]. Same advance rules:
+/// after a non-empty match the next scan starts at the match end;
+/// after an empty match the next scan starts one byte later; an empty
+/// match immediately adjacent to a previous non-empty match is
+/// dropped.
+#[must_use]
+pub fn pike_captures_all(program: &CompiledC2Program, input: &[u8]) -> Vec<PikeMatch> {
+    let nfa = &program.forward_anchored;
+    let bcm = &program.byte_class_map;
+    let num_slots = slot_count(program);
+    let mut results = Vec::new();
+    let mut start = 0usize;
+    let mut prev_non_empty_end: Option<usize> = None;
+    while start <= input.len() {
+        let Some((end, mut caps)) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
+        else {
+            start += 1;
+            continue;
+        };
+        let is_empty = end == start;
+        if is_empty && Some(start) == prev_non_empty_end {
+            start += 1;
+            continue;
+        }
+        caps[0] = Some(start);
+        caps[1] = Some(end);
+        results.push(PikeMatch {
+            start,
+            end,
+            groups: captures_to_groups(&caps),
+        });
+        prev_non_empty_end = if is_empty { None } else { Some(end) };
+        start = if is_empty { start + 1 } else { end };
+    }
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,5 +1012,136 @@ mod tests {
         let input = b"INFO: ok\nERROR: bad\nWARN: meh\n";
         let matches = pike_find_all(&prog, input);
         assert_eq!(matches.len(), 3);
+    }
+
+    // ============================================================
+    // Capture tracking
+    // ============================================================
+
+    #[test]
+    fn captures_zero_groups_returns_overall_match_only() {
+        // Pattern with no capture groups: groups[0] = overall match,
+        // and the result has length 1 (only group 0).
+        let prog = compile("hello");
+        let m = pike_captures(&prog, b"hello world").expect("match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 5);
+        assert_eq!(m.groups, vec![Some((0, 5))]);
+    }
+
+    #[test]
+    fn captures_one_group_returns_two_entries() {
+        // (\w+) — one capture group. groups[0] = overall, groups[1] = group 1.
+        let prog = compile(r"(\w+)");
+        let m = pike_captures(&prog, b"  hello").expect("match");
+        assert_eq!(m.start, 2);
+        assert_eq!(m.end, 7);
+        assert_eq!(m.groups, vec![Some((2, 7)), Some((2, 7))]);
+    }
+
+    #[test]
+    fn captures_multiple_groups() {
+        // (\d+)-(\d+) — two capture groups.
+        let prog = compile(r"(\d+)-(\d+)");
+        let m = pike_captures(&prog, b"year 12-345 day").expect("match");
+        assert_eq!(m.start, 5);
+        assert_eq!(m.end, 11);
+        assert_eq!(m.groups, vec![Some((5, 11)), Some((5, 7)), Some((8, 11))]);
+    }
+
+    #[test]
+    fn captures_nested_groups() {
+        // ((\w+)-(\w+)) — nested groups. group 1 = whole, group 2 = first
+        // word, group 3 = second word.
+        let prog = compile(r"((\w+)-(\w+))");
+        let m = pike_captures(&prog, b"foo-bar baz").expect("match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 7);
+        assert_eq!(
+            m.groups,
+            vec![
+                Some((0, 7)), // overall
+                Some((0, 7)), // outer group 1
+                Some((0, 3)), // inner group 2 = "foo"
+                Some((4, 7)), // inner group 3 = "bar"
+            ]
+        );
+    }
+
+    #[test]
+    fn captures_optional_group_unmatched() {
+        // a(b)?c — group 1 is optional. When the input is "ac", group 1
+        // does not participate.
+        let prog = compile("a(b)?c");
+        let m = pike_captures(&prog, b"ac").expect("match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 2);
+        // group 0 = overall, group 1 = None (didn't participate)
+        assert_eq!(m.groups, vec![Some((0, 2)), None]);
+    }
+
+    #[test]
+    fn captures_optional_group_matched() {
+        let prog = compile("a(b)?c");
+        let m = pike_captures(&prog, b"abc").expect("match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+        assert_eq!(m.groups, vec![Some((0, 3)), Some((1, 2))]);
+    }
+
+    #[test]
+    fn captures_no_match_returns_none() {
+        let prog = compile(r"(\d+)");
+        assert_eq!(pike_captures(&prog, b"no digits"), None);
+    }
+
+    #[test]
+    fn captures_alternation_picks_winning_branch() {
+        // (cat|dog) — only one branch participates per match.
+        let prog = compile("(cat|dog)");
+        let m = pike_captures(&prog, b"the dog runs").expect("match");
+        assert_eq!(m.start, 4);
+        assert_eq!(m.end, 7);
+        assert_eq!(m.groups, vec![Some((4, 7)), Some((4, 7))]);
+    }
+
+    #[test]
+    fn captures_all_returns_all_matches_with_groups() {
+        // (\w+) — find all words and capture each.
+        let prog = compile(r"(\w+)");
+        let matches = pike_captures_all(&prog, b"foo bar baz");
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].groups[1], Some((0, 3)));
+        assert_eq!(matches[1].groups[1], Some((4, 7)));
+        assert_eq!(matches[2].groups[1], Some((8, 11)));
+    }
+
+    #[test]
+    fn captures_quantified_group_keeps_last_iteration() {
+        // (\w)+ — group 1 captures the last iteration of \w. Standard
+        // PCRE2/Perl semantics.
+        let prog = compile(r"(\w)+");
+        let m = pike_captures(&prog, b"abc").expect("match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+        // group 1 = last single-char iteration = 'c' at (2, 3)
+        assert_eq!(m.groups[1], Some((2, 3)));
+    }
+
+    #[test]
+    fn captures_iso_date_with_three_groups() {
+        let prog = compile(r"(\d{4})-(\d{2})-(\d{2})");
+        let m = pike_captures(&prog, b"today is 2026-04-10 ok").expect("match");
+        assert_eq!(m.start, 9);
+        assert_eq!(m.end, 19);
+        assert_eq!(
+            m.groups,
+            vec![
+                Some((9, 19)),  // overall
+                Some((9, 13)),  // year
+                Some((14, 16)), // month
+                Some((17, 19)), // day
+            ]
+        );
     }
 }

@@ -1299,3 +1299,33 @@ Live continuity memory for `rgx` sessions.
 
 ### Next concrete action
 - C2 step 4b: capture tracking + engine dispatch wiring. The Pike-VM tracks captures via per-thread capture buffers (Vec<Option<usize>>). On epsilon edges with capture tags, the buffer is updated with the current position. Engine dispatch lives in c2/dispatch.rs (new file). Public API methods on Regex check the program's classification and route accordingly.
+
+## 2026-04-10 session — C2 step 4b shipped (Pike-VM captures + extended differential)
+
+### Split decision
+- Step 4 is now 4a (Pike-VM core, no captures), 4b (captures), 4c (engine dispatch). 4b is this commit. The split keeps each commit focused: 4b has its own correctness gate (the differential test now compares capture positions) before 4c amplifies the differential surface to the entire 633+ test suite via dispatch wiring.
+
+### What landed
+- New `PikeMatch` struct with `start`, `end`, `groups` fields. Same shape as the existing `MatchResult.groups`.
+- New `ThreadSet` struct (separate from `SparseSet`) with parallel state IDs + capture buffers. Pre-allocated, no per-call allocations.
+- New `epsilon_closure_with_captures` that threads capture buffers through the recursion. Clones only on tagged edges (the rare case); pass-through on untagged edges (the common case).
+- New `pike_match_at_with_captures` that uses the same dense-position-as-priority trick for leftmost-first semantics.
+- New `pike_captures` and `pike_captures_all` public functions.
+- 11 new pike unit tests covering zero groups, one group, multiple groups, nested groups, optional unmatched/matched, alternation winner, find_all with groups, quantified group last-iteration semantics, realistic ISO date.
+- Extended differential test compares is_match + find_first spans + find_all spans + **find_first capture groups** + **find_all capture groups** against the existing VM. All 12 corpus suites pass.
+
+### One SOTA correctness fix
+- `CompiledC2Program::try_compile` was skipping `Compiler::assign_capture_indices` between parse and classify. The PGEN parser emits capture groups with `index: None` and the indices are assigned downstream. Without that pass, all capture groups collapsed to group 0 and `Nfa::num_capture_groups()` returned 0. Fix: made `assign_capture_indices` `pub(crate)` and called it from `try_compile`. The existing VM compile path already runs this pass; my C2 path now matches it.
+
+### The slot layout
+- Capture buffers are flat slices of `2 * (num_capture_groups + 1)` `Option<usize>` slots.
+- `slots[0]` / `slots[1]` = overall match span (group 0). Populated by the caller from the scan position and the simulator's matched end — the NFA builder doesn't emit `CaptureTag::GroupStart(0)` / `GroupEnd(0)` for the overall match.
+- `slots[2k]` / `slots[2k+1]` = group `k` start/end (for `k >= 1`). Populated by the simulator from `CaptureTag` epsilon edges during closure expansion.
+- `captures_to_groups` pairs adjacent slots and converts to `Vec<Option<(usize, usize)>>` matching the existing VM's `MatchResult.groups` shape.
+
+### Pending for step 4c
+- Engine dispatch wiring. Public `Regex::compile` checks classification; if NoBacktracking, builds a `CompiledC2Program` alongside the existing `Program` and routes is_match/find_first/find_all/captures through Pike-VM.
+- Once dispatched, the existing 633+ test suite is automatically a deeper differential test.
+
+### Next concrete action
+- C2 step 4c. Add a `Option<CompiledC2Program>` field to `CompiledPattern` (or `Regex`). Build it during `Regex::compile` when classification is NoBacktracking. In each public API method on `Regex`, check the classification and route accordingly. Run the full existing test suite — any disagreement is a Pike-VM bug to fix before the commit lands.
