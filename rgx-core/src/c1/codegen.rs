@@ -475,6 +475,12 @@ enum JitOp {
     StartText,
     /// `\z` — zero-width assertion: matches iff `pos == text_len`.
     EndText,
+    /// `\b` (negated=false) or `\B` (negated=true) — zero-width
+    /// assertion that consults the runtime helper
+    /// [`crate::c1::runtime::rgx_runtime_word_boundary_test`] for
+    /// the boundary check. The codegen lowers this to an indirect
+    /// call into the registered helper symbol.
+    WordBoundary { negated: bool },
     /// Group-0 capture wrapper — accepted as no-op at step 3a/3b.
     /// The engine layer (step 5) will reconstruct group 0 from the
     /// entry pos and the returned end pos. Capture group ids 1+
@@ -586,12 +592,31 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
     let name = format!("rgx_jit_step3_{}", host.next_func_index());
     let func_id = host.declare_function(&name, Linkage::Local, &sig)?;
 
+    // Import the runtime helper(s) the codegen might need into
+    // this function. The helpers are registered with the JIT
+    // module's symbol table in `JitHost::new`; here we declare
+    // them as imports inside *this* function so the codegen layer
+    // can issue indirect calls. The `FuncRef` is scoped to the
+    // function, not the module — each `compile_program` call
+    // imports its own.
+    //
+    // Step 3c imports only the word-boundary helper. Step 6+ will
+    // add char-class and multi-byte helpers as they become needed.
+    let mut function = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
+    let word_boundary_ref = if ops
+        .iter()
+        .any(|op| matches!(op, JitOp::WordBoundary { .. }))
+    {
+        Some(host.import_word_boundary_helper(&mut function)?)
+    } else {
+        None
+    };
+
     // Build the IR using a per-opcode block-per-block layout. Each
     // op block takes the current `pos` as its single block parameter
     // and either advances pos and jumps to the next op's block, or
     // jumps to the fail block on a mismatch. The Match op jumps to
     // the success block, which returns the final pos.
-    let mut function = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
     {
         let mut fb_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut function, &mut fb_ctx);
@@ -646,6 +671,7 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
                 next_block,
                 fail_block,
                 success_block,
+                word_boundary_ref,
             );
             builder.seal_block(block);
         }
@@ -677,11 +703,18 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 /// the new pos) or jumps to `fail_block`. The `Match` op terminates
 /// by jumping to `success_block` with the current pos.
 ///
-/// **Step 3b only.** This function handles the linear opcode subset
-/// — `Char`, the six built-in char-class variants, `StartText` /
-/// `EndText`, `SaveGroupZero` (no-op), and `Match`. Step 3c will
-/// extend it for control-flow opcodes (`Split`, `Jump`) which need
-/// different handling.
+/// **Step 3b/3c.** This function handles the linear opcode subset
+/// (`Char`, char classes, `StartText`/`EndText`, `SaveGroupZero`,
+/// `Match`) from step 3b plus the word-boundary opcodes (`\b`/`\B`)
+/// added in step 3c. Step 3d will extend it for control-flow
+/// opcodes (`Split`, `Jump`) which need a backtrack stack.
+///
+/// Word boundary handling uses an indirect call to the runtime
+/// helper [`crate::c1::runtime::rgx_runtime_word_boundary_test`]
+/// via the `word_boundary_ref` parameter, which `compile_program`
+/// imports into the current function via
+/// [`crate::c1::jit::JitHost::import_word_boundary_helper`] when
+/// any `WordBoundary` op appears in the program.
 #[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct and there's no good grouping
 fn emit_jit_op(
     builder: &mut FunctionBuilder,
@@ -692,6 +725,7 @@ fn emit_jit_op(
     next_block: cranelift_codegen::ir::Block,
     fail_block: cranelift_codegen::ir::Block,
     success_block: cranelift_codegen::ir::Block,
+    word_boundary_ref: Option<cranelift_codegen::ir::FuncRef>,
 ) {
     match op {
         JitOp::Char(b) => {
@@ -753,6 +787,39 @@ fn emit_jit_op(
             builder
                 .ins()
                 .brif(cond, next_block, &[pos], fail_block, &[]);
+        }
+        JitOp::WordBoundary { negated } => {
+            // Zero-width: calls the runtime helper
+            // `rgx_runtime_word_boundary_test(text, text_len, pos)`
+            // which returns a bool (i8). For \b: pass-through if
+            // the helper returned non-zero. For \B: pass-through
+            // if the helper returned zero.
+            //
+            // The helper is imported into the function by
+            // `compile_program` via `JitHost::import_word_boundary_helper`
+            // and passed in as `word_boundary_ref`. If we reach
+            // this branch without an import, it's a codegen layer
+            // bug — we expect that anywhere a `WordBoundary` op
+            // appears, the import was performed up front. Use
+            // `expect` to surface the bug loudly.
+            let func_ref = word_boundary_ref
+                .expect("WordBoundary op requires the helper import; compile_program is buggy");
+            let call = builder.ins().call(func_ref, &[text_ptr, text_len, pos]);
+            let raw_result = builder.inst_results(call)[0];
+            // The helper returns i8 (the C ABI bool). Compare
+            // against zero to get a Cranelift boolean we can branch
+            // on. For \B (negated), we invert the test by swapping
+            // the branch targets — equivalent to `!returned`.
+            let is_boundary = builder.ins().icmp_imm(IntCC::NotEqual, raw_result, 0);
+            if negated {
+                builder
+                    .ins()
+                    .brif(is_boundary, fail_block, &[], next_block, &[pos]);
+            } else {
+                builder
+                    .ins()
+                    .brif(is_boundary, next_block, &[pos], fail_block, &[]);
+            }
         }
         JitOp::SaveGroupZero { which: _ } => {
             // Step 3b: group-0 wrappers are no-op. The engine layer
@@ -975,6 +1042,8 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
             OpCode::SpaceAsciiNeg => ops.push(JitOp::SpaceAscii { negated: true }),
             OpCode::StartText => ops.push(JitOp::StartText),
             OpCode::EndText => ops.push(JitOp::EndText),
+            OpCode::WordBoundary => ops.push(JitOp::WordBoundary { negated: false }),
+            OpCode::NonWordBoundary => ops.push(JitOp::WordBoundary { negated: true }),
             OpCode::SaveStart | OpCode::SaveEnd => {
                 let Some(&group_id) = code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(format!(
@@ -1825,23 +1894,17 @@ mod tests {
         }
     }
 
-    // ----- Step 3b refusal cases -----
+    // ----- Step 3b/3c refusal cases -----
     //
     // Patterns that the eligibility check (step 2) accepts but
-    // step 3b's narrower codegen still refuses. Each must return
-    // CodegenUnsupported so the engine layer (step 5+) falls back
-    // to the interpreter.
-
-    #[test]
-    fn step3b_refuses_word_boundary() {
-        // \b needs a runtime helper call; deferred to a later step.
-        assert_codegen_unsupported(r"\bword");
-    }
-
-    #[test]
-    fn step3b_refuses_non_word_boundary() {
-        assert_codegen_unsupported(r"\Bword");
-    }
+    // the current step's narrower codegen still refuses. Each must
+    // return CodegenUnsupported so the engine layer (step 5+) falls
+    // back to the interpreter.
+    //
+    // Note: word boundaries (\b / \B) were originally refused at
+    // step 3b but are now accepted at step 3c via the runtime
+    // helper. The corresponding refusal tests are gone; positive
+    // tests live in the step 3c section below.
 
     #[test]
     fn step3b_caret_lowers_to_start_text_in_non_multiline_mode() {
@@ -1871,5 +1934,144 @@ mod tests {
     fn step3b_refuses_end_text_or_nl() {
         // \Z (EndTextOrNL) needs newline detection; deferred.
         assert_codegen_unsupported(r"abc\Z");
+    }
+
+    // ============================================================
+    // C1 step 3c — word boundaries via runtime helper
+    // ============================================================
+    //
+    // Each test JIT-compiles a pattern that uses `\b` or `\B` and
+    // verifies the JIT'd function calls into the runtime helper
+    // correctly. The helper itself is unit-tested directly in
+    // `c1::runtime::tests`; these tests verify the indirect call
+    // codegen, the symbol registration in `JitHost::new`, and the
+    // pass-through-pos-on-success contract for zero-width opcodes.
+
+    #[test]
+    fn step3c_word_boundary_at_start_of_text() {
+        // \bword — \b at pos 0 with word char following → boundary
+        let (_host, func) = jit_compile(r"\bword");
+        unsafe {
+            let text = b"word";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 4);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_at_offset_after_space() {
+        // \bword starting at pos 4 of "abc word" — boundary because
+        // pos 3 is a space and pos 4 is `w`.
+        let (_host, func) = jit_compile(r"\bword");
+        unsafe {
+            let text = b"abc word";
+            assert_eq!(func(text.as_ptr(), text.len(), 4), 8);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_no_boundary_in_middle() {
+        // \bword starting at pos 1 of "aword" — no boundary because
+        // pos 0 is `a` (word char) and pos 1 is `w` (word char).
+        let (_host, func) = jit_compile(r"\bword");
+        unsafe {
+            let text = b"aword";
+            assert_eq!(func(text.as_ptr(), text.len(), 1), -1);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_at_end_of_text() {
+        // word\b — \b after the literal at end of text → boundary
+        let (_host, func) = jit_compile(r"word\b");
+        unsafe {
+            let text = b"word";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 4);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_in_middle_of_text() {
+        // word\b followed by a non-word char
+        let (_host, func) = jit_compile(r"word\b");
+        unsafe {
+            let text = b"word ";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 4);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_no_boundary_followed_by_word() {
+        // word\b followed by another word char → no boundary at end
+        let (_host, func) = jit_compile(r"word\b");
+        unsafe {
+            let text = b"words";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_both_sides_full_match() {
+        // \bword\b — both anchored
+        let (_host, func) = jit_compile(r"\bword\b");
+        unsafe {
+            assert_eq!(func(b"word".as_ptr(), 4, 0), 4);
+            assert_eq!(func(b" word ".as_ptr(), 6, 1), 5);
+            // Surrounded by word chars on both sides → no match
+            assert_eq!(func(b"awordb".as_ptr(), 6, 1), -1);
+        }
+    }
+
+    #[test]
+    fn step3c_non_word_boundary_between_word_chars() {
+        // \Bword starting at pos 1 of "aword" — \B fires because
+        // pos 0 (a) and pos 1 (w) are both word chars.
+        let (_host, func) = jit_compile(r"\Bword");
+        unsafe {
+            let text = b"aword";
+            assert_eq!(func(text.as_ptr(), text.len(), 1), 5);
+        }
+    }
+
+    #[test]
+    fn step3c_non_word_boundary_refuses_at_actual_boundary() {
+        // \Bword at pos 0 of "word" — \B fails because pos 0 is a
+        // real word boundary.
+        let (_host, func) = jit_compile(r"\Bword");
+        unsafe {
+            let text = b"word";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_with_digit() {
+        // \b123 starting at the start of "123" — `1` is a word
+        // char (digit), pos 0 has no preceding char, so \b fires.
+        let (_host, func) = jit_compile(r"\b123");
+        unsafe {
+            let text = b"123";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 3);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_with_underscore() {
+        // _ is a word char, so `\b_x` should match at start of text
+        let (_host, func) = jit_compile(r"\b_x");
+        unsafe {
+            let text = b"_x";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 2);
+        }
+    }
+
+    #[test]
+    fn step3c_word_boundary_with_char_class() {
+        // \b\d+\b doesn't compile (it has a quantifier) — instead
+        // verify \b\d works at the start of "5"
+        let (_host, func) = jit_compile(r"\b\d");
+        unsafe {
+            let text = b"5";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 1);
+        }
     }
 }

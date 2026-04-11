@@ -82,22 +82,45 @@ pub unsafe extern "C" fn rgx_runtime_char_class_test(
 
 /// Test whether the position is at a word boundary (`\b`).
 ///
-/// **Step 1: signature-only stub.** Implementation lands in step 7.
-/// The real version will compare the word-character status of the
-/// bytes at `pos - 1` and `pos`, returning `true` if exactly one of
-/// them is a word character (or one is the start/end of input).
+/// **Real implementation, landed at C1 step 3c.** A position is a
+/// word boundary iff exactly one of the bytes at `pos - 1` and `pos`
+/// is an ASCII word character `[A-Za-z0-9_]`. Out-of-range positions
+/// (`pos == 0` or `pos == text_len`) are treated as "non-word"
+/// neighbours, so `\b` matches at the start/end of input iff the
+/// adjacent byte is a word character. This matches PCRE2 ASCII
+/// `\b` semantics.
+///
+/// JIT'd code calls this via an indirect call registered with the
+/// Cranelift JIT module's symbol table. The C ABI signature is the
+/// stable contract; changes require a JIT module version bump.
 ///
 /// # Safety
 /// `text` must point to a valid `[u8]` of length `text_len`. `pos`
-/// must be `<= text_len`.
+/// must be `<= text_len`. Both invariants are upheld by the
+/// JIT'd-code caller (the codegen layer in `c1/codegen.rs` only
+/// emits this call when the bounds are guaranteed by the engine
+/// dispatch layer at step 5+).
 #[no_mangle]
 pub unsafe extern "C" fn rgx_runtime_word_boundary_test(
     text: *const u8,
     text_len: usize,
     pos: usize,
 ) -> bool {
-    let _ = (text, text_len, pos);
-    false
+    // SAFETY: caller upholds the contract that `text` points to
+    // `text_len` valid bytes and `pos <= text_len`.
+    let bytes = std::slice::from_raw_parts(text, text_len);
+    let prev_is_word = pos > 0 && is_ascii_word_byte(bytes[pos - 1]);
+    let curr_is_word = pos < text_len && is_ascii_word_byte(bytes[pos]);
+    prev_is_word != curr_is_word
+}
+
+/// Returns `true` iff `b` is an ASCII word character: `[A-Za-z0-9_]`.
+/// This matches the same set the existing VM and the C2 NFA use for
+/// `\w` so word-boundary semantics stay consistent across all three
+/// engines.
+#[inline]
+fn is_ascii_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Match a multi-byte literal character at the given position.
@@ -164,22 +187,18 @@ pub unsafe extern "C" fn rgx_runtime_run_subprogram(ctx: *mut u8, subprogram_id:
 mod tests {
     use super::*;
 
-    /// Verify the signature stubs link and can be called. They all
-    /// return `false` (the safe default) at step 1; the real
-    /// behaviours land in steps 6 and 7. The point of this test is
-    /// to catch any signature drift between the stubs declared here
-    /// and the function signatures in any future caller — a stub
-    /// that fails to link is a hard error before any C1 dispatch is
-    /// wired up.
+    /// Verify the signature stubs (still stubbed at step 3c) link
+    /// and can be called. The implemented helpers
+    /// (`rgx_runtime_word_boundary_test` as of step 3c) get their
+    /// own dedicated correctness tests below; this test only
+    /// catches signature drift on the still-stubbed helpers.
     #[test]
     fn step_one_stubs_are_callable_and_return_safe_defaults() {
-        // SAFETY: all stubs are signature-only and ignore their
-        // arguments at step 1. Passing null pointers and zero
-        // lengths is safe because the implementations don't
-        // dereference anything.
+        // SAFETY: stubs ignore their arguments at step 1. Passing
+        // null pointers and zero lengths is safe because the
+        // implementations don't dereference anything.
         unsafe {
             assert!(!rgx_runtime_char_class_test(std::ptr::null(), 0, 0));
-            assert!(!rgx_runtime_word_boundary_test(std::ptr::null(), 0, 0));
             assert!(!rgx_runtime_match_multibyte_char(
                 std::ptr::null(),
                 0,
@@ -190,5 +209,101 @@ mod tests {
             assert!(!rgx_runtime_compare_capture(std::ptr::null_mut(), 0));
             assert!(!rgx_runtime_run_subprogram(std::ptr::null_mut(), 0));
         }
+    }
+
+    // ============================================================
+    // C1 step 3c: rgx_runtime_word_boundary_test correctness
+    // ============================================================
+    //
+    // The helper is the source of truth for `\b` / `\B` semantics
+    // in JIT'd code. The codegen calls this via an indirect call,
+    // so any divergence between this implementation and the
+    // existing VM's word-boundary behaviour is a hard correctness
+    // bug per design doc §1.0. These tests pin the exact PCRE2
+    // ASCII semantics: a word boundary is a position where exactly
+    // one of the adjacent bytes is a word character.
+
+    /// Convenience wrapper that lifts a `&[u8]` and a position into
+    /// the raw helper signature.
+    fn wb(text: &[u8], pos: usize) -> bool {
+        // SAFETY: text outlives the call; pos <= text.len() upheld
+        // by the test caller.
+        unsafe { rgx_runtime_word_boundary_test(text.as_ptr(), text.len(), pos) }
+    }
+
+    #[test]
+    fn word_boundary_at_start_of_text_with_word_char() {
+        // pos 0, text starts with a word char → boundary
+        assert!(wb(b"abc", 0));
+    }
+
+    #[test]
+    fn word_boundary_at_start_of_text_with_non_word_char() {
+        // pos 0, text starts with a non-word char → no boundary
+        assert!(!wb(b" abc", 0));
+    }
+
+    #[test]
+    fn word_boundary_at_end_of_text_after_word_char() {
+        // pos == text_len, last byte is a word char → boundary
+        assert!(wb(b"abc", 3));
+    }
+
+    #[test]
+    fn word_boundary_at_end_of_text_after_non_word_char() {
+        // pos == text_len, last byte is a non-word char → no boundary
+        assert!(!wb(b"abc ", 4));
+    }
+
+    #[test]
+    fn word_boundary_between_word_and_non_word() {
+        // "abc def" — boundary at position 3 (after `c`, before space)
+        // and position 4 (after space, before `d`).
+        assert!(wb(b"abc def", 3));
+        assert!(wb(b"abc def", 4));
+    }
+
+    #[test]
+    fn no_word_boundary_between_two_word_chars() {
+        // "abc" — no boundary at positions 1 or 2.
+        assert!(!wb(b"abc", 1));
+        assert!(!wb(b"abc", 2));
+    }
+
+    #[test]
+    fn no_word_boundary_between_two_non_word_chars() {
+        // "  " — no boundary at position 1 (space-space transition).
+        assert!(!wb(b"  ", 1));
+    }
+
+    #[test]
+    fn word_boundary_handles_underscore_as_word() {
+        // "_abc" — `_` is a word char, no boundary at position 1.
+        assert!(!wb(b"_abc", 1));
+        // " _" — boundary at position 1 (space → underscore).
+        assert!(wb(b" _", 1));
+    }
+
+    #[test]
+    fn word_boundary_handles_digit_as_word() {
+        // "1abc" — `1` is a word char, no boundary at position 1.
+        assert!(!wb(b"1abc", 1));
+        // " 1" — boundary at position 1 (space → digit).
+        assert!(wb(b" 1", 1));
+    }
+
+    #[test]
+    fn word_boundary_empty_input() {
+        // pos 0, text_len 0 → both neighbours are out-of-range
+        // (treated as non-word) → no boundary.
+        assert!(!wb(b"", 0));
+    }
+
+    #[test]
+    fn word_boundary_punctuation_is_non_word() {
+        // "abc!" — `!` is non-word, boundary at position 3.
+        assert!(wb(b"abc!", 3));
+        // "!abc" — boundary at position 1.
+        assert!(wb(b"!abc", 1));
     }
 }

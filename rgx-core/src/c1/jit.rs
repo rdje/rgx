@@ -37,7 +37,7 @@
 //! choice), §7 (runtime helper layer), and §10 (module layout) for
 //! the design context.
 
-use cranelift_codegen::ir::{Function, Signature};
+use cranelift_codegen::ir::{types, AbiParam, FuncRef, Function, Signature};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module, ModuleError};
@@ -166,7 +166,24 @@ impl JitHost {
             .finish(settings::Flags::new(flag_builder))
             .map_err(|e| JitHostError::IsaBuildError(e.to_string()))?;
 
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        // Register the runtime helper symbols so JIT'd code can call
+        // them via indirect calls. The names here MUST match the
+        // `#[no_mangle] extern "C"` symbols in `c1/runtime.rs` AND
+        // the names declared via `Module::declare_function` in the
+        // codegen layer (`c1/codegen.rs`). Adding a new helper means
+        // adding a `builder.symbol(...)` line here AND a matching
+        // `Module::declare_function` call in codegen.
+        //
+        // The address cast is sound because each helper is declared
+        // `#[no_mangle] pub unsafe extern "C" fn` so it has a stable
+        // C ABI and a stable address. See design doc §7.
+        builder.symbol(
+            "rgx_runtime_word_boundary_test",
+            crate::c1::runtime::rgx_runtime_word_boundary_test as *const u8,
+        );
+
         let module = JITModule::new(builder);
         Ok(Self {
             module,
@@ -254,6 +271,43 @@ impl JitHost {
     #[must_use]
     pub fn get_finalized_fn(&self, func_id: FuncId) -> *const u8 {
         self.module.get_finalized_function(func_id)
+    }
+
+    /// Import the `rgx_runtime_word_boundary_test` runtime helper
+    /// into the given Cranelift `Function` so JIT'd code can call
+    /// it. Returns a [`FuncRef`] usable with `builder.ins().call(...)`.
+    ///
+    /// The symbol must already have been registered with the
+    /// `JITBuilder` (which happens in [`Self::new`]), otherwise
+    /// finalisation will fail with a missing-symbol error. The
+    /// import declares the function with `Linkage::Import` and the
+    /// matching C ABI signature `(i64, i64, i64) -> i8`.
+    ///
+    /// Each `Function` needs its own import — the `FuncRef` is
+    /// scoped to the function it was declared in, not the module.
+    ///
+    /// # Errors
+    /// Forwards any error from `cranelift_module::Module::declare_function`.
+    pub fn import_word_boundary_helper(
+        &mut self,
+        function: &mut Function,
+    ) -> Result<FuncRef, JitHostError> {
+        // C ABI signature: (text: *const u8, text_len: usize, pos: usize) -> bool.
+        // Pointers and usize are i64 on 64-bit; bool returns as i8
+        // (the low byte of the return register).
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I8));
+
+        let func_id = self
+            .module
+            .declare_function("rgx_runtime_word_boundary_test", Linkage::Import, &sig)
+            .map_err(JitHostError::from)?;
+
+        let func_ref = self.module.declare_func_in_func(func_id, function);
+        Ok(func_ref)
     }
 }
 
