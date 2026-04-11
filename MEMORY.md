@@ -294,6 +294,26 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-11 (evening — seventh commit)
+- **C1 step 3d.1 (refactor pos to Cranelift Variable) landed.** Pure architectural pivot — no new functionality, no behaviour change, no new tests. The JIT'd function's match position `pos` is now held in a `Variable::from_u32(0)` declared at the top of `compile_program`, instead of being passed between op_blocks via block parameters. Each op_block reads pos via `use_var(pos_var)` once at the top; consuming ops write the new pos via `def_var(pos_var, new_pos)` on the success edge in a fresh `advance_block`; zero-width ops leave pos_var unchanged; the success block reads pos_var fresh to produce its return value.
+- **Why the refactor**: step 3d.2 needs to restore `pos` from the backtrack stack on failure dispatch (when popping a frame). Cranelift's `br_table` instruction doesn't accept per-target arguments, so anything that needs to be restored on backtrack MUST live in a Variable that the dispatch block can write before jumping. Block parameters can't survive a `br_table` dispatch. The Variable refactor is the foundation step 3d.2 builds on.
+- **All 126 existing C1 tests pass on the first run after the refactor**, confirming the Variable + use_var/def_var pattern produces semantically identical IR to the previous block-parameter pattern. Cranelift's SSA pass handles auto-phi insertion (which currently never fires for linear programs but will once Split/Jump dispatch lands at step 3d.2).
+- **Cranelift API gotcha caught immediately**: my first draft used `Variable::new(0)` (the obvious-sounding constructor) which doesn't exist in Cranelift 0.101. The compiler error pointed at the deprecated `Variable::with_u32` and the canonical `Variable::from_u32`. Fixed in one edit. Documented the right constructor inline.
+- **Touched functions**:
+  - `compile_program`: declares pos_var, removes `append_block_param` for op_blocks/success_block, replaces jumps-with-pos-arg with jumps-with-empty-args, replaces `block_params(success_block)[0]` with `use_var(pos_var)`.
+  - `emit_jit_op`: gains a `pos_var: Variable` parameter alongside `pos: Value` (current value, already loaded by the caller). All zero-width ops use empty arg lists. Match ignores pos_var and pos because the success block reads pos_var fresh.
+  - `emit_consume_byte_with_test`: gains `pos_var`. Success edge jumps to a new `advance_block` that calls `def_var(pos_var, new_pos)` and then jumps to `next_block` with empty args.
+- **Validation**: full quality gates green on default + `--features jit`. Default `cargo test -p rgx-core` 902/0 unchanged, `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors. With `jit`: `cargo test -p rgx-core --features jit` 1028/0 (126 C1 tests, unchanged), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors. `cargo fmt --check` clean.
+- **Next concrete action**: C1 step 3d.2 (control flow + backtracking). Adds Split/Jump/SplitLazy opcodes with the 256-frame stack-allocated backtrack array architecture sketched in the previous session entry. Specifically:
+  - New `JitOp` variants: `Split { branch_b_op_idx }`, `SplitLazy { branch_b_op_idx }`, `Jump { target_op_idx }`.
+  - Two-pass `decode_program`: first pass collects op positions (byte_offset → op_idx), second pass resolves Split/Jump byte targets (`ip_after_operand + offset`) to op indices.
+  - Stack slot via `create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 4096))` for 256 backtrack frames × 16 bytes (8 saved_pc + 8 saved_pos).
+  - `bt_top_var: Variable` (i64 counter, 0..256).
+  - `failure_dispatch` block: checks `bt_top > 0`, decrements bt_top, loads (saved_pc, saved_pos) from `stack_addr + bt_top * 16`, sets `pos_var = saved_pos`, uses `br_table` to dispatch to `op_blocks[saved_pc]`.
+  - `emit_jit_op` Split arm: pushes (next_op_idx_after_split? or branch_b_op_idx?) onto bt_stack and jumps. Need to verify which is the "second" branch from the bytecode dispatch logic.
+  - All consuming op fail edges redirect to `failure_dispatch` instead of `fail_block`.
+  - New tests: simple alternation `cat|dog`, optional `a?`, nested patterns, edge cases.
+
 ### 2026-04-11 (afternoon — sixth commit)
 - **C1 step 3c (word boundaries via runtime helper) landed.** Re-orders the design doc plan: step 3c implements `\b`/`\B` via a runtime helper indirect call instead of control flow + backtracking. Control flow (`Split`/`Jump` with a backtrack stack) is a substantially larger commit and gets its own slot at step 3d. Re-ordering keeps each commit accuracy-first scoped while still adding real new capability.
 - **The runtime helper infrastructure is now in place** and reusable for step 6 (CharClass + multi-byte helpers) and step 7 (runtime safety helpers):

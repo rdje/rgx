@@ -73,7 +73,7 @@ use crate::c1::jit::{JitHost, JitHostError};
 use crate::vm::{OpCode, Program};
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, AbiParam, Function, InstBuilder, MemFlags, UserFuncName};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{FuncId, Linkage};
 
 /// Returns `true` iff the JIT will accept the given compiled program.
@@ -612,14 +612,28 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
         None
     };
 
-    // Build the IR using a per-opcode block-per-block layout. Each
-    // op block takes the current `pos` as its single block parameter
-    // and either advances pos and jumps to the next op's block, or
-    // jumps to the fail block on a mismatch. The Match op jumps to
-    // the success block, which returns the final pos.
+    // Build the IR using a per-opcode block-per-block layout. The
+    // current match position `pos` is held in a Cranelift `Variable`
+    // (instead of being passed between blocks via block parameters)
+    // so that step 3d's backtrack-dispatch path can restore pos
+    // from the saved frame on a `br_table` jump — `br_table` does
+    // not accept per-target arguments, so anything that needs to
+    // be restored on backtrack must live in a Variable that the
+    // dispatch can write before jumping. The pos Variable is
+    // declared and initialised in the entry block; each op_block
+    // reads it via `use_var` and writes the new pos (for consuming
+    // ops) via `def_var` before jumping to the next op_block.
     {
         let mut fb_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut function, &mut fb_ctx);
+
+        // The pos Variable. Declared once, used across every block.
+        // Cranelift's SSA pass auto-inserts phi nodes wherever
+        // multiple predecessors converge with different pos values
+        // (which currently never happens for linear programs, but
+        // will once Split / Jump dispatch lands at step 3d.2).
+        let pos_var = Variable::from_u32(0);
+        builder.declare_var(pos_var, types::I64);
 
         // Allocate all blocks up front so we can target the next
         // op's block by index when emitting each op.
@@ -628,33 +642,28 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
         let fail_block = builder.create_block();
         let op_blocks: Vec<_> = ops.iter().map(|_| builder.create_block()).collect();
 
-        // Each op block takes the current pos as a single i64
-        // parameter. Same for the success block (it returns whatever
-        // pos is when the Match op fires).
-        for &b in &op_blocks {
-            builder.append_block_param(b, types::I64);
-        }
-        builder.append_block_param(success_block, types::I64);
-
-        // === Entry block: load function params and jump into the
-        // first op block (or directly to success if there are no
-        // ops, which shouldn't happen but is handled defensively).
+        // === Entry block: load function params, initialise pos_var,
+        // jump into the first op block. Op blocks no longer take
+        // pos as a parameter — they read it via use_var(pos_var).
         builder.append_block_params_for_function_params(entry);
         builder.switch_to_block(entry);
         let text_ptr = builder.block_params(entry)[0];
         let text_len = builder.block_params(entry)[1];
         let init_pos = builder.block_params(entry)[2];
+        builder.def_var(pos_var, init_pos);
         let first_target = op_blocks.first().copied().unwrap_or(success_block);
-        builder.ins().jump(first_target, &[init_pos]);
+        builder.ins().jump(first_target, &[]);
         builder.seal_block(entry);
 
-        // === Per-op blocks: emit IR for each JitOp. Each block jumps
-        // to the next op's block (passing the new pos) or to the
-        // fail block. The Match op jumps to success_block.
+        // === Per-op blocks: emit IR for each JitOp. Each block reads
+        // the current pos from `pos_var`, applies the op-specific
+        // semantics, and either updates pos_var + jumps to the next
+        // op_block, or jumps to fail_block. The Match op jumps to
+        // success_block.
         for (i, op) in ops.iter().enumerate() {
             let block = op_blocks[i];
             builder.switch_to_block(block);
-            let pos = builder.block_params(block)[0];
+            let pos = builder.use_var(pos_var);
 
             // The "next block" for a successful step is the next op
             // block, or the success block if this is the last op.
@@ -666,6 +675,7 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
                 &mut builder,
                 *op,
                 pos,
+                pos_var,
                 text_ptr,
                 text_len,
                 next_block,
@@ -676,9 +686,10 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
             builder.seal_block(block);
         }
 
-        // === Success block: return the pos parameter.
+        // === Success block: return the current pos (read from the
+        // pos_var Variable, which the Match op set last).
         builder.switch_to_block(success_block);
-        let final_pos = builder.block_params(success_block)[0];
+        let final_pos = builder.use_var(pos_var);
         builder.ins().return_(&[final_pos]);
         builder.seal_block(success_block);
 
@@ -715,11 +726,19 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 /// imports into the current function via
 /// [`crate::c1::jit::JitHost::import_word_boundary_helper`] when
 /// any `WordBoundary` op appears in the program.
+///
+/// `pos` is the current position value (already read from
+/// `pos_var` by the caller); `pos_var` is the Variable that
+/// `emit_jit_op` writes the new pos into for consuming ops. Both
+/// are passed because reading pos via `use_var` again inside the
+/// helpers would re-emit the IR — the caller already loaded it
+/// once.
 #[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct and there's no good grouping
 fn emit_jit_op(
     builder: &mut FunctionBuilder,
     op: JitOp,
     pos: cranelift_codegen::ir::Value,
+    pos_var: Variable,
     text_ptr: cranelift_codegen::ir::Value,
     text_len: cranelift_codegen::ir::Value,
     next_block: cranelift_codegen::ir::Block,
@@ -732,6 +751,7 @@ fn emit_jit_op(
             emit_consume_byte_with_test(
                 builder,
                 pos,
+                pos_var,
                 text_ptr,
                 text_len,
                 next_block,
@@ -743,6 +763,7 @@ fn emit_jit_op(
             emit_consume_byte_with_test(
                 builder,
                 pos,
+                pos_var,
                 text_ptr,
                 text_len,
                 next_block,
@@ -754,6 +775,7 @@ fn emit_jit_op(
             emit_consume_byte_with_test(
                 builder,
                 pos,
+                pos_var,
                 text_ptr,
                 text_len,
                 next_block,
@@ -765,6 +787,7 @@ fn emit_jit_op(
             emit_consume_byte_with_test(
                 builder,
                 pos,
+                pos_var,
                 text_ptr,
                 text_len,
                 next_block,
@@ -774,26 +797,23 @@ fn emit_jit_op(
         }
         JitOp::StartText => {
             // Zero-width: matches iff pos == 0. No bytes consumed,
-            // so the next block sees the same pos.
+            // so pos_var is left unchanged.
             let cond = builder.ins().icmp_imm(IntCC::Equal, pos, 0);
-            builder
-                .ins()
-                .brif(cond, next_block, &[pos], fail_block, &[]);
+            builder.ins().brif(cond, next_block, &[], fail_block, &[]);
         }
         JitOp::EndText => {
             // Zero-width: matches iff pos == text_len. No bytes
-            // consumed, so the next block sees the same pos.
+            // consumed, so pos_var is left unchanged.
             let cond = builder.ins().icmp(IntCC::Equal, pos, text_len);
-            builder
-                .ins()
-                .brif(cond, next_block, &[pos], fail_block, &[]);
+            builder.ins().brif(cond, next_block, &[], fail_block, &[]);
         }
         JitOp::WordBoundary { negated } => {
             // Zero-width: calls the runtime helper
             // `rgx_runtime_word_boundary_test(text, text_len, pos)`
             // which returns a bool (i8). For \b: pass-through if
             // the helper returned non-zero. For \B: pass-through
-            // if the helper returned zero.
+            // if the helper returned zero. pos_var is left unchanged
+            // either way (zero-width).
             //
             // The helper is imported into the function by
             // `compile_program` via `JitHost::import_word_boundary_helper`
@@ -814,24 +834,28 @@ fn emit_jit_op(
             if negated {
                 builder
                     .ins()
-                    .brif(is_boundary, fail_block, &[], next_block, &[pos]);
+                    .brif(is_boundary, fail_block, &[], next_block, &[]);
             } else {
                 builder
                     .ins()
-                    .brif(is_boundary, next_block, &[pos], fail_block, &[]);
+                    .brif(is_boundary, next_block, &[], fail_block, &[]);
             }
         }
         JitOp::SaveGroupZero { which: _ } => {
             // Step 3b: group-0 wrappers are no-op. The engine layer
             // (step 5) reconstructs group 0 from entry pos + returned
             // end pos. Step 4 will replace this with real capture
-            // trail handling for groups 1+. Just thread pos through.
-            builder.ins().jump(next_block, &[pos]);
+            // trail handling for groups 1+. pos_var is left unchanged.
+            builder.ins().jump(next_block, &[]);
         }
         JitOp::Match => {
-            // Terminate with success: pos becomes the return value.
+            // Terminate with success. pos_var is left unchanged
+            // — the success block reads it via use_var to produce
+            // the return value.
             let _ = next_block; // unused for Match
-            builder.ins().jump(success_block, &[pos]);
+            let _ = pos_var; // unchanged on Match
+            let _ = pos; // success block reads pos_var fresh
+            builder.ins().jump(success_block, &[]);
         }
     }
 }
@@ -844,10 +868,15 @@ fn emit_jit_op(
 /// 1. Bounds check: `pos < text_len`. If not, jump to fail.
 /// 2. Load `text[pos]` as an i8.
 /// 3. Apply the predicate closure to get a boolean.
-/// 4. If true, jump to `next_block` with `pos + 1`. Else jump to fail.
+/// 4. If true, write `pos + 1` into `pos_var` and jump to
+///    `next_block`. Else jump to fail (`pos_var` left unchanged so
+///    the backtrack-dispatch path at step 3d.2 can restore from
+///    the stack-saved pos).
+#[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct and there's no good grouping
 fn emit_consume_byte_with_test<F>(
     builder: &mut FunctionBuilder,
     pos: cranelift_codegen::ir::Value,
+    pos_var: Variable,
     text_ptr: cranelift_codegen::ir::Value,
     text_len: cranelift_codegen::ir::Value,
     next_block: cranelift_codegen::ir::Block,
@@ -875,12 +904,20 @@ fn emit_consume_byte_with_test<F>(
     // Apply the predicate.
     let cond = predicate(builder, byte);
 
-    // If the predicate matched, advance pos and jump to the next op.
-    // Otherwise jump to fail.
+    // Pre-compute the advanced pos. Cranelift's optimizer will
+    // dead-strip this on the fail edge since pos_var is only
+    // written on the success edge below.
     let new_pos = builder.ins().iadd_imm(pos, 1);
+    let advance_block = builder.create_block();
     builder
         .ins()
-        .brif(cond, next_block, &[new_pos], fail_block, &[]);
+        .brif(cond, advance_block, &[], fail_block, &[]);
+
+    // Success edge: write the new pos into pos_var and continue.
+    builder.switch_to_block(advance_block);
+    builder.seal_block(advance_block);
+    builder.def_var(pos_var, new_pos);
+    builder.ins().jump(next_block, &[]);
 }
 
 /// Helper: emit IR for the ASCII digit test `b >= '0' && b <= '9'`,
