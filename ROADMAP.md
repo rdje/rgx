@@ -19,18 +19,14 @@ Live forward-looking tracker for rgx.
 - `done`: completed and validated (then move to `CHANGES.md`)
 
 ## Now (active)
-### Performance: NFA/DFA hybrid (C2) + JIT compilation (C1)
-- Status: `in-progress` (active focus as of 2026-04-09)
-- Goal: change RGX's performance class on the patterns where most users live, then close the constant-factor gap with PCRE2-JIT.
-- Strategic ordering: **C2 first, C1 second.**
-  - **C2** changes the algorithmic class. Detect patterns that don't use backtracking-only features (no backreferences, no recursion, no lookaround, no inline code blocks) at compile time and run them through a Thompson NFA + lazy DFA cache instead of the backtracking VM. Gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator and typically delivers 10x-100x improvement on regular patterns.
-  - **C1** is then a constant-factor multiplier on whatever engine is running. Cranelift is already in the dep tree via wasmtime. Wins ~5-10x on top of whichever path executes.
-  - In this order, the work compounds: NFA/DFA on the common case + JIT'd backtracking for the patterns C2 can't handle.
-- Scope:
-  - C2: Thompson NFA construction, lazy DFA cache, pattern-analysis pass to decide which engine, capture-handling subtlety (the lesson from the Rust `regex` crate is that DFA + captures is genuinely tricky and usually solved by running the DFA to find the match span, then re-running a small VM step to recover captures)
-  - C1: bytecode → Cranelift IR translation, bytecode format stability, cross-platform validation, debug story, binary-size impact decision
-- Rationale: A9 (language bindings) was deprioritized in this session because the unique value of RGX is engine quality, not surface area. Engine work strengthens the differentiator; bindings expand a maintenance treadmill.
-- Validation: deltas tracked through the existing `target/benchmark-trends/` infrastructure. The label-paired quick/full longitudinal story already in place is exactly the right surface for measuring this.
+### Tier-2 perf headroom + parity polish (post-C1/C2 cleanup)
+- Status: `in-progress` (started 2026-04-12, after the C1 production cutover)
+- Context: the C2 NFA/DFA hybrid (shipped 2026-04-11) and C1 JIT compilation (shipped 2026-04-12) closed the major-perf track. Both are default-on. The 4-tier dispatch chain (`DFA → Pike-VM → JIT → backtracking VM`) is in production and exercised by every test in the suite.
+- Goal: pick off the smaller follow-up wins now that the major arcs are done. Three concrete focuses for this session:
+  - **Reverse-DFA pipeline (C2 follow-up).** The reverse NFAs are already built and stored on `CompiledC2Program` but the dispatch path uses per-position anchored scans. Switching to a forward-DFA finds match end → reverse-DFA finds match start → bounded Pike-VM recovers captures pipeline is the biggest single perf win still on the table (per the C2 chapter's "what's not in C2 yet" section).
+  - **DFA negated-char-class semantics fix.** The C1 step 6 differential gate exposed that `Regex::find_first("[^0-9]", "123abc")` returns `(3, 6)` (leftmost-LONGEST) via the C2 DFA path while the raw VM and the JIT correctly return `(3, 4)`. Small correctness improvement to C2.
+  - **A8 crate publishing prep.** Cargo.toml metadata cleanup, README polish for crates.io display, license file check, dry-run via `cargo publish --dry-run`. Does not actually publish — that's gated on a final API-stability decision and explicit user authorization.
+- Validation: existing benchmark trend infrastructure (label-paired quick/full captures under `target/benchmark-trends/`) for the perf items; the differential gate for the correctness fix; `cargo publish --dry-run` for the publishing prep.
 
 ### PCRE2 parity program (features, speed, accuracy)
 - Status: `in-progress`
@@ -171,7 +167,7 @@ Live forward-looking tracker for rgx.
   - Tag v0.1.0 release.
 
 ### Remaining PCRE2 feature gaps
-The compatibility matrix is now at ~98% parity. The remaining gaps are:
+The compatibility matrix is now at ~98% parity. JIT compilation has shipped as of the C1 production cutover (2026-04-12, default-on). The remaining gaps are:
 
 #### VERSION conditionals `(?(VERSION>=...)...)`
 - Priority: `very low`
@@ -183,11 +179,6 @@ The compatibility matrix is now at ~98% parity. The remaining gaps are:
 - Status: `planned`
 - Rationale: `(*SKIP)` (without name) is already shipped. The named form `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to the position of a specific mark. This requires wiring the mark name registry into the skip logic. The unnamed form covers the vast majority of use cases.
 
-#### JIT compilation
-- Priority: `deferred to speed phase`
-- Status: `planned`
-- Rationale: PCRE2's JIT compiles regex bytecode to native machine code for ~5-10x speedup. This is purely a performance feature. RGX's priority is to close the speed gap through engineering optimizations first (text copy elimination, trace gating, opcode fusion); JIT is a later-stage investment if the gap remains significant after those optimizations.
-
 ### Binding/runtime expansion (A9)
 - Status: `deferred` (deprioritized 2026-04-09)
 - Scope: production-ready external bindings and runtime targets (Python/Node/C) after core stability gates.
@@ -195,6 +186,8 @@ The compatibility matrix is now at ~98% parity. The remaining gaps are:
 - Reactivation criteria: a real user or use case pulling for a specific binding. Without a demand signal, this is speculative work. If it does reactivate, **C bindings via cbindgen first** (cheapest, unlocks every other FFI host for free) — not Python.
 
 ## Done recently (snapshot)
+- **C1 JIT compilation production cutover** (2026-04-12). All 9 steps (0–8) of the design doc plan complete. The `jit` Cargo feature is now default-on; existing users get the JIT for free at the next `cargo update`. The 4-tier dispatch chain (`DFA → Pike-VM → JIT → backtracking VM`) is in production and exercised by every test in the suite. Public design lives in `book/src/internals/jit-compiler.md` (new chapter, ~250 lines). With the new default, `cargo test -p rgx-core` runs 957 lib tests (= 695 baseline + 262 C1) — up from 695 baseline. Opt-out via `--no-default-features --features pgen-parser` still works (drops Cranelift entirely from the dependency closure, runs 695 baseline tests). See `CHANGES.md` 2026-04-12 entry for the full step-by-step history.
+- **C2 NFA/DFA hybrid production cutover** (2026-04-11). All 9 steps (0–8) complete. Sparse-set Pike-VM, lazy DFA cache, byte-class equivalence partitioning, two-pass capture recovery, and the 3-tier dispatch chain wired into `Engine::find_first` / `find_all` / `is_match`. Patterns the DFA can handle run ~1.9x faster than PCRE2; pure-literal patterns ~3.2x faster. Public design lives in `book/src/internals/nfa-dfa-engine.md`.
 - Extended Perl extended character classes again so nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset, including representative shorthand/range, POSIX, and Unicode-property forms such as `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`, with parser-path, parser-contract, compiler/unit, and differential parity coverage.
 - Extended Perl extended character classes again so the default path now also supports bare escaped literal/codepoint terms such as `\n`, `\t`, `\r`, `\x{41}`, `\x41`, and escaped operators like `\-` inside the shipped `(?[...])` subset, including differential parity coverage for hex/control-escape cases while still keeping broader remaining forms behind an explicit compile boundary.
 - Extended Perl extended character classes again so the default path now also supports horizontal/vertical whitespace shorthands (`\h`, `\H`, `\v`, `\V`) inside the shipped `(?[...])` subset, including parser-path and differential parity coverage while still keeping broader remaining forms behind an explicit compile boundary.
