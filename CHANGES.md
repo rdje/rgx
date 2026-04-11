@@ -14,6 +14,32 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 3e.3: QuestionGreedy via decoder unfolding
+- Scope: Tenth code commit for the C1 JIT compilation backend. Adds `QuestionGreedy` (`?` quantifier) support via the same decoder-unfolding approach as steps 3e.1 and 3e.2. The lowering is the SIMPLEST of the optimized quantifier lowerings: `[Split{exit}, inner_jit_ops...]` with NO Jump back, because `?` is "zero or one" and there's no loop. Patterns like `a?`, `\d?`, `\w?`, `(?:ab)?`, `\Aa?\z`, `a?b+` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics. With this commit, all three greedy optimized quantifier opcodes (`PlusGreedy`, `StarGreedy`, `QuestionGreedy`) are supported.
+- **The unfolding lowering**: `QuestionGreedy(inner)` decodes to:
+  ```text
+  [Split { branch_b_op_idx: exit }]      ← greedy: try inner first; on backtrack go to exit
+  [inner_jit_ops...]
+  exit                                   ← first op after the unfolded sequence
+  ```
+  The Split pushes `(exit, current_pos)` and falls through to the inner. If the inner succeeds, it advances pos and the last inner op falls through to the next outer op (= exit) via the per-op-block iteration's natural sequencing — no Jump needed. If the inner fails, failure_dispatch pops the most recent frame and dispatches to exit at the saved (= original) pos. The total unfolded count is `inner_count + 1` (just the Split, not Split + Jump like Plus/Star).
+- **`compute_jit_op_count` extended** to handle QuestionGreedy: it shares the same operand-reading logic as PlusGreedy / StarGreedy but uses `inner_count + 1` instead of `inner_count + 2`. The match arm uses `matches!(op, OpCode::QuestionGreedy)` to pick the right offset.
+- **`decode_program` QuestionGreedy arm**: reuses `read_inline_subprogram` to read the operand bytes, reserves the Split slot at `split_op_idx = ops.len()`, computes `exit_op_idx = split_op_idx + inner_count + 1` from `simple_inner_jit_op_count`, pushes the Split, then decodes the inner via `decode_simple_inner_into`. No Jump tail. Includes debug assertions that the emitted count matches the computed count.
+- **12 new step 3e.3 tests** in `c1::codegen::tests::step3e3_*`:
+  - **Zero match**: `a?` against `b` (returns 0); `a?` against empty input (returns 0)
+  - **One match**: `a?` against `a` (returns 1); `a?` against `aaa` — greedy takes one (returns 1, not 3)
+  - **Followed by literal**: `a?b` against `b` (zero a's then b, returns 1); `a?b` against `ab` (one a then b, returns 2); `a?b` against various non-matching inputs
+  - **Backtrack-into-quantifier**: `a?a` against `a` — `a?` greedily takes the a, trailing `a` fails (eof), backtrack `a?` to zero a's, trailing `a` matches the only a; also tested against `aa`, empty input, and wrong char
+  - **Char-class quantifiers**: `\d?`, `\w?` each tested against matching, non-matching, empty
+  - **Multi-char inner**: `(?:ab)?` against empty, `xyz`, `ab`, `abxyz`, just `a` (inner fails on missing `b`, backtracks to zero iterations)
+  - **Anchored**: `\Aa?\z` against empty (matches), single `a` (matches), `aa` (fails — `a?` matches one, `\z` fails because there's another `a`, backtrack to zero, `\z` still fails at pos 0), wrong char (fails)
+  - **Combined with Plus**: `a?b+` against `b`, `ab`, `abbb`, `bbb`, just `a` (fails — `a?` matches but no `b+`), empty (fails)
+- **No bugs caught on the first run**: all 12 step 3e.3 tests pass on the first attempt. The lowering is the simplest of the three (`?` requires no loop tail) and the existing infrastructure from step 3e.1 and step 3e.2 carries over directly. The `read_inline_subprogram` helper added in step 3e.2 is reused without modification.
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 passing (unchanged from step 3e.2 — `c1/` still doesn't exist when the feature is off), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit --lib c1` **173 C1 tests passing** (161 from step 3e.2 + 12 new step 3e.3), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 3e.3 is complete.** All three greedy optimized quantifiers (`+`, `*`, `?`) are now JIT-compilable. The decoder-unfolding architecture handled the addition cleanly with minimal new code (the QuestionGreedy arm is ~25 lines). Next: C1 step 3e.4 (lazy variants — `*?`, `+?`, `??` — which use `SplitLazy` instead of `Split` to swap the branch ordering, trying the "exit" branch first and falling through to "iterate" only on backtrack). After all step 3e substeps: step 4 (capture trail + differential gate active), step 5 (engine dispatch wiring), steps 6–8.
+
 ### 2026-04-11 - C1 step 3e.2: StarGreedy via decoder unfolding
 - Scope: Ninth code commit for the C1 JIT compilation backend. Adds `StarGreedy` (`*` quantifier) support via the same decoder-unfolding approach as step 3e.1, now reused for both `+` and `*`. The lowering for `*` puts the `Split` BEFORE the inner subprogram (since `*` allows zero matches): `[Split{exit}, inner_jit_ops..., Jump{back to Split}]`. On the very first visit to the Split, it pushes `(exit_op_idx, current_pos)` so the loop can exit at zero iterations if the inner immediately fails. Patterns like `a*`, `\d*`, `\w*`, `\s*`, `(?:ab)*`, `\A\d*\z`, `a*b+` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics.
 - **The unfolding lowering**: `StarGreedy(inner)` decodes to:
