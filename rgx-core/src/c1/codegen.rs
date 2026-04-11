@@ -72,9 +72,27 @@
 use crate::c1::jit::{JitHost, JitHostError};
 use crate::vm::{OpCode, Program};
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, AbiParam, Function, InstBuilder, MemFlags, UserFuncName};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
+use cranelift_codegen::ir::{
+    types, AbiParam, Function, InstBuilder, MemFlags, StackSlotData, StackSlotKind, UserFuncName,
+};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Switch, Variable};
 use cranelift_module::{FuncId, Linkage};
+
+/// Maximum number of backtrack frames the JIT'd function can hold
+/// on its stack-allocated `bt_stack`. Patterns whose backtracking
+/// depth would exceed this bail with -1 (no match) at runtime; the
+/// engine layer at step 5 can fall back to the interpreter for
+/// patterns that exhaust the JIT's `bt_stack`.
+///
+/// 256 frames × 16 bytes per frame = 4 KiB total. Comfortable for
+/// any realistic pattern shape; the optimized quantifier opcodes
+/// (`StarGreedy` etc.) handle deep loops without consuming the
+/// `bt_stack`.
+const C1_BACKTRACK_STACK_FRAMES: i64 = 256;
+const C1_BACKTRACK_FRAME_BYTES: i64 = 16; // 8 bytes saved_pc + 8 bytes saved_pos
+#[allow(clippy::cast_possible_truncation)] // 256 * 16 = 4096 — fits in u32 by construction
+#[allow(clippy::cast_sign_loss)] // both factors are positive constants
+const C1_BACKTRACK_STACK_BYTES: u32 = (C1_BACKTRACK_STACK_FRAMES * C1_BACKTRACK_FRAME_BYTES) as u32;
 
 /// Returns `true` iff the JIT will accept the given compiled program.
 ///
@@ -492,6 +510,41 @@ enum JitOp {
         #[allow(dead_code)]
         which: SaveSlot,
     },
+    /// `Split` (greedy) — try the next op (fall-through) first; on
+    /// backtrack, resume at op `branch_b_op_idx`. Pushes
+    /// `(branch_b_op_idx, current_pos)` onto the backtrack stack
+    /// and falls through to the next `op_block`.
+    Split {
+        /// Op index to resume at on backtrack. Resolved by the
+        /// decoder from the bytecode's u16 forward offset.
+        branch_b_op_idx: usize,
+    },
+    /// `SplitLazy` — try op `branch_b_op_idx` first; on backtrack,
+    /// resume at the next op (fall-through). Pushes
+    /// `(next_op_idx, current_pos)` onto the backtrack stack and
+    /// jumps to `op_blocks[branch_b_op_idx]`. Mirror of `Split`
+    /// with the branches swapped — gives lazy quantifier semantics.
+    SplitLazy {
+        /// Op index of the first branch to try.
+        branch_b_op_idx: usize,
+    },
+    /// `Jump` — unconditional jump to op `target_op_idx`. No
+    /// backtrack interaction.
+    Jump {
+        /// Op index to jump to. Resolved by the decoder from the
+        /// bytecode's u16 forward offset.
+        target_op_idx: usize,
+    },
+    /// `SetAlternative(idx)` — top-level alternation tracking
+    /// metadata. The existing VM uses this to populate
+    /// `MatchResult.matched_branch_number`. The JIT'd function only
+    /// returns `isize` (the new pos), not a full `MatchResult`, so
+    /// we treat this op as a no-op for step 3 — `pos` is unchanged
+    /// and we just jump to the next block. The engine layer at
+    /// step 5 will handle the branch-number contract by inspecting
+    /// the matched span externally (or via a separate codegen
+    /// extension).
+    SetAlternative,
     /// `Match` — terminate with success and return the current pos.
     Match,
 }
@@ -560,6 +613,7 @@ enum SaveSlot {
 /// let new_pos = unsafe { f(text.as_ptr(), text.len(), 0) };
 /// assert_eq!(new_pos, 3);
 /// ```
+#[allow(clippy::too_many_lines)] // long because it builds the entire IR in one pass; the architecture is naturally monolithic
 pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, JitHostError> {
     // Eligibility short-circuit. `compile_program` trusts that
     // anything `is_jit_eligible` accepts is something it might be
@@ -612,78 +666,167 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
         None
     };
 
+    // Allocate the backtrack stack slot on the JIT'd function's
+    // stack frame. 256 frames × 16 bytes per frame = 4 KiB. Each
+    // frame holds (saved_pc: i64, saved_pos: i64) where saved_pc
+    // is an op index into `op_blocks` and saved_pos is the input
+    // position to restore on backtrack. Allocated up front so the
+    // codegen layer can reference it from any op_block.
+    let bt_stack_slot = function.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        C1_BACKTRACK_STACK_BYTES,
+    ));
+
     // Build the IR using a per-opcode block-per-block layout. The
-    // current match position `pos` is held in a Cranelift `Variable`
-    // (instead of being passed between blocks via block parameters)
-    // so that step 3d's backtrack-dispatch path can restore pos
-    // from the saved frame on a `br_table` jump — `br_table` does
-    // not accept per-target arguments, so anything that needs to
-    // be restored on backtrack must live in a Variable that the
-    // dispatch can write before jumping. The pos Variable is
-    // declared and initialised in the entry block; each op_block
-    // reads it via `use_var` and writes the new pos (for consuming
-    // ops) via `def_var` before jumping to the next op_block.
+    // function's mutable state — `pos`, `bt_top`, plus the function
+    // params `text_ptr` / `text_len` — is held in Cranelift
+    // `Variable`s instead of being passed between blocks via block
+    // parameters. The Variable approach is required because step 3d.2's
+    // backtrack-dispatch path needs to restore `pos` from the saved
+    // frame on a `br_table` jump, and `br_table` does not accept
+    // per-target arguments. The other Variables (`bt_top`, `text_ptr`,
+    // `text_len`) ride along for consistency and so any block reached
+    // via `failure_dispatch` has access to them via `use_var` without
+    // SSA dominance concerns.
     {
         let mut fb_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut function, &mut fb_ctx);
 
-        // The pos Variable. Declared once, used across every block.
-        // Cranelift's SSA pass auto-inserts phi nodes wherever
-        // multiple predecessors converge with different pos values
-        // (which currently never happens for linear programs, but
-        // will once Split / Jump dispatch lands at step 3d.2).
+        // Variables. Each is declared once, used/defined across
+        // every block as needed. Cranelift's SSA pass auto-inserts
+        // phi nodes wherever multiple predecessors converge with
+        // different values.
         let pos_var = Variable::from_u32(0);
+        let bt_top_var = Variable::from_u32(1);
+        let text_ptr_var = Variable::from_u32(2);
+        let text_len_var = Variable::from_u32(3);
         builder.declare_var(pos_var, types::I64);
+        builder.declare_var(bt_top_var, types::I64);
+        builder.declare_var(text_ptr_var, types::I64);
+        builder.declare_var(text_len_var, types::I64);
 
         // Allocate all blocks up front so we can target the next
         // op's block by index when emitting each op.
         let entry = builder.create_block();
         let success_block = builder.create_block();
         let fail_block = builder.create_block();
+        let failure_dispatch_block = builder.create_block();
         let op_blocks: Vec<_> = ops.iter().map(|_| builder.create_block()).collect();
 
-        // === Entry block: load function params, initialise pos_var,
-        // jump into the first op block. Op blocks no longer take
-        // pos as a parameter — they read it via use_var(pos_var).
+        // === Entry block: load function params into Variables, init
+        // bt_top to 0, jump into the first op block (or directly to
+        // success if there are no ops, which shouldn't happen but is
+        // handled defensively).
         builder.append_block_params_for_function_params(entry);
         builder.switch_to_block(entry);
-        let text_ptr = builder.block_params(entry)[0];
-        let text_len = builder.block_params(entry)[1];
-        let init_pos = builder.block_params(entry)[2];
-        builder.def_var(pos_var, init_pos);
+        let entry_text_ptr = builder.block_params(entry)[0];
+        let entry_text_len = builder.block_params(entry)[1];
+        let entry_init_pos = builder.block_params(entry)[2];
+        builder.def_var(text_ptr_var, entry_text_ptr);
+        builder.def_var(text_len_var, entry_text_len);
+        builder.def_var(pos_var, entry_init_pos);
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.def_var(bt_top_var, zero);
         let first_target = op_blocks.first().copied().unwrap_or(success_block);
         builder.ins().jump(first_target, &[]);
         builder.seal_block(entry);
 
         // === Per-op blocks: emit IR for each JitOp. Each block reads
-        // the current pos from `pos_var`, applies the op-specific
-        // semantics, and either updates pos_var + jumps to the next
-        // op_block, or jumps to fail_block. The Match op jumps to
-        // success_block.
+        // the current state from Variables, applies the op-specific
+        // semantics, and either updates Variables + jumps to the next
+        // op_block (success edge), or jumps to `failure_dispatch_block`
+        // (fail edge). The Match op jumps to success_block.
+        //
+        // Note: we deliberately do NOT seal op_blocks inside this
+        // loop. Each op_block can receive an additional predecessor
+        // edge from `failure_dispatch_block` via the `br_table`,
+        // which is built AFTER this loop. Cranelift requires all
+        // predecessors to be known at seal time, so the seal must
+        // wait until after `failure_dispatch_block` is built. The
+        // sealing happens in a second pass below.
         for (i, op) in ops.iter().enumerate() {
             let block = op_blocks[i];
             builder.switch_to_block(block);
-            let pos = builder.use_var(pos_var);
 
+            // The "next op index" is `i + 1` (or `op_blocks.len()` if
+            // this is the last op, which is the Match terminator).
             // The "next block" for a successful step is the next op
             // block, or the success block if this is the last op.
             // (Match always jumps to success_block directly via
             // `emit_jit_op` and ignores `next_block`.)
-            let next_block = op_blocks.get(i + 1).copied().unwrap_or(success_block);
+            let next_op_idx = i + 1;
+            let next_block = op_blocks.get(next_op_idx).copied().unwrap_or(success_block);
 
             emit_jit_op(
                 &mut builder,
                 *op,
-                pos,
+                next_op_idx,
                 pos_var,
-                text_ptr,
-                text_len,
+                text_ptr_var,
+                text_len_var,
+                bt_top_var,
+                bt_stack_slot,
+                &op_blocks,
                 next_block,
+                failure_dispatch_block,
                 fail_block,
                 success_block,
                 word_boundary_ref,
             );
-            builder.seal_block(block);
+        }
+
+        // === Failure dispatch block: pop a backtrack frame and
+        // resume at the saved op index, with the saved pos restored
+        // into `pos_var`. If the bt_stack is empty, jump to the
+        // global fail_block (return -1). All consuming-op fail
+        // edges go through here so backtracking is automatic.
+        builder.switch_to_block(failure_dispatch_block);
+        let bt_top = builder.use_var(bt_top_var);
+        let bt_top_zero = builder.ins().icmp_imm(IntCC::Equal, bt_top, 0);
+        let pop_block = builder.create_block();
+        builder
+            .ins()
+            .brif(bt_top_zero, fail_block, &[], pop_block, &[]);
+        builder.seal_block(failure_dispatch_block);
+
+        builder.switch_to_block(pop_block);
+        let new_bt_top = builder.ins().iadd_imm(bt_top, -1);
+        builder.def_var(bt_top_var, new_bt_top);
+        // Compute frame address: stack_addr(bt_stack_slot) + new_bt_top * 16.
+        let frame_offset = builder.ins().imul_imm(new_bt_top, C1_BACKTRACK_FRAME_BYTES);
+        let stack_base = builder.ins().stack_addr(types::I64, bt_stack_slot, 0);
+        let frame_addr = builder.ins().iadd(stack_base, frame_offset);
+        let saved_pc = builder
+            .ins()
+            .load(types::I64, MemFlags::trusted(), frame_addr, 0);
+        let saved_pos = builder
+            .ins()
+            .load(types::I64, MemFlags::trusted(), frame_addr, 8);
+        builder.def_var(pos_var, saved_pos);
+
+        // Dispatch via `cranelift_frontend::Switch` which handles
+        // br_table construction AND the SSA-pass-inserted block
+        // parameters (phi nodes for the Variables) correctly. The
+        // low-level `JumpTableData` API would require us to know
+        // the implicit block-call args ahead of time, which is
+        // impossible because the SSA pass inserts them later.
+        // `Switch` defers the construction so the args resolve
+        // automatically when the blocks are sealed below.
+        let mut switch = Switch::new();
+        for (idx, &op_block) in op_blocks.iter().enumerate() {
+            switch.set_entry(idx as u128, op_block);
+        }
+        switch.emit(&mut builder, saved_pc, fail_block);
+        builder.seal_block(pop_block);
+
+        // Now that `pop_block`'s `br_table` has registered every
+        // op_block as a predecessor, we can finally seal the
+        // op_blocks. (Sealing during the per-op-block emission loop
+        // would have failed because the br_table predecessor
+        // wouldn't have been recorded yet, and Cranelift's SSA pass
+        // requires all predecessors to be known at seal time.)
+        for &op_block in &op_blocks {
+            builder.seal_block(op_block);
         }
 
         // === Success block: return the current pos (read from the
@@ -714,11 +857,10 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 /// the new pos) or jumps to `fail_block`. The `Match` op terminates
 /// by jumping to `success_block` with the current pos.
 ///
-/// **Step 3b/3c.** This function handles the linear opcode subset
-/// (`Char`, char classes, `StartText`/`EndText`, `SaveGroupZero`,
-/// `Match`) from step 3b plus the word-boundary opcodes (`\b`/`\B`)
-/// added in step 3c. Step 3d will extend it for control-flow
-/// opcodes (`Split`, `Jump`) which need a backtrack stack.
+/// **Step 3b/3c/3d.** This function handles the JIT-eligible opcode
+/// subset: literals, char classes, simple anchors, word boundaries,
+/// group-0 capture wrappers, control flow with backtracking
+/// (`Split` / `SplitLazy` / `Jump`), and the `Match` terminator.
 ///
 /// Word boundary handling uses an indirect call to the runtime
 /// helper [`crate::c1::runtime::rgx_runtime_word_boundary_test`]
@@ -727,25 +869,38 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 /// [`crate::c1::jit::JitHost::import_word_boundary_helper`] when
 /// any `WordBoundary` op appears in the program.
 ///
-/// `pos` is the current position value (already read from
-/// `pos_var` by the caller); `pos_var` is the Variable that
-/// `emit_jit_op` writes the new pos into for consuming ops. Both
-/// are passed because reading pos via `use_var` again inside the
-/// helpers would re-emit the IR — the caller already loaded it
-/// once.
+/// Control-flow handling uses the stack-allocated backtrack array
+/// allocated by `compile_program` (`bt_stack_slot`) plus the
+/// `bt_top_var` Variable counter. `Split` / `SplitLazy` push
+/// `(saved_pc, current_pos)` onto the stack and increment `bt_top`;
+/// consuming-op failures jump to `failure_dispatch_block` which
+/// pops a frame and resumes via `br_table`.
+///
+/// `next_op_idx` is the op index of the fall-through next op (used
+/// by `SplitLazy` to record the `saved_pc` on the backtrack stack).
+/// `op_blocks` is the full `op_block` table (used by `Jump` /
+/// `SplitLazy` to dispatch to forward targets by index).
 #[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct and there's no good grouping
+#[allow(clippy::too_many_lines)] // long because it dispatches every JitOp variant; refactoring would just split arbitrarily
 fn emit_jit_op(
     builder: &mut FunctionBuilder,
     op: JitOp,
-    pos: cranelift_codegen::ir::Value,
+    next_op_idx: usize,
     pos_var: Variable,
-    text_ptr: cranelift_codegen::ir::Value,
-    text_len: cranelift_codegen::ir::Value,
+    text_ptr_var: Variable,
+    text_len_var: Variable,
+    bt_top_var: Variable,
+    bt_stack_slot: cranelift_codegen::ir::StackSlot,
+    op_blocks: &[cranelift_codegen::ir::Block],
     next_block: cranelift_codegen::ir::Block,
+    failure_dispatch_block: cranelift_codegen::ir::Block,
     fail_block: cranelift_codegen::ir::Block,
     success_block: cranelift_codegen::ir::Block,
     word_boundary_ref: Option<cranelift_codegen::ir::FuncRef>,
 ) {
+    let pos = builder.use_var(pos_var);
+    let text_ptr = builder.use_var(text_ptr_var);
+    let text_len = builder.use_var(text_len_var);
     match op {
         JitOp::Char(b) => {
             emit_consume_byte_with_test(
@@ -755,7 +910,7 @@ fn emit_jit_op(
                 text_ptr,
                 text_len,
                 next_block,
-                fail_block,
+                failure_dispatch_block,
                 |fb, byte| fb.ins().icmp_imm(IntCC::Equal, byte, i64::from(b)),
             );
         }
@@ -767,7 +922,7 @@ fn emit_jit_op(
                 text_ptr,
                 text_len,
                 next_block,
-                fail_block,
+                failure_dispatch_block,
                 |fb, byte| emit_digit_byte_test(fb, byte, negated),
             );
         }
@@ -779,7 +934,7 @@ fn emit_jit_op(
                 text_ptr,
                 text_len,
                 next_block,
-                fail_block,
+                failure_dispatch_block,
                 |fb, byte| emit_word_byte_test(fb, byte, negated),
             );
         }
@@ -791,54 +946,41 @@ fn emit_jit_op(
                 text_ptr,
                 text_len,
                 next_block,
-                fail_block,
+                failure_dispatch_block,
                 |fb, byte| emit_space_byte_test(fb, byte, negated),
             );
         }
         JitOp::StartText => {
             // Zero-width: matches iff pos == 0. No bytes consumed,
-            // so pos_var is left unchanged.
+            // so pos_var is left unchanged. On failure, dispatch to
+            // failure_dispatch so any backtrack frames can be tried.
             let cond = builder.ins().icmp_imm(IntCC::Equal, pos, 0);
-            builder.ins().brif(cond, next_block, &[], fail_block, &[]);
+            builder
+                .ins()
+                .brif(cond, next_block, &[], failure_dispatch_block, &[]);
         }
         JitOp::EndText => {
             // Zero-width: matches iff pos == text_len. No bytes
             // consumed, so pos_var is left unchanged.
             let cond = builder.ins().icmp(IntCC::Equal, pos, text_len);
-            builder.ins().brif(cond, next_block, &[], fail_block, &[]);
+            builder
+                .ins()
+                .brif(cond, next_block, &[], failure_dispatch_block, &[]);
         }
         JitOp::WordBoundary { negated } => {
-            // Zero-width: calls the runtime helper
-            // `rgx_runtime_word_boundary_test(text, text_len, pos)`
-            // which returns a bool (i8). For \b: pass-through if
-            // the helper returned non-zero. For \B: pass-through
-            // if the helper returned zero. pos_var is left unchanged
-            // either way (zero-width).
-            //
-            // The helper is imported into the function by
-            // `compile_program` via `JitHost::import_word_boundary_helper`
-            // and passed in as `word_boundary_ref`. If we reach
-            // this branch without an import, it's a codegen layer
-            // bug — we expect that anywhere a `WordBoundary` op
-            // appears, the import was performed up front. Use
-            // `expect` to surface the bug loudly.
             let func_ref = word_boundary_ref
                 .expect("WordBoundary op requires the helper import; compile_program is buggy");
             let call = builder.ins().call(func_ref, &[text_ptr, text_len, pos]);
             let raw_result = builder.inst_results(call)[0];
-            // The helper returns i8 (the C ABI bool). Compare
-            // against zero to get a Cranelift boolean we can branch
-            // on. For \B (negated), we invert the test by swapping
-            // the branch targets — equivalent to `!returned`.
             let is_boundary = builder.ins().icmp_imm(IntCC::NotEqual, raw_result, 0);
             if negated {
                 builder
                     .ins()
-                    .brif(is_boundary, fail_block, &[], next_block, &[]);
+                    .brif(is_boundary, failure_dispatch_block, &[], next_block, &[]);
             } else {
                 builder
                     .ins()
-                    .brif(is_boundary, next_block, &[], fail_block, &[]);
+                    .brif(is_boundary, next_block, &[], failure_dispatch_block, &[]);
             }
         }
         JitOp::SaveGroupZero { which: _ } => {
@@ -847,6 +989,54 @@ fn emit_jit_op(
             // end pos. Step 4 will replace this with real capture
             // trail handling for groups 1+. pos_var is left unchanged.
             builder.ins().jump(next_block, &[]);
+        }
+        JitOp::SetAlternative => {
+            // No-op: the JIT'd function returns only `isize`, not a
+            // full `MatchResult`, so we don't need to track branch
+            // numbers. pos_var is unchanged.
+            builder.ins().jump(next_block, &[]);
+        }
+        JitOp::Split { branch_b_op_idx } => {
+            // Greedy split: try the next op (fall-through) first.
+            // On backtrack, resume at op_blocks[branch_b_op_idx].
+            // Push (branch_b_op_idx, current_pos) onto bt_stack and
+            // jump to next_block.
+            emit_backtrack_push(
+                builder,
+                pos,
+                bt_top_var,
+                bt_stack_slot,
+                branch_b_op_idx,
+                next_block,
+                fail_block,
+            );
+        }
+        JitOp::SplitLazy { branch_b_op_idx } => {
+            // Lazy split: try op_blocks[branch_b_op_idx] first. On
+            // backtrack, resume at the next op (fall-through).
+            // Push (next_op_idx, current_pos) onto bt_stack and
+            // jump to op_blocks[branch_b_op_idx].
+            let target_block = op_blocks
+                .get(branch_b_op_idx)
+                .copied()
+                .unwrap_or(success_block);
+            emit_backtrack_push(
+                builder,
+                pos,
+                bt_top_var,
+                bt_stack_slot,
+                next_op_idx,
+                target_block,
+                fail_block,
+            );
+        }
+        JitOp::Jump { target_op_idx } => {
+            // Unconditional forward jump. No backtrack interaction.
+            let target_block = op_blocks
+                .get(target_op_idx)
+                .copied()
+                .unwrap_or(success_block);
+            builder.ins().jump(target_block, &[]);
         }
         JitOp::Match => {
             // Terminate with success. pos_var is left unchanged
@@ -858,6 +1048,75 @@ fn emit_jit_op(
             builder.ins().jump(success_block, &[]);
         }
     }
+}
+
+/// Emit IR that pushes a backtrack frame onto the stack-allocated
+/// `bt_stack` and then jumps to `success_block` (the destination
+/// on the "took the branch we're committing to" edge).
+///
+/// The frame stored is `(saved_pc as i64, current_pos as i64)`.
+/// `saved_pc` is the op index to resume at on a future backtrack
+/// pop. `current_pos` is the position at the time of the push.
+///
+/// On `bt_stack` overflow (`bt_top` would exceed
+/// `C1_BACKTRACK_STACK_FRAMES`), the codegen jumps to
+/// `overflow_block` which returns -1 — the JIT cannot handle
+/// patterns whose backtracking depth exceeds the fixed `bt_stack`
+/// size, and the engine layer at step 5 will fall back to the
+/// interpreter for those patterns.
+#[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct
+fn emit_backtrack_push(
+    builder: &mut FunctionBuilder,
+    pos: cranelift_codegen::ir::Value,
+    bt_top_var: Variable,
+    bt_stack_slot: cranelift_codegen::ir::StackSlot,
+    saved_pc_idx: usize,
+    success_block: cranelift_codegen::ir::Block,
+    overflow_block: cranelift_codegen::ir::Block,
+) {
+    let bt_top = builder.use_var(bt_top_var);
+
+    // Overflow check: if bt_top >= C1_BACKTRACK_STACK_FRAMES,
+    // jump to overflow_block (which returns -1).
+    let at_capacity = builder.ins().icmp_imm(
+        IntCC::UnsignedGreaterThanOrEqual,
+        bt_top,
+        C1_BACKTRACK_STACK_FRAMES,
+    );
+    let push_block = builder.create_block();
+    builder
+        .ins()
+        .brif(at_capacity, overflow_block, &[], push_block, &[]);
+
+    builder.switch_to_block(push_block);
+    builder.seal_block(push_block);
+
+    // Compute frame address: stack_addr(bt_stack_slot) + bt_top * 16.
+    let frame_offset = builder.ins().imul_imm(bt_top, C1_BACKTRACK_FRAME_BYTES);
+    let stack_base = builder.ins().stack_addr(types::I64, bt_stack_slot, 0);
+    let frame_addr = builder.ins().iadd(stack_base, frame_offset);
+
+    // Store saved_pc at frame_addr + 0 (i64). `saved_pc_idx` is
+    // an op index that always fits in i64 (op counts are bounded
+    // by the bytecode walker — single u8 length prefixes — so the
+    // count is never anywhere near 2^63). The cast is safe by
+    // construction; the `try_from` makes the bound explicit.
+    let saved_pc_const = i64::try_from(saved_pc_idx)
+        .expect("saved_pc_idx fits in i64 by construction (bytecode op count is small)");
+    let saved_pc_val = builder.ins().iconst(types::I64, saved_pc_const);
+    builder
+        .ins()
+        .store(MemFlags::trusted(), saved_pc_val, frame_addr, 0);
+
+    // Store current_pos at frame_addr + 8 (i64).
+    builder.ins().store(MemFlags::trusted(), pos, frame_addr, 8);
+
+    // Increment bt_top.
+    let new_bt_top = builder.ins().iadd_imm(bt_top, 1);
+    builder.def_var(bt_top_var, new_bt_top);
+
+    // Jump to the "took the branch we're committing to" target.
+    builder.ins().jump(success_block, &[]);
 }
 
 /// Helper: emit IR for a "consume one byte and apply a predicate"
@@ -1019,23 +1278,48 @@ fn emit_space_byte_test(
 ///
 /// The decoder is the per-step gate: any opcode outside the current
 /// step's codegen subset returns `CodegenUnsupported` with a
-/// descriptive message identifying the offending opcode. Step 3b
-/// accepts:
+/// descriptive message identifying the offending opcode. Step 3d
+/// (the current state) accepts:
 ///
 /// - `Char(len=1)` — single-byte ASCII literal
 /// - `DigitAscii` / `DigitAsciiNeg`
 /// - `WordAscii` / `WordAsciiNeg`
 /// - `SpaceAscii` / `SpaceAsciiNeg`
 /// - `StartText` (`\A`) / `EndText` (`\z`)
+/// - `WordBoundary` / `NonWordBoundary` (via runtime helper)
 /// - `SaveStart(0)` / `SaveEnd(0)` (group-0 wrappers, no-op)
+/// - `Split` / `SplitLazy` / `Jump` (control flow with backtrack)
 /// - `Match` (terminator)
 ///
-/// Anything else (multi-byte `Char`, line anchors, word boundaries,
-/// `\Z` / `\X` / `\K`, control-flow opcodes, captures for groups
-/// 1+, ...) returns a descriptive `CodegenUnsupported` error and
-/// the caller falls back to the interpreter for that pattern.
+/// Anything else (multi-byte `Char`, line anchors, `\Z` / `\X` /
+/// `\K`, optimized quantifier opcodes like `StarGreedy`, captures
+/// for groups 1+, ...) returns a descriptive `CodegenUnsupported`
+/// error and the caller falls back to the interpreter for that
+/// pattern.
+///
+/// # Two-pass walker
+///
+/// Step 3d.2 introduced the two-pass walk because `Split` / `Jump`
+/// / `SplitLazy` opcodes carry forward byte offsets that must be
+/// resolved to op-index targets so the codegen layer can dispatch
+/// via `op_blocks[op_idx]`. The first pass builds a map from byte
+/// offsets to op indices; the second pass decodes each op and
+/// resolves any forward target via `binary_search` on the map.
+#[allow(clippy::too_many_lines)] // long because it dispatches every supported opcode; refactoring would just split arbitrarily
 fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
-    let mut ops = Vec::new();
+    // Pass 1: walk the bytecode collecting the byte offset where
+    // each opcode starts. This is needed by pass 2 to resolve
+    // Split/Jump forward targets to op indices. The walker uses
+    // the same operand-size convention as `eligible_opcode_operand_size`
+    // (the canonical reference is `RegexVM::rebase_inline_char_class_ids`
+    // in `vm.rs`).
+    let op_positions = collect_op_positions(code)?;
+
+    // Pass 2: decode each opcode into a `JitOp`. Forward targets
+    // (Split / Jump / SplitLazy) are resolved by computing
+    // `target_byte = ip_after_operand + offset` and looking up the
+    // corresponding op index in `op_positions` via binary search.
+    let mut ops = Vec::with_capacity(op_positions.len());
     let mut ip = 0;
     let mut saw_match = false;
 
@@ -1081,6 +1365,37 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
             OpCode::EndText => ops.push(JitOp::EndText),
             OpCode::WordBoundary => ops.push(JitOp::WordBoundary { negated: false }),
             OpCode::NonWordBoundary => ops.push(JitOp::WordBoundary { negated: true }),
+            OpCode::Split => {
+                // 2-byte u16 forward offset. Target = ip_after_operand + offset.
+                let target_idx = decode_forward_target(code, &mut ip, &op_positions, "Split")?;
+                ops.push(JitOp::Split {
+                    branch_b_op_idx: target_idx,
+                });
+            }
+            OpCode::SplitLazy => {
+                let target_idx = decode_forward_target(code, &mut ip, &op_positions, "SplitLazy")?;
+                ops.push(JitOp::SplitLazy {
+                    branch_b_op_idx: target_idx,
+                });
+            }
+            OpCode::Jump => {
+                let target_idx = decode_forward_target(code, &mut ip, &op_positions, "Jump")?;
+                ops.push(JitOp::Jump {
+                    target_op_idx: target_idx,
+                });
+            }
+            OpCode::SetAlternative => {
+                // Skip the 1-byte alternative-index operand. The
+                // op is a no-op in JIT'd code (we don't track
+                // branch numbers in the JIT path).
+                if ip >= code.len() {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated SetAlternative opcode (missing index operand)".to_string(),
+                    ));
+                }
+                ip += 1;
+                ops.push(JitOp::SetAlternative);
+            }
             OpCode::SaveStart | OpCode::SaveEnd => {
                 let Some(&group_id) = code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(format!(
@@ -1089,7 +1404,7 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 };
                 if group_id != 0 {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3b only accepts group-0 capture wrappers; \
+                        "step 3 only accepts group-0 capture wrappers; \
                          got {op:?} for group {group_id} (capture trail lands at step 4)"
                     )));
                 }
@@ -1115,7 +1430,7 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
             }
             other => {
                 return Err(JitHostError::CodegenUnsupported(format!(
-                    "step 3b does not yet support {other:?} (lands in a later step)"
+                    "step 3 does not yet support {other:?} (lands in a later step)"
                 )));
             }
         }
@@ -1128,6 +1443,76 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
     }
 
     Ok(ops)
+}
+
+/// Pass-1 walker for `decode_program`. Collects the byte offset of
+/// each opcode in the bytecode so pass 2 can resolve Split/Jump
+/// forward targets to op indices.
+///
+/// Returns `Err(CodegenUnsupported)` on any opcode the per-step
+/// codegen subset rejects, on truncated bytecode, or on operand
+/// layouts that run past the end of the buffer.
+fn collect_op_positions(code: &[u8]) -> Result<Vec<usize>, JitHostError> {
+    let mut positions = Vec::new();
+    let mut ip = 0;
+    while ip < code.len() {
+        positions.push(ip);
+        let Ok(op) = OpCode::try_from(code[ip]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "unknown opcode byte 0x{:02X} at ip={ip}",
+                code[ip]
+            )));
+        };
+        // Reject ineligible opcodes here so pass 2 can rely on the
+        // eligible-only operand-size table without falling through.
+        if !is_opcode_jit_eligible(op) {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "step 3 does not yet support {op:?} (lands in a later step)"
+            )));
+        }
+        ip += 1;
+        let Some(operand_size) = eligible_opcode_operand_size(op, &code[ip..]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "truncated {op:?} opcode at ip={ip}"
+            )));
+        };
+        ip += operand_size;
+    }
+    Ok(positions)
+}
+
+/// Decode a 2-byte u16 forward offset from the bytecode (the
+/// operand of `Split` / `SplitLazy` / `Jump`) and resolve it to an
+/// op index in `op_positions` via binary search. Advances `ip` past
+/// the operand bytes.
+///
+/// The encoding (per the existing VM dispatch in `vm.rs`):
+/// - Operand at `code[ip..ip+2]` is `u16::from_le_bytes`.
+/// - Target byte = `ip + 2 + offset` (the offset is from
+///   immediately after the operand, NOT from the opcode start).
+/// - Target byte must exactly match an op start, otherwise the
+///   bytecode is malformed and we bail with `CodegenUnsupported`.
+fn decode_forward_target(
+    code: &[u8],
+    ip: &mut usize,
+    op_positions: &[usize],
+    op_name: &str,
+) -> Result<usize, JitHostError> {
+    if *ip + 1 >= code.len() {
+        return Err(JitHostError::CodegenUnsupported(format!(
+            "truncated {op_name} opcode (missing 2-byte forward offset)"
+        )));
+    }
+    let offset = u16::from_le_bytes([code[*ip], code[*ip + 1]]) as usize;
+    *ip += 2;
+    let target_byte = *ip + offset;
+    op_positions.binary_search(&target_byte).map_err(|_| {
+        JitHostError::CodegenUnsupported(format!(
+            "{op_name} forward offset {offset} (target byte {target_byte}) \
+             does not land on an op start; bytecode is malformed or the \
+             target is mid-operand"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -1641,10 +2026,10 @@ mod tests {
         assert_codegen_unsupported(".");
     }
 
-    #[test]
-    fn step3a_refuses_alternation() {
-        assert_codegen_unsupported("a|b");
-    }
+    // Note: `step3a_refuses_alternation` was removed at step 3d.2
+    // because alternation patterns like `a|b` are now correctly
+    // accepted via the Split/Jump/SplitLazy codegen. Positive
+    // tests for alternation live in the step 3d.2 section below.
 
     #[test]
     fn step3a_refuses_quantifier() {
@@ -2109,6 +2494,158 @@ mod tests {
         unsafe {
             let text = b"5";
             assert_eq!(func(text.as_ptr(), text.len(), 0), 1);
+        }
+    }
+
+    // ============================================================
+    // C1 step 3d.2 — control flow + backtracking
+    // ============================================================
+    //
+    // These tests JIT-compile patterns that use Split / Jump /
+    // SplitLazy (alternations and quantifiers that the existing
+    // compiler emits as control-flow opcodes rather than the
+    // optimized quantifier opcodes) and verify the backtracking
+    // dispatch correctly handles failed first-branch attempts.
+
+    #[test]
+    fn step3d_simple_alternation_first_branch_matches() {
+        // cat|dog — try `cat` first, on failure backtrack to `dog`.
+        let (_host, func) = jit_compile("cat|dog");
+        unsafe {
+            let text = b"cat";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 3);
+        }
+    }
+
+    #[test]
+    fn step3d_simple_alternation_second_branch_matches() {
+        // cat|dog against "dog" — first branch fails, backtrack
+        // pops the saved frame and dispatches to the `dog` branch.
+        let (_host, func) = jit_compile("cat|dog");
+        unsafe {
+            let text = b"dog";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 3);
+        }
+    }
+
+    #[test]
+    fn step3d_simple_alternation_neither_matches() {
+        let (_host, func) = jit_compile("cat|dog");
+        unsafe {
+            let text = b"bird";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_three_branch_alternation() {
+        // cat|dog|bird — three branches, two backtrack frames
+        // possible. Each branch should match its own input.
+        let (_host, func) = jit_compile("cat|dog|bird");
+        unsafe {
+            assert_eq!(func(b"cat".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"dog".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"bird".as_ptr(), 4, 0), 4);
+            assert_eq!(func(b"fish".as_ptr(), 4, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_alternation_with_char_classes() {
+        // \d|\w — try digit first (the more specific class), on
+        // failure try word char (the broader class). For `5`,
+        // both branches match — first one wins.
+        let (_host, func) = jit_compile(r"\d|\w");
+        unsafe {
+            // `5` is both a digit and a word char — first branch
+            // (\d) matches.
+            assert_eq!(func(b"5".as_ptr(), 1, 0), 1);
+            // `a` is a word char but not a digit — first branch
+            // fails, backtrack to second branch which matches.
+            assert_eq!(func(b"a".as_ptr(), 1, 0), 1);
+            // `!` is neither — both branches fail.
+            assert_eq!(func(b"!".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_alternation_with_anchored_branches() {
+        // \Acat|\Adog — both branches anchored. Only matches at
+        // the start of text.
+        let (_host, func) = jit_compile(r"\Acat|\Adog");
+        unsafe {
+            assert_eq!(func(b"cat".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"dog".as_ptr(), 3, 0), 3);
+            // Starting at offset, \A fails for both branches.
+            assert_eq!(func(b"xcat".as_ptr(), 4, 1), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_alternation_with_overlap_first_wins() {
+        // ab|abc — `ab` and `abc` both match `abc`, but the first
+        // branch is tried first. PCRE2 uses leftmost-first
+        // semantics: the first matching branch wins.
+        let (_host, func) = jit_compile("ab|abc");
+        unsafe {
+            // First branch (`ab`) matches and returns 2 — even
+            // though the second branch could also match and
+            // return 3. PCRE2 leftmost-first semantics.
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), 2);
+        }
+    }
+
+    #[test]
+    fn step3d_alternation_with_partial_first_match() {
+        // ab|c — `ab` partially matches `ac` (consumes `a`, fails
+        // on `c`). Backtrack to second branch `c` which fails at
+        // pos 0. Result: -1.
+        let (_host, func) = jit_compile("ab|c");
+        unsafe {
+            // `ab` against `abc` matches first branch.
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), 2);
+            // `c` against `c` matches second branch.
+            assert_eq!(func(b"c".as_ptr(), 1, 0), 1);
+            // `ac` partially matches first branch (consumes `a`,
+            // then `b` fails), backtracks to second branch (`c`)
+            // at pos 0 (the saved pos), `c` doesn't match `a`,
+            // so the whole pattern fails.
+            assert_eq!(func(b"ac".as_ptr(), 2, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_alternation_position_restored_on_backtrack() {
+        // The key test for backtrack-pos-restoration: a pattern
+        // where the first branch consumes some bytes before
+        // failing, so the second branch must see the ORIGINAL
+        // position (not the advanced one).
+        // \dxy|\dab — first tries `\dxy`, second tries `\dab`.
+        let (_host, func) = jit_compile(r"\dxy|\dab");
+        unsafe {
+            // `5xy...` matches first branch
+            assert_eq!(func(b"5xy".as_ptr(), 3, 0), 3);
+            // `5ab...` — first branch consumes `5`, then `x` !=
+            // `a` fails. Backtrack restores pos to 0 (NOT 1) and
+            // dispatches to second branch, which then matches.
+            assert_eq!(func(b"5ab".as_ptr(), 3, 0), 3);
+            // `5cd...` — both branches fail, return -1.
+            assert_eq!(func(b"5cd".as_ptr(), 3, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3d_nested_alternation_via_non_capturing_group() {
+        // (?:cat|dog)|bird — non-capturing group keeps the pattern
+        // step 3-eligible (group 1+ would require step 4 capture
+        // trail). Tests that nested Split structures backtrack
+        // correctly.
+        let (_host, func) = jit_compile("(?:cat|dog)|bird");
+        unsafe {
+            assert_eq!(func(b"cat".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"dog".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"bird".as_ptr(), 4, 0), 4);
+            assert_eq!(func(b"fish".as_ptr(), 4, 0), -1);
         }
     }
 }

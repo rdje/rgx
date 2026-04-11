@@ -94,7 +94,12 @@ impl std::error::Error for JitHostError {}
 
 impl From<ModuleError> for JitHostError {
     fn from(err: ModuleError) -> Self {
-        Self::ModuleError(err.to_string())
+        // Use Debug formatting so verifier errors and other
+        // multi-line ModuleError variants surface their full
+        // detail. The cranelift `Verifier errors` variant only
+        // shows the leading message under Display, which makes
+        // codegen bugs hard to track down.
+        Self::ModuleError(format!("{err:?}"))
     }
 }
 
