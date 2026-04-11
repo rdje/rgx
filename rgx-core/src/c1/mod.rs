@@ -143,8 +143,40 @@
 //!     7 char-class direct-call differential, 6 multi-byte literal
 //!     differential, 2 ASCII-class-with-Unicode-text differential,
 //!     4 eligibility tests.
-//! - **Step 7**: runtime safety helpers (step counter, recursion depth,
-//!   backtrack frame limit) inlined as Cranelift branches. (planned)
+//! - **Step 7**: runtime safety helpers (step counter, backtrack
+//!   frame limit) inlined as Cranelift branches. ✅
+//!   - JIT'd function signature extended from 6 args to 8 args by
+//!     adding `max_steps: u64` and `max_bt_frames: u64` parameters.
+//!     `0` = unlimited.
+//!   - New step-counter Variable initialised to `0` in the entry
+//!     block. The new helper `emit_step_limit_check` increments
+//!     it at the START of every JitOp's emit and jumps to the
+//!     limit-abort block if `max_steps != 0 && counter > max_steps`.
+//!     Mirrors the interpreter's main-loop pattern.
+//!   - `emit_backtrack_push` extended with a user-limit check
+//!     alongside the existing hard-cap check. If `max_bt_frames != 0`
+//!     and `bt_top >= max_bt_frames`, jumps to the limit-abort block.
+//!   - New `JIT_LIMIT_EXCEEDED_SENTINEL = -2` return value
+//!     distinguishes "limit hit" from "no match" (`-1`). The engine
+//!     scan loops detect `-2` and stop scanning entirely (matching
+//!     the interpreter's behaviour of bailing out on limit overflow).
+//!   - **Removed `has_runtime_match_limits` exclusion** from
+//!     `Engine::should_use_jit`. Patterns with `set_max_steps` or
+//!     `set_max_backtrack_frames` set are now JIT-eligible. The
+//!     `has_recursion_depth_limit` check stays — JIT doesn't support
+//!     recursion, so a recursion limit is meaningless for JIT'd code.
+//!   - 13 new step-7 tests in `c1::codegen::tests::step7_*`:
+//!     5 max_steps codegen tests, 4 max_bt_frames codegen tests,
+//!     4 engine-integration tests via the public API.
+//!   - **Per-call semantics**: the JIT enforces both limits **per
+//!     call** (the step counter resets to 0 on every JIT'd-function
+//!     entry). This is looser than the interpreter, which limits
+//!     **cumulative** steps across the whole `find_first` /
+//!     `find_all` scan. The engine compensates: when the JIT
+//!     returns the limit-abort sentinel, the engine stops scanning
+//!     entirely. So the user-visible "limit hit → no match"
+//!     behaviour matches the interpreter, even though the exact
+//!     accounting differs.
 //! - **Step 8**: production cutover, benchmarks, Book chapter. (planned)
 //!
 //! # Cohabitation invariant
@@ -174,5 +206,6 @@ pub mod runtime;
 
 pub use codegen::{
     compile_program, compile_program_to_jit_program, is_jit_eligible, JittedFn, Step3aJittedFn,
+    JIT_LIMIT_EXCEEDED_SENTINEL,
 };
 pub use jit::{JitHost, JitHostError, JitProgram};

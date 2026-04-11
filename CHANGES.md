@@ -14,6 +14,52 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 7: runtime safety helpers (max_steps + max_bt_frames)
+- Scope: Sixteenth code commit for the C1 JIT compilation backend. Lowers the user-configurable runtime safety limits (`max_steps` and `max_backtrack_frames`) into the JIT'd code as inline Cranelift branches. The JIT'd function signature gains 2 new parameters; the engine layer threads the current limits through on every call. Patterns with safety limits set are now JIT-eligible — previously the engine excluded them in `should_use_jit`.
+- **Function signature change**. The signature went from
+  ```
+  unsafe extern "C" fn(text, text_len, pos, captures_ptr, char_classes_ptr, char_classes_len) -> isize
+  ```
+  to
+  ```
+  unsafe extern "C" fn(text, text_len, pos, captures_ptr, char_classes_ptr, char_classes_len, max_steps, max_bt_frames) -> isize
+  ```
+  Two new args: `max_steps: u64` and `max_bt_frames: u64`. `0` = unlimited. The engine reads from `vm.max_steps()` and `vm.max_backtrack_frames()` and passes them on every call.
+- **New `JIT_LIMIT_EXCEEDED_SENTINEL = -2`**. Distinct from `-1` (no match) so the engine scan loops can distinguish "limit hit, stop entirely" from "no match, continue scanning". The constant lives in `c1/codegen.rs` and is re-exported from `c1::mod` for the engine to import.
+- **`emit_step_limit_check` helper**. New helper in `c1/codegen.rs` that emits the inline step-counter increment + check at the START of every JitOp's emit. Mirrors the interpreter's main-loop pattern (see `vm.rs` around line 1932):
+  ```
+  step_counter += 1
+  if max_steps != 0 && step_counter > max_steps {
+      jump limit_abort_block  (returns -2)
+  }
+  // fall through to op code
+  ```
+  Called from `emit_jit_op`'s prologue. Each consuming op (Char, CharBytes, CharClass, DigitAscii, etc.) AND each control-flow op (Split, SplitLazy, Jump, Save, SetAlternative, Match, StartText, EndText, WordBoundary) increments the counter once. The order is `increment then compare` (the JIT) vs the interpreter's `compare then increment` — both reject the same set of inputs because the JIT compares `> max_steps` while the interpreter compares `>= max_steps` before its increment.
+- **`emit_backtrack_push` user-limit check**. Extended with a second check after the hard-cap (`bt_top >= C1_BACKTRACK_STACK_FRAMES`) check. The new check compares `bt_top >= max_bt_frames` (when `max_bt_frames != 0`) and jumps to the limit-abort block on overflow. Cranelift IR:
+  ```
+  let limit_set = max_bt_frames != 0
+  let bt_top_at_user_limit = bt_top >= max_bt_frames
+  let user_limit_exceeded = limit_set & bt_top_at_user_limit
+  brif(user_limit_exceeded, limit_abort_block, push_block)
+  ```
+- **`limit_abort_block`**. New Cranelift block that returns `JIT_LIMIT_EXCEEDED_SENTINEL` (`-2`). Reached from any step-counter check OR the new user-frame-limit check in `emit_backtrack_push`. Sealed alongside the existing `fail_block` at the end of `compile_program`'s function builder.
+- **New Cranelift Variables**. `step_counter_var`, `max_steps_var`, `max_bt_frames_var` declared in `compile_program` and initialised in the entry block from the new function params 6 and 7. The step counter starts at `0`; max_steps and max_bt_frames are loaded from the corresponding entry-block params.
+- **Engine layer changes**.
+  - Three new locals in each `try_jit_*` method: `let max_steps = self.vm.max_steps(); let max_bt_frames = self.vm.max_backtrack_frames();`. New public getters `RegexVM::max_steps()` and `RegexVM::max_backtrack_frames()` expose the atomic values.
+  - The `func()` calls now pass 8 args (added `max_steps`, `max_bt_frames` after `cc_len`).
+  - **Sentinel detection in scan loops**: each `try_jit_*` method checks `result == JIT_LIMIT_EXCEEDED_SENTINEL as isize` after every JIT call and bails out (returns `Some(false)` for is_match, `Some(None)` for find_first, breaks the loop and returns the matches collected so far for find_all). Matches the interpreter's behaviour of bailing out on limit overflow.
+  - **`should_use_jit` exclusion removed**. The `if self.vm.has_runtime_match_limits() { return None; }` gate is gone. Patterns with `set_max_steps` or `set_max_backtrack_frames` set are now JIT-eligible. A new `has_recursion_depth_limit` gate stays — recursion is JIT-ineligible (the `Call` opcode is rejected by the eligibility check), so a recursion limit is meaningless for JIT'd code, and patterns that USE recursion are already excluded.
+- **Per-call vs cumulative semantics**. The JIT's step counter resets to `0` on every JIT'd-function entry — it enforces a **per-call** limit, not a **cumulative** one. The interpreter, by contrast, runs `find_first` as a single execution that maintains the counter across all scan positions. Step 7 reconciles this at the engine layer: when the JIT returns the limit-abort sentinel, the engine stops scanning entirely (no more positions tried). The user-visible "set tight limit → matching gives up" behaviour is identical to the interpreter; the exact accounting (whether the limit is reached in 1 position or distributed across N) differs, but neither is observable from the public API.
+- **`jit_compile_with_limits` test helper**. New test helper in `c1::codegen::tests` that returns a closure exposing the `(max_steps, max_bt_frames)` parameters. Used by step 7 tests to verify the inline checks at the codegen level. The legacy `jit_compile` and `jit_compile_with_captures` helpers continue to pass `0, 0` (unlimited) so the existing test suite is unaffected.
+- **13 new step-7 tests** in `c1::codegen::tests::step7_*`:
+  - **`max_steps` codegen tests** (5): `step7_no_limit_runs_unlimited`, `step7_max_steps_zero_means_unlimited`, `step7_max_steps_generous_completes`, `step7_max_steps_tight_returns_sentinel`, `step7_max_steps_exact_boundary`. Verify the per-op increment, the `0 = unlimited` semantics, and the limit-abort sentinel return.
+  - **`max_bt_frames` codegen tests** (4): `step7_max_bt_frames_zero_means_unlimited`, `step7_max_bt_frames_generous_completes`, `step7_max_bt_frames_zero_budget_returns_sentinel`, `step7_max_bt_frames_just_enough_completes`. Verify the user-limit check in `emit_backtrack_push`.
+  - **Engine-integration tests** (4): `step7_engine_max_steps_via_public_api`, `step7_engine_max_steps_does_not_break_normal_matches`, `step7_engine_max_bt_frames_via_public_api`, `step7_should_use_jit_no_longer_excludes_max_steps`. Verify the engine layer correctly forwards user limits through the public API and that the dispatch chain doesn't refuse limited patterns.
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 baseline tests (unchanged), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit` **957 lib tests pass** (695 baseline + 262 C1, +13 from step 7), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 7 is complete.** The JIT now enforces the same user-configurable safety limits as the interpreter. The dispatch chain no longer excludes limited patterns from the JIT path. Per-call vs cumulative accounting differs from the interpreter but the user-visible behaviour matches. Next: C1 step 8 (production cutover, benchmarks, Book chapter expanded to its full form). Step 8 is the FINAL step in the C1 series — it ships the `jit` feature flipped to default-on, runs the full benchmark sweep, and writes the public Book chapter `book/src/internals/jit-compiler.md`.
+
 ### 2026-04-11 - C1 step 6: CharClass + multi-byte literal codegen
 - Scope: Fifteenth code commit for the C1 JIT compilation backend. Widens the JIT-eligible subset to handle (1) custom char classes via the `CharClass(id)` / `CharClassNeg(id)` opcodes through an indirect call to a new runtime helper, and (2) multi-byte `Char` literals (UTF-8 sequences of length 2..=4) via inline byte comparisons. Patterns like `[abc]`, `[a-z]`, `[^0-9]`, `[а-я]`, `é`, `日本`, `🦀` are now JIT-eligible.
 - **New runtime helper `rgx_runtime_char_class_match_at`** in `c1/runtime.rs`. Replaces the step-1 stub. C ABI signature:

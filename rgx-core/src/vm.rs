@@ -803,6 +803,35 @@ impl RegexVM {
                 > 0
     }
 
+    /// Returns the current `max_steps` setting (`0` = unlimited).
+    /// Used by the C1 JIT dispatch path to thread the limit through
+    /// to the JIT'd function as a per-call argument.
+    #[doc(hidden)]
+    pub fn max_steps(&self) -> u64 {
+        self.max_steps.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the current `max_backtrack_frames` setting (`0` =
+    /// unlimited). Used by the C1 JIT dispatch path.
+    #[doc(hidden)]
+    pub fn max_backtrack_frames(&self) -> u64 {
+        self.max_backtrack_frames
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns `true` if `max_recursion_depth` has been set to a
+    /// non-zero value. Used by the C1 JIT dispatch path: the JIT
+    /// doesn't support recursion (`Call` opcode is JIT-ineligible),
+    /// so a recursion depth limit is meaningless for JIT'd code —
+    /// but if the user has set one, the C1 path falls through to
+    /// the interpreter to keep semantics consistent.
+    #[doc(hidden)]
+    pub fn has_recursion_depth_limit(&self) -> bool {
+        self.max_recursion_depth
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0
+    }
+
     /// Find first match using adaptive execution strategy
     #[must_use]
     #[allow(clippy::too_many_lines)] // Literal fast-path + adaptive strategy selection

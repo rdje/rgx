@@ -687,7 +687,17 @@ impl Engine {
         if self.vm.has_event_observer() {
             return None;
         }
-        if self.vm.has_runtime_match_limits() {
+        // Step 7: previously this gate excluded all
+        // `has_runtime_match_limits` patterns. Now the JIT
+        // enforces `max_steps` and `max_backtrack_frames`
+        // inline (via `emit_step_limit_check` /
+        // `emit_backtrack_push`'s user-limit check), so those
+        // limits no longer disqualify a pattern. Recursion is
+        // still excluded — the JIT doesn't lower `Call` opcodes,
+        // so a recursion depth limit is meaningless for JIT'd
+        // code, and patterns that USE recursion are already
+        // rejected by the JIT eligibility check.
+        if self.vm.has_recursion_depth_limit() {
             return None;
         }
         if self.vm.has_literal_finder() {
@@ -727,11 +737,29 @@ impl Engine {
     #[cfg(feature = "jit")]
     #[doc(hidden)]
     pub fn try_jit_is_match(&self, input: &[u8]) -> Option<bool> {
+        const LIMIT_SENTINEL: isize = crate::c1::JIT_LIMIT_EXCEEDED_SENTINEL as isize;
+        // Step 7: when the JIT returns the limit-abort sentinel,
+        // the engine treats the call as "no match" — same
+        // user-visible behaviour as the interpreter, which
+        // returns false from its main loop on limit overflow.
+        // We do NOT return None (which would fall through to
+        // the interpreter and double-execute the same hopeless
+        // pattern); we return Some(false) directly, matching
+        // what the interpreter would have done.
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
         let cc_len = self.vm.program.char_classes.len();
+        // Step 7: thread the user-configured runtime safety
+        // limits through to the JIT'd function as 7th and 8th
+        // args. 0 = unlimited (the JIT's hard cap of
+        // C1_BACKTRACK_STACK_FRAMES = 256 still applies for
+        // backtrack frames). On limit overflow the JIT returns
+        // -2 (JIT_LIMIT_EXCEEDED_SENTINEL); the scan loops below
+        // detect that and stop scanning entirely.
+        let max_steps = self.vm.max_steps();
+        let max_bt_frames = self.vm.max_backtrack_frames();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
@@ -752,10 +780,16 @@ impl Engine {
                     captures.as_mut_ptr(),
                     cc_ptr,
                     cc_len,
+                    max_steps,
+                    max_bt_frames,
                 )
             };
             if result >= 0 {
                 return Some(true);
+            }
+            if result == LIMIT_SENTINEL {
+                // Limit hit — stop scanning. Matches interpreter behavior.
+                return Some(false);
             }
             start = candidate + 1;
         }
@@ -772,11 +806,14 @@ impl Engine {
                     captures.as_mut_ptr(),
                     cc_ptr,
                     cc_len,
+                    max_steps,
+                    max_bt_frames,
                 )
             };
             if result >= 0 {
                 return Some(true);
             }
+            // (limit sentinel falls through to Some(false) below)
         }
         Some(false)
     }
@@ -788,11 +825,21 @@ impl Engine {
     #[cfg(feature = "jit")]
     #[doc(hidden)]
     pub fn try_jit_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
+        const LIMIT_SENTINEL: isize = crate::c1::JIT_LIMIT_EXCEEDED_SENTINEL as isize;
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
         let cc_len = self.vm.program.char_classes.len();
+        // Step 7: thread the user-configured runtime safety
+        // limits through to the JIT'd function as 7th and 8th
+        // args. 0 = unlimited (the JIT's hard cap of
+        // C1_BACKTRACK_STACK_FRAMES = 256 still applies for
+        // backtrack frames). On limit overflow the JIT returns
+        // -2 (JIT_LIMIT_EXCEEDED_SENTINEL); the scan loops below
+        // detect that and stop scanning entirely.
+        let max_steps = self.vm.max_steps();
+        let max_bt_frames = self.vm.max_backtrack_frames();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
@@ -807,6 +854,8 @@ impl Engine {
                     captures.as_mut_ptr(),
                     cc_ptr,
                     cc_len,
+                    max_steps,
+                    max_bt_frames,
                 )
             };
             if result >= 0 {
@@ -815,6 +864,10 @@ impl Engine {
                 return Some(Some(jit_match_to_result(
                     candidate, end, &captures, num_groups,
                 )));
+            }
+            if result == LIMIT_SENTINEL {
+                // Limit hit — stop scanning. Matches interpreter behavior.
+                return Some(None);
             }
             start = candidate + 1;
         }
@@ -829,6 +882,8 @@ impl Engine {
                     captures.as_mut_ptr(),
                     cc_ptr,
                     cc_len,
+                    max_steps,
+                    max_bt_frames,
                 )
             };
             if result >= 0 {
@@ -841,6 +896,7 @@ impl Engine {
                     num_groups,
                 )));
             }
+            // (limit sentinel falls through to Some(None) below)
         }
         Some(None)
     }
@@ -855,11 +911,21 @@ impl Engine {
     #[cfg(feature = "jit")]
     #[doc(hidden)]
     pub fn try_jit_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
+        const LIMIT_SENTINEL: isize = crate::c1::JIT_LIMIT_EXCEEDED_SENTINEL as isize;
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
         let cc_len = self.vm.program.char_classes.len();
+        // Step 7: thread the user-configured runtime safety
+        // limits through to the JIT'd function as 7th and 8th
+        // args. 0 = unlimited (the JIT's hard cap of
+        // C1_BACKTRACK_STACK_FRAMES = 256 still applies for
+        // backtrack frames). On limit overflow the JIT returns
+        // -2 (JIT_LIMIT_EXCEEDED_SENTINEL); the scan loops below
+        // detect that and stop scanning entirely.
+        let max_steps = self.vm.max_steps();
+        let max_bt_frames = self.vm.max_backtrack_frames();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut results = Vec::new();
@@ -880,8 +946,18 @@ impl Engine {
                     captures.as_mut_ptr(),
                     cc_ptr,
                     cc_len,
+                    max_steps,
+                    max_bt_frames,
                 )
             };
+            if result == LIMIT_SENTINEL {
+                // Limit hit — stop scanning, return matches
+                // collected so far. Matches the interpreter's
+                // behaviour of bailing out of the find_all loop
+                // on limit overflow (no error, just no more
+                // matches).
+                break;
+            }
             if result < 0 {
                 start += 1;
                 continue;
