@@ -730,6 +730,8 @@ impl Engine {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
+        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_len = self.vm.program.char_classes.len();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
@@ -739,13 +741,17 @@ impl Engine {
             // pointer is alive for the lifetime of the JitProgram
             // which is held by self via the Mutex; the captures
             // buffer is sized 2*(num_groups+1) and pre-initialised
-            // to -1 in every slot.
+            // to -1 in every slot; cc_ptr / cc_len describe the
+            // program's char_classes Vec which lives as long as
+            // self.vm and is never mutated after engine creation.
             let result = unsafe {
                 func(
                     input.as_ptr(),
                     input.len(),
                     candidate,
                     captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
                 )
             };
             if result >= 0 {
@@ -764,6 +770,8 @@ impl Engine {
                     input.len(),
                     input.len(),
                     captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
                 )
             };
             if result >= 0 {
@@ -783,6 +791,8 @@ impl Engine {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
+        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_len = self.vm.program.char_classes.len();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
@@ -795,6 +805,8 @@ impl Engine {
                     input.len(),
                     candidate,
                     captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
                 )
             };
             if result >= 0 {
@@ -815,6 +827,8 @@ impl Engine {
                     input.len(),
                     input.len(),
                     captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
                 )
             };
             if result >= 0 {
@@ -844,6 +858,8 @@ impl Engine {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
+        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_len = self.vm.program.char_classes.len();
         let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut results = Vec::new();
@@ -856,7 +872,16 @@ impl Engine {
             start = candidate;
             reset_capture_buffer(&mut captures);
             // SAFETY: see try_jit_is_match.
-            let result = unsafe { func(input.as_ptr(), input.len(), start, captures.as_mut_ptr()) };
+            let result = unsafe {
+                func(
+                    input.as_ptr(),
+                    input.len(),
+                    start,
+                    captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
+                )
+            };
             if result < 0 {
                 start += 1;
                 continue;

@@ -188,6 +188,13 @@ impl JitHost {
             "rgx_runtime_word_boundary_test",
             crate::c1::runtime::rgx_runtime_word_boundary_test as *const u8,
         );
+        // Step 6: char-class matching helper. Used by the JIT
+        // codegen for `CharClass(id)` / `CharClassNeg(id)` opcodes
+        // and for arbitrary Unicode-aware char-class tests.
+        builder.symbol(
+            "rgx_runtime_char_class_match_at",
+            crate::c1::runtime::rgx_runtime_char_class_match_at as *const u8,
+        );
 
         let module = JITModule::new(builder);
         Ok(Self {
@@ -309,6 +316,53 @@ impl JitHost {
         let func_id = self
             .module
             .declare_function("rgx_runtime_word_boundary_test", Linkage::Import, &sig)
+            .map_err(JitHostError::from)?;
+
+        let func_ref = self.module.declare_func_in_func(func_id, function);
+        Ok(func_ref)
+    }
+
+    /// Import the `rgx_runtime_char_class_match_at` runtime helper
+    /// into the given Cranelift `Function` so JIT'd code can call
+    /// it. Returns a [`FuncRef`] usable with `builder.ins().call(...)`.
+    ///
+    /// The symbol must already have been registered with the
+    /// `JITBuilder` (which happens in [`Self::new`]), otherwise
+    /// finalisation will fail with a missing-symbol error. The
+    /// import declares the function with `Linkage::Import` and the
+    /// matching C ABI signature
+    /// `(i64, i64, i64, i64, i64, i32, i32) -> i32`.
+    ///
+    /// **Step 6.** Used by the codegen for `CharClass(id)` /
+    /// `CharClassNeg(id)` opcode lowering. Each `Function` needs
+    /// its own import — the `FuncRef` is scoped to the function
+    /// it was declared in, not the module.
+    ///
+    /// # Errors
+    /// Forwards any error from `cranelift_module::Module::declare_function`.
+    pub fn import_char_class_helper(
+        &mut self,
+        function: &mut Function,
+    ) -> Result<FuncRef, JitHostError> {
+        // C ABI signature:
+        // (text: *const u8, text_len: usize, pos: usize,
+        //  char_classes_ptr: *const u8, char_classes_len: usize,
+        //  class_id: u32, negated: u32) -> u32
+        // Pointers and usize are i64 on 64-bit; u32 args/return
+        // are i32.
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64)); // text
+        sig.params.push(AbiParam::new(types::I64)); // text_len
+        sig.params.push(AbiParam::new(types::I64)); // pos
+        sig.params.push(AbiParam::new(types::I64)); // char_classes_ptr
+        sig.params.push(AbiParam::new(types::I64)); // char_classes_len
+        sig.params.push(AbiParam::new(types::I32)); // class_id
+        sig.params.push(AbiParam::new(types::I32)); // negated
+        sig.returns.push(AbiParam::new(types::I32)); // bytes consumed (0 = no match)
+
+        let func_id = self
+            .module
+            .declare_function("rgx_runtime_char_class_match_at", Linkage::Import, &sig)
             .map_err(JitHostError::from)?;
 
         let func_ref = self.module.declare_func_in_func(func_id, function);

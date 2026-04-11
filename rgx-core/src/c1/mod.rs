@@ -106,7 +106,43 @@
 //!     (mirrors C2 dispatch) because the JIT'd function signature
 //!     returns only the match span, not `matched_branch_number`.
 //! - **Step 6**: `CharClass(id)` and multi-byte literal support via
-//!   runtime helpers. (planned)
+//!   runtime helpers. ✅
+//!   - JIT'd function signature extended from
+//!     `(text, text_len, pos, captures_ptr) -> isize` to
+//!     `(text, text_len, pos, captures_ptr, char_classes_ptr, char_classes_len) -> isize`
+//!     so the JIT can call the runtime
+//!     `rgx_runtime_char_class_match_at` helper for `CharClass(id)`
+//!     / `CharClassNeg(id)` opcodes.
+//!   - New `JitOp::CharBytes { bytes: [u8; 4], len: u8 }` variant
+//!     for multi-byte UTF-8 literals (lengths 2..=4). Lowered as
+//!     unrolled inline byte comparisons + advance — no runtime
+//!     helper because the bytes are constants known at JIT-compile
+//!     time.
+//!   - New `JitOp::CharClass { id: u8, negated: bool }` variant
+//!     for custom char classes. Lowered as an indirect call to
+//!     `rgx_runtime_char_class_match_at` which returns the number
+//!     of bytes consumed (0 = no match, 1..=4 = char width); the
+//!     codegen advances `pos` by the returned width on success.
+//!   - The runtime helper handles ASCII bitmap fast path AND
+//!     Unicode range binary search, mirroring `RegexVM::test_char_class`.
+//!   - Decoder accepts multi-byte `Char` opcodes (any length 1..=4)
+//!     and `CharClass` / `CharClassNeg` opcodes. Patterns like
+//!     `[abc]`, `[a-z]`, `[^0-9]`, `[а-я]`, `é`, `日本`, `🦀` are
+//!     now JIT-eligible.
+//!   - Engine `try_jit_*` methods pass
+//!     `self.vm.program.char_classes.as_ptr()` and `.len()` as the
+//!     new 5th and 6th args to every JIT call.
+//!   - Differential gate **switched to compare against the raw
+//!     `RegexVM::find_first` interpreter** instead of the public
+//!     `Regex::find_first` API. The public API dispatches through
+//!     DFA / Pike-VM / JIT / interpreter, and the C2 DFA path can
+//!     produce different results for some negated-char-class
+//!     patterns. The design doc §1.0 says the JIT must match the
+//!     **interpreter**, which is the VM — not the dispatch chain.
+//!   - 19 new step-6 tests in `c1::codegen::tests::step6_*`:
+//!     7 char-class direct-call differential, 6 multi-byte literal
+//!     differential, 2 ASCII-class-with-Unicode-text differential,
+//!     4 eligibility tests.
 //! - **Step 7**: runtime safety helpers (step counter, recursion depth,
 //!   backtrack frame limit) inlined as Cranelift branches. (planned)
 //! - **Step 8**: production cutover, benchmarks, Book chapter. (planned)

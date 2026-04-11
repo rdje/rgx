@@ -484,11 +484,14 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 /// callers transmute the raw function pointer to.
 ///
 /// Step 3a introduced the original 3-arg signature `(text, text_len,
-/// pos) -> isize` for pure literal programs; step 4b (this commit)
-/// extends it with a `captures_ptr` parameter so the JIT can write
-/// capture group spans for groups 1+ alongside the overall match.
-/// All subsequent codegen steps (control flow, quantifiers, char
-/// classes, runtime helpers) reuse this signature.
+/// pos) -> isize` for pure literal programs; step 4b extended it
+/// with a `captures_ptr` parameter so the JIT can write capture
+/// group spans for groups 1+ alongside the overall match; step 6
+/// (this commit) extends it with `char_classes_ptr` /
+/// `char_classes_len` parameters so the JIT can call the runtime
+/// `rgx_runtime_char_class_match_at` helper for `CharClass(id)` /
+/// `CharClassNeg(id)` opcodes. All subsequent codegen steps reuse
+/// this signature.
 ///
 /// # Parameters
 /// - `text`: pointer to the input bytes (borrow lifetime managed by
@@ -508,6 +511,16 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 ///   partially written to slots before the failure path was
 ///   taken, so the buffer must be re-initialised to all `-1`s
 ///   before the next call.
+/// - `char_classes_ptr`: pointer to the program's
+///   `[CompiledCharClass]` slice cast as `*const u8`. Must remain
+///   valid for the duration of the call. The caller (engine
+///   layer) obtains this via
+///   `self.vm.program.char_classes.as_ptr() as *const u8`.
+///   Programs with no custom char classes still pass a valid
+///   pointer (the empty-slice base address) and `char_classes_len = 0`.
+/// - `char_classes_len`: length of the `[CompiledCharClass]`
+///   slice. The runtime helper bounds-checks `class_id` against
+///   this when emitting calls.
 ///
 /// # Returns
 /// - `>= 0`: the new position after a successful match (`pos +
@@ -521,6 +534,9 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 /// - `captures_ptr` points to at least `2 * (num_groups + 1)`
 ///   `i64` slots of writable memory, with all slots pre-initialised
 ///   to `-1`.
+/// - `char_classes_ptr` points to a valid `[CompiledCharClass]`
+///   slice of length `char_classes_len`, with the layout matching
+///   the program the JIT was compiled against.
 ///
 /// The function performs its own bounds checks for byte loads, but
 /// it trusts the caller-supplied pointer / length / position / buffer
@@ -530,6 +546,8 @@ pub type JittedFn = unsafe extern "C" fn(
     text_len: usize,
     pos: usize,
     captures_ptr: *mut i64,
+    char_classes_ptr: *const u8,
+    char_classes_len: usize,
 ) -> isize;
 
 /// Backwards-compatible alias for the JIT'd function type. The
@@ -559,6 +577,31 @@ pub type Step3aJittedFn = JittedFn;
 enum JitOp {
     /// Single-byte literal `Char(b)` — consume one byte equal to `b`.
     Char(u8),
+    /// Multi-byte literal `Char(bytes)` for UTF-8 sequences with
+    /// `len` in `2..=4`. Step 6: previously the decoder rejected
+    /// `Char` opcodes with non-1 length payloads. The codegen
+    /// emits `len` bounds checks + `len` byte comparisons + advance
+    /// `pos` by `len`. Bytes are stored inline as a fixed-size
+    /// array (max UTF-8 length is 4) so `JitOp` stays `Copy`.
+    CharBytes {
+        /// UTF-8 byte sequence, padded with zeros past `len`.
+        bytes: [u8; 4],
+        /// Actual byte count (`2..=4`; single-byte literals use the
+        /// `Char(b)` variant for consistency with steps 3a–4b).
+        len: u8,
+    },
+    /// `CharClass(id)` / `CharClassNeg(id)` — test the character at
+    /// `pos` against the program's `char_classes[id]` table via the
+    /// `rgx_runtime_char_class_match_at` runtime helper. The helper
+    /// returns the number of bytes consumed (1..=4) on success or 0
+    /// on failure. Step 6: lifts the JIT-eligible subset to handle
+    /// custom char classes like `[abc]`, `[a-z]`, `[^0-9]`, `[а-я]`.
+    CharClass {
+        /// Char class id (index into `program.char_classes`).
+        id: u8,
+        /// `false` for `CharClass`, `true` for `CharClassNeg`.
+        negated: bool,
+    },
     /// `\d` (negated=false) or `\D` (negated=true) — consume one
     /// byte that is (or is not) an ASCII digit `0..=9`.
     DigitAscii { negated: bool },
@@ -722,13 +765,18 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
     // so the snapshot size is bounded.
     let num_groups = program.num_groups;
 
-    // Build the Cranelift function signature: 4 i64 params (text
-    // pointer, text len, pos, captures_ptr), 1 i64 return (new pos
-    // or -1). The captures_ptr is added in step 4b — earlier steps
-    // had only 3 params. Cranelift uses I64 on 64-bit hosts; we'd
-    // need a target-pointer type query for 32-bit, which isn't a
+    // Build the Cranelift function signature: 6 i64 params (text
+    // pointer, text len, pos, captures_ptr, char_classes_ptr,
+    // char_classes_len), 1 i64 return (new pos or -1). The
+    // captures_ptr was added in step 4b; the char_classes
+    // pointer/length pair is added in step 6 — earlier steps
+    // had 3 (step 3a) then 4 (step 4b) then 6 (step 6) params.
+    // Cranelift uses I64 on 64-bit hosts; we'd need a
+    // target-pointer type query for 32-bit, which isn't a
     // supported target anyway.
     let mut sig = host.make_signature();
+    sig.params.push(AbiParam::new(types::I64));
+    sig.params.push(AbiParam::new(types::I64));
     sig.params.push(AbiParam::new(types::I64));
     sig.params.push(AbiParam::new(types::I64));
     sig.params.push(AbiParam::new(types::I64));
@@ -748,14 +796,20 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
     // function, not the module — each `compile_program` call
     // imports its own.
     //
-    // Step 3c imports only the word-boundary helper. Step 6+ will
-    // add char-class and multi-byte helpers as they become needed.
+    // Step 3c imports the word-boundary helper. Step 6 (this
+    // commit) adds the char-class helper. Future steps add more
+    // helpers as needed.
     let mut function = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
     let word_boundary_ref = if ops
         .iter()
         .any(|op| matches!(op, JitOp::WordBoundary { .. }))
     {
         Some(host.import_word_boundary_helper(&mut function)?)
+    } else {
+        None
+    };
+    let char_class_ref = if ops.iter().any(|op| matches!(op, JitOp::CharClass { .. })) {
+        Some(host.import_char_class_helper(&mut function)?)
     } else {
         None
     };
@@ -803,11 +857,15 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
         let text_ptr_var = Variable::from_u32(2);
         let text_len_var = Variable::from_u32(3);
         let captures_ptr_var = Variable::from_u32(4);
+        let char_classes_ptr_var = Variable::from_u32(5);
+        let char_classes_len_var = Variable::from_u32(6);
         builder.declare_var(pos_var, types::I64);
         builder.declare_var(bt_top_var, types::I64);
         builder.declare_var(text_ptr_var, types::I64);
         builder.declare_var(text_len_var, types::I64);
         builder.declare_var(captures_ptr_var, types::I64);
+        builder.declare_var(char_classes_ptr_var, types::I64);
+        builder.declare_var(char_classes_len_var, types::I64);
 
         // Allocate all blocks up front so we can target the next
         // op's block by index when emitting each op.
@@ -827,10 +885,14 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
         let entry_text_len = builder.block_params(entry)[1];
         let entry_init_pos = builder.block_params(entry)[2];
         let entry_captures_ptr = builder.block_params(entry)[3];
+        let entry_char_classes_ptr = builder.block_params(entry)[4];
+        let entry_char_classes_len = builder.block_params(entry)[5];
         builder.def_var(text_ptr_var, entry_text_ptr);
         builder.def_var(text_len_var, entry_text_len);
         builder.def_var(pos_var, entry_init_pos);
         builder.def_var(captures_ptr_var, entry_captures_ptr);
+        builder.def_var(char_classes_ptr_var, entry_char_classes_ptr);
+        builder.def_var(char_classes_len_var, entry_char_classes_len);
         let zero = builder.ins().iconst(types::I64, 0);
         builder.def_var(bt_top_var, zero);
         let first_target = op_blocks.first().copied().unwrap_or(success_block);
@@ -872,6 +934,8 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
                 text_len_var,
                 bt_top_var,
                 captures_ptr_var,
+                char_classes_ptr_var,
+                char_classes_len_var,
                 bt_stack_slot,
                 frame_bytes,
                 snapshot_bytes,
@@ -882,6 +946,7 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
                 fail_block,
                 success_block,
                 word_boundary_ref,
+                char_class_ref,
             );
         }
 
@@ -1048,6 +1113,8 @@ fn emit_jit_op(
     text_len_var: Variable,
     bt_top_var: Variable,
     captures_ptr_var: Variable,
+    char_classes_ptr_var: Variable,
+    char_classes_len_var: Variable,
     bt_stack_slot: cranelift_codegen::ir::StackSlot,
     frame_bytes: i64,
     snapshot_bytes: i64,
@@ -1058,6 +1125,7 @@ fn emit_jit_op(
     fail_block: cranelift_codegen::ir::Block,
     success_block: cranelift_codegen::ir::Block,
     word_boundary_ref: Option<cranelift_codegen::ir::FuncRef>,
+    char_class_ref: Option<cranelift_codegen::ir::FuncRef>,
 ) {
     let pos = builder.use_var(pos_var);
     let text_ptr = builder.use_var(text_ptr_var);
@@ -1074,6 +1142,63 @@ fn emit_jit_op(
                 failure_dispatch_block,
                 |fb, byte| fb.ins().icmp_imm(IntCC::Equal, byte, i64::from(b)),
             );
+        }
+        JitOp::CharBytes { bytes, len } => {
+            emit_match_multibyte_literal(
+                builder,
+                pos,
+                pos_var,
+                text_ptr,
+                text_len,
+                next_block,
+                failure_dispatch_block,
+                &bytes[..len as usize],
+            );
+        }
+        JitOp::CharClass { id, negated } => {
+            let func_ref = char_class_ref
+                .expect("CharClass op requires the helper import; compile_program is buggy");
+            let char_classes_ptr = builder.use_var(char_classes_ptr_var);
+            let char_classes_len = builder.use_var(char_classes_len_var);
+            let class_id_val = builder.ins().iconst(types::I32, i64::from(id));
+            let negated_val = builder.ins().iconst(types::I32, i64::from(negated));
+            // Call rgx_runtime_char_class_match_at(text, text_len,
+            // pos, char_classes_ptr, char_classes_len, class_id,
+            // negated). Returns u32: 0 = no match, 1..=4 = bytes
+            // consumed.
+            let call = builder.ins().call(
+                func_ref,
+                &[
+                    text_ptr,
+                    text_len,
+                    pos,
+                    char_classes_ptr,
+                    char_classes_len,
+                    class_id_val,
+                    negated_val,
+                ],
+            );
+            let consumed_i32 = builder.inst_results(call)[0];
+            // Sign-extend to i64 so we can add to pos. The helper
+            // returns 0..=4, which fits in any width — uextend is
+            // safe.
+            let consumed = builder.ins().uextend(types::I64, consumed_i32);
+            // 0 means no match → fail. Anything > 0 means match
+            // → advance pos by `consumed` bytes.
+            let zero_consumed = builder.ins().icmp_imm(IntCC::Equal, consumed, 0);
+            let advance_block = builder.create_block();
+            builder.ins().brif(
+                zero_consumed,
+                failure_dispatch_block,
+                &[],
+                advance_block,
+                &[],
+            );
+            builder.switch_to_block(advance_block);
+            builder.seal_block(advance_block);
+            let new_pos = builder.ins().iadd(pos, consumed);
+            builder.def_var(pos_var, new_pos);
+            builder.ins().jump(next_block, &[]);
         }
         JitOp::DigitAscii { negated } => {
             emit_consume_byte_with_test(
@@ -1386,6 +1511,85 @@ fn emit_capture_snapshot_restore(
     }
 }
 
+/// Emit IR that matches a multi-byte literal sequence at the
+/// current `pos`. The bytes are inlined as Cranelift constants
+/// (the literal is fixed at JIT-compile time). On match, advances
+/// `pos` by `bytes.len()` and jumps to `next_block`. On mismatch
+/// (any byte differs OR the bytes don't fit in the input), jumps
+/// to `failure_dispatch_block`.
+///
+/// Step 6: replaces the step-3a single-byte-only `Char` lowering
+/// for non-ASCII literals. Single-byte literals continue to use
+/// `JitOp::Char(b)` + `emit_consume_byte_with_test` (which is
+/// slightly leaner because it does only one bounds check rather
+/// than the multi-byte upfront bounds check this helper uses).
+///
+/// The codegen sequence:
+/// 1. Bounds check: `pos + len > text_len` → fail.
+/// 2. For each byte `i` in `0..len`: load `text[pos + i]`,
+///    compare with `bytes[i]`, AND into a running boolean.
+/// 3. If all bytes match: `pos += len`, jump to `next_block`.
+///    Else jump to `failure_dispatch_block`.
+fn emit_match_multibyte_literal(
+    builder: &mut FunctionBuilder,
+    pos: cranelift_codegen::ir::Value,
+    pos_var: Variable,
+    text_ptr: cranelift_codegen::ir::Value,
+    text_len: cranelift_codegen::ir::Value,
+    next_block: cranelift_codegen::ir::Block,
+    fail_block: cranelift_codegen::ir::Block,
+    bytes: &[u8],
+) {
+    let len = bytes.len();
+    debug_assert!(
+        (2..=4).contains(&len),
+        "emit_match_multibyte_literal expects 2..=4 bytes (UTF-8 max length)"
+    );
+
+    // Bounds check: pos + len <= text_len.
+    let advanced_pos = builder.ins().iadd_imm(pos, len as i64);
+    let in_bounds = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThanOrEqual, advanced_pos, text_len);
+    let load_block = builder.create_block();
+    builder
+        .ins()
+        .brif(in_bounds, load_block, &[], fail_block, &[]);
+    builder.switch_to_block(load_block);
+    builder.seal_block(load_block);
+
+    // Load each byte and compare. AND the per-byte tests into a
+    // running boolean. (Cranelift's optimizer can fold this into
+    // a single load + word-level compare on aligned cases, but the
+    // straight-line per-byte form is simple and correct for any
+    // length.)
+    let mut combined: Option<cranelift_codegen::ir::Value> = None;
+    for (i, expected) in bytes.iter().enumerate() {
+        let byte_offset = builder.ins().iadd_imm(text_ptr, i as i64);
+        let byte_addr = builder.ins().iadd(byte_offset, pos);
+        let actual = builder
+            .ins()
+            .load(types::I8, MemFlags::trusted(), byte_addr, 0);
+        let cmp = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, actual, i64::from(*expected));
+        combined = Some(match combined {
+            None => cmp,
+            Some(prev) => builder.ins().band(prev, cmp),
+        });
+    }
+    let cond = combined.expect("bytes is non-empty by assertion above");
+
+    let advance_block = builder.create_block();
+    builder
+        .ins()
+        .brif(cond, advance_block, &[], fail_block, &[]);
+    builder.switch_to_block(advance_block);
+    builder.seal_block(advance_block);
+    builder.def_var(pos_var, advanced_pos);
+    builder.ins().jump(next_block, &[]);
+}
+
 /// Helper: emit IR for a "consume one byte and apply a predicate"
 /// opcode. The predicate closure builds the per-byte test in
 /// Cranelift IR (returning an i8 boolean value: 0 = fail, 1 = pass).
@@ -1608,19 +1812,45 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 };
                 let length = len_byte as usize;
                 ip += 1;
-                if length != 1 {
+                if length == 0 || length > 4 {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3 only handles single-byte Char literals; \
-                         got {length}-byte Char (multi-byte literals land at step 6)"
+                        "Char opcode has invalid byte length {length} (UTF-8 is 1..=4)"
                     )));
                 }
-                let Some(&byte) = code.get(ip) else {
+                if ip + length > code.len() {
                     return Err(JitHostError::CodegenUnsupported(
-                        "truncated Char opcode (missing payload byte)".to_string(),
+                        "truncated Char opcode (length prefix exceeds remaining bytecode)"
+                            .to_string(),
                     ));
+                }
+                if length == 1 {
+                    ops.push(JitOp::Char(code[ip]));
+                } else {
+                    // Step 6: multi-byte UTF-8 literal. Stash up to
+                    // 4 bytes inline so JitOp stays Copy.
+                    let mut bytes = [0u8; 4];
+                    bytes[..length].copy_from_slice(&code[ip..ip + length]);
+                    ops.push(JitOp::CharBytes {
+                        bytes,
+                        len: length as u8,
+                    });
+                }
+                ip += length;
+            }
+            OpCode::CharClass | OpCode::CharClassNeg => {
+                // Step 6: custom char-class lowering via runtime
+                // helper. The opcode operand is a single u8 class id
+                // indexing into program.char_classes.
+                let Some(&class_id) = code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "truncated {op:?} opcode (missing class id)"
+                    )));
                 };
-                ops.push(JitOp::Char(byte));
                 ip += 1;
+                ops.push(JitOp::CharClass {
+                    id: class_id,
+                    negated: op == OpCode::CharClassNeg,
+                });
             }
             OpCode::DigitAscii => ops.push(JitOp::DigitAscii { negated: false }),
             OpCode::DigitAsciiNeg => ops.push(JitOp::DigitAscii { negated: true }),
@@ -1930,6 +2160,8 @@ fn is_simple_inner_opcode(op: OpCode) -> bool {
     matches!(
         op,
         OpCode::Char
+            | OpCode::CharClass
+            | OpCode::CharClassNeg
             | OpCode::DigitAscii
             | OpCode::DigitAsciiNeg
             | OpCode::WordAscii
@@ -1977,25 +2209,46 @@ fn decode_simple_inner_into(inner_code: &[u8], ops: &mut Vec<JitOp>) -> Result<(
             OpCode::Char => {
                 let Some(&len_byte) = inner_code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(
-                        "truncated Char inside PlusGreedy inner (missing length prefix)"
+                        "truncated Char inside quantifier inner (missing length prefix)"
                             .to_string(),
                     ));
                 };
                 let length = len_byte as usize;
                 ip += 1;
-                if length != 1 {
+                if length == 0 || length > 4 {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3 only handles single-byte Char literals; \
-                         got {length}-byte Char inside PlusGreedy inner"
+                        "Char inside quantifier inner has invalid byte length {length} (UTF-8 is 1..=4)"
                     )));
                 }
-                let Some(&byte) = inner_code.get(ip) else {
+                if ip + length > inner_code.len() {
                     return Err(JitHostError::CodegenUnsupported(
-                        "truncated Char inside PlusGreedy inner (missing payload byte)".to_string(),
+                        "truncated Char inside quantifier inner (length exceeds inner subprogram)"
+                            .to_string(),
                     ));
+                }
+                if length == 1 {
+                    ops.push(JitOp::Char(inner_code[ip]));
+                } else {
+                    let mut bytes = [0u8; 4];
+                    bytes[..length].copy_from_slice(&inner_code[ip..ip + length]);
+                    ops.push(JitOp::CharBytes {
+                        bytes,
+                        len: length as u8,
+                    });
+                }
+                ip += length;
+            }
+            OpCode::CharClass | OpCode::CharClassNeg => {
+                let Some(&class_id) = inner_code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "truncated {op:?} inside quantifier inner (missing class id)"
+                    )));
                 };
                 ip += 1;
-                ops.push(JitOp::Char(byte));
+                ops.push(JitOp::CharClass {
+                    id: class_id,
+                    negated: op == OpCode::CharClassNeg,
+                });
             }
             OpCode::DigitAscii => ops.push(JitOp::DigitAscii { negated: false }),
             OpCode::DigitAsciiNeg => ops.push(JitOp::DigitAscii { negated: true }),
@@ -2565,21 +2818,38 @@ mod tests {
     /// the closure (the closure captures the function pointer by
     /// value but the executable mapping is owned by the host).
     fn jit_compile(pattern: &str) -> (JitHost, impl Fn(*const u8, usize, usize) -> isize) {
-        let (host, func, num_groups) = jit_compile_inner(pattern);
+        let (host, func, num_groups, char_classes) = jit_compile_inner(pattern);
         let captures_size = 2 * (num_groups as usize + 1);
+        // Move the char_classes Vec into the closure so its data
+        // pointer stays valid for the closure's lifetime. We can't
+        // just borrow from `program` because `program` is dropped
+        // when `jit_compile_inner` returns.
         let wrapped = move |text_ptr: *const u8, text_len: usize, pos: usize| -> isize {
             let mut captures = vec![-1i64; captures_size];
+            let cc_ptr = char_classes.as_ptr() as *const u8;
+            let cc_len = char_classes.len();
             // SAFETY: caller upholds the text/text_len/pos
             // contract; captures is sized correctly for the
-            // program and pre-initialised to -1.
-            unsafe { func(text_ptr, text_len, pos, captures.as_mut_ptr()) }
+            // program and pre-initialised to -1; cc_ptr/cc_len
+            // describe the char_classes Vec captured by this
+            // closure (alive for the closure's lifetime).
+            unsafe {
+                func(
+                    text_ptr,
+                    text_len,
+                    pos,
+                    captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
+                )
+            }
         };
         (host, wrapped)
     }
 
     /// Like [`jit_compile`] but returns a closure that exposes
-    /// the captures buffer alongside the result. Used by the new
-    /// step 4b tests that verify per-group capture spans.
+    /// the captures buffer alongside the result. Used by the
+    /// step 4b / step 6 tests that verify per-group capture spans.
     #[allow(dead_code)] // used by step 4b differential tests; quieten the warning when fewer tests use it
     fn jit_compile_with_captures(
         pattern: &str,
@@ -2588,37 +2858,54 @@ mod tests {
         impl Fn(*const u8, usize, usize) -> (isize, Vec<i64>),
         u32,
     ) {
-        let (host, func, num_groups) = jit_compile_inner(pattern);
+        let (host, func, num_groups, char_classes) = jit_compile_inner(pattern);
         let captures_size = 2 * (num_groups as usize + 1);
         let wrapped =
             move |text_ptr: *const u8, text_len: usize, pos: usize| -> (isize, Vec<i64>) {
                 let mut captures = vec![-1i64; captures_size];
+                let cc_ptr = char_classes.as_ptr() as *const u8;
+                let cc_len = char_classes.len();
                 // SAFETY: see jit_compile.
-                let result = unsafe { func(text_ptr, text_len, pos, captures.as_mut_ptr()) };
+                let result = unsafe {
+                    func(
+                        text_ptr,
+                        text_len,
+                        pos,
+                        captures.as_mut_ptr(),
+                        cc_ptr,
+                        cc_len,
+                    )
+                };
                 (result, captures)
             };
         (host, wrapped, num_groups)
     }
 
     /// Shared inner helper: compile + finalise + transmute, then
-    /// return the raw `(host, func, num_groups)` triple. Both
-    /// `jit_compile` and `jit_compile_with_captures` build on this.
-    fn jit_compile_inner(pattern: &str) -> (JitHost, JittedFn, u32) {
+    /// return the raw `(host, func, num_groups, char_classes)`
+    /// quadruple. Both `jit_compile` and `jit_compile_with_captures`
+    /// build on this. The char_classes Vec is cloned out of the
+    /// program so the caller can move it into the wrapper closure
+    /// (the program itself is dropped when this function returns).
+    fn jit_compile_inner(
+        pattern: &str,
+    ) -> (JitHost, JittedFn, u32, Vec<crate::vm::CompiledCharClass>) {
         let program = compile(pattern);
         let num_groups = program.num_groups;
+        let char_classes = program.char_classes.clone();
         let mut host = JitHost::new().expect("JitHost::new must succeed");
         let func_id = compile_program(&program, &mut host)
             .unwrap_or_else(|e| panic!("compile_program for `{pattern}` failed: {e}"));
         host.finalize_definitions().expect("finalize must succeed");
         let raw = host.get_finalized_fn(func_id);
         assert!(!raw.is_null());
-        // SAFETY: the IR signature `(i64, i64, i64, i64) -> i64`
+        // SAFETY: the IR signature `(i64, i64, i64, i64, i64, i64) -> i64`
         // matches the `JittedFn` C ABI signature exactly. The
         // function pointer is alive for the lifetime of `host`,
         // returned alongside it so the caller keeps the host
         // pinned across every call.
         let func: JittedFn = unsafe { std::mem::transmute(raw) };
-        (host, func, num_groups)
+        (host, func, num_groups, char_classes)
     }
 
     #[test]
@@ -2749,29 +3036,65 @@ mod tests {
         // SAFETY: signature is fixed JittedFn for every compiled
         // function; host outlives the calls. Both programs have
         // num_groups == 0 so a single 2-slot capture buffer is
-        // sufficient for both.
+        // sufficient for both. Char-classes pointer/len are taken
+        // from prog_abc / prog_xyz; both programs have empty
+        // char_classes (literal-only) so a null-equivalent
+        // (empty-Vec) base address with len 0 would also work, but
+        // we use the real values for consistency.
         let f_abc: JittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(id_abc)) };
         let f_xyz: JittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(id_xyz)) };
         let text = b"abcxyz";
         let mut captures: [i64; 2] = [-1, -1];
+        let cc_abc_ptr = prog_abc.char_classes.as_ptr() as *const u8;
+        let cc_abc_len = prog_abc.char_classes.len();
+        let cc_xyz_ptr = prog_xyz.char_classes.as_ptr() as *const u8;
+        let cc_xyz_len = prog_xyz.char_classes.len();
         unsafe {
             assert_eq!(
-                f_abc(text.as_ptr(), text.len(), 0, captures.as_mut_ptr()),
+                f_abc(
+                    text.as_ptr(),
+                    text.len(),
+                    0,
+                    captures.as_mut_ptr(),
+                    cc_abc_ptr,
+                    cc_abc_len
+                ),
                 3
             );
             captures = [-1, -1];
             assert_eq!(
-                f_xyz(text.as_ptr(), text.len(), 3, captures.as_mut_ptr()),
+                f_xyz(
+                    text.as_ptr(),
+                    text.len(),
+                    3,
+                    captures.as_mut_ptr(),
+                    cc_xyz_ptr,
+                    cc_xyz_len
+                ),
                 6
             );
             captures = [-1, -1];
             assert_eq!(
-                f_abc(text.as_ptr(), text.len(), 3, captures.as_mut_ptr()),
+                f_abc(
+                    text.as_ptr(),
+                    text.len(),
+                    3,
+                    captures.as_mut_ptr(),
+                    cc_abc_ptr,
+                    cc_abc_len
+                ),
                 -1
             );
             captures = [-1, -1];
             assert_eq!(
-                f_xyz(text.as_ptr(), text.len(), 0, captures.as_mut_ptr()),
+                f_xyz(
+                    text.as_ptr(),
+                    text.len(),
+                    0,
+                    captures.as_mut_ptr(),
+                    cc_xyz_ptr,
+                    cc_xyz_len
+                ),
                 -1
             );
         }
@@ -2829,12 +3152,11 @@ mod tests {
     // capture-bearing differential tests in `step4b_*` and
     // `differential_capture_*` cover the newly-eligible patterns.
 
-    #[test]
-    fn step3a_refuses_multibyte_literal() {
-        // Non-ASCII literal compiles to a multi-byte Char opcode;
-        // step 3a only handles single-byte payloads.
-        assert_codegen_unsupported("é");
-    }
+    // Note: step 6 removed the "refuses multi-byte literals" test —
+    // patterns like `é` and other non-ASCII literals are now
+    // JIT-eligible via the `JitOp::CharBytes` lowering. The new
+    // step-6 tests in `step6_*` and `differential_multibyte_*` cover
+    // the newly-eligible patterns.
 
     #[test]
     fn step3a_refuses_jit_ineligible_pattern_via_eligibility_check() {
@@ -4227,18 +4549,35 @@ mod tests {
     ///
     /// **Step 4b**: extended to allocate / reset the capture buffer
     /// between calls and return the buffer alongside the span.
+    /// **Step 6**: takes the program's char_classes slice and threads
+    /// it through to the JIT call as the new char_classes_ptr / len
+    /// args.
     fn jit_find_first_via_scan(
         func: JittedFn,
         text: &[u8],
         num_groups: u32,
+        char_classes: &[crate::vm::CompiledCharClass],
     ) -> Option<(usize, usize, Vec<i64>)> {
         let captures_size = 2 * (num_groups as usize + 1);
+        let cc_ptr = char_classes.as_ptr() as *const u8;
+        let cc_len = char_classes.len();
         for start in 0..=text.len() {
             let mut captures = vec![-1i64; captures_size];
             // SAFETY: text outlives the call; func is alive for
             // the lifetime of the host the caller still owns;
-            // captures is sized correctly and pre-initialised.
-            let result = unsafe { func(text.as_ptr(), text.len(), start, captures.as_mut_ptr()) };
+            // captures is sized correctly and pre-initialised;
+            // cc_ptr/cc_len describe the program's char_classes
+            // slice held by the caller.
+            let result = unsafe {
+                func(
+                    text.as_ptr(),
+                    text.len(),
+                    start,
+                    captures.as_mut_ptr(),
+                    cc_ptr,
+                    cc_len,
+                )
+            };
             if result >= 0 {
                 // The `>= 0` check above proves the cast is safe.
                 #[allow(clippy::cast_sign_loss)]
@@ -4289,7 +4628,8 @@ mod tests {
             let interp_span = regex.find_first(interp_text).map(|m| (m.start, m.end));
 
             // JIT result via scan-loop wrapper.
-            let jit_span = jit_find_first_via_scan(func, input, num_groups).map(|(s, e, _)| (s, e));
+            let jit_span = jit_find_first_via_scan(func, input, num_groups, &program.char_classes)
+                .map(|(s, e, _)| (s, e));
 
             assert_eq!(
                 interp_span, jit_span,
@@ -4656,19 +4996,27 @@ mod tests {
     /// compiles it via `compile_program`, and at each starting
     /// position calls the JIT'd function directly with a fresh
     /// captures buffer. The assertion compares the captures buffer
-    /// the JIT writes against what the interpreter reports for the
-    /// SAME starting position.
+    /// the JIT writes against what the **raw interpreter VM**
+    /// (`RegexVM::find_first`) reports for the same input.
+    ///
+    /// **Reference: VM, not the public Regex API.** The design doc
+    /// §1.0 says the JIT must produce byte-for-byte identical
+    /// results to the **interpreter**. The interpreter is
+    /// `RegexVM::find_first`, not `Regex::find_first` — the public
+    /// API dispatches through DFA / Pike-VM / JIT / interpreter
+    /// layers, and the C2 DFA path can produce different results
+    /// for some patterns (e.g. `[^0-9]` vs multi-char input). The
+    /// JIT's contract is to match the interpreter, so we compare
+    /// against the VM directly, bypassing the dispatch chain.
     ///
     /// This is the strongest possible assertion of the JIT codegen
-    /// because it bypasses the engine layer entirely — any
-    /// divergence is in the codegen, not the dispatch glue.
+    /// because it bypasses both the engine layer AND the public
+    /// dispatch chain — any divergence is in the codegen vs the
+    /// reference VM, not in the dispatch glue.
     fn assert_jit_direct_capture_equivalent(pattern: &str, inputs: &[&[u8]]) -> bool {
-        let regex = match crate::Regex::compile(pattern) {
-            Ok(r) => r,
-            Err(e) => panic!("interpreter compile failed for `{pattern}`: {e}"),
-        };
         let program = compile(pattern);
         let num_groups = program.num_groups;
+        let vm = crate::vm::RegexVM::new(program.clone());
         let mut host = JitHost::new().expect("JitHost::new must succeed");
         let func_id = match compile_program(&program, &mut host) {
             Ok(id) => id,
@@ -4676,20 +5024,19 @@ mod tests {
             Err(other) => panic!("compile_program for `{pattern}` failed: {other}"),
         };
         host.finalize_definitions().expect("finalize must succeed");
-        // SAFETY: signature `(i64, i64, i64, i64) -> i64` matches the
-        // JittedFn C ABI; host outlives the calls.
+        // SAFETY: signature `(i64, i64, i64, i64, i64, i64) -> i64`
+        // matches the JittedFn C ABI; host outlives the calls.
         let func: JittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(func_id)) };
 
         for input in inputs {
-            // Find the leftmost starting position where the JIT
-            // succeeds (mimicking the engine's scan loop). For
-            // each candidate position, allocate a fresh capture
-            // buffer, call the JIT, and stop on the first success.
+            // Reference VM result via the raw interpreter (NOT the
+            // public Regex API).
             let interp_text =
                 std::str::from_utf8(input).expect("differential corpus inputs must be valid UTF-8");
-            let interp_match = regex.find_first(interp_text);
+            let interp_match = vm.find_first(interp_text);
 
-            let jit_result = jit_find_first_via_scan(func, input, num_groups);
+            let jit_result =
+                jit_find_first_via_scan(func, input, num_groups, &program.char_classes);
 
             // Compare overall span first.
             let interp_span = interp_match.as_ref().map(|m| (m.start, m.end));
@@ -4697,7 +5044,7 @@ mod tests {
             assert_eq!(
                 interp_span, jit_span,
                 "match span divergence (direct) on pattern={pattern:?} input={input:?}: \
-                 interp={interp_span:?} jit={jit_span:?}"
+                 vm={interp_span:?} jit={jit_span:?}"
             );
 
             // If both matched, compare per-group capture spans.
@@ -4722,7 +5069,7 @@ mod tests {
                 assert_eq!(
                     interp.groups, jit_groups,
                     "capture group divergence (direct) on pattern={pattern:?} input={input:?}: \
-                     interp_groups={:?} jit_groups={:?}",
+                     vm_groups={:?} jit_groups={:?}",
                     interp.groups, jit_groups
                 );
             }
@@ -4931,5 +5278,222 @@ mod tests {
             is_jit_eligible(&program),
             "pattern with 16 groups must be JIT-eligible"
         );
+    }
+
+    // ============================================================
+    // C1 step 6 — CharClass + multi-byte literal differential gate
+    // ============================================================
+    //
+    // Step 6 widens the JIT-eligible subset to include:
+    //   1. `CharClass(id)` / `CharClassNeg(id)` opcodes for custom
+    //      char classes like `[abc]`, `[a-z]`, `[^0-9]`, `[а-я]`.
+    //      Lowered via an indirect call to the runtime helper
+    //      `rgx_runtime_char_class_match_at`.
+    //   2. Multi-byte `Char` literals (UTF-8 sequences of length
+    //      2..=4) for non-ASCII single-character literals like `é`,
+    //      `日`, etc. Lowered via inline byte comparisons (no
+    //      runtime helper).
+    //
+    // Tests fall into two groups:
+    //   - Direct-call differential tests via
+    //     `assert_jit_direct_capture_equivalent` (which compares
+    //     match span + per-group captures byte-for-byte against
+    //     the interpreter).
+    //   - Eligibility tests confirming the new opcode patterns
+    //     pass `is_jit_eligible` and the decoder accepts them.
+
+    // ----- step 6: char class differential tests -----
+
+    #[test]
+    fn step6_simple_char_class() {
+        // [abc] — three-character class.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[abc]",
+            &[b"a", b"b", b"c", b"d", b"", b"xa", b"abc"]
+        ));
+    }
+
+    #[test]
+    fn step6_range_char_class() {
+        // [a-z] — lowercase letter range.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[a-z]",
+            &[b"a", b"m", b"z", b"A", b"5", b"", b"abc"]
+        ));
+    }
+
+    #[test]
+    fn step6_negated_char_class() {
+        // [^0-9] — anything but a digit.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[^0-9]",
+            &[b"a", b"5", b" ", b"!", b"", b"123abc"]
+        ));
+    }
+
+    #[test]
+    fn step6_char_class_with_quantifier() {
+        // [a-z]+ — one-or-more lowercase letters.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[a-z]+",
+            &[b"abc", b"a", b"ABC", b"abc123", b"123abc", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_char_class_in_capture() {
+        // ([a-z]+) — capture a run of lowercase letters.
+        assert!(assert_jit_direct_capture_equivalent(
+            "([a-z]+)",
+            &[b"hello", b"a", b"HELLO", b"hello world", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_multiple_char_classes() {
+        // [a-z][0-9] — letter followed by digit.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[a-z][0-9]",
+            &[b"a1", b"z9", b"a", b"1a", b"AB", b"", b"a1b2"]
+        ));
+    }
+
+    #[test]
+    fn step6_char_class_alternation() {
+        // [aeiou]|[0-9] — vowel or digit. Top-level alternation
+        // routes through the interpreter via the engine's
+        // exclusion, so this uses the engine path.
+        assert!(assert_jit_interp_capture_equivalent(
+            "[aeiou]|[0-9]",
+            &[b"a", b"5", b"b", b"!", b""]
+        ));
+    }
+
+    // ----- step 6: multi-byte literal differential tests -----
+
+    #[test]
+    fn step6_two_byte_literal() {
+        // `é` — 2-byte UTF-8 (0xC3 0xA9).
+        assert!(assert_jit_direct_capture_equivalent(
+            "é",
+            &[
+                "é".as_bytes(),
+                "café".as_bytes(),
+                b"e",
+                b"",
+                "naïve".as_bytes()
+            ]
+        ));
+    }
+
+    #[test]
+    fn step6_three_byte_literal() {
+        // `日` — 3-byte UTF-8 (0xE6 0x97 0xA5). Japanese kanji.
+        assert!(assert_jit_direct_capture_equivalent(
+            "日",
+            &["日".as_bytes(), "今日".as_bytes(), b"day", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_four_byte_literal() {
+        // `🦀` — 4-byte UTF-8 (0xF0 0x9F 0xA6 0x80). Crab emoji.
+        assert!(assert_jit_direct_capture_equivalent(
+            "🦀",
+            &["🦀".as_bytes(), "rust 🦀".as_bytes(), b"crab", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_multibyte_with_quantifier() {
+        // `é+` — one-or-more `é` characters.
+        assert!(assert_jit_direct_capture_equivalent(
+            "é+",
+            &["é".as_bytes(), "éé".as_bytes(), "ééé".as_bytes(), b"e", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_multibyte_in_capture() {
+        // `(é)` — capture a multi-byte literal.
+        assert!(assert_jit_direct_capture_equivalent(
+            "(é)",
+            &["é".as_bytes(), "café".as_bytes(), b"e", b""]
+        ));
+    }
+
+    #[test]
+    fn step6_multibyte_concat() {
+        // `日本` — two adjacent 3-byte literals.
+        assert!(assert_jit_direct_capture_equivalent(
+            "日本",
+            &["日本".as_bytes(), "今日本".as_bytes(), "日".as_bytes(), b""]
+        ));
+    }
+
+    // ----- step 6: ASCII char-class with non-ASCII text -----
+
+    #[test]
+    fn step6_ascii_class_skips_unicode_byte() {
+        // [a-z] tested against text that contains non-ASCII bytes.
+        // The helper must correctly handle the UTF-8 decode at
+        // each position.
+        assert!(assert_jit_direct_capture_equivalent(
+            "[a-z]",
+            &["café".as_bytes(), "naïve".as_bytes(), b"abc"]
+        ));
+    }
+
+    #[test]
+    fn step6_unicode_range_class() {
+        // [а-я] — Russian Cyrillic alphabet (Unicode range path).
+        assert!(assert_jit_direct_capture_equivalent(
+            "[а-я]",
+            &["а".as_bytes(), "абв".as_bytes(), b"abc", b""]
+        ));
+    }
+
+    // ----- step 6: eligibility -----
+
+    #[test]
+    fn step6_simple_char_class_is_jit_eligible() {
+        let program = compile("[abc]");
+        assert!(
+            is_jit_eligible(&program),
+            "[abc] must be JIT-eligible at step 6"
+        );
+        // And the codegen must accept it.
+        let mut host = JitHost::new().expect("host");
+        compile_program(&program, &mut host).expect("[abc] must compile");
+    }
+
+    #[test]
+    fn step6_negated_char_class_is_jit_eligible() {
+        let program = compile("[^0-9]");
+        assert!(is_jit_eligible(&program));
+        let mut host = JitHost::new().expect("host");
+        compile_program(&program, &mut host).expect("[^0-9] must compile");
+    }
+
+    #[test]
+    fn step6_multibyte_literal_is_jit_eligible() {
+        let program = compile("é");
+        assert!(
+            is_jit_eligible(&program),
+            "`é` must be JIT-eligible at step 6"
+        );
+        let mut host = JitHost::new().expect("host");
+        compile_program(&program, &mut host).expect("`é` must compile");
+    }
+
+    #[test]
+    fn step6_four_byte_literal_is_jit_eligible() {
+        let program = compile("🦀");
+        assert!(
+            is_jit_eligible(&program),
+            "4-byte UTF-8 literal must be JIT-eligible at step 6"
+        );
+        let mut host = JitHost::new().expect("host");
+        compile_program(&program, &mut host).expect("`🦀` must compile");
     }
 }
