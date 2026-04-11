@@ -53,7 +53,14 @@ cranelift-native = { version = "0.101", optional = true }
 target-lexicon = { version = "0.12", optional = true }
 
 [features]
-default = ["std", "pgen-parser"]
+# C1 step 8 production cutover (2026-04-11): the `jit` feature is now
+# default-on. Existing users get the JIT for free; users who don't
+# want Cranelift in their dependency tree can opt out via
+# `default-features = false`. The JIT was opt-in for steps 1–7 while
+# the differential gate verified end-to-end correctness across the
+# eligible subset; step 8 ships it as production-ready alongside
+# the existing interpreter / DFA / Pike-VM dispatch tiers.
+default = ["std", "pgen-parser", "jit"]
 std = []
 trace = []
 pgen-parser = ["dep:pgen", "dep:serde", "dep:serde_json", "dep:serde_stacker"]
@@ -62,10 +69,12 @@ lua = ["mlua"]
 javascript = ["rquickjs"]
 rhai = ["dep:rhai"]
 all-languages = ["wasm", "lua", "javascript", "rhai"]
-# C1 JIT compilation. Opt-in for step 1 (the standalone host plumbing).
-# Will become default-on at the C1 production cutover (step 8) once the
-# differential gate has verified end-to-end correctness on every supported
-# target. Gated dependencies bring in Cranelift for native code generation.
+# C1 JIT compilation backend (Cranelift). Default-on as of step 8.
+# The Cranelift dependencies (cranelift-codegen / cranelift-frontend /
+# cranelift-module / cranelift-jit / cranelift-native / target-lexicon)
+# add ~2 MiB to the rgx-core dependency closure. Users who want to
+# avoid Cranelift can opt out via `default-features = false` and
+# explicitly include the other features they need.
 jit = [
     "dep:cranelift-codegen",
     "dep:cranelift-frontend",

@@ -175,14 +175,14 @@ Several patterns get their own specialized execution paths:
 
 ## The backlog: what's NOT optimized yet
 
-Honest accounting matters. RGX is fast, but it is not PCRE2 with JIT enabled.
+Honest accounting matters. RGX is fast, but it is not PCRE2 with JIT on every benchmark.
 
-The main thing RGX does not have is **JIT compilation**. PCRE2's JIT translates bytecode into native machine code, giving roughly a 5-10x speedup on top of its interpreter. RGX has no JIT today. This is tracked in the backlog as item **C1 — JIT compilation** and is the next major engineering push after the C2 cutover.
+For a long time, the main thing RGX did not have was **JIT compilation**. That changed with the C1 production cutover: RGX now ships a Cranelift-based JIT that translates bytecode into native machine code for the JIT-eligible subset, on by default. See [The JIT Compiler](./jit-compiler.md) for the full design — that chapter explains the JIT-eligible subset, the per-frame capture snapshot, the runtime helper layer, and the dispatch decision.
 
-RGX does have a **DFA hybrid** as of the C2 production cutover. For patterns in the no-backtracking subset, a Thompson NFA + lazy DFA cache runs alongside this VM and is preferred whenever it can deliver the answer. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the full design — that chapter explains the dispatch chain, the per-position skip acceleration, and the two-pass capture recovery trick.
+RGX also has a **DFA hybrid** as of the C2 production cutover. For patterns in the no-backtracking subset, a Thompson NFA + lazy DFA cache runs alongside this VM and is preferred whenever it can deliver the answer. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the full design — that chapter explains the dispatch chain, the per-position skip acceleration, and the two-pass capture recovery trick.
 
-The C2 hybrid pushes RGX to **3.16x faster than PCRE2 on literals** and **1.96x faster than PCRE2 on capture_groups** in the benchmark suite, while keeping the backtracking VM permanently in place for patterns that need its features.
+Together, the three execution tiers (DFA, Pike-VM, JIT, and the backtracking VM as the always-available fallback) push RGX to **3.16x faster than PCRE2 on literals** and **1.96x faster than PCRE2 on capture_groups** in the benchmark suite, while keeping the backtracking VM permanently in place for patterns that need its features.
 
 ## Next: the second engine
 
-The backtracking VM is half the run-time story. The other half is the C2 hybrid that runs alongside it. Head to [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the design, then on to [PGEN Integration](./pgen-integration.md) for the parser boundary.
+The backtracking VM is one third of the run-time story. The other two thirds are the C2 hybrid and the C1 JIT that run alongside it. Head to [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the C2 design, then [The JIT Compiler](./jit-compiler.md) for the C1 design, then on to [PGEN Integration](./pgen-integration.md) for the parser boundary.

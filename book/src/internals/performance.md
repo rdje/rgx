@@ -1,12 +1,12 @@
 # Performance
 
-RGX is fast. It is not the fastest regex engine in the world — PCRE2 with JIT enabled still wins on raw pattern matching, and Rust's `regex` crate wins on patterns that fit its NFA/DFA model. But RGX is fast **enough** to be practical, and on several benchmarks it is actually faster than PCRE2.
+RGX is fast. It is competitive with PCRE2 and Rust's `regex` crate on a wide range of patterns, and on several benchmarks it is actually faster than PCRE2. The honest summary: RGX is fast **enough** to be practical, sometimes the fastest, sometimes second.
 
 This chapter is about what "fast enough" means, how we measured it, and what we did (and did not do) to get here.
 
 ## Honest numbers
 
-Here is where RGX sits against PCRE2 on the current benchmark suite (after the C2 NFA/DFA hybrid production cutover), measured by `rgx-bench` against PCRE2 10.x:
+Here is where RGX sits against PCRE2 on the current benchmark suite (after the C2 NFA/DFA hybrid and C1 JIT production cutovers), measured by `rgx-bench` against PCRE2 10.x:
 
 | Benchmark | RGX vs PCRE2 | Interpretation |
 |-----------|--------------|----------------|
@@ -15,10 +15,10 @@ Here is where RGX sits against PCRE2 on the current benchmark suite (after the C
 | `find_first` capture 1K | **~1.91x faster** | DFA dispatch via the C2 hybrid |
 | `find_all` capture 1K | **~1.93x faster** | DFA scan + Pike-VM capture recovery |
 | `find_all` capture 10K | **~1.96x faster** | DFA dispatch dominates |
-| `find_first` email 1K | ~3.09x slower | existing VM, no DFA dispatch (has `\b`) |
-| `find_all` email 1K | ~2.63x slower | same; no nested quantifier so Pike-VM also skipped |
+| `find_first` email 1K | ~3.09x slower | C1 JIT path (has `\b`, ineligible for C2) |
+| `find_all` email 1K | ~2.63x slower | same; the JIT eats the per-opcode dispatch cost but pays for word-boundary helper calls |
 
-These are **wins** in most cases. On patterns with strong literal content the memmem fast path is so effective that RGX outruns PCRE2 by several times. On patterns the C2 lazy DFA can handle (no zero-width assertions, no lazy quantifiers), the dispatch chain delivers another factor-of-two over PCRE2 — see [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the dispatch design. On patterns the C2 path can't handle, RGX falls back to the existing backtracking VM and pays its honest cost (still without JIT).
+These are **wins** in most cases. On patterns with strong literal content the memmem fast path is so effective that RGX outruns PCRE2 by several times. On patterns the C2 lazy DFA can handle (no zero-width assertions, no lazy quantifiers), the dispatch chain delivers another factor-of-two over PCRE2 — see [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the dispatch design. On patterns the JIT can handle but C2 can't (anchors, word boundaries, lazy quantifiers), the C1 JIT delivers a constant-factor speedup over the existing VM — see [The JIT Compiler](./jit-compiler.md) for the codegen design.
 
 Older versions of this chapter would have shown a very different story. Before the optimizations described below, RGX was roughly **50-70x slower** than PCRE2 on the same suite. The path from "50x slower" to "3x faster" is the subject of the rest of this chapter, and the most recent stretch of that path is the C2 production cutover described in the dedicated chapter.
 
@@ -90,23 +90,27 @@ The `find_iter`, `captures_iter`, and `split_iter` APIs are lazy — they alloca
 
 This is a small ergonomic improvement on the API and a measurable speedup on the common case of "try to replace, usually nothing matches."
 
+## Three execution tiers
+
+As of the C1 production cutover, RGX runs three execution tiers in parallel:
+
+1. **C2 — NFA/DFA hybrid** ([nfa-dfa-engine.md](./nfa-dfa-engine.md)). Lazy DFA cache + sparse-set Pike-VM. Guaranteed linear time for the no-backtracking subset. Preferred whenever the pattern is C2-eligible — this is what gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator.
+2. **C1 — JIT compiler** ([jit-compiler.md](./jit-compiler.md)). Cranelift-based native codegen for the JIT-eligible subset. Eliminates per-opcode dispatch overhead from the existing VM and runs at native speed. On by default as of the production cutover. JIT is sequenced after C2 in the dispatch chain so its constant-factor win compounds on top of C2's algorithmic-class improvement.
+3. **The backtracking VM** ([the-vm.md](./the-vm.md)). Always available, handles every PCRE2 feature including the ones C1 and C2 can't lower (backreferences, lookaround, recursion, code blocks, atomic groups, backtracking verbs, `\K`).
+
+The dispatch chain (DFA → Pike-VM → JIT → backtracking VM) is described in detail in the C2 and C1 chapters. Each tier handles the patterns it's best at and falls through to the next tier when ineligible.
+
 ## What is NOT optimized yet
 
 Being honest about what we have not done is part of the deal.
 
-### JIT compilation (backlog C1)
+### Reverse-DFA pipeline (C2 follow-up)
 
-RGX has no JIT. PCRE2's JIT translates bytecode into native machine code and gets roughly 5-10x speedup on top of its interpreter. RGX's roadmap position is: **engineering optimizations first, JIT later**. The interpreter is fast, and most of the low-hanging fruit is in better bytecode and smarter scanning rather than native codegen.
+The C2 hybrid currently uses per-position anchored scans for `find_first` / `find_all`. A faster approach would build the match span via a forward-then-reverse DFA pipeline (forward DFA finds the match end → reverse DFA finds the match start → bounded Pike-VM recovers captures). The reverse NFAs are already built and stored on `CompiledC2Program`, but the dispatch path doesn't use them yet. This is a future C2 optimization.
 
-If we do build a JIT, the most likely vehicle is Cranelift, which is already in our dependency graph via wasmtime. `dynasm-rs` is also on the table for lower-level control. This is a "weeks of work" project and we have not decided when it is worth doing.
+### JIT-ahead-of-Pike-VM dispatch (C1 follow-up)
 
-### NFA/DFA hybrid (backlog C2)
-
-For patterns that do not use backreferences, lookaround, or recursion, a Thompson NFA gives guaranteed linear time. This is what Rust's `regex` crate does, and it is why the `regex` crate cannot hang on pathological input.
-
-RGX does not have this. Every pattern runs through the backtracking VM, and pathological patterns can be catastrophic without explicit limits. We protect against that with `set_max_steps`, `set_max_backtrack_frames`, and `set_max_recursion_depth`, which is the best we can do without the hybrid architecture.
-
-Building an NFA/DFA hybrid is a major project — probably the largest single item in the backlog. It requires a separate compiler path, a separate runtime, and a pattern analyzer that decides which engine to use. We will get there, but not soon.
+C1 v1 ships with the JIT after Pike-VM in the dispatch chain. The original design doc sketched JIT before Pike-VM, but Pike-VM is the safety net for nested-quantifier patterns where the JIT could blow up exponentially. Re-ordering is a future optimization that requires benchmark evidence the JIT consistently beats Pike-VM on the disputed pattern shapes.
 
 ### Opcode fusion
 

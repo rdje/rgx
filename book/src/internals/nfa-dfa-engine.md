@@ -244,8 +244,8 @@ Three things on the C2 roadmap are deliberately deferred:
 - **Multi-byte literal prefix (memmem)** — the `c2_prefix_byte` field is a single byte. Patterns like `https://` could in principle do a full `memmem::Finder` lookup, but the existing VM's `literal_finder` already handles pure literals and the dispatch gate routes them through the existing VM.
 - **Smarter Pike-VM dispatch heuristic** — the nested-quantifier check is conservative. Pike-VM could in principle dispatch for some flat patterns where the existing VM has hidden weaknesses, but no benchmark currently demonstrates a pattern shape where it wins.
 
-Each is tracked in `docs/BACKLOG.md` and sequenced behind C1 (JIT compilation), which is the next major engineering push.
+Each is tracked in `docs/BACKLOG.md`. C1 (JIT compilation) was the original "next major push" — that's now shipped (see [The JIT Compiler](./jit-compiler.md)) and the C2 follow-ups above are sequenced after it.
 
-## Next: PGEN integration
+## Next: the JIT compiler
 
-C2 is the second of two engines RGX runs. Both are fed by the same compile pipeline, which is fed by the same parser — and in RGX the parser is an external project called PGEN. Head to [PGEN Integration](./pgen-integration.md) to see how the parser boundary works.
+C2 is the second of three execution tiers RGX ships. The third — and the next chapter — is the **JIT compiler** (C1), which translates RGX bytecode into native machine code via Cranelift. Head to [The JIT Compiler](./jit-compiler.md) to see how RGX gets a constant-factor speedup on top of C2's algorithmic-class improvement.
