@@ -400,12 +400,22 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 }
 
 // ============================================================
-// C1 step 3a — codegen for linear single-byte literal programs
+// C1 step 3 — linear codegen architecture
 // ============================================================
 
-/// **C1 step 3a signature.** The shape of the JIT'd function returned
-/// by [`compile_program`] in step 3a. Documents the C ABI contract
-/// callers transmute the raw function pointer to.
+/// **C1 step 3 signature.** The shape of the JIT'd function returned
+/// by [`compile_program`]. Documents the C ABI contract callers
+/// transmute the raw function pointer to.
+///
+/// Step 3a introduced this signature for pure literal programs;
+/// step 3b extends it to handle built-in character classes
+/// (`\d` / `\D` / `\w` / `\W` / `\s` / `\S`) and simple anchors
+/// (`\A` / `\z`). The signature is unchanged: the JIT'd function
+/// tests the pattern at *exactly* `pos` (it does not scan), and
+/// returns the new position on a successful match or `-1` on no
+/// match. Subsequent step 3 sub-commits widen the codegen further
+/// (control flow at step 3c, capture trail at step 4) without
+/// changing the signature.
 ///
 /// # Parameters
 /// - `text`: pointer to the input bytes (borrow lifetime managed by
@@ -415,12 +425,8 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 ///
 /// # Returns
 /// - `>= 0`: the new position after a successful match (`pos +
-///   pattern_length`)
+///   match_length`)
 /// - `-1`: the pattern did not match at `pos`
-///
-/// The function tests the pattern at *exactly* `pos` — it does not
-/// scan. Scanning is the caller's responsibility (typically the
-/// engine dispatch loop, which lands at C1 step 5).
 ///
 /// # Safety
 /// Callers must ensure `text` points to at least `text_len` bytes of
@@ -430,6 +436,67 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 /// to a valid slice.
 pub type Step3aJittedFn =
     unsafe extern "C" fn(text: *const u8, text_len: usize, pos: usize) -> isize;
+
+/// Pre-decoded representation of a single JIT'd opcode.
+///
+/// The codegen layer decodes a `Program`'s bytecode into a
+/// `Vec<JitOp>` and then emits one Cranelift basic block per `JitOp`.
+/// This decoupling has two benefits:
+///
+/// 1. The bytecode walker (which has to handle every opcode's
+///    operand-size convention) is separate from the codegen layer
+///    (which only cares about the *semantic* opcode kind).
+/// 2. The codegen layer can iterate over the `JitOp` list once and
+///    generate IR linearly, with each block knowing exactly what
+///    comes after it without having to re-walk operands.
+///
+/// At step 3b the variants cover the linear opcode subset: literal
+/// bytes, the six built-in ASCII char-class opcodes, two simple
+/// anchors, group-0 capture wrappers (treated as no-op for now;
+/// captures land at step 4), and the terminating `Match`. Step 3c
+/// will add control-flow variants (`Split`, `Jump`) and step 4 will
+/// add real capture handling.
+#[derive(Debug, Clone, Copy)]
+enum JitOp {
+    /// Single-byte literal `Char(b)` — consume one byte equal to `b`.
+    Char(u8),
+    /// `\d` (negated=false) or `\D` (negated=true) — consume one
+    /// byte that is (or is not) an ASCII digit `0..=9`.
+    DigitAscii { negated: bool },
+    /// `\w` / `\W` — consume one byte that is (or is not) an ASCII
+    /// word character `[A-Za-z0-9_]`.
+    WordAscii { negated: bool },
+    /// `\s` / `\S` — consume one byte that is (or is not) an ASCII
+    /// whitespace character. Whitespace = space, tab, newline,
+    /// carriage return, form feed, vertical tab. Matches the same
+    /// set as `b.is_ascii_whitespace()` in `std`.
+    SpaceAscii { negated: bool },
+    /// `\A` — zero-width assertion: matches iff `pos == 0`.
+    StartText,
+    /// `\z` — zero-width assertion: matches iff `pos == text_len`.
+    EndText,
+    /// Group-0 capture wrapper — accepted as no-op at step 3a/3b.
+    /// The engine layer (step 5) will reconstruct group 0 from the
+    /// entry pos and the returned end pos. Capture group ids 1+
+    /// require the capture trail and land at step 4. Variant carries
+    /// `which` (Start vs End) so step 4 can extend it without a
+    /// decoder change.
+    SaveGroupZero {
+        // Step 3b: field reserved for step 4 capture-trail codegen.
+        #[allow(dead_code)]
+        which: SaveSlot,
+    },
+    /// `Match` — terminate with success and return the current pos.
+    Match,
+}
+
+/// Which slot of a capture group a `SaveGroupZero` op refers to.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Step 3b: variants reserved for step 4 capture-trail codegen.
+enum SaveSlot {
+    Start,
+    End,
+}
 
 /// JIT-compile a linear single-byte literal program into a Cranelift
 /// function and return its [`FuncId`].
@@ -488,21 +555,21 @@ pub type Step3aJittedFn =
 /// assert_eq!(new_pos, 3);
 /// ```
 pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, JitHostError> {
-    // Eligibility short-circuit. The compile function trusts that
-    // anything is_jit_eligible accepts is something it can lower —
-    // step 3a additionally restricts the accepted set via
-    // extract_step3a_literal below.
+    // Eligibility short-circuit. `compile_program` trusts that
+    // anything `is_jit_eligible` accepts is something it might be
+    // able to lower — `decode_program` below applies the per-step
+    // narrower acceptance check.
     if !is_jit_eligible(program) {
         return Err(JitHostError::CodegenUnsupported(
             "program is not in the JIT-eligible subset (see is_jit_eligible)".to_string(),
         ));
     }
 
-    // Walk the bytecode and extract the literal byte sequence. If
-    // anything outside the step 3a subset appears, bail with a
-    // descriptive error so the caller can fall back to the
-    // interpreter for this pattern.
-    let literal = extract_step3a_literal(&program.code)?;
+    // Decode the bytecode into a list of `JitOp` values. The decoder
+    // is the per-step gate: anything outside the current step's
+    // codegen subset returns `CodegenUnsupported` with a descriptive
+    // message identifying the offending opcode.
+    let ops = decode_program(&program.code)?;
 
     // Build the Cranelift function signature: 3 i64 params (text
     // pointer, text len, pos), 1 i64 return (new pos or -1).
@@ -516,99 +583,80 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 
     // Use a name unique within the module so multiple programs can
     // be compiled into the same JitHost without colliding.
-    let name = format!("rgx_jit_step3a_{}", host.next_func_index());
+    let name = format!("rgx_jit_step3_{}", host.next_func_index());
     let func_id = host.declare_function(&name, Linkage::Local, &sig)?;
 
-    // Build the IR.
+    // Build the IR using a per-opcode block-per-block layout. Each
+    // op block takes the current `pos` as its single block parameter
+    // and either advances pos and jumps to the next op's block, or
+    // jumps to the fail block on a mismatch. The Match op jumps to
+    // the success block, which returns the final pos.
     let mut function = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
     {
         let mut fb_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut function, &mut fb_ctx);
 
+        // Allocate all blocks up front so we can target the next
+        // op's block by index when emitting each op.
         let entry = builder.create_block();
         let success_block = builder.create_block();
         let fail_block = builder.create_block();
+        let op_blocks: Vec<_> = ops.iter().map(|_| builder.create_block()).collect();
 
+        // Each op block takes the current pos as a single i64
+        // parameter. Same for the success block (it returns whatever
+        // pos is when the Match op fires).
+        for &b in &op_blocks {
+            builder.append_block_param(b, types::I64);
+        }
+        builder.append_block_param(success_block, types::I64);
+
+        // === Entry block: load function params and jump into the
+        // first op block (or directly to success if there are no
+        // ops, which shouldn't happen but is handled defensively).
         builder.append_block_params_for_function_params(entry);
         builder.switch_to_block(entry);
-
         let text_ptr = builder.block_params(entry)[0];
         let text_len = builder.block_params(entry)[1];
-        let pos = builder.block_params(entry)[2];
-
-        // needed = pos + literal.len()
-        let literal_len = i64::try_from(literal.len()).map_err(|_| {
-            JitHostError::CodegenUnsupported(format!(
-                "literal length {} does not fit in i64",
-                literal.len()
-            ))
-        })?;
-        let needed = builder.ins().iadd_imm(pos, literal_len);
-
-        // if needed > text_len: jump to fail
-        let bounds_ok = builder
-            .ins()
-            .icmp(IntCC::UnsignedLessThanOrEqual, needed, text_len);
-        let first_check = builder.create_block();
-        builder
-            .ins()
-            .brif(bounds_ok, first_check, &[], fail_block, &[]);
-        // Entry block has no more incoming branches; seal it now so
-        // Cranelift can finalise SSA value definitions for it before
-        // we move on to the per-byte chain.
+        let init_pos = builder.block_params(entry)[2];
+        let first_target = op_blocks.first().copied().unwrap_or(success_block);
+        builder.ins().jump(first_target, &[init_pos]);
         builder.seal_block(entry);
 
-        // Per-byte comparison chain.
-        builder.switch_to_block(first_check);
-        let base_ptr = builder.ins().iadd(text_ptr, pos);
+        // === Per-op blocks: emit IR for each JitOp. Each block jumps
+        // to the next op's block (passing the new pos) or to the
+        // fail block. The Match op jumps to success_block.
+        for (i, op) in ops.iter().enumerate() {
+            let block = op_blocks[i];
+            builder.switch_to_block(block);
+            let pos = builder.block_params(block)[0];
 
-        // For each literal byte, load text[pos + i] and compare
-        // against the expected byte. On mismatch jump to fail; on
-        // match fall through to the next byte (or to success after
-        // the last byte).
-        let mut current_block = first_check;
-        for (i, &expected) in literal.iter().enumerate() {
-            // Load the byte at offset i from base_ptr. Cranelift's
-            // `load` accepts an i32 immediate offset; the literal
-            // length is bounded by the bytecode walker's u8 length
-            // prefixes, so this conversion is essentially infallible
-            // — but we surface any overflow as `CodegenUnsupported`
-            // rather than panicking, per design doc §1.0 (every
-            // failure mode is a controlled error).
-            let byte_offset = i32::try_from(i).map_err(|_| {
-                JitHostError::CodegenUnsupported(format!(
-                    "literal byte index {i} exceeds Cranelift's i32 load offset"
-                ))
-            })?;
-            let loaded = builder
-                .ins()
-                .load(types::I8, MemFlags::trusted(), base_ptr, byte_offset);
-            // Compare with expected byte. iconst sign-extends, but
-            // we use icmp_imm with an i64 expected value because
-            // Cranelift's icmp_imm wants an i64 immediate.
-            let expected_const = i64::from(expected);
-            let matches = builder.ins().icmp_imm(IntCC::Equal, loaded, expected_const);
+            // The "next block" for a successful step is the next op
+            // block, or the success block if this is the last op.
+            // (Match always jumps to success_block directly via
+            // `emit_jit_op` and ignores `next_block`.)
+            let next_block = op_blocks.get(i + 1).copied().unwrap_or(success_block);
 
-            // The next block is either the next byte's check or the
-            // success block on the last iteration.
-            let next_block = if i + 1 == literal.len() {
-                success_block
-            } else {
-                builder.create_block()
-            };
-            builder
-                .ins()
-                .brif(matches, next_block, &[], fail_block, &[]);
-            builder.seal_block(current_block);
-            current_block = next_block;
-            builder.switch_to_block(current_block);
+            emit_jit_op(
+                &mut builder,
+                *op,
+                pos,
+                text_ptr,
+                text_len,
+                next_block,
+                fail_block,
+                success_block,
+            );
+            builder.seal_block(block);
         }
 
-        // success_block: return needed (the new position).
-        builder.ins().return_(&[needed]);
+        // === Success block: return the pos parameter.
+        builder.switch_to_block(success_block);
+        let final_pos = builder.block_params(success_block)[0];
+        builder.ins().return_(&[final_pos]);
         builder.seal_block(success_block);
 
-        // fail_block: return -1.
+        // === Fail block: return -1.
         builder.switch_to_block(fail_block);
         let neg_one = builder.ins().iconst(types::I64, -1);
         builder.ins().return_(&[neg_one]);
@@ -621,21 +669,269 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
     Ok(func_id)
 }
 
-/// Walk a program's bytecode and extract the literal byte sequence
-/// it represents, OR return a `CodegenUnsupported` error if it
-/// contains anything outside the step 3a subset.
+/// Emit Cranelift IR for a single [`JitOp`] inside its dedicated
+/// block. The caller has already switched the builder to the op's
+/// block and obtained the current `pos` from its block parameter.
 ///
-/// Step 3a accepts:
-/// - `Char(len=1)` opcodes — extracted into the literal byte sequence
-/// - `SaveStart(0)` / `SaveEnd(0)` opcodes — accepted as no-op (the
-///   caller computes group 0 from the start position and the returned
-///   end position; explicit per-group capture tracking lands at step 4)
-/// - A trailing `Match` opcode
+/// Each op either advances `pos` and jumps to `next_block` (passing
+/// the new pos) or jumps to `fail_block`. The `Match` op terminates
+/// by jumping to `success_block` with the current pos.
 ///
-/// Anything else returns a `CodegenUnsupported` error with a message
-/// identifying the offending opcode.
-fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
-    let mut literal = Vec::new();
+/// **Step 3b only.** This function handles the linear opcode subset
+/// — `Char`, the six built-in char-class variants, `StartText` /
+/// `EndText`, `SaveGroupZero` (no-op), and `Match`. Step 3c will
+/// extend it for control-flow opcodes (`Split`, `Jump`) which need
+/// different handling.
+#[allow(clippy::too_many_arguments)] // each parameter is conceptually distinct and there's no good grouping
+fn emit_jit_op(
+    builder: &mut FunctionBuilder,
+    op: JitOp,
+    pos: cranelift_codegen::ir::Value,
+    text_ptr: cranelift_codegen::ir::Value,
+    text_len: cranelift_codegen::ir::Value,
+    next_block: cranelift_codegen::ir::Block,
+    fail_block: cranelift_codegen::ir::Block,
+    success_block: cranelift_codegen::ir::Block,
+) {
+    match op {
+        JitOp::Char(b) => {
+            emit_consume_byte_with_test(
+                builder,
+                pos,
+                text_ptr,
+                text_len,
+                next_block,
+                fail_block,
+                |fb, byte| fb.ins().icmp_imm(IntCC::Equal, byte, i64::from(b)),
+            );
+        }
+        JitOp::DigitAscii { negated } => {
+            emit_consume_byte_with_test(
+                builder,
+                pos,
+                text_ptr,
+                text_len,
+                next_block,
+                fail_block,
+                |fb, byte| emit_digit_byte_test(fb, byte, negated),
+            );
+        }
+        JitOp::WordAscii { negated } => {
+            emit_consume_byte_with_test(
+                builder,
+                pos,
+                text_ptr,
+                text_len,
+                next_block,
+                fail_block,
+                |fb, byte| emit_word_byte_test(fb, byte, negated),
+            );
+        }
+        JitOp::SpaceAscii { negated } => {
+            emit_consume_byte_with_test(
+                builder,
+                pos,
+                text_ptr,
+                text_len,
+                next_block,
+                fail_block,
+                |fb, byte| emit_space_byte_test(fb, byte, negated),
+            );
+        }
+        JitOp::StartText => {
+            // Zero-width: matches iff pos == 0. No bytes consumed,
+            // so the next block sees the same pos.
+            let cond = builder.ins().icmp_imm(IntCC::Equal, pos, 0);
+            builder
+                .ins()
+                .brif(cond, next_block, &[pos], fail_block, &[]);
+        }
+        JitOp::EndText => {
+            // Zero-width: matches iff pos == text_len. No bytes
+            // consumed, so the next block sees the same pos.
+            let cond = builder.ins().icmp(IntCC::Equal, pos, text_len);
+            builder
+                .ins()
+                .brif(cond, next_block, &[pos], fail_block, &[]);
+        }
+        JitOp::SaveGroupZero { which: _ } => {
+            // Step 3b: group-0 wrappers are no-op. The engine layer
+            // (step 5) reconstructs group 0 from entry pos + returned
+            // end pos. Step 4 will replace this with real capture
+            // trail handling for groups 1+. Just thread pos through.
+            builder.ins().jump(next_block, &[pos]);
+        }
+        JitOp::Match => {
+            // Terminate with success: pos becomes the return value.
+            let _ = next_block; // unused for Match
+            builder.ins().jump(success_block, &[pos]);
+        }
+    }
+}
+
+/// Helper: emit IR for a "consume one byte and apply a predicate"
+/// opcode. The predicate closure builds the per-byte test in
+/// Cranelift IR (returning an i8 boolean value: 0 = fail, 1 = pass).
+///
+/// The emitted IR:
+/// 1. Bounds check: `pos < text_len`. If not, jump to fail.
+/// 2. Load `text[pos]` as an i8.
+/// 3. Apply the predicate closure to get a boolean.
+/// 4. If true, jump to `next_block` with `pos + 1`. Else jump to fail.
+fn emit_consume_byte_with_test<F>(
+    builder: &mut FunctionBuilder,
+    pos: cranelift_codegen::ir::Value,
+    text_ptr: cranelift_codegen::ir::Value,
+    text_len: cranelift_codegen::ir::Value,
+    next_block: cranelift_codegen::ir::Block,
+    fail_block: cranelift_codegen::ir::Block,
+    predicate: F,
+) where
+    F: FnOnce(&mut FunctionBuilder, cranelift_codegen::ir::Value) -> cranelift_codegen::ir::Value,
+{
+    // Bounds check: pos < text_len. If pos == text_len there's no
+    // byte to consume, so the op fails.
+    let in_bounds = builder.ins().icmp(IntCC::UnsignedLessThan, pos, text_len);
+    let load_block = builder.create_block();
+    builder
+        .ins()
+        .brif(in_bounds, load_block, &[], fail_block, &[]);
+    builder.switch_to_block(load_block);
+    builder.seal_block(load_block);
+
+    // Load text[pos].
+    let byte_addr = builder.ins().iadd(text_ptr, pos);
+    let byte = builder
+        .ins()
+        .load(types::I8, MemFlags::trusted(), byte_addr, 0);
+
+    // Apply the predicate.
+    let cond = predicate(builder, byte);
+
+    // If the predicate matched, advance pos and jump to the next op.
+    // Otherwise jump to fail.
+    let new_pos = builder.ins().iadd_imm(pos, 1);
+    builder
+        .ins()
+        .brif(cond, next_block, &[new_pos], fail_block, &[]);
+}
+
+/// Helper: emit IR for the ASCII digit test `b >= '0' && b <= '9'`,
+/// optionally negated. Returns a Cranelift boolean value.
+fn emit_digit_byte_test(
+    builder: &mut FunctionBuilder,
+    byte: cranelift_codegen::ir::Value,
+    negated: bool,
+) -> cranelift_codegen::ir::Value {
+    let ge = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, byte, 0x30); // '0'
+    let le = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedLessThanOrEqual, byte, 0x39); // '9'
+    let in_range = builder.ins().band(ge, le);
+    if negated {
+        builder.ins().bxor_imm(in_range, 1)
+    } else {
+        in_range
+    }
+}
+
+/// Helper: emit IR for the ASCII word-character test
+/// `(b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'`,
+/// optionally negated. Returns a Cranelift boolean value.
+fn emit_word_byte_test(
+    builder: &mut FunctionBuilder,
+    byte: cranelift_codegen::ir::Value,
+    negated: bool,
+) -> cranelift_codegen::ir::Value {
+    let upper_lo = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, byte, 0x41); // 'A'
+    let upper_hi = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedLessThanOrEqual, byte, 0x5A); // 'Z'
+    let in_upper = builder.ins().band(upper_lo, upper_hi);
+
+    let lower_lo = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, byte, 0x61); // 'a'
+    let lower_hi = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedLessThanOrEqual, byte, 0x7A); // 'z'
+    let in_lower = builder.ins().band(lower_lo, lower_hi);
+
+    let digit_lo = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, byte, 0x30); // '0'
+    let digit_hi = builder
+        .ins()
+        .icmp_imm(IntCC::UnsignedLessThanOrEqual, byte, 0x39); // '9'
+    let in_digit = builder.ins().band(digit_lo, digit_hi);
+
+    let is_underscore = builder.ins().icmp_imm(IntCC::Equal, byte, 0x5F); // '_'
+
+    let alpha = builder.ins().bor(in_upper, in_lower);
+    let alphanum = builder.ins().bor(alpha, in_digit);
+    let word = builder.ins().bor(alphanum, is_underscore);
+
+    if negated {
+        builder.ins().bxor_imm(word, 1)
+    } else {
+        word
+    }
+}
+
+/// Helper: emit IR for the ASCII whitespace test against the same
+/// six bytes `b.is_ascii_whitespace()` matches in `std`: space
+/// (0x20), tab (0x09), newline (0x0A), carriage return (0x0D), form
+/// feed (0x0C), vertical tab (0x0B). Returns a Cranelift boolean.
+fn emit_space_byte_test(
+    builder: &mut FunctionBuilder,
+    byte: cranelift_codegen::ir::Value,
+    negated: bool,
+) -> cranelift_codegen::ir::Value {
+    let is_space_char = builder.ins().icmp_imm(IntCC::Equal, byte, 0x20);
+    let is_tab_char = builder.ins().icmp_imm(IntCC::Equal, byte, 0x09);
+    let is_newline_char = builder.ins().icmp_imm(IntCC::Equal, byte, 0x0A);
+    let is_carriage_return = builder.ins().icmp_imm(IntCC::Equal, byte, 0x0D);
+    let is_form_feed = builder.ins().icmp_imm(IntCC::Equal, byte, 0x0C);
+    let is_vertical_tab = builder.ins().icmp_imm(IntCC::Equal, byte, 0x0B);
+
+    let space_or_tab = builder.ins().bor(is_space_char, is_tab_char);
+    let newline_or_cr = builder.ins().bor(is_newline_char, is_carriage_return);
+    let form_or_vert = builder.ins().bor(is_form_feed, is_vertical_tab);
+    let pair_one = builder.ins().bor(space_or_tab, newline_or_cr);
+    let space = builder.ins().bor(pair_one, form_or_vert);
+
+    if negated {
+        builder.ins().bxor_imm(space, 1)
+    } else {
+        space
+    }
+}
+
+/// Walk a program's bytecode and decode it into a `Vec<JitOp>`.
+///
+/// The decoder is the per-step gate: any opcode outside the current
+/// step's codegen subset returns `CodegenUnsupported` with a
+/// descriptive message identifying the offending opcode. Step 3b
+/// accepts:
+///
+/// - `Char(len=1)` — single-byte ASCII literal
+/// - `DigitAscii` / `DigitAsciiNeg`
+/// - `WordAscii` / `WordAsciiNeg`
+/// - `SpaceAscii` / `SpaceAsciiNeg`
+/// - `StartText` (`\A`) / `EndText` (`\z`)
+/// - `SaveStart(0)` / `SaveEnd(0)` (group-0 wrappers, no-op)
+/// - `Match` (terminator)
+///
+/// Anything else (multi-byte `Char`, line anchors, word boundaries,
+/// `\Z` / `\X` / `\K`, control-flow opcodes, captures for groups
+/// 1+, ...) returns a descriptive `CodegenUnsupported` error and
+/// the caller falls back to the interpreter for that pattern.
+fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
+    let mut ops = Vec::new();
     let mut ip = 0;
     let mut saw_match = false;
 
@@ -650,7 +946,6 @@ fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
 
         match op {
             OpCode::Char => {
-                // 1 byte length prefix + length payload.
                 let Some(&len_byte) = code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(
                         "truncated Char opcode (missing length prefix)".to_string(),
@@ -660,7 +955,7 @@ fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
                 ip += 1;
                 if length != 1 {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3a only handles single-byte Char literals; \
+                        "step 3 only handles single-byte Char literals; \
                          got {length}-byte Char (multi-byte literals land at step 6)"
                     )));
                 }
@@ -669,15 +964,18 @@ fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
                         "truncated Char opcode (missing payload byte)".to_string(),
                     ));
                 };
-                literal.push(byte);
+                ops.push(JitOp::Char(byte));
                 ip += 1;
             }
+            OpCode::DigitAscii => ops.push(JitOp::DigitAscii { negated: false }),
+            OpCode::DigitAsciiNeg => ops.push(JitOp::DigitAscii { negated: true }),
+            OpCode::WordAscii => ops.push(JitOp::WordAscii { negated: false }),
+            OpCode::WordAsciiNeg => ops.push(JitOp::WordAscii { negated: true }),
+            OpCode::SpaceAscii => ops.push(JitOp::SpaceAscii { negated: false }),
+            OpCode::SpaceAsciiNeg => ops.push(JitOp::SpaceAscii { negated: true }),
+            OpCode::StartText => ops.push(JitOp::StartText),
+            OpCode::EndText => ops.push(JitOp::EndText),
             OpCode::SaveStart | OpCode::SaveEnd => {
-                // 1 byte group id. Step 3a accepts group 0 wrappers
-                // as no-op (the engine layer reconstructs group 0
-                // from the entry pos + returned end pos at step 5).
-                // Higher group ids would need real capture tracking
-                // and are deferred to step 4.
                 let Some(&group_id) = code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(format!(
                         "truncated {op:?} opcode (missing group id)"
@@ -685,31 +983,33 @@ fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
                 };
                 if group_id != 0 {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3a only accepts group-0 capture wrappers; \
+                        "step 3b only accepts group-0 capture wrappers; \
                          got {op:?} for group {group_id} (capture trail lands at step 4)"
                     )));
                 }
                 ip += 1;
+                let which = if op == OpCode::SaveStart {
+                    SaveSlot::Start
+                } else {
+                    SaveSlot::End
+                };
+                ops.push(JitOp::SaveGroupZero { which });
             }
             OpCode::Match => {
                 saw_match = true;
-                // The bytecode should end here. We tolerate trailing
-                // bytes only if they aren't reachable, but the
-                // existing compiler always emits Match as the last
-                // opcode of the main bytecode, so anything after it
-                // is unexpected.
                 if ip != code.len() {
                     return Err(JitHostError::CodegenUnsupported(format!(
-                        "step 3a expects Match to terminate the program; \
+                        "step 3 expects Match to terminate the program; \
                          got {} trailing bytes after Match",
                         code.len() - ip
                     )));
                 }
+                ops.push(JitOp::Match);
                 break;
             }
             other => {
                 return Err(JitHostError::CodegenUnsupported(format!(
-                    "step 3a does not yet support {other:?} (lands in a later step)"
+                    "step 3b does not yet support {other:?} (lands in a later step)"
                 )));
             }
         }
@@ -717,11 +1017,11 @@ fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
 
     if !saw_match {
         return Err(JitHostError::CodegenUnsupported(
-            "step 3a requires a Match opcode at end of program".to_string(),
+            "step 3 requires a Match opcode at end of program".to_string(),
         ));
     }
 
-    Ok(literal)
+    Ok(ops)
 }
 
 #[cfg(test)]
@@ -1222,19 +1522,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn step3a_refuses_char_class() {
-        assert_codegen_unsupported(r"\d");
-    }
+    // Step 3b widens the codegen to char classes and simple anchors,
+    // so the patterns that step 3a refused (\d, \Aabc) are now
+    // accepted. The remaining step3a_refuses_* tests cover patterns
+    // step 3b STILL refuses (alternation, quantifiers, captures for
+    // groups 1+, multi-byte literals, JIT-ineligible patterns).
 
     #[test]
     fn step3a_refuses_dot() {
+        // Dot (`.`) lowers to AnyDotAll/Any opcodes which involve
+        // UTF-8 byte advancement; deferred to step 6.
         assert_codegen_unsupported(".");
-    }
-
-    #[test]
-    fn step3a_refuses_anchor() {
-        assert_codegen_unsupported(r"\Aabc");
     }
 
     #[test]
@@ -1266,5 +1564,312 @@ mod tests {
         // The is_jit_eligible short-circuit fires first when the
         // pattern is outside the broader JIT subset.
         assert_codegen_unsupported(r"(\w+)\1");
+    }
+
+    // ============================================================
+    // C1 step 3b — built-in char classes + simple anchors
+    // ============================================================
+
+    // ----- Built-in char class opcodes -----
+
+    #[test]
+    fn step3b_digit_match() {
+        let (_host, func) = jit_compile(r"\d");
+        let text = b"5xyz";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, 1, "\\d must match digit `5`");
+    }
+
+    #[test]
+    fn step3b_digit_no_match_alpha() {
+        let (_host, func) = jit_compile(r"\d");
+        let text = b"x";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, -1, "\\d must reject non-digit `x`");
+    }
+
+    #[test]
+    fn step3b_digit_no_match_empty() {
+        let (_host, func) = jit_compile(r"\d");
+        let text = b"";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, -1, "\\d must reject empty input");
+    }
+
+    #[test]
+    fn step3b_digit_negated_match_alpha() {
+        let (_host, func) = jit_compile(r"\D");
+        let text = b"x";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, 1, "\\D must match non-digit `x`");
+    }
+
+    #[test]
+    fn step3b_digit_negated_no_match_digit() {
+        let (_host, func) = jit_compile(r"\D");
+        let text = b"5";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, -1, "\\D must reject digit `5`");
+    }
+
+    #[test]
+    fn step3b_word_match_letter() {
+        let (_host, func) = jit_compile(r"\w");
+        let text = b"x";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_word_match_digit() {
+        let (_host, func) = jit_compile(r"\w");
+        let text = b"7";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_word_match_underscore() {
+        let (_host, func) = jit_compile(r"\w");
+        let text = b"_";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_word_no_match_punctuation() {
+        let (_host, func) = jit_compile(r"\w");
+        let text = b"!";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, -1);
+    }
+
+    #[test]
+    fn step3b_word_no_match_space() {
+        let (_host, func) = jit_compile(r"\w");
+        let text = b" ";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, -1);
+    }
+
+    #[test]
+    fn step3b_word_negated_match_punctuation() {
+        let (_host, func) = jit_compile(r"\W");
+        let text = b"!";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_word_negated_no_match_letter() {
+        let (_host, func) = jit_compile(r"\W");
+        let text = b"a";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, -1);
+    }
+
+    #[test]
+    fn step3b_space_match_space() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b" ";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_match_tab() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"\t";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_match_newline() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"\n";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_match_carriage_return() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"\r";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_match_form_feed() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"\x0c";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_match_vertical_tab() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"\x0b";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_no_match_letter() {
+        let (_host, func) = jit_compile(r"\s");
+        let text = b"x";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, -1);
+    }
+
+    #[test]
+    fn step3b_space_negated_match_letter() {
+        let (_host, func) = jit_compile(r"\S");
+        let text = b"x";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, 1);
+    }
+
+    #[test]
+    fn step3b_space_negated_no_match_space() {
+        let (_host, func) = jit_compile(r"\S");
+        let text = b" ";
+        assert_eq!(unsafe { func(text.as_ptr(), text.len(), 0) }, -1);
+    }
+
+    // ----- Combinations: literals + char classes -----
+
+    #[test]
+    fn step3b_digit_then_literal() {
+        // \dx — digit followed by literal `x`
+        let (_host, func) = jit_compile(r"\dx");
+        unsafe {
+            let yes = b"5xy";
+            assert_eq!(func(yes.as_ptr(), yes.len(), 0), 2);
+            let no_first = b"ax";
+            assert_eq!(func(no_first.as_ptr(), no_first.len(), 0), -1);
+            let no_second = b"5y";
+            assert_eq!(func(no_second.as_ptr(), no_second.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3b_digit_digit_dash_digit_digit() {
+        // \d\d-\d\d — common timestamp shape, fully linear
+        let (_host, func) = jit_compile(r"\d\d-\d\d");
+        unsafe {
+            let yes = b"12-34abc";
+            assert_eq!(func(yes.as_ptr(), yes.len(), 0), 5);
+            let no = b"1a-34";
+            assert_eq!(func(no.as_ptr(), no.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3b_word_word_word() {
+        // \w\w\w — three word characters
+        let (_host, func) = jit_compile(r"\w\w\w");
+        unsafe {
+            let yes = b"abc";
+            assert_eq!(func(yes.as_ptr(), yes.len(), 0), 3);
+            let yes_mixed = b"a1_xyz";
+            assert_eq!(func(yes_mixed.as_ptr(), yes_mixed.len(), 0), 3);
+            let no = b"a!c";
+            assert_eq!(func(no.as_ptr(), no.len(), 0), -1);
+        }
+    }
+
+    // ----- Anchors: \A and \z -----
+
+    #[test]
+    fn step3b_anchor_start_text_at_pos_zero() {
+        // \Aabc — only matches at the very start of the input
+        let (_host, func) = jit_compile(r"\Aabc");
+        unsafe {
+            let text = b"abcdef";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 3);
+        }
+    }
+
+    #[test]
+    fn step3b_anchor_start_text_at_offset_no_match() {
+        let (_host, func) = jit_compile(r"\Aabc");
+        unsafe {
+            // Same text but starting at pos 3 — \A wants pos == 0,
+            // so the anchor fails even though `abc` would otherwise
+            // match at this position in `xyzabcdef`.
+            let text = b"xyzabcdef";
+            assert_eq!(func(text.as_ptr(), text.len(), 3), -1);
+        }
+    }
+
+    #[test]
+    fn step3b_anchor_end_text_at_text_end() {
+        // abc\z — only matches when the literal ends exactly at
+        // text_len.
+        let (_host, func) = jit_compile(r"abc\z");
+        unsafe {
+            let text = b"xyzabc";
+            assert_eq!(func(text.as_ptr(), text.len(), 3), 6);
+        }
+    }
+
+    #[test]
+    fn step3b_anchor_end_text_with_trailing_no_match() {
+        let (_host, func) = jit_compile(r"abc\z");
+        unsafe {
+            // `abc` matches but is not at the end of the input.
+            let text = b"abcdef";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3b_anchor_start_and_end_full_match() {
+        // \Aabc\z — matches iff the input is exactly "abc"
+        let (_host, func) = jit_compile(r"\Aabc\z");
+        unsafe {
+            let exact = b"abc";
+            assert_eq!(func(exact.as_ptr(), exact.len(), 0), 3);
+            let too_long = b"abcd";
+            assert_eq!(func(too_long.as_ptr(), too_long.len(), 0), -1);
+            let too_short = b"ab";
+            assert_eq!(func(too_short.as_ptr(), too_short.len(), 0), -1);
+        }
+    }
+
+    // ----- Step 3b refusal cases -----
+    //
+    // Patterns that the eligibility check (step 2) accepts but
+    // step 3b's narrower codegen still refuses. Each must return
+    // CodegenUnsupported so the engine layer (step 5+) falls back
+    // to the interpreter.
+
+    #[test]
+    fn step3b_refuses_word_boundary() {
+        // \b needs a runtime helper call; deferred to a later step.
+        assert_codegen_unsupported(r"\bword");
+    }
+
+    #[test]
+    fn step3b_refuses_non_word_boundary() {
+        assert_codegen_unsupported(r"\Bword");
+    }
+
+    #[test]
+    fn step3b_caret_lowers_to_start_text_in_non_multiline_mode() {
+        // In non-multiline (PCRE2 default) mode, `^` is equivalent
+        // to `\A` and lowers to the StartText opcode — which step 3b
+        // accepts. Verify the behaviour matches `\Aabc` exactly.
+        let (_host, func) = jit_compile("^abc");
+        unsafe {
+            let text = b"abcdef";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 3);
+            // At an offset, `^` (= `\A`) refuses because it requires
+            // pos == 0.
+            let with_prefix = b"xyzabcdef";
+            assert_eq!(func(with_prefix.as_ptr(), with_prefix.len(), 3), -1);
+        }
+    }
+
+    #[test]
+    fn step3b_refuses_end_line_anchor() {
+        // `$` in non-multiline mode lowers to EndLine (which has
+        // newline-aware semantics at the end of input) — distinct
+        // from `\z`. Step 3b refuses; deferred to a later step.
+        assert_codegen_unsupported("abc$");
+    }
+
+    #[test]
+    fn step3b_refuses_end_text_or_nl() {
+        // \Z (EndTextOrNL) needs newline detection; deferred.
+        assert_codegen_unsupported(r"abc\Z");
     }
 }
