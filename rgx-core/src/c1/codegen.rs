@@ -1396,6 +1396,63 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 ip += 1;
                 ops.push(JitOp::SetAlternative);
             }
+            OpCode::PlusGreedy => {
+                // Step 3e.1 lowering: PlusGreedy(inner) →
+                // [inner_jit_ops..., Split{exit}, Jump{back to inner_start}]
+                //
+                // The first iteration of inner is mandatory; the
+                // Split-based loop handles 2nd+ iterations with
+                // greedy backtracking via the step 3d.2 backtrack
+                // stack. Restricted to "simple linear inner"
+                // subprograms (no nested control flow); nested
+                // optimized quantifiers will land in a later step.
+                let Some(&len_byte) = code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated PlusGreedy opcode (missing length prefix)".to_string(),
+                    ));
+                };
+                let inner_length = len_byte as usize;
+                ip += 1;
+                if ip + inner_length > code.len() {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated PlusGreedy opcode (length prefix exceeds remaining bytes)"
+                            .to_string(),
+                    ));
+                }
+                let inner_bytes = &code[ip..ip + inner_length];
+                ip += inner_length;
+
+                // Decode the simple-linear-inner subprogram into JitOps.
+                // Each inner bytecode opcode becomes exactly one JitOp
+                // (no further unfolding) since the simple-inner subset
+                // excludes nested optimized quantifiers and control flow.
+                let inner_start_op_idx = ops.len();
+                decode_simple_inner_into(inner_bytes, &mut ops)?;
+                let inner_end_op_idx = ops.len();
+                // Sanity check: the unfolded count we computed in
+                // pass 1 must match what we just emitted, otherwise
+                // pass 1 and pass 2 have drifted apart and forward
+                // Split/Jump targets pointing at this PlusGreedy
+                // would be misresolved.
+                debug_assert_eq!(
+                    inner_end_op_idx - inner_start_op_idx,
+                    simple_inner_jit_op_count(inner_bytes)?,
+                    "step 3e.1 PlusGreedy unfolded count drift between pass 1 and pass 2"
+                );
+
+                // Append the loop tail: Split (greedy: try another
+                // iteration; on backtrack go to exit) + Jump (back
+                // to the inner). The exit op idx is the index of
+                // the FIRST OUTER op AFTER this PlusGreedy unfold,
+                // which is `ops.len() + 2` (after we push Split + Jump).
+                let exit_op_idx = ops.len() + 2;
+                ops.push(JitOp::Split {
+                    branch_b_op_idx: exit_op_idx,
+                });
+                ops.push(JitOp::Jump {
+                    target_op_idx: inner_start_op_idx,
+                });
+            }
             OpCode::SaveStart | OpCode::SaveEnd => {
                 let Some(&group_id) = code.get(ip) else {
                     return Err(JitHostError::CodegenUnsupported(format!(
@@ -1445,22 +1502,27 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
     Ok(ops)
 }
 
-/// Pass-1 walker for `decode_program`. Collects the byte offset of
-/// each opcode in the bytecode so pass 2 can resolve Split/Jump
-/// forward targets to op indices.
+/// Pass-1 walker for `decode_program`. Collects `(byte_offset,
+/// jit_op_idx)` pairs so pass 2 can resolve Split/Jump forward
+/// targets to JIT op indices. The `jit_op_idx` is the index of the
+/// FIRST `JitOp` emitted for the bytecode opcode at `byte_offset` —
+/// most opcodes unfold to exactly 1 `JitOp`, but optimized
+/// quantifier opcodes (`PlusGreedy` etc.) unfold to multiple via
+/// the Split/Jump-based loop lowering at step 3e.1.
 ///
 /// Returns `Err(CodegenUnsupported)` on any opcode the per-step
 /// codegen subset rejects, on truncated bytecode, or on operand
 /// layouts that run past the end of the buffer.
-fn collect_op_positions(code: &[u8]) -> Result<Vec<usize>, JitHostError> {
+fn collect_op_positions(code: &[u8]) -> Result<Vec<(usize, usize)>, JitHostError> {
     let mut positions = Vec::new();
-    let mut ip = 0;
-    while ip < code.len() {
-        positions.push(ip);
-        let Ok(op) = OpCode::try_from(code[ip]) else {
+    let mut byte_ip = 0;
+    let mut jit_op_idx = 0;
+    while byte_ip < code.len() {
+        positions.push((byte_ip, jit_op_idx));
+        let Ok(op) = OpCode::try_from(code[byte_ip]) else {
             return Err(JitHostError::CodegenUnsupported(format!(
-                "unknown opcode byte 0x{:02X} at ip={ip}",
-                code[ip]
+                "unknown opcode byte 0x{:02X} at ip={byte_ip}",
+                code[byte_ip]
             )));
         };
         // Reject ineligible opcodes here so pass 2 can rely on the
@@ -1470,32 +1532,225 @@ fn collect_op_positions(code: &[u8]) -> Result<Vec<usize>, JitHostError> {
                 "step 3 does not yet support {op:?} (lands in a later step)"
             )));
         }
-        ip += 1;
-        let Some(operand_size) = eligible_opcode_operand_size(op, &code[ip..]) else {
+        let bytecode_op_start = byte_ip;
+        byte_ip += 1;
+        let Some(operand_size) = eligible_opcode_operand_size(op, &code[byte_ip..]) else {
             return Err(JitHostError::CodegenUnsupported(format!(
-                "truncated {op:?} opcode at ip={ip}"
+                "truncated {op:?} opcode at ip={bytecode_op_start}"
             )));
         };
-        ip += operand_size;
+        // How many JitOps does this bytecode opcode unfold to?
+        // Most opcodes unfold to 1 JitOp; optimized quantifier
+        // opcodes (PlusGreedy at step 3e.1) unfold to several via
+        // the Split/Jump-based loop lowering.
+        let jit_op_count = compute_jit_op_count(op, &code[byte_ip..byte_ip + operand_size])?;
+        jit_op_idx += jit_op_count;
+        byte_ip += operand_size;
     }
     Ok(positions)
 }
 
+/// Returns the number of `JitOp`s that the given bytecode opcode
+/// unfolds into, given its operand bytes (without the opcode byte
+/// itself). Most opcodes return 1; optimized quantifier opcodes
+/// return more.
+///
+/// Step 3e.1: only `PlusGreedy` is implemented as an unfolding
+/// quantifier. Other optimized quantifier opcodes return
+/// `CodegenUnsupported`.
+fn compute_jit_op_count(op: OpCode, operand_bytes: &[u8]) -> Result<usize, JitHostError> {
+    match op {
+        OpCode::PlusGreedy => {
+            // PlusGreedy lowering: [inner_jit_ops..., Split, Jump]
+            // — inner_jit_ops once (mandatory iteration 1) followed
+            // by a Split + Jump that forms the greedy backtracking
+            // loop. Inner jit op count == inner bytecode opcode
+            // count for "simple linear inner" subprograms (the
+            // step 3e.1 restriction; nested optimized quantifiers
+            // will land in a later step).
+            let length_byte = operand_bytes.first().copied().ok_or_else(|| {
+                JitHostError::CodegenUnsupported(
+                    "truncated PlusGreedy opcode (missing length prefix)".to_string(),
+                )
+            })? as usize;
+            if operand_bytes.len() < 1 + length_byte {
+                return Err(JitHostError::CodegenUnsupported(
+                    "truncated PlusGreedy opcode (length prefix exceeds operand bytes)".to_string(),
+                ));
+            }
+            let inner_bytes = &operand_bytes[1..=length_byte];
+            let inner_jit_count = simple_inner_jit_op_count(inner_bytes)?;
+            Ok(inner_jit_count + 2) // inner + Split + Jump
+        }
+        // Every other supported opcode unfolds to 1 JitOp.
+        _ => Ok(1),
+    }
+}
+
+/// Returns the `JitOp` count for a "simple linear" inner
+/// subprogram — the subset of opcodes the step 3e.1 `PlusGreedy`
+/// lowering accepts. Each opcode in the inner subprogram
+/// contributes exactly 1 `JitOp`; nested optimized quantifiers,
+/// control-flow opcodes, and the `Match` terminator are rejected.
+fn simple_inner_jit_op_count(inner_code: &[u8]) -> Result<usize, JitHostError> {
+    let mut count = 0;
+    let mut ip = 0;
+    while ip < inner_code.len() {
+        let Ok(op) = OpCode::try_from(inner_code[ip]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "unknown opcode byte 0x{:02X} in PlusGreedy inner subprogram at ip={ip}",
+                inner_code[ip]
+            )));
+        };
+        if !is_simple_inner_opcode(op) {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "PlusGreedy inner subprogram contains {op:?} which is not in \
+                 the step 3e.1 simple-inner subset (lands in a later step)"
+            )));
+        }
+        ip += 1;
+        let Some(operand_size) = eligible_opcode_operand_size(op, &inner_code[ip..]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "truncated {op:?} opcode inside PlusGreedy inner subprogram"
+            )));
+        };
+        ip += operand_size;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Returns `true` iff the opcode is in the "simple linear inner"
+/// subset that step 3e.1's `PlusGreedy` lowering accepts. This is a
+/// subset of `is_opcode_jit_eligible` that excludes control-flow
+/// opcodes (`Split` / `Jump` / `SplitLazy`), optimized quantifier
+/// opcodes (`PlusGreedy` / `StarGreedy` / `QuestionGreedy` and
+/// their lazy forms), and the `Match` terminator.
+fn is_simple_inner_opcode(op: OpCode) -> bool {
+    matches!(
+        op,
+        OpCode::Char
+            | OpCode::DigitAscii
+            | OpCode::DigitAsciiNeg
+            | OpCode::WordAscii
+            | OpCode::WordAsciiNeg
+            | OpCode::SpaceAscii
+            | OpCode::SpaceAsciiNeg
+            | OpCode::StartText
+            | OpCode::EndText
+            | OpCode::WordBoundary
+            | OpCode::NonWordBoundary
+            | OpCode::SaveStart
+            | OpCode::SaveEnd
+    )
+}
+
+/// Decode a "simple linear inner" subprogram (bytecode bytes from
+/// the inline operand of a `PlusGreedy` / `StarGreedy` / etc.
+/// opcode) into `JitOp`s and append them to `ops`. The subset
+/// accepts only opcodes from `is_simple_inner_opcode` — anything
+/// else (`Split` / `Jump` / nested optimized quantifiers / `Match`)
+/// returns `CodegenUnsupported` so the caller falls back to the
+/// interpreter.
+///
+/// The inner subprogram does NOT have a trailing `Match` opcode —
+/// it's a fragment, not a complete program. The `PlusGreedy`
+/// lowering in `decode_program` adds the loop tail (`Split` +
+/// `Jump`) after the inner `JitOp`s.
+fn decode_simple_inner_into(inner_code: &[u8], ops: &mut Vec<JitOp>) -> Result<(), JitHostError> {
+    let mut ip = 0;
+    while ip < inner_code.len() {
+        let Ok(op) = OpCode::try_from(inner_code[ip]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "unknown opcode byte 0x{:02X} in PlusGreedy inner subprogram at ip={ip}",
+                inner_code[ip]
+            )));
+        };
+        if !is_simple_inner_opcode(op) {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "PlusGreedy inner subprogram contains {op:?} which is not in \
+                 the step 3e.1 simple-inner subset (lands in a later step)"
+            )));
+        }
+        ip += 1;
+        match op {
+            OpCode::Char => {
+                let Some(&len_byte) = inner_code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated Char inside PlusGreedy inner (missing length prefix)"
+                            .to_string(),
+                    ));
+                };
+                let length = len_byte as usize;
+                ip += 1;
+                if length != 1 {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "step 3 only handles single-byte Char literals; \
+                         got {length}-byte Char inside PlusGreedy inner"
+                    )));
+                }
+                let Some(&byte) = inner_code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated Char inside PlusGreedy inner (missing payload byte)".to_string(),
+                    ));
+                };
+                ip += 1;
+                ops.push(JitOp::Char(byte));
+            }
+            OpCode::DigitAscii => ops.push(JitOp::DigitAscii { negated: false }),
+            OpCode::DigitAsciiNeg => ops.push(JitOp::DigitAscii { negated: true }),
+            OpCode::WordAscii => ops.push(JitOp::WordAscii { negated: false }),
+            OpCode::WordAsciiNeg => ops.push(JitOp::WordAscii { negated: true }),
+            OpCode::SpaceAscii => ops.push(JitOp::SpaceAscii { negated: false }),
+            OpCode::SpaceAsciiNeg => ops.push(JitOp::SpaceAscii { negated: true }),
+            OpCode::StartText => ops.push(JitOp::StartText),
+            OpCode::EndText => ops.push(JitOp::EndText),
+            OpCode::WordBoundary => ops.push(JitOp::WordBoundary { negated: false }),
+            OpCode::NonWordBoundary => ops.push(JitOp::WordBoundary { negated: true }),
+            OpCode::SaveStart | OpCode::SaveEnd => {
+                let Some(&group_id) = inner_code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "truncated {op:?} inside PlusGreedy inner (missing group id)"
+                    )));
+                };
+                if group_id != 0 {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "step 3 only accepts group-0 capture wrappers; \
+                         got {op:?} for group {group_id} inside PlusGreedy inner"
+                    )));
+                }
+                ip += 1;
+                let which = if op == OpCode::SaveStart {
+                    SaveSlot::Start
+                } else {
+                    SaveSlot::End
+                };
+                ops.push(JitOp::SaveGroupZero { which });
+            }
+            // is_simple_inner_opcode rejected anything else above.
+            _ => unreachable!(
+                "is_simple_inner_opcode allowed {op:?} but the decoder doesn't handle it"
+            ),
+        }
+    }
+    Ok(())
+}
+
 /// Decode a 2-byte u16 forward offset from the bytecode (the
-/// operand of `Split` / `SplitLazy` / `Jump`) and resolve it to an
-/// op index in `op_positions` via binary search. Advances `ip` past
-/// the operand bytes.
+/// operand of `Split` / `SplitLazy` / `Jump`) and resolve it to a
+/// JIT op index via binary search on `op_positions`. Advances `ip`
+/// past the operand bytes.
 ///
 /// The encoding (per the existing VM dispatch in `vm.rs`):
 /// - Operand at `code[ip..ip+2]` is `u16::from_le_bytes`.
 /// - Target byte = `ip + 2 + offset` (the offset is from
 ///   immediately after the operand, NOT from the opcode start).
-/// - Target byte must exactly match an op start, otherwise the
-///   bytecode is malformed and we bail with `CodegenUnsupported`.
+/// - Target byte must exactly match a bytecode op start, otherwise
+///   the bytecode is malformed and we bail with `CodegenUnsupported`.
 fn decode_forward_target(
     code: &[u8],
     ip: &mut usize,
-    op_positions: &[usize],
+    op_positions: &[(usize, usize)],
     op_name: &str,
 ) -> Result<usize, JitHostError> {
     if *ip + 1 >= code.len() {
@@ -1506,13 +1761,16 @@ fn decode_forward_target(
     let offset = u16::from_le_bytes([code[*ip], code[*ip + 1]]) as usize;
     *ip += 2;
     let target_byte = *ip + offset;
-    op_positions.binary_search(&target_byte).map_err(|_| {
-        JitHostError::CodegenUnsupported(format!(
-            "{op_name} forward offset {offset} (target byte {target_byte}) \
-             does not land on an op start; bytecode is malformed or the \
-             target is mid-operand"
-        ))
-    })
+    op_positions
+        .binary_search_by_key(&target_byte, |&(byte, _)| byte)
+        .map(|idx| op_positions[idx].1)
+        .map_err(|_| {
+            JitHostError::CodegenUnsupported(format!(
+                "{op_name} forward offset {offset} (target byte {target_byte}) \
+                 does not land on an op start; bytecode is malformed or the \
+                 target is mid-operand"
+            ))
+        })
 }
 
 #[cfg(test)]
@@ -2031,10 +2289,10 @@ mod tests {
     // accepted via the Split/Jump/SplitLazy codegen. Positive
     // tests for alternation live in the step 3d.2 section below.
 
-    #[test]
-    fn step3a_refuses_quantifier() {
-        assert_codegen_unsupported("a+");
-    }
+    // Note: `step3a_refuses_quantifier` was removed at step 3e.1
+    // because `a+` (PlusGreedy) is now accepted via decoder
+    // unfolding into [Char 'a', Split, Jump]. Positive tests for
+    // PlusGreedy live in the step 3e.1 section below.
 
     #[test]
     fn step3a_refuses_capture_group() {
@@ -2646,6 +2904,181 @@ mod tests {
             assert_eq!(func(b"dog".as_ptr(), 3, 0), 3);
             assert_eq!(func(b"bird".as_ptr(), 4, 0), 4);
             assert_eq!(func(b"fish".as_ptr(), 4, 0), -1);
+        }
+    }
+
+    // ============================================================
+    // C1 step 3e.1 — PlusGreedy via decoder unfolding
+    // ============================================================
+    //
+    // PlusGreedy(inner) lowers to [inner_jit_ops..., Split, Jump]
+    // where the first iteration of inner is mandatory and the
+    // Split-based loop handles 2nd+ iterations with greedy
+    // backtracking. Inner restricted to "simple linear" subset
+    // (no nested control flow); nested optimized quantifiers will
+    // land in a later step.
+
+    #[test]
+    fn step3e1_plus_greedy_single_char_match_one() {
+        // a+ against `a` — exactly one iteration
+        let (_host, func) = jit_compile("a+");
+        unsafe {
+            let text = b"a";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_single_char_match_many() {
+        // a+ against `aaaa` — four iterations
+        let (_host, func) = jit_compile("a+");
+        unsafe {
+            let text = b"aaaa";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 4);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_single_char_no_match() {
+        // a+ against `bbb` — first (mandatory) iteration fails
+        let (_host, func) = jit_compile("a+");
+        unsafe {
+            let text = b"bbb";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_single_char_partial() {
+        // a+ against `aab` — consume `aa`, stop at `b`
+        let (_host, func) = jit_compile("a+");
+        unsafe {
+            let text = b"aab";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 2);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_followed_by_literal() {
+        // a+b — must match a's then a b. Greedy `a+` consumes
+        // all leading a's then `b` matches.
+        let (_host, func) = jit_compile("a+b");
+        unsafe {
+            let text = b"aaab";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 4);
+            // No b at the end → greedy a+ consumes all, then b
+            // fails, backtracks all the way, fails entirely.
+            let text2 = b"aaaa";
+            assert_eq!(func(text2.as_ptr(), text2.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_backtrack_to_satisfy_following_op() {
+        // a+a — `a+` consumes greedily then `a` must match. The
+        // greedy a+ over-consumes (eats all the a's), then `a`
+        // fails (no more chars), backtracks one iteration so the
+        // last a matches.
+        let (_host, func) = jit_compile("a+a");
+        unsafe {
+            // `aa` — a+ consumes both; backtrack to a+ consuming
+            // 1, then `a` matches the second.
+            assert_eq!(func(b"aa".as_ptr(), 2, 0), 2);
+            // `aaa` — a+ consumes 3, backtrack to 2, `a` matches.
+            assert_eq!(func(b"aaa".as_ptr(), 3, 0), 3);
+            // `a` alone — a+ consumes 1, then `a` fails (eof),
+            // backtrack would shrink to 0 iterations but `a+`
+            // requires at least 1 → fail.
+            assert_eq!(func(b"a".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_digit() {
+        // \d+ matches digit sequence
+        let (_host, func) = jit_compile(r"\d+");
+        unsafe {
+            assert_eq!(func(b"42".as_ptr(), 2, 0), 2);
+            assert_eq!(func(b"123abc".as_ptr(), 6, 0), 3);
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_word() {
+        // \w+ matches word-character sequence
+        let (_host, func) = jit_compile(r"\w+");
+        unsafe {
+            assert_eq!(func(b"hello".as_ptr(), 5, 0), 5);
+            assert_eq!(func(b"hello world".as_ptr(), 11, 0), 5);
+            assert_eq!(func(b"!".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_space() {
+        // \s+ matches whitespace
+        let (_host, func) = jit_compile(r"\s+");
+        unsafe {
+            assert_eq!(func(b"   ".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"\t \n".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_multi_char_inner() {
+        // (?:ab)+ — repeated two-char sequence. The inner has 2
+        // ops; this exercises the multi-op simple-inner path.
+        let (_host, func) = jit_compile("(?:ab)+");
+        unsafe {
+            assert_eq!(func(b"ab".as_ptr(), 2, 0), 2);
+            assert_eq!(func(b"abab".as_ptr(), 4, 0), 4);
+            assert_eq!(func(b"ababab".as_ptr(), 6, 0), 6);
+            // `abc` — first iteration `ab` matches, second
+            // iteration starts at pos 2 with `c`, fails on `a`
+            // mismatch. Result: pos=2.
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), 2);
+            // `aba` — first iteration `ab` matches, second
+            // iteration starts at pos 2 with `a`, then needs `b`
+            // at pos 3 → eof, fails. Backtrack: but at this
+            // point bt_top has 1 frame from after the first
+            // successful iteration, pop it → exit at pos=2.
+            assert_eq!(func(b"aba".as_ptr(), 3, 0), 2);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_anchored() {
+        // \A\d+\z — anchored digit sequence (whole input must be digits)
+        let (_host, func) = jit_compile(r"\A\d+\z");
+        unsafe {
+            assert_eq!(func(b"123".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+            assert_eq!(func(b"123abc".as_ptr(), 6, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_email_like() {
+        // \w+@\w+\.\w+ — email-like pattern with three quantifiers
+        let (_host, func) = jit_compile(r"\w+@\w+\.\w+");
+        unsafe {
+            let text = b"user@example.com";
+            assert_eq!(func(text.as_ptr(), text.len(), 0), 16);
+            let text2 = b"abc";
+            assert_eq!(func(text2.as_ptr(), text2.len(), 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e1_plus_greedy_with_alternation() {
+        // \d+|word — quantifier in alternation
+        let (_host, func) = jit_compile(r"\d+|word");
+        unsafe {
+            assert_eq!(func(b"123".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"word".as_ptr(), 4, 0), 4);
+            assert_eq!(func(b"xxx".as_ptr(), 3, 0), -1);
         }
     }
 }

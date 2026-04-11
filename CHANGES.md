@@ -14,6 +14,42 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 3e.1: PlusGreedy via decoder unfolding
+- Scope: Eighth code commit for the C1 JIT compilation backend. Adds `PlusGreedy` (`+` quantifier) support via decoder unfolding — when the decoder hits the `PlusGreedy(inner)` opcode, it recursively decodes the inline subprogram into a Vec<JitOp> and unfolds the quantifier into a Split/Jump-based loop using the step 3d.2 backtracking infrastructure. Patterns like `a+`, `\d+`, `\w+`, `\s+`, `(?:ab)+`, `\w+@\w+\.\w+`, `\A\d+\z`, `\d+|word` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics. The first iteration of the inner is mandatory; subsequent iterations are tried greedily with backtracking via the existing bt_stack.
+- **The unfolding lowering**: `PlusGreedy(inner)` decodes to:
+  ```text
+  [inner_jit_ops...]                     ← mandatory iteration 1
+  Split { branch_b_op_idx: exit }        ← greedy: fall-through to Jump (continue loop), on backtrack go to exit
+  Jump { target_op_idx: inner_start }    ← loop back to start of inner_ops
+  exit                                   ← first op after the unfolded sequence
+  ```
+  When the inner consumes successfully, fall through to Split which pushes (exit, current_pos) onto the bt_stack and falls through to Jump. Jump goes back to inner_start. Each successful iteration pushes one bt_stack frame. When the inner fails (e.g., end of input), failure_dispatch pops the most recent frame, restores pos, and dispatches to exit. Subsequent backtracks pop earlier frames (one fewer iteration each time), enabling the standard greedy-then-backtrack semantics.
+- **Restricted to "simple linear inner" subset for step 3e.1**: the inner subprogram can only contain opcodes from the existing supported simple-linear set (literals, char classes, anchors, word boundaries, group-0 wrappers). It cannot contain `Split`/`Jump`/`SplitLazy` or nested optimized quantifier opcodes — those will land in a later step. This restriction lets the unfolding be straightforward: each inner bytecode opcode contributes exactly 1 JitOp, with no internal Split/Jump targets to shift.
+- **Two-pass decoder restructuring**: `collect_op_positions` now returns `Vec<(usize, usize)>` (byte_offset, jit_op_idx) instead of `Vec<usize>` (just byte_offset). The jit_op_idx is the index of the FIRST JitOp emitted for that bytecode opcode — most opcodes contribute 1 jit_op, but PlusGreedy contributes (inner_count + 2). Pass 1 simulates the unfolding via `compute_jit_op_count` (which calls `simple_inner_jit_op_count` for the inner) so the byte_offset → jit_op_idx map is correct before pass 2 emits the actual JitOps. Forward Split/Jump targets in the OUTER bytecode that point AT a PlusGreedy opcode now resolve correctly to the first JitOp in the unfolded sequence (i.e., the start of inner_jit_ops).
+- New helper functions:
+  - `compute_jit_op_count(op, operand_bytes) -> Result<usize>` — returns the unfolded JitOp count for a single bytecode opcode. Used by pass 1.
+  - `simple_inner_jit_op_count(inner_code) -> Result<usize>` — returns the JitOp count for a "simple linear" inner subprogram. Walks the inner bytecode, rejects any opcode outside the simple-inner subset, returns the total opcode count.
+  - `is_simple_inner_opcode(op) -> bool` — predicate for the simple-inner subset (literals, char classes, anchors, word boundaries, group-0 wrappers).
+  - `decode_simple_inner_into(inner_code, ops) -> Result<()>` — decodes a simple-linear inner subprogram into JitOps and appends them to the outer ops Vec. Used by pass 2 when handling PlusGreedy.
+- **`decode_forward_target` updated** to use `binary_search_by_key` on the new `Vec<(byte, jit_op_idx)>` format and return the jit_op_idx instead of the bytecode index.
+- **`decode_program` PlusGreedy arm**: reads the 1-byte length prefix + length bytes of inner subprogram, calls `decode_simple_inner_into` to splice the inner ops, then appends `Split { branch_b_op_idx: ops.len() + 2 }` (the exit) and `Jump { target_op_idx: inner_start_op_idx }` (loop back). Includes a debug assertion that the unfolded count matches what pass 1 computed (catches any drift between the two passes).
+- **`step3a_refuses_quantifier` test removed**: it was correct at step 3a (which refused all quantifiers) but step 3e.1 now correctly accepts `a+`. Replaced by 13 positive tests in the new step 3e.1 section.
+- **13 new step 3e.1 tests** in `c1::codegen::tests::step3e1_*`:
+  - **Single-char PlusGreedy**: `a+` matching one iteration, many iterations, no match, partial match
+  - **PlusGreedy followed by literal**: `a+b` against `aaab` (greedy then exact match); `a+b` against `aaaa` (greedy then no match → backtrack to empty fails because `+` requires 1+)
+  - **The critical backtrack-into-quantifier test**: `a+a` against `aa`/`aaa`/`a` — proves that when the following op fails after the greedy quantifier, backtracking shrinks the iteration count by one each time until either succeeding or reaching the minimum (1 for `+`)
+  - **PlusGreedy with each char-class kind**: `\d+` against `42`, `123abc`, `abc`; `\w+` against `hello`, `hello world`, `!`; `\s+` against `   `, `\t \n`, `abc`
+  - **Multi-char inner subprogram**: `(?:ab)+` against `ab`, `abab`, `ababab`, `abc` (partial), `aba` (partial — exercises the inner-failing-mid-iteration backtrack path)
+  - **Anchored quantifier**: `\A\d+\z` against valid digit strings, empty input, mixed input
+  - **Realistic email-like pattern**: `\w+@\w+\.\w+` against `user@example.com` (three quantifiers in sequence)
+  - **PlusGreedy in alternation**: `\d+|word` against `123`, `word`, `xxx`
+- **No bugs caught on the first run**: all 13 new tests pass on the first attempt. The two-pass decoder design with the unfolded count tracking caught any potential drift between the position tracking and the actual emitted JitOps via the debug_assert in the PlusGreedy arm. The architecture from step 3d.2 (Switch-based br_table with Variables) handled the new backtrack patterns (one frame per iteration) without modification.
+- 2 small clippy warnings introduced and fixed: `range_plus_one` (`1..1+length_byte` → `1..=length_byte` in the inner bytes slice), several `doc_markdown` warnings (`JitOp` / `Split` / `Jump` / `SplitLazy` / `PlusGreedy` / `StarGreedy` / `QuestionGreedy` / `Match` needing backticks across the new doc comments).
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 passing (unchanged from step 3d.2 — `c1/` still doesn't exist when the feature is off), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit` lib tests **842 passing** (135 C1 tests previously + 13 new step 3e.1 - 1 removed step3a_refuses_quantifier = 147 C1 tests; total 695 base + 147 = 842 lib), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 3e.1 is complete.** PlusGreedy patterns are now JIT-compilable. The decoder-unfolding approach is the architecture for future optimized quantifier support; step 3e.2 will add `StarGreedy` (`*`), step 3e.3 will add `QuestionGreedy` (`?`), and the lazy variants will follow with similar lowerings. After all step 3e substeps, step 4 (capture trail + differential gate active) can land. Then step 5 (engine dispatch wiring), and steps 6–8.
+
 ### 2026-04-11 - C1 step 3d.2: control flow + backtracking
 - Scope: Seventh code commit for the C1 JIT compilation backend. **The biggest C1 substep yet** — adds the full backtracking infrastructure (256-frame stack-allocated bt_stack, `failure_dispatch` block with `br_table`, two-pass decoder for forward-jump targets) plus codegen for `Split` / `SplitLazy` / `Jump` opcodes plus `SetAlternative` (no-op). Alternation patterns like `cat|dog`, `\d|\w`, `\Acat|\Adog` are now JIT-compilable end-to-end with byte-for-byte correct backtracking semantics. The 3d.1 refactor (pos → Variable) shipped previously was the foundation for this; without it the `br_table` dispatch couldn't restore pos.
 - **Architecture**:
