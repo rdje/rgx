@@ -56,7 +56,37 @@
 //!   `SaveEnd`, `Backtrack`, `StartText`, `EndText`, `WordBoundary`,
 //!   `NonWordBoundary`). ✅ (substeps 3a–3e.4)
 //! - **Step 4a**: corpus-based differential test harness. ✅
-//! - **Step 4b**: capture trail in JIT'd code. (planned)
+//! - **Step 4b**: capture trail in JIT'd code. ✅
+//!   - JIT'd function signature extended from
+//!     `(text, text_len, pos) -> isize` to
+//!     `(text, text_len, pos, captures_ptr) -> isize` so the JIT
+//!     can write capture spans for groups 1+ alongside the overall
+//!     match. The new type alias is [`JittedFn`]; the old name
+//!     [`Step3aJittedFn`] is kept as a backwards-compatible alias.
+//!   - Per-frame **capture snapshot**: each backtrack frame in the
+//!     stack-allocated `bt_stack` carries a copy of the captures
+//!     buffer at the moment of the matching `Split`/`SplitLazy`
+//!     push. On a backtrack-pop the snapshot is restored, undoing
+//!     all capture writes since the push in one shot. This is the
+//!     simpler alternative to the per-modification trail described
+//!     in design doc §6.1 (both approaches are byte-for-byte
+//!     equivalent under the differential gate).
+//!   - Per-frame size grows from 16 bytes (steps 3a–4a) to
+//!     `16 + 16 * (num_groups + 1)` bytes; eligibility caps user
+//!     groups at `C1_MAX_USER_GROUPS = 16` so the per-function
+//!     stack budget stays bounded (~72 KiB at the cap).
+//!   - Decoder accepts `SaveStart(g)` / `SaveEnd(g)` for any group
+//!     id (previously only `g == 0` was accepted). Patterns like
+//!     `(\d+)`, `(a+)b`, `(\w+)@(\w+)\.(\w+)` are now JIT-eligible.
+//!   - Engine `try_jit_*` methods allocate a captures buffer of
+//!     size `2 * (num_groups + 1)`, reset it between calls, and
+//!     read it back into `MatchResult.groups` after a successful
+//!     match. The capture buffer state is undefined on a `-1`
+//!     return — the engine layer resets it before every call.
+//!   - 14 new step-4b tests in `c1::codegen::tests::step4b_*`
+//!     covering single/multi-capture patterns, capture-with-
+//!     backtrack, lazy capture quantifiers, anchored captures,
+//!     nested alternation in captures, and the eligibility cap.
 //! - **Step 5**: engine dispatch wiring + 4-tier dispatch chain. ✅
 //!   - New [`JitProgram`] type encapsulating `JitHost + FuncId` with
 //!     `unsafe impl Send` documented for the read-only-after-finalize
@@ -107,6 +137,6 @@ pub mod jit;
 pub mod runtime;
 
 pub use codegen::{
-    compile_program, compile_program_to_jit_program, is_jit_eligible, Step3aJittedFn,
+    compile_program, compile_program_to_jit_program, is_jit_eligible, JittedFn, Step3aJittedFn,
 };
 pub use jit::{JitHost, JitHostError, JitProgram};

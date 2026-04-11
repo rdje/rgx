@@ -129,22 +129,75 @@ fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
     }
 }
 
-/// Convert a JIT'd-function result `(start, end)` into the public
-/// [`MatchResult`] shape. C1 step 5.
+/// Allocate a fresh capture-slot buffer sized for `num_groups`
+/// user-numbered capture groups. Layout matches the JIT'd function's
+/// captures_ptr contract: `[i64; 2 * (num_groups + 1)]`, with each
+/// pair representing `(start, end)` for one group, and `-1` meaning
+/// "unset". Group 0 is included alongside the user groups, so the
+/// buffer always has at least 2 slots.
 ///
-/// The JIT'd function returns only the new match end position; the
-/// engine layer combines this with the scan position to produce
-/// `(start, end)`. The capture groups vector contains only group 0
-/// (the overall match span) because the JIT-eligible subset
-/// rejects patterns with capture groups 1+ at the decoder.
-/// `matched_branch_number` and `code_result` are always `None`
-/// for the same eligibility-exclusion reasons.
+/// Initialised to `-1` in every slot — see [`reset_capture_buffer`]
+/// for the inter-call reset that prepares the buffer for re-use.
+/// C1 step 4b.
 #[cfg(feature = "jit")]
-fn jit_match_to_result(start: usize, end: usize) -> MatchResult {
+fn new_capture_buffer(num_groups: u32) -> Vec<i64> {
+    vec![-1i64; 2 * (num_groups as usize + 1)]
+}
+
+/// Reset every slot in the capture buffer to `-1`. Called between
+/// JIT'd-function invocations so the buffer is in the contract-required
+/// state. The JIT'd function expects every slot to be `-1` on entry
+/// and writes the actual capture spans during execution. C1 step 4b.
+#[cfg(feature = "jit")]
+fn reset_capture_buffer(captures: &mut [i64]) {
+    for slot in captures.iter_mut() {
+        *slot = -1;
+    }
+}
+
+/// Convert a JIT'd-function result `(start, end)` plus the post-call
+/// captures buffer into the public [`MatchResult`] shape. C1 step 4b.
+///
+/// The JIT'd function returns the new match end position via its
+/// return value AND populates the caller-provided captures buffer
+/// with `(start, end)` pairs for every capture group 0..=num_groups.
+/// This helper:
+///
+/// 1. Reads each `(start, end)` slot pair from the buffer.
+/// 2. Treats `(-1, -1)` as "group did not participate" (the JIT
+///    initializes every slot to -1 before invocation).
+/// 3. Forces group 0 to `(start, end)` from the JIT's return value
+///    even if the program's bytecode didn't emit `SaveStart(0)` /
+///    `SaveEnd(0)` ops — the JIT-eligible subset always treats
+///    group 0 as the overall match span. (In practice the bytecode
+///    *does* emit these, but the helper is robust either way.)
+///
+/// `matched_branch_number` and `code_result` are always `None` for
+/// the JIT path: top-level alternation patterns are excluded from
+/// JIT dispatch in `build_jit_program_if_eligible`, and code blocks
+/// are excluded by the eligibility check.
+#[cfg(feature = "jit")]
+fn jit_match_to_result(start: usize, end: usize, captures: &[i64], num_groups: u32) -> MatchResult {
+    let total_groups = num_groups as usize + 1; // include group 0
+    let mut groups = Vec::with_capacity(total_groups);
+    // Group 0 is always the overall match span — force it from the
+    // JIT's (start, end) regardless of what the buffer says.
+    groups.push(Some((start, end)));
+    // Groups 1..=num_groups come from the captures buffer.
+    for g in 1..=num_groups as usize {
+        let s_slot = captures[2 * g];
+        let e_slot = captures[2 * g + 1];
+        if s_slot < 0 || e_slot < 0 {
+            groups.push(None);
+        } else {
+            #[allow(clippy::cast_sign_loss)] // checked >= 0 above
+            groups.push(Some((s_slot as usize, e_slot as usize)));
+        }
+    }
     MatchResult {
         start,
         end,
-        groups: vec![Some((start, end))],
+        groups,
         matched_branch_number: None,
         code_result: None,
     }
@@ -666,18 +719,35 @@ impl Engine {
     /// this method scans every position from 0..=input.len() and
     /// returns true on the first successful match. The scan loop
     /// uses the existing `PrefixScanner` for skip acceleration.
+    ///
+    /// Step 4b: a captures buffer is allocated and reset between
+    /// calls so the JIT can write capture spans for groups 1+ even
+    /// though `is_match` discards them — the JIT'd function signature
+    /// always requires the buffer.
     #[cfg(feature = "jit")]
     #[doc(hidden)]
     pub fn try_jit_is_match(&self, input: &[u8]) -> Option<bool> {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
+        let num_groups = self.vm.program.num_groups;
+        let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
         while let Some(candidate) = scanner.next_candidate(input, start) {
+            reset_capture_buffer(&mut captures);
             // SAFETY: input is alive for the call; the function
             // pointer is alive for the lifetime of the JitProgram
-            // which is held by self via the Mutex.
-            let result = unsafe { func(input.as_ptr(), input.len(), candidate) };
+            // which is held by self via the Mutex; the captures
+            // buffer is sized 2*(num_groups+1) and pre-initialised
+            // to -1 in every slot.
+            let result = unsafe {
+                func(
+                    input.as_ptr(),
+                    input.len(),
+                    candidate,
+                    captures.as_mut_ptr(),
+                )
+            };
             if result >= 0 {
                 return Some(true);
             }
@@ -687,7 +757,15 @@ impl Engine {
         // when no consuming-byte position was a candidate. Try the
         // trailing position once.
         if start <= input.len() {
-            let result = unsafe { func(input.as_ptr(), input.len(), input.len()) };
+            reset_capture_buffer(&mut captures);
+            let result = unsafe {
+                func(
+                    input.as_ptr(),
+                    input.len(),
+                    input.len(),
+                    captures.as_mut_ptr(),
+                )
+            };
             if result >= 0 {
                 return Some(true);
             }
@@ -704,25 +782,50 @@ impl Engine {
     pub fn try_jit_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
+        let num_groups = self.vm.program.num_groups;
+        let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut start = 0usize;
         while let Some(candidate) = scanner.next_candidate(input, start) {
+            reset_capture_buffer(&mut captures);
             // SAFETY: see try_jit_is_match.
-            let result = unsafe { func(input.as_ptr(), input.len(), candidate) };
+            let result = unsafe {
+                func(
+                    input.as_ptr(),
+                    input.len(),
+                    candidate,
+                    captures.as_mut_ptr(),
+                )
+            };
             if result >= 0 {
                 #[allow(clippy::cast_sign_loss)] // checked >= 0
                 let end = result as usize;
-                return Some(Some(jit_match_to_result(candidate, end)));
+                return Some(Some(jit_match_to_result(
+                    candidate, end, &captures, num_groups,
+                )));
             }
             start = candidate + 1;
         }
         // Try the trailing position for empty-match patterns.
         if start <= input.len() {
-            let result = unsafe { func(input.as_ptr(), input.len(), input.len()) };
+            reset_capture_buffer(&mut captures);
+            let result = unsafe {
+                func(
+                    input.as_ptr(),
+                    input.len(),
+                    input.len(),
+                    captures.as_mut_ptr(),
+                )
+            };
             if result >= 0 {
                 #[allow(clippy::cast_sign_loss)] // checked >= 0
                 let end = result as usize;
-                return Some(Some(jit_match_to_result(input.len(), end)));
+                return Some(Some(jit_match_to_result(
+                    input.len(),
+                    end,
+                    &captures,
+                    num_groups,
+                )));
             }
         }
         Some(None)
@@ -740,6 +843,8 @@ impl Engine {
     pub fn try_jit_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let jit_mutex = self.should_use_jit()?;
         let func = self.jit_function_ptr(jit_mutex);
+        let num_groups = self.vm.program.num_groups;
+        let mut captures = new_capture_buffer(num_groups);
         let scanner = PrefixScanner::new(&self.vm, None);
         let mut results = Vec::new();
         let mut start = 0usize;
@@ -749,8 +854,9 @@ impl Engine {
                 break;
             };
             start = candidate;
+            reset_capture_buffer(&mut captures);
             // SAFETY: see try_jit_is_match.
-            let result = unsafe { func(input.as_ptr(), input.len(), start) };
+            let result = unsafe { func(input.as_ptr(), input.len(), start, captures.as_mut_ptr()) };
             if result < 0 {
                 start += 1;
                 continue;
@@ -762,7 +868,7 @@ impl Engine {
                 start += 1;
                 continue;
             }
-            results.push(jit_match_to_result(start, end));
+            results.push(jit_match_to_result(start, end, &captures, num_groups));
             prev_non_empty_end = if is_empty { None } else { Some(end) };
             start = if is_empty { start + 1 } else { end };
         }
