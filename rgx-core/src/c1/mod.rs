@@ -20,7 +20,7 @@
 //! ships production-quality code; nothing here is throwaway.
 //!
 //! - **Step 0**: design proposal landed. ✅
-//! - **Step 1 (this commit)**: standalone JIT host plumbing. ✅
+//! - **Step 1**: standalone JIT host plumbing. ✅
 //!   - Cargo `jit` feature flag wires Cranelift dependencies.
 //!   - [`jit::JitHost`] wraps `cranelift_jit::JITModule` with the
 //!     lifetime/ownership story for compiled function pointers.
@@ -32,13 +32,25 @@
 //!     wrapper, verifying the entire pipeline (target ISA selection,
 //!     IR construction, compilation, finalisation, function-pointer
 //!     transmute, native invocation) works end-to-end.
-//!   - **Does NOT touch the engine.** No `Program::jit_eligible` field,
-//!     no `Engine::should_use_jit` accessor, no dispatch wiring. The
-//!     module is completely standalone — it can be compiled and tested
-//!     in isolation, and removing it has zero effect on the rest of
-//!     the engine.
-//! - **Step 2**: JIT eligibility check (AST walker, `Program::jit_eligible`
-//!   field). (planned)
+//! - **Step 2 (this commit)**: JIT eligibility check. ✅
+//!   - [`codegen::is_jit_eligible`] walks a compiled [`crate::vm::Program`]
+//!     and decides whether the JIT will accept the pattern. The check
+//!     uses two layers: a quick reject from `ProgramFlags`
+//!     (`has_backrefs` / `has_lookarounds` / `has_code_blocks` /
+//!     non-empty `subroutines`) followed by a bytecode walk that
+//!     looks for ineligible opcodes the flags don't cover (atomic
+//!     groups, conditionals, backtracking verbs, `\K` / `\G` / `\X`,
+//!     reserved opcodes).
+//!   - Hand-curated truth table in `codegen::tests` covers ~45
+//!     pattern shapes: literals, char classes, alternations, every
+//!     quantifier flavour, anchors, capture groups, realistic
+//!     patterns; vs ineligible cases for each forbidden opcode
+//!     family.
+//!   - **Still does NOT touch the engine.** No `Program::jit_eligible`
+//!     field, no `Engine::should_use_jit` accessor, no dispatch
+//!     wiring. The check stands alone as a pure function on
+//!     `&Program`. Engine wiring lands in step 5 only after the
+//!     codegen and capture-trail steps are differentially verified.
 //! - **Step 3**: codegen for the easy opcodes (`Char`, `DigitAscii`,
 //!   `WordAscii`, `SpaceAscii`, `Split`, `Jump`, `Match`, `SaveStart`,
 //!   `SaveEnd`, `Backtrack`, `StartText`, `EndText`, `WordBoundary`,
@@ -73,7 +85,9 @@
 //! See design doc §11 for the full feature-gating story and §1.0 for
 //! the priority-order rule that drives this decision.
 
+pub mod codegen;
 pub mod jit;
 pub mod runtime;
 
+pub use codegen::is_jit_eligible;
 pub use jit::{JitHost, JitHostError};
