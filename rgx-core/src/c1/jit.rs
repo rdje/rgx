@@ -69,6 +69,12 @@ pub enum JitHostError {
     /// that wasn't defined on this host before `finalize_definitions`
     /// was called.
     FunctionNotDefined(FuncId),
+    /// The codegen layer refused to JIT-compile the program because
+    /// it contains an opcode (or opcode shape) the current C1 step
+    /// hasn't implemented yet. Carries a human-readable description
+    /// of the unsupported construct. Caller should fall back to the
+    /// interpreter for this pattern.
+    CodegenUnsupported(String),
 }
 
 impl fmt::Display for JitHostError {
@@ -79,6 +85,7 @@ impl fmt::Display for JitHostError {
             Self::IsaBuildError(msg) => write!(f, "C1 JIT ISA build error: {msg}"),
             Self::ModuleError(msg) => write!(f, "C1 JIT module error: {msg}"),
             Self::FunctionNotDefined(id) => write!(f, "C1 JIT function {id:?} not defined"),
+            Self::CodegenUnsupported(msg) => write!(f, "C1 JIT codegen unsupported: {msg}"),
         }
     }
 }
@@ -106,6 +113,11 @@ impl From<ModuleError> for JitHostError {
 /// the codegen layer (`c1/codegen.rs`) is in place.
 pub struct JitHost {
     module: JITModule,
+    /// Monotonic counter used to generate unique function names so
+    /// multiple programs can be compiled into the same `JitHost`
+    /// without colliding. Each call to [`Self::next_func_index`]
+    /// returns the next value and increments the counter.
+    next_func_index: u32,
 }
 
 impl fmt::Debug for JitHost {
@@ -156,7 +168,20 @@ impl JitHost {
 
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
         let module = JITModule::new(builder);
-        Ok(Self { module })
+        Ok(Self {
+            module,
+            next_func_index: 0,
+        })
+    }
+
+    /// Allocate the next monotonic function index for a fresh
+    /// function on this host. Used by the codegen layer to generate
+    /// unique function names so multiple programs can be compiled
+    /// into the same host without name collisions.
+    pub fn next_func_index(&mut self) -> u32 {
+        let idx = self.next_func_index;
+        self.next_func_index = self.next_func_index.wrapping_add(1);
+        idx
     }
 
     /// Build a fresh empty `Signature` using the host module's default

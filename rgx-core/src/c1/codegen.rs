@@ -1,9 +1,31 @@
 //! C1 codegen layer.
 //!
-//! At C1 step 2 this module hosts only the **JIT eligibility check** —
-//! [`is_jit_eligible`] decides whether the JIT will accept a compiled
-//! [`Program`]. The actual codegen functions (lowering bytecode opcodes
-//! into Cranelift IR) land in step 3 and grow this file alongside.
+//! Step 2 (shipped) added the **JIT eligibility check**
+//! [`is_jit_eligible`]. Step 3a (this module's current state) adds the
+//! first slice of **codegen**: [`compile_program`] translates a
+//! linear, capture-less, single-byte literal program into a Cranelift
+//! function with C ABI signature
+//! `unsafe extern "C" fn(text: *const u8, text_len: usize, pos: usize) -> isize`.
+//! The function returns the new position on a successful match (i.e.
+//! `pos + match_length`) and `-1` on no match.
+//!
+//! Step 3a deliberately scopes the codegen to the simplest possible
+//! coherent slice: programs whose bytecode is exclusively `Char`
+//! opcodes (with single-byte payloads, i.e. ASCII literals)
+//! optionally wrapped in group-0 `SaveStart` / `SaveEnd` markers and
+//! terminated by `Match`. Anything else is rejected with
+//! `JitHostError::CodegenUnsupported` and the caller falls back to
+//! the interpreter. Subsequent step 3 commits widen the codegen to
+//! built-in char classes (3b), anchors (3b), and control flow with
+//! backtracking (3c). Step 4 adds capture trail handling and turns
+//! the differential gate active.
+//!
+//! The narrow scope is intentional per design doc §1.0: each commit
+//! ships a slice that is byte-for-byte correct against the
+//! interpreter on every input it accepts, instead of a partial
+//! implementation that's "almost right". Step 3a's correctness is
+//! locked by hand-curated unit tests; step 4's differential gate
+//! extends that coverage to every JIT-eligible test in the suite.
 //!
 //! See `docs/C1_JIT_COMPILATION_DESIGN.md` §5.3 for the complete list
 //! of patterns the JIT refuses on the first pass and §1.0 for the
@@ -47,7 +69,12 @@
 //! correctness and are forbidden by §1.0 of the design doc. The
 //! conservative bias is intentional.
 
+use crate::c1::jit::{JitHost, JitHostError};
 use crate::vm::{OpCode, Program};
+use cranelift_codegen::ir::condcodes::IntCC;
+use cranelift_codegen::ir::{types, AbiParam, Function, InstBuilder, MemFlags, UserFuncName};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_module::{FuncId, Linkage};
 
 /// Returns `true` iff the JIT will accept the given compiled program.
 ///
@@ -372,6 +399,331 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
     }
 }
 
+// ============================================================
+// C1 step 3a — codegen for linear single-byte literal programs
+// ============================================================
+
+/// **C1 step 3a signature.** The shape of the JIT'd function returned
+/// by [`compile_program`] in step 3a. Documents the C ABI contract
+/// callers transmute the raw function pointer to.
+///
+/// # Parameters
+/// - `text`: pointer to the input bytes (borrow lifetime managed by
+///   the caller; must outlive the call)
+/// - `text_len`: length of the input in bytes
+/// - `pos`: byte position to test the pattern at
+///
+/// # Returns
+/// - `>= 0`: the new position after a successful match (`pos +
+///   pattern_length`)
+/// - `-1`: the pattern did not match at `pos`
+///
+/// The function tests the pattern at *exactly* `pos` — it does not
+/// scan. Scanning is the caller's responsibility (typically the
+/// engine dispatch loop, which lands at C1 step 5).
+///
+/// # Safety
+/// Callers must ensure `text` points to at least `text_len` bytes of
+/// initialized memory and that `pos <= text_len`. The function
+/// performs its own bounds check before any byte loads, but it
+/// trusts the caller-supplied pointer / length / position to refer
+/// to a valid slice.
+pub type Step3aJittedFn =
+    unsafe extern "C" fn(text: *const u8, text_len: usize, pos: usize) -> isize;
+
+/// JIT-compile a linear single-byte literal program into a Cranelift
+/// function and return its [`FuncId`].
+///
+/// **C1 step 3a deliverable.** This function only handles the
+/// simplest possible coherent slice of the JIT-eligible subset:
+/// programs whose bytecode is exclusively `Char` opcodes (with
+/// single-byte payloads, i.e. ASCII literals) optionally wrapped in
+/// group-0 `SaveStart` / `SaveEnd` markers and terminated by `Match`.
+/// Anything else (multi-byte `Char`, char classes, anchors, control
+/// flow, captures for groups 1+, ...) is rejected with
+/// [`JitHostError::CodegenUnsupported`] and the caller is expected
+/// to fall back to the interpreter for that pattern.
+///
+/// The narrow scope is intentional per design doc §1.0 (100%
+/// accuracy first): each step 3 sub-commit ships a slice that is
+/// byte-for-byte correct against the interpreter on every input it
+/// accepts. Subsequent commits widen the codegen.
+///
+/// # JIT'd function shape
+///
+/// The compiled function has the C ABI signature documented at
+/// [`Step3aJittedFn`] — it takes a pointer to a byte slice, a
+/// length, and a starting position, and returns the new position on
+/// a successful match (`pos + N` where `N` is the literal length) or
+/// `-1` on no match.
+///
+/// # Caller invariants
+///
+/// - The caller must invoke [`JitHost::finalize_definitions`] *after*
+///   this function returns and *before* calling the function pointer
+///   retrieved via [`JitHost::get_finalized_fn`]. Definitions are
+///   not executable until finalisation.
+/// - The function pointer is only valid for the lifetime of the
+///   `JitHost` it was compiled into. Dropping the host invalidates
+///   any held pointers.
+///
+/// # Errors
+///
+/// - [`JitHostError::CodegenUnsupported`] if the program contains
+///   any opcode outside the step 3a subset.
+/// - [`JitHostError::ModuleError`] if Cranelift fails to declare or
+///   define the function.
+///
+/// # Example (test-only)
+///
+/// ```ignore
+/// let mut host = JitHost::new()?;
+/// let program = Compiler::new().compile("abc")?.program;
+/// let func_id = compile_program(&program, &mut host)?;
+/// host.finalize_definitions()?;
+/// let raw = host.get_finalized_fn(func_id);
+/// let f: Step3aJittedFn = unsafe { std::mem::transmute(raw) };
+/// let text = b"abcdef";
+/// let new_pos = unsafe { f(text.as_ptr(), text.len(), 0) };
+/// assert_eq!(new_pos, 3);
+/// ```
+pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, JitHostError> {
+    // Eligibility short-circuit. The compile function trusts that
+    // anything is_jit_eligible accepts is something it can lower —
+    // step 3a additionally restricts the accepted set via
+    // extract_step3a_literal below.
+    if !is_jit_eligible(program) {
+        return Err(JitHostError::CodegenUnsupported(
+            "program is not in the JIT-eligible subset (see is_jit_eligible)".to_string(),
+        ));
+    }
+
+    // Walk the bytecode and extract the literal byte sequence. If
+    // anything outside the step 3a subset appears, bail with a
+    // descriptive error so the caller can fall back to the
+    // interpreter for this pattern.
+    let literal = extract_step3a_literal(&program.code)?;
+
+    // Build the Cranelift function signature: 3 i64 params (text
+    // pointer, text len, pos), 1 i64 return (new pos or -1).
+    // Cranelift uses I64 on 64-bit hosts; we'd need a target-pointer
+    // type query for 32-bit, which isn't a supported target anyway.
+    let mut sig = host.make_signature();
+    sig.params.push(AbiParam::new(types::I64));
+    sig.params.push(AbiParam::new(types::I64));
+    sig.params.push(AbiParam::new(types::I64));
+    sig.returns.push(AbiParam::new(types::I64));
+
+    // Use a name unique within the module so multiple programs can
+    // be compiled into the same JitHost without colliding.
+    let name = format!("rgx_jit_step3a_{}", host.next_func_index());
+    let func_id = host.declare_function(&name, Linkage::Local, &sig)?;
+
+    // Build the IR.
+    let mut function = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig);
+    {
+        let mut fb_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut function, &mut fb_ctx);
+
+        let entry = builder.create_block();
+        let success_block = builder.create_block();
+        let fail_block = builder.create_block();
+
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+
+        let text_ptr = builder.block_params(entry)[0];
+        let text_len = builder.block_params(entry)[1];
+        let pos = builder.block_params(entry)[2];
+
+        // needed = pos + literal.len()
+        let literal_len = i64::try_from(literal.len()).map_err(|_| {
+            JitHostError::CodegenUnsupported(format!(
+                "literal length {} does not fit in i64",
+                literal.len()
+            ))
+        })?;
+        let needed = builder.ins().iadd_imm(pos, literal_len);
+
+        // if needed > text_len: jump to fail
+        let bounds_ok = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThanOrEqual, needed, text_len);
+        let first_check = builder.create_block();
+        builder
+            .ins()
+            .brif(bounds_ok, first_check, &[], fail_block, &[]);
+        // Entry block has no more incoming branches; seal it now so
+        // Cranelift can finalise SSA value definitions for it before
+        // we move on to the per-byte chain.
+        builder.seal_block(entry);
+
+        // Per-byte comparison chain.
+        builder.switch_to_block(first_check);
+        let base_ptr = builder.ins().iadd(text_ptr, pos);
+
+        // For each literal byte, load text[pos + i] and compare
+        // against the expected byte. On mismatch jump to fail; on
+        // match fall through to the next byte (or to success after
+        // the last byte).
+        let mut current_block = first_check;
+        for (i, &expected) in literal.iter().enumerate() {
+            // Load the byte at offset i from base_ptr. Cranelift's
+            // `load` accepts an i32 immediate offset; the literal
+            // length is bounded by the bytecode walker's u8 length
+            // prefixes, so this conversion is essentially infallible
+            // — but we surface any overflow as `CodegenUnsupported`
+            // rather than panicking, per design doc §1.0 (every
+            // failure mode is a controlled error).
+            let byte_offset = i32::try_from(i).map_err(|_| {
+                JitHostError::CodegenUnsupported(format!(
+                    "literal byte index {i} exceeds Cranelift's i32 load offset"
+                ))
+            })?;
+            let loaded = builder
+                .ins()
+                .load(types::I8, MemFlags::trusted(), base_ptr, byte_offset);
+            // Compare with expected byte. iconst sign-extends, but
+            // we use icmp_imm with an i64 expected value because
+            // Cranelift's icmp_imm wants an i64 immediate.
+            let expected_const = i64::from(expected);
+            let matches = builder.ins().icmp_imm(IntCC::Equal, loaded, expected_const);
+
+            // The next block is either the next byte's check or the
+            // success block on the last iteration.
+            let next_block = if i + 1 == literal.len() {
+                success_block
+            } else {
+                builder.create_block()
+            };
+            builder
+                .ins()
+                .brif(matches, next_block, &[], fail_block, &[]);
+            builder.seal_block(current_block);
+            current_block = next_block;
+            builder.switch_to_block(current_block);
+        }
+
+        // success_block: return needed (the new position).
+        builder.ins().return_(&[needed]);
+        builder.seal_block(success_block);
+
+        // fail_block: return -1.
+        builder.switch_to_block(fail_block);
+        let neg_one = builder.ins().iconst(types::I64, -1);
+        builder.ins().return_(&[neg_one]);
+        builder.seal_block(fail_block);
+
+        builder.finalize();
+    }
+
+    host.define_function(func_id, function)?;
+    Ok(func_id)
+}
+
+/// Walk a program's bytecode and extract the literal byte sequence
+/// it represents, OR return a `CodegenUnsupported` error if it
+/// contains anything outside the step 3a subset.
+///
+/// Step 3a accepts:
+/// - `Char(len=1)` opcodes — extracted into the literal byte sequence
+/// - `SaveStart(0)` / `SaveEnd(0)` opcodes — accepted as no-op (the
+///   caller computes group 0 from the start position and the returned
+///   end position; explicit per-group capture tracking lands at step 4)
+/// - A trailing `Match` opcode
+///
+/// Anything else returns a `CodegenUnsupported` error with a message
+/// identifying the offending opcode.
+fn extract_step3a_literal(code: &[u8]) -> Result<Vec<u8>, JitHostError> {
+    let mut literal = Vec::new();
+    let mut ip = 0;
+    let mut saw_match = false;
+
+    while ip < code.len() {
+        let Ok(op) = OpCode::try_from(code[ip]) else {
+            return Err(JitHostError::CodegenUnsupported(format!(
+                "unknown opcode byte 0x{:02X} at ip={ip}",
+                code[ip]
+            )));
+        };
+        ip += 1;
+
+        match op {
+            OpCode::Char => {
+                // 1 byte length prefix + length payload.
+                let Some(&len_byte) = code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated Char opcode (missing length prefix)".to_string(),
+                    ));
+                };
+                let length = len_byte as usize;
+                ip += 1;
+                if length != 1 {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "step 3a only handles single-byte Char literals; \
+                         got {length}-byte Char (multi-byte literals land at step 6)"
+                    )));
+                }
+                let Some(&byte) = code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(
+                        "truncated Char opcode (missing payload byte)".to_string(),
+                    ));
+                };
+                literal.push(byte);
+                ip += 1;
+            }
+            OpCode::SaveStart | OpCode::SaveEnd => {
+                // 1 byte group id. Step 3a accepts group 0 wrappers
+                // as no-op (the engine layer reconstructs group 0
+                // from the entry pos + returned end pos at step 5).
+                // Higher group ids would need real capture tracking
+                // and are deferred to step 4.
+                let Some(&group_id) = code.get(ip) else {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "truncated {op:?} opcode (missing group id)"
+                    )));
+                };
+                if group_id != 0 {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "step 3a only accepts group-0 capture wrappers; \
+                         got {op:?} for group {group_id} (capture trail lands at step 4)"
+                    )));
+                }
+                ip += 1;
+            }
+            OpCode::Match => {
+                saw_match = true;
+                // The bytecode should end here. We tolerate trailing
+                // bytes only if they aren't reachable, but the
+                // existing compiler always emits Match as the last
+                // opcode of the main bytecode, so anything after it
+                // is unexpected.
+                if ip != code.len() {
+                    return Err(JitHostError::CodegenUnsupported(format!(
+                        "step 3a expects Match to terminate the program; \
+                         got {} trailing bytes after Match",
+                        code.len() - ip
+                    )));
+                }
+                break;
+            }
+            other => {
+                return Err(JitHostError::CodegenUnsupported(format!(
+                    "step 3a does not yet support {other:?} (lands in a later step)"
+                )));
+            }
+        }
+    }
+
+    if !saw_match {
+        return Err(JitHostError::CodegenUnsupported(
+            "step 3a requires a Match opcode at end of program".to_string(),
+        ));
+    }
+
+    Ok(literal)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,5 +1029,242 @@ mod tests {
         // groups, no verbs, no `\K` / `\G` / `\X`. Should be
         // eligible.
         assert_eligible(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\s+(ERROR|WARN|INFO)\s+\w+");
+    }
+
+    // ============================================================
+    // C1 step 3a — literal codegen
+    // ============================================================
+    //
+    // Each test JIT-compiles a real `Program` (built via the normal
+    // compile pipeline) and exercises the resulting native function
+    // pointer through its C ABI signature. The host is held across
+    // every call to keep the executable mapping alive (per the
+    // lifetime invariant documented on `JitHost::get_finalized_fn`).
+
+    /// Compile a pattern to a `Program`, JIT-compile it via
+    /// step 3a, and return both the host and the typed function
+    /// pointer. The caller MUST keep the host alive for the
+    /// lifetime of the function pointer.
+    fn jit_compile(pattern: &str) -> (JitHost, Step3aJittedFn) {
+        let program = compile(pattern);
+        let mut host = JitHost::new().expect("JitHost::new must succeed");
+        let func_id = compile_program(&program, &mut host)
+            .unwrap_or_else(|e| panic!("compile_program for `{pattern}` failed: {e}"));
+        host.finalize_definitions().expect("finalize must succeed");
+        let raw = host.get_finalized_fn(func_id);
+        assert!(!raw.is_null());
+        // SAFETY: The IR signature `(i64, i64, i64) -> i64` matches
+        // the `Step3aJittedFn` C ABI signature exactly. The function
+        // pointer is alive for the lifetime of `host`, returned
+        // alongside it so the caller keeps the host pinned across
+        // every call.
+        let func: Step3aJittedFn = unsafe { std::mem::transmute(raw) };
+        (host, func)
+    }
+
+    #[test]
+    fn step3a_single_char_match_at_position_zero() {
+        let (_host, func) = jit_compile("a");
+        let text = b"abc";
+        // SAFETY: text outlives the call; pos is within bounds.
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, 1, "matching `a` at pos 0 of \"abc\" must return 1");
+    }
+
+    #[test]
+    fn step3a_single_char_no_match() {
+        let (_host, func) = jit_compile("a");
+        let text = b"xyz";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, -1,
+            "matching `a` at pos 0 of \"xyz\" must return -1"
+        );
+    }
+
+    #[test]
+    fn step3a_three_char_literal_match() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"abcdef";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, 3,
+            "matching `abc` at pos 0 of \"abcdef\" must return 3"
+        );
+    }
+
+    #[test]
+    fn step3a_three_char_literal_match_at_offset() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"xyzabcdef";
+        let result = unsafe { func(text.as_ptr(), text.len(), 3) };
+        assert_eq!(
+            result, 6,
+            "matching `abc` at pos 3 of \"xyzabcdef\" must return 6"
+        );
+    }
+
+    #[test]
+    fn step3a_three_char_literal_partial_no_match() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"abx";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, -1,
+            "partial-prefix `ab` of `abc` against \"abx\" must return -1"
+        );
+    }
+
+    #[test]
+    fn step3a_three_char_literal_short_input_no_match() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"ab";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, -1,
+            "two-byte input \"ab\" must reject 3-byte literal `abc`"
+        );
+    }
+
+    #[test]
+    fn step3a_three_char_literal_offset_at_end_no_match() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"abcdef";
+        // Starting at pos 4, only 2 bytes remain — bounds check
+        // must reject the match attempt.
+        let result = unsafe { func(text.as_ptr(), text.len(), 4) };
+        assert_eq!(result, -1, "starting at pos 4 leaves only 2 bytes");
+    }
+
+    #[test]
+    fn step3a_three_char_literal_at_pos_equals_text_len() {
+        let (_host, func) = jit_compile("abc");
+        let text = b"abcdef";
+        // Starting at pos == text_len: 0 bytes remain, must reject.
+        let result = unsafe { func(text.as_ptr(), text.len(), text.len()) };
+        assert_eq!(result, -1, "no bytes left starting at text.len()");
+    }
+
+    #[test]
+    fn step3a_long_literal_match() {
+        let (_host, func) = jit_compile("hello world");
+        let text = b"hello world!";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(result, 11);
+    }
+
+    #[test]
+    fn step3a_long_literal_no_match_first_byte_mismatch() {
+        let (_host, func) = jit_compile("hello world");
+        let text = b"Hello world!";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, -1,
+            "first-byte mismatch (lowercase vs uppercase) must reject"
+        );
+    }
+
+    #[test]
+    fn step3a_long_literal_no_match_last_byte_mismatch() {
+        let (_host, func) = jit_compile("hello world");
+        let text = b"hello worlD!";
+        let result = unsafe { func(text.as_ptr(), text.len(), 0) };
+        assert_eq!(
+            result, -1,
+            "last-byte mismatch must reject (whole literal must match)"
+        );
+    }
+
+    #[test]
+    fn step3a_multiple_programs_on_one_host() {
+        // Compile two distinct literal programs into the same host
+        // and call both. Validates the unique-name allocation in
+        // `JitHost::next_func_index` and the per-function lookup via
+        // `get_finalized_fn`.
+        let mut host = JitHost::new().expect("host construction must succeed");
+        let prog_abc = compile("abc");
+        let prog_xyz = compile("xyz");
+        let id_abc = compile_program(&prog_abc, &mut host).expect("abc compile");
+        let id_xyz = compile_program(&prog_xyz, &mut host).expect("xyz compile");
+        host.finalize_definitions().expect("finalize");
+        // SAFETY: signature is fixed Step3aJittedFn for every step 3a
+        // compiled function; host outlives the calls.
+        let f_abc: Step3aJittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(id_abc)) };
+        let f_xyz: Step3aJittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(id_xyz)) };
+        let text = b"abcxyz";
+        unsafe {
+            assert_eq!(f_abc(text.as_ptr(), text.len(), 0), 3);
+            assert_eq!(f_xyz(text.as_ptr(), text.len(), 3), 6);
+            assert_eq!(f_abc(text.as_ptr(), text.len(), 3), -1);
+            assert_eq!(f_xyz(text.as_ptr(), text.len(), 0), -1);
+        }
+    }
+
+    // ----- step 3a refusal cases -----
+    //
+    // Patterns outside the step 3a subset must be rejected with
+    // CodegenUnsupported. The eligibility check (step 2) accepts
+    // these but step 3a's narrower scope rejects them; the caller
+    // would fall back to the interpreter.
+
+    fn assert_codegen_unsupported(pattern: &str) {
+        let program = compile(pattern);
+        let mut host = JitHost::new().expect("host construction must succeed");
+        let result = compile_program(&program, &mut host);
+        match result {
+            Err(JitHostError::CodegenUnsupported(_)) => {}
+            Err(other) => {
+                panic!("pattern `{pattern}` should be CodegenUnsupported but got {other:?}")
+            }
+            Ok(_) => {
+                panic!("pattern `{pattern}` should be CodegenUnsupported but compiled successfully")
+            }
+        }
+    }
+
+    #[test]
+    fn step3a_refuses_char_class() {
+        assert_codegen_unsupported(r"\d");
+    }
+
+    #[test]
+    fn step3a_refuses_dot() {
+        assert_codegen_unsupported(".");
+    }
+
+    #[test]
+    fn step3a_refuses_anchor() {
+        assert_codegen_unsupported(r"\Aabc");
+    }
+
+    #[test]
+    fn step3a_refuses_alternation() {
+        assert_codegen_unsupported("a|b");
+    }
+
+    #[test]
+    fn step3a_refuses_quantifier() {
+        assert_codegen_unsupported("a+");
+    }
+
+    #[test]
+    fn step3a_refuses_capture_group() {
+        // Capturing group with explicit group id 1 — group 0 wrappers
+        // are accepted, group 1+ require capture trail (step 4).
+        assert_codegen_unsupported("(abc)");
+    }
+
+    #[test]
+    fn step3a_refuses_multibyte_literal() {
+        // Non-ASCII literal compiles to a multi-byte Char opcode;
+        // step 3a only handles single-byte payloads.
+        assert_codegen_unsupported("é");
+    }
+
+    #[test]
+    fn step3a_refuses_jit_ineligible_pattern_via_eligibility_check() {
+        // The is_jit_eligible short-circuit fires first when the
+        // pattern is outside the broader JIT subset.
+        assert_codegen_unsupported(r"(\w+)\1");
     }
 }
