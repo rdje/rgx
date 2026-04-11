@@ -54,10 +54,27 @@
 //! - **Step 3**: codegen for the easy opcodes (`Char`, `DigitAscii`,
 //!   `WordAscii`, `SpaceAscii`, `Split`, `Jump`, `Match`, `SaveStart`,
 //!   `SaveEnd`, `Backtrack`, `StartText`, `EndText`, `WordBoundary`,
-//!   `NonWordBoundary`). (planned)
-//! - **Step 4**: capture trail in JIT'd code with the differential gate
-//!   active. (planned)
-//! - **Step 5**: engine dispatch wiring + 4-tier dispatch chain. (planned)
+//!   `NonWordBoundary`). ✅ (substeps 3a–3e.4)
+//! - **Step 4a**: corpus-based differential test harness. ✅
+//! - **Step 4b**: capture trail in JIT'd code. (planned)
+//! - **Step 5**: engine dispatch wiring + 4-tier dispatch chain. ✅
+//!   - New [`JitProgram`] type encapsulating `JitHost + FuncId` with
+//!     `unsafe impl Send` documented for the read-only-after-finalize
+//!     invariant.
+//!   - New `Engine::should_use_jit` runtime gate, mirroring
+//!     `should_dispatch_to_c2` (no event observer, no runtime safety
+//!     limits).
+//!   - New `Engine::try_jit_is_match` / `try_jit_find_first` /
+//!     `try_jit_find_all` methods, each using `PrefixScanner` for
+//!     skip acceleration.
+//!   - 4-tier dispatch chain in `Regex::find_first` / `find_all` /
+//!     `is_match`: **DFA → Pike-VM → JIT → interpreter**. JIT goes
+//!     AFTER Pike-VM (deviation from design doc §8) because Pike-VM
+//!     is the safety net for nested-quantifier patterns where the
+//!     JIT could blow up exponentially.
+//!   - Top-level alternation patterns are excluded from the JIT
+//!     (mirrors C2 dispatch) because the JIT'd function signature
+//!     returns only the match span, not `matched_branch_number`.
 //! - **Step 6**: `CharClass(id)` and multi-byte literal support via
 //!   runtime helpers. (planned)
 //! - **Step 7**: runtime safety helpers (step counter, recursion depth,
@@ -89,5 +106,7 @@ pub mod codegen;
 pub mod jit;
 pub mod runtime;
 
-pub use codegen::is_jit_eligible;
-pub use jit::{JitHost, JitHostError};
+pub use codegen::{
+    compile_program, compile_program_to_jit_program, is_jit_eligible, Step3aJittedFn,
+};
+pub use jit::{JitHost, JitHostError, JitProgram};

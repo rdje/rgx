@@ -86,6 +86,17 @@ pub struct Engine {
     /// the DFA's `transition` method mutates its state cache, and
     /// public `Regex` API methods are `&self`.
     c2_dfa: Option<Mutex<LazyDfa>>,
+    /// C1 JIT-compiled program for native dispatch (step 5).
+    /// Built in [`Engine::new`] only when the pattern is
+    /// JIT-eligible per `c1::is_jit_eligible` AND the codegen
+    /// layer accepts it (`c1::compile_program_to_jit_program`).
+    /// Wrapped in `Mutex` because `cranelift_jit::JITModule`'s
+    /// internal symbol table is interior-mutable, mirroring the
+    /// `c2_dfa` pattern. The lock is held only briefly to retrieve
+    /// the function pointer; the actual JIT'd-function call
+    /// happens after the lock is released. Gated on `feature = "jit"`.
+    #[cfg(feature = "jit")]
+    jit_program: Option<Mutex<crate::c1::JitProgram>>,
 }
 
 /// Convert a VM-level `Match` into a public `MatchResult`.
@@ -113,6 +124,27 @@ fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
         start: m.start,
         end: m.end,
         groups: m.groups,
+        matched_branch_number: None,
+        code_result: None,
+    }
+}
+
+/// Convert a JIT'd-function result `(start, end)` into the public
+/// [`MatchResult`] shape. C1 step 5.
+///
+/// The JIT'd function returns only the new match end position; the
+/// engine layer combines this with the scan position to produce
+/// `(start, end)`. The capture groups vector contains only group 0
+/// (the overall match span) because the JIT-eligible subset
+/// rejects patterns with capture groups 1+ at the decoder.
+/// `matched_branch_number` and `code_result` are always `None`
+/// for the same eligibility-exclusion reasons.
+#[cfg(feature = "jit")]
+fn jit_match_to_result(start: usize, end: usize) -> MatchResult {
+    MatchResult {
+        start,
+        end,
+        groups: vec![Some((start, end))],
         matched_branch_number: None,
         code_result: None,
     }
@@ -248,6 +280,42 @@ fn build_dfa_if_eligible(
         .map(Mutex::new)
 }
 
+/// Try to JIT-compile the given program into a `JitProgram`.
+/// Returns `None` if the pattern is outside the JIT-eligible
+/// subset (the most common case — anything with captures,
+/// lookaround, code blocks, etc. is rejected by the C1 decoder),
+/// or if any other JIT host error occurs (e.g. the host
+/// architecture isn't supported by Cranelift), or if the pattern
+/// has top-level alternation (the JIT path doesn't track
+/// `matched_branch_number`, mirroring the C2 dispatch's exclusion).
+///
+/// `Some(Mutex<JitProgram>)` means the engine should consider
+/// dispatching through the JIT for this pattern. The runtime
+/// gating in [`Engine::should_use_jit`] still applies (event
+/// observers, runtime safety limits).
+///
+/// C1 step 5.
+#[cfg(feature = "jit")]
+fn build_jit_program_if_eligible(
+    ast: &crate::ast::Regex,
+    program: &crate::vm::Program,
+) -> Option<Mutex<crate::c1::JitProgram>> {
+    // Skip JIT dispatch for top-level alternation. The JIT'd
+    // function returns only the match span, not the matched
+    // branch number — and the existing API contract sets
+    // `MatchResult.matched_branch_number = Some(branch_idx)` for
+    // top-level alternation. Routing these patterns through the
+    // JIT would silently drop the branch number. The C2 dispatch
+    // path excludes top-level alternation for the same reason
+    // (see `c2::program::is_c2_dispatch_eligible`).
+    if crate::c2::program::has_top_level_alternation(ast) {
+        return None;
+    }
+    crate::c1::compile_program_to_jit_program(program)
+        .ok()
+        .map(Mutex::new)
+}
+
 impl Engine {
     /// Create new engine from compiled pattern
     ///
@@ -270,11 +338,24 @@ impl Engine {
         // C2 step 5b: build the lazy DFA if the pattern is DFA-eligible.
         // The DFA serves `is_match` dispatch via `should_dispatch_to_dfa`.
         let c2_dfa = build_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
+
+        // C1 step 5: JIT-compile the pattern if possible. On
+        // `CodegenUnsupported` (or any other error), we silently
+        // store None and the engine falls back to the existing
+        // dispatch chain (DFA → Pike-VM → interpreter). Patterns
+        // outside the JIT subset are common (anything with
+        // captures, lookaround, code blocks, etc.) so failure is
+        // expected and not an error.
+        #[cfg(feature = "jit")]
+        let jit_program = build_jit_program_if_eligible(&pattern.ast, &pattern.program);
+
         let vm = RegexVM::with_execution_manager(pattern.program.clone(), execution_manager);
         let engine = Self {
             vm,
             mode: pattern.mode,
             c2_dfa,
+            #[cfg(feature = "jit")]
+            jit_program,
         };
         trace_exit!("engine", "Engine::new", "ok=true,mode={:?}", engine.mode);
         Ok(engine)
@@ -525,6 +606,189 @@ impl Engine {
             start = if is_empty { start + 1 } else { end };
         }
         Some(results)
+    }
+
+    // ============================================================
+    // C1 step 5 — JIT dispatch
+    // ============================================================
+
+    /// Returns the JIT-compiled program for this engine if the
+    /// pattern is JIT-eligible AND the runtime state allows JIT
+    /// dispatch (no event observer, no runtime safety limits —
+    /// same constraints as [`Engine::should_dispatch_to_c2`]).
+    ///
+    /// Also returns `None` for pure-literal patterns: the existing
+    /// VM has a `memchr::memmem::Finder` fast path that bypasses
+    /// the VM entirely for those, and that fast path is faster
+    /// than anything the JIT can do for a pure literal.
+    ///
+    /// The returned `Mutex` must be locked by the caller. The
+    /// JIT host's symbol table is interior-mutable, so the lock
+    /// is required even from `&self` — but it's held only briefly
+    /// to retrieve the function pointer; the actual JIT'd-function
+    /// call happens after the lock is released.
+    #[cfg(feature = "jit")]
+    #[doc(hidden)]
+    pub fn should_use_jit(&self) -> Option<&Mutex<crate::c1::JitProgram>> {
+        let jit = self.jit_program.as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
+            return None;
+        }
+        Some(jit)
+    }
+
+    /// `should_use_jit` stub when the `jit` feature is disabled.
+    /// Always returns `None`. Lets `lib.rs` dispatch chains call
+    /// the same accessor regardless of the feature flag.
+    #[cfg(not(feature = "jit"))]
+    #[doc(hidden)]
+    pub fn should_use_jit(&self) -> Option<()> {
+        None
+    }
+
+    /// Try to answer `is_match` via the JIT. Returns:
+    /// - `Some(true)` / `Some(false)` if the JIT path produced a
+    ///   definitive answer
+    /// - `None` if the JIT isn't available or runtime state forbids
+    ///   JIT dispatch
+    ///
+    /// The caller (`Regex::is_match` in `lib.rs`) falls back to
+    /// the C2 / Pike-VM / interpreter dispatch chain when this
+    /// returns `None`.
+    ///
+    /// The JIT'd function tests the pattern at exactly one position;
+    /// this method scans every position from 0..=input.len() and
+    /// returns true on the first successful match. The scan loop
+    /// uses the existing `PrefixScanner` for skip acceleration.
+    #[cfg(feature = "jit")]
+    #[doc(hidden)]
+    pub fn try_jit_is_match(&self, input: &[u8]) -> Option<bool> {
+        let jit_mutex = self.should_use_jit()?;
+        let func = self.jit_function_ptr(jit_mutex);
+        let scanner = PrefixScanner::new(&self.vm, None);
+        let mut start = 0usize;
+        while let Some(candidate) = scanner.next_candidate(input, start) {
+            // SAFETY: input is alive for the call; the function
+            // pointer is alive for the lifetime of the JitProgram
+            // which is held by self via the Mutex.
+            let result = unsafe { func(input.as_ptr(), input.len(), candidate) };
+            if result >= 0 {
+                return Some(true);
+            }
+            start = candidate + 1;
+        }
+        // Empty-match patterns may still match at input.len() even
+        // when no consuming-byte position was a candidate. Try the
+        // trailing position once.
+        if start <= input.len() {
+            let result = unsafe { func(input.as_ptr(), input.len(), input.len()) };
+            if result >= 0 {
+                return Some(true);
+            }
+        }
+        Some(false)
+    }
+
+    /// Try to answer `find_first` via the JIT. Returns the leftmost
+    /// match found by scanning positions and calling the JIT'd
+    /// function at each candidate, or `None` if the JIT isn't
+    /// available.
+    #[cfg(feature = "jit")]
+    #[doc(hidden)]
+    pub fn try_jit_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
+        let jit_mutex = self.should_use_jit()?;
+        let func = self.jit_function_ptr(jit_mutex);
+        let scanner = PrefixScanner::new(&self.vm, None);
+        let mut start = 0usize;
+        while let Some(candidate) = scanner.next_candidate(input, start) {
+            // SAFETY: see try_jit_is_match.
+            let result = unsafe { func(input.as_ptr(), input.len(), candidate) };
+            if result >= 0 {
+                #[allow(clippy::cast_sign_loss)] // checked >= 0
+                let end = result as usize;
+                return Some(Some(jit_match_to_result(candidate, end)));
+            }
+            start = candidate + 1;
+        }
+        // Try the trailing position for empty-match patterns.
+        if start <= input.len() {
+            let result = unsafe { func(input.as_ptr(), input.len(), input.len()) };
+            if result >= 0 {
+                #[allow(clippy::cast_sign_loss)] // checked >= 0
+                let end = result as usize;
+                return Some(Some(jit_match_to_result(input.len(), end)));
+            }
+        }
+        Some(None)
+    }
+
+    /// Try to answer `find_all` via the JIT. Returns the full list
+    /// of non-overlapping matches found by scanning positions and
+    /// calling the JIT'd function. Same advance rules as
+    /// `try_dfa_find_all`: after a non-empty match the next scan
+    /// starts at the match end; after an empty match the next scan
+    /// starts one byte later; an empty match adjacent to a previous
+    /// non-empty match is dropped.
+    #[cfg(feature = "jit")]
+    #[doc(hidden)]
+    pub fn try_jit_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
+        let jit_mutex = self.should_use_jit()?;
+        let func = self.jit_function_ptr(jit_mutex);
+        let scanner = PrefixScanner::new(&self.vm, None);
+        let mut results = Vec::new();
+        let mut start = 0usize;
+        let mut prev_non_empty_end: Option<usize> = None;
+        while start <= input.len() {
+            let Some(candidate) = scanner.next_candidate(input, start) else {
+                break;
+            };
+            start = candidate;
+            // SAFETY: see try_jit_is_match.
+            let result = unsafe { func(input.as_ptr(), input.len(), start) };
+            if result < 0 {
+                start += 1;
+                continue;
+            }
+            #[allow(clippy::cast_sign_loss)] // checked >= 0
+            let end = result as usize;
+            let is_empty = end == start;
+            if is_empty && Some(start) == prev_non_empty_end {
+                start += 1;
+                continue;
+            }
+            results.push(jit_match_to_result(start, end));
+            prev_non_empty_end = if is_empty { None } else { Some(end) };
+            start = if is_empty { start + 1 } else { end };
+        }
+        Some(results)
+    }
+
+    /// Retrieve the raw function pointer from the JIT program,
+    /// transmuted to the typed `Step3aJittedFn` C ABI signature.
+    /// Locks the mutex briefly, fetches the pointer, releases
+    /// the lock, and returns the typed function. The function
+    /// pointer is valid for the lifetime of the engine because
+    /// the underlying `JitProgram` is owned by the Mutex which
+    /// is owned by the engine.
+    #[cfg(feature = "jit")]
+    fn jit_function_ptr(
+        &self,
+        jit_mutex: &Mutex<crate::c1::JitProgram>,
+    ) -> crate::c1::Step3aJittedFn {
+        let jit = jit_mutex.lock().expect("JitProgram mutex poisoned");
+        let raw = jit.raw_fn_ptr();
+        // SAFETY: the function pointer was finalized by
+        // `compile_program_to_jit_program` and points at executable
+        // memory owned by the JitProgram, which is alive for the
+        // lifetime of self. The signature `(i64, i64, i64) -> i64`
+        // matches the `Step3aJittedFn` C ABI exactly.
+        unsafe { std::mem::transmute(raw) }
     }
 
     /// C2 classification of the compiled pattern this engine was built for.

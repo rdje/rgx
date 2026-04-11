@@ -258,7 +258,7 @@ pub fn is_c2_dispatch_eligible(ast: &Regex) -> bool {
 /// is `Alternation`. Used by [`is_c2_dispatch_eligible`] to detect
 /// patterns whose `matched_branch_number` field would be lost on
 /// engine dispatch.
-fn has_top_level_alternation(ast: &Regex) -> bool {
+pub(crate) fn has_top_level_alternation(ast: &Regex) -> bool {
     match ast {
         Regex::Alternation(_) => true,
         Regex::Group { expr, .. } => has_top_level_alternation(expr),

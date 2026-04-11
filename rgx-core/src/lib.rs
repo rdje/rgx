@@ -854,6 +854,47 @@ impl RegexBuilder {
     }
 }
 
+// ============================================================
+// C1 step 5 — JIT dispatch helpers
+// ============================================================
+//
+// These thin wrappers call into `Engine`'s JIT dispatch methods
+// when the `jit` feature is enabled and return `None` (no-op)
+// when it isn't. The non-jit stubs let `Regex::find_first` /
+// `find_all` / `is_match` use the same dispatch chain regardless
+// of whether the feature is on, avoiding `#[cfg]` clutter at the
+// public API.
+
+#[cfg(feature = "jit")]
+fn jit_dispatch_find_first(engine: &Engine, input: &[u8]) -> Option<Option<MatchResult>> {
+    engine.try_jit_find_first(input)
+}
+
+#[cfg(not(feature = "jit"))]
+fn jit_dispatch_find_first(_engine: &Engine, _input: &[u8]) -> Option<Option<MatchResult>> {
+    None
+}
+
+#[cfg(feature = "jit")]
+fn jit_dispatch_find_all(engine: &Engine, input: &[u8]) -> Option<Vec<MatchResult>> {
+    engine.try_jit_find_all(input)
+}
+
+#[cfg(not(feature = "jit"))]
+fn jit_dispatch_find_all(_engine: &Engine, _input: &[u8]) -> Option<Vec<MatchResult>> {
+    None
+}
+
+#[cfg(feature = "jit")]
+fn jit_dispatch_is_match(engine: &Engine, input: &[u8]) -> Option<bool> {
+    engine.try_jit_is_match(input)
+}
+
+#[cfg(not(feature = "jit"))]
+fn jit_dispatch_is_match(_engine: &Engine, _input: &[u8]) -> Option<bool> {
+    None
+}
+
 /// High-performance regex matcher with optional code execution capabilities.
 ///
 /// This is the main entry point for the `rgx` regex engine. It provides
@@ -1044,17 +1085,20 @@ impl Regex {
     #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
-        // C2 step 8: 3-tier dispatch — try the lazy DFA first, then
-        // Pike-VM (with the same `PrefixScanner` skip acceleration the
-        // existing backtracking VM uses), then the existing backtracking
-        // VM. The Pike-VM tier now goes through `Engine::try_pike_find_all`
-        // instead of calling `pike_captures_all` directly so that
-        // `Digit` / `Word` / `Space` / `CharClass` prefixes don't scan
-        // every byte position.
+        // C1 step 5: 4-tier dispatch — try the lazy DFA first
+        // (DFA-eligible patterns), then Pike-VM (nested-quantifier
+        // safety net), then the JIT (everything else that the JIT
+        // can lower), then the existing backtracking VM (final
+        // fallback). The JIT tier sits AFTER Pike-VM because
+        // Pike-VM is the safety net for patterns that risk
+        // catastrophic backtracking — the JIT inherits that risk
+        // since it's a JIT'd backtracking VM, not an NFA simulator.
         let matches = if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
             dfa_result
         } else if let Some(pike_result) = self.engine.try_pike_find_all(text.as_bytes()) {
             pike_result
+        } else if let Some(jit_result) = jit_dispatch_find_all(&self.engine, text.as_bytes()) {
+            jit_result
         } else {
             self.engine.find_all(text.as_bytes())
         };
@@ -1080,15 +1124,16 @@ impl Regex {
     #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
-        // C2 step 8: 3-tier dispatch — try the lazy DFA first (faster
-        // per-byte for DFA-eligible patterns), then Pike-VM (for
-        // patterns DFA can't handle, with `PrefixScanner` skip
-        // acceleration), then the existing backtracking VM (for
-        // patterns outside the C2 subset).
+        // C1 step 5: 4-tier dispatch — DFA → Pike-VM → JIT →
+        // interpreter. See `find_all` for the rationale of the
+        // ordering (Pike-VM before JIT because Pike-VM is the
+        // safety net for nested-quantifier patterns).
         let first = if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
             dfa_result
         } else if let Some(pike_result) = self.engine.try_pike_find_first(text.as_bytes()) {
             pike_result
+        } else if let Some(jit_result) = jit_dispatch_find_first(&self.engine, text.as_bytes()) {
+            jit_result
         } else {
             self.engine.find_first(text.as_bytes())
         };
@@ -1326,14 +1371,14 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
-        // C2 step 8: prefer the lazy DFA when available; fall back to
-        // Pike-VM (with `PrefixScanner` skip acceleration) on cache
-        // exhaustion or when the pattern isn't DFA-eligible. Pike-VM
-        // in turn falls back to the existing backtracking VM when the
-        // pattern isn't C2-eligible.
+        // C1 step 5: 4-tier dispatch — DFA → Pike-VM → JIT →
+        // interpreter. See `find_all` for the rationale of the
+        // ordering.
         let matched = if let Some(matched) = self.engine.try_dfa_is_match(text.as_bytes()) {
             matched
         } else if let Some(matched) = self.engine.try_pike_is_match(text.as_bytes()) {
+            matched
+        } else if let Some(matched) = jit_dispatch_is_match(&self.engine, text.as_bytes()) {
             matched
         } else {
             self.engine.is_match(text.as_bytes())

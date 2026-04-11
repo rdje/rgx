@@ -849,6 +849,41 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
     Ok(func_id)
 }
 
+/// **C1 step 5 entry point.** Compile a `Program` into a complete
+/// `JitProgram` ready for engine dispatch. This is a thin wrapper
+/// over [`compile_program`] that:
+///
+/// 1. Creates a fresh [`JitHost`].
+/// 2. Calls [`compile_program`] to JIT-compile the program. On
+///    failure (`CodegenUnsupported` or any other host error), the
+///    `JitHost` is dropped and the error is propagated.
+/// 3. Calls [`JitHost::finalize_definitions`] to make the function
+///    pointer executable.
+/// 4. Wraps the host + func_id into a [`JitProgram`].
+///
+/// Used by `Engine::new` (in `engine.rs`) to optionally JIT-compile
+/// every newly-built engine. Patterns the JIT can't handle return
+/// `Err(JitHostError::CodegenUnsupported)` and the engine layer
+/// stores `None` for `jit_program`, falling back to the existing
+/// dispatch chain (DFA → Pike-VM → interpreter).
+///
+/// # Errors
+///
+/// - [`JitHostError::HostNotSupported`] if Cranelift can't build a
+///   JIT host for the current target.
+/// - [`JitHostError::CodegenUnsupported`] if the program is outside
+///   the JIT-eligible subset.
+/// - [`JitHostError::ModuleError`] if Cranelift fails to declare,
+///   define, or finalise the function.
+pub fn compile_program_to_jit_program(
+    program: &Program,
+) -> Result<crate::c1::JitProgram, JitHostError> {
+    let mut host = JitHost::new()?;
+    let func_id = compile_program(program, &mut host)?;
+    host.finalize_definitions()?;
+    Ok(crate::c1::JitProgram::new(host, func_id))
+}
+
 /// Emit Cranelift IR for a single [`JitOp`] inside its dedicated
 /// block. The caller has already switched the builder to the op's
 /// block and obtained the current `pos` from its block parameter.

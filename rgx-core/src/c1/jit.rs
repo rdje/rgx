@@ -316,6 +316,95 @@ impl JitHost {
     }
 }
 
+/// A finalised JIT-compiled program: a `JitHost` paired with a
+/// `FuncId` for the compiled function. This is the engine-layer
+/// handle returned by `c1::codegen::compile_program` (via the C1
+/// step 5 wrapper) and stored on `Engine::jit_program`.
+///
+/// The `JitHost` is held inside this struct so its executable
+/// memory mapping (and therefore the function pointer the engine
+/// dispatch path calls) stays alive for the lifetime of the
+/// `JitProgram`. Dropping a `JitProgram` unmaps the executable
+/// memory and invalidates any still-held function pointers — but
+/// since the host is owned exclusively by this struct, and the
+/// engine layer keeps the struct alive for the lifetime of the
+/// `Regex`, the function pointer is always valid when the engine
+/// dispatches.
+///
+/// # Sync / Send
+///
+/// `JitProgram` is `Send` (via the underlying `JitHost` being
+/// `Send`) but is NOT `Sync` because `cranelift_jit::JITModule`'s
+/// internal symbol table is interior-mutable. The engine layer
+/// wraps it in a `Mutex` (mirroring the `c2_dfa` pattern in
+/// `engine.rs`) to satisfy `Engine`'s `Sync` requirement. The
+/// lock is held only briefly to retrieve the function pointer
+/// via `get_finalized_fn`; the actual JIT'd-function call happens
+/// after the lock is released.
+pub struct JitProgram {
+    /// The host that owns the executable memory mapping. Kept
+    /// alive for the lifetime of `JitProgram` so the function
+    /// pointer below remains valid.
+    host: JitHost,
+    /// The Cranelift `FuncId` of the compiled program. Used by
+    /// `host.get_finalized_fn(func_id)` to retrieve the raw
+    /// function pointer.
+    func_id: FuncId,
+}
+
+impl JitProgram {
+    /// Construct a `JitProgram` from a finalised `JitHost` and the
+    /// `FuncId` of the compiled function. The host MUST have had
+    /// `finalize_definitions` called before this constructor.
+    #[must_use]
+    pub fn new(host: JitHost, func_id: FuncId) -> Self {
+        Self { host, func_id }
+    }
+
+    /// Retrieve the raw native function pointer for the compiled
+    /// program. The pointer is only valid for the lifetime of the
+    /// `JitProgram` — dropping the program unmaps the executable
+    /// memory and invalidates the pointer.
+    ///
+    /// The caller transmutes this to the appropriate `extern "C"
+    /// fn` signature matching what the codegen layer produced.
+    /// For step 5, that signature is
+    /// `unsafe extern "C" fn(text: *const u8, text_len: usize, pos: usize) -> isize`
+    /// (the `Step3aJittedFn` type from `c1::codegen`).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn raw_fn_ptr(&self) -> *const u8 {
+        self.host.get_finalized_fn(self.func_id)
+    }
+}
+
+impl fmt::Debug for JitProgram {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JitProgram")
+            .field("func_id", &self.func_id)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: `cranelift_jit::JITModule` contains raw `*const u8`
+// pointers (the cached function-pointer lookup table), which
+// makes it `!Send` by default. For RGX's use case the JIT module
+// is constructed once via `compile_program_to_jit_program`
+// (which builds, defines, and finalises the function in a single
+// thread), then stored on `Engine` inside a `Mutex` and never
+// mutated again. All subsequent use is read-only — `raw_fn_ptr`
+// just looks up the cached function pointer. Read-only sharing
+// of a `!Sync` type across threads via a `Mutex` is sound, and
+// the `Send` impl is what makes the `Mutex<JitProgram>` `Sync`.
+//
+// The invariant we rely on: after `JitProgram::new` returns,
+// nothing inside the contained `JitHost` is ever mutated. The
+// engine layer is the sole user and never calls any of the
+// mutating methods (`declare_function`, `define_function`,
+// `finalize_definitions`, `import_word_boundary_helper`,
+// `next_func_index`) on the held host.
+unsafe impl Send for JitProgram {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
