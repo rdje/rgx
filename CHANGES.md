@@ -14,6 +14,34 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 4a: corpus-based differential test harness
+- Scope: Twelfth code commit for the C1 JIT compilation backend. **The design doc §1.0 (accuracy first) hard gate is now active** for the existing JIT-eligible subset. Adds a corpus-based differential test harness that JIT-compiles patterns through the C1 path AND runs the same patterns through the existing interpreter, then asserts byte-for-byte match-span equivalence across multiple inputs. 27 new differential tests cover all the JIT-eligible opcode families shipped in steps 3a–3e.4. Step 4 is split: 4a (this commit) is the differential gate; 4b will land the capture trail in JIT'd code so capture-bearing patterns become JIT-eligible.
+- **The differential gate is the most important correctness check the C1 plan ships.** Until now the JIT codegen has had hand-curated unit tests that exercise specific patterns. The differential gate adds a SECOND layer: every pattern in the corpus is run through both the JIT and the interpreter, with the results compared at the public API level. Any divergence — for any input — is a hard test failure. This catches:
+  - Edge cases at start/end of input that unit tests missed
+  - Empty match handling subtleties
+  - Subtle anchor semantics
+  - Backtracking bugs in complex combinations
+  - Quantifier corner cases involving the interaction with following ops
+- **The harness architecture**:
+  - `jit_find_first_via_scan(func, text) -> Option<(start, end)>` wraps a `Step3aJittedFn` in a scan loop. For each position 0..=text.len() (inclusive — to allow empty matches at end of text), it calls the JIT'd function and returns the leftmost successful match. This mimics the interpreter's `find_first` scan semantics so the two paths can be compared apples-to-apples.
+  - `assert_jit_interp_equivalent(pattern, &[inputs])` compiles the pattern via both `Regex::compile` (interpreter) and `compile_program` (JIT), then iterates over the inputs and asserts the match spans match. Patterns the JIT can't handle (`CodegenUnsupported`) cause the helper to return `false` without panicking — they would route through the interpreter in production anyway.
+- **27 new differential tests** in `c1::codegen::tests::differential_*`, covering:
+  - **Literals**: pure literals (`abc`, `a`) against matching, non-matching, partial-match, prefix-match, and empty inputs.
+  - **Char classes**: `\d`, `\w`, `\s` and their negated forms `\D`, `\W`, `\S` against representative inputs.
+  - **Anchors**: `\Aabc` (start text), `abc\z` (end text), `\Aabc\z` (both), `\bword\b` (word boundaries) against matching and non-matching positions.
+  - **Alternations**: `cat|dog`, `cat|dog|bird`, `ab|abc` (overlap test for leftmost-first semantics).
+  - **Greedy quantifiers**: `\d+`, `\d*`, `\d?` against matching, non-matching, and edge-case inputs.
+  - **Lazy quantifiers**: `\d+?`, `\d*?`, `\d??` — the most important set because lazy semantics are subtle and easy to get wrong.
+  - **Combinations**: `\d+x` (quantifier + literal), `\A\d+\z` (anchored quantifier), `\w+@\w+\.\w+` (email-like), `\w+|word` (quantifier in alternation), `a*b+` (combined Star + Plus), `a*?b` (lazy followed by literal), `\b\d+\b` (boundary + class quantifier), `\Ahello\b` (anchor + word boundary).
+- **Every test in the corpus uses multiple inputs per pattern** (typically 5–8 inputs) so the verification is broad. A pattern might pass the unit-test harness on a single hand-picked input but fail on a different one — the differential corpus catches that.
+- **Result: zero divergences across all 27 tests**. Every JIT-compiled pattern produces byte-for-byte identical match spans to the interpreter on every corpus input. This locks in the correctness of steps 3a–3e.4 and gives us a high-confidence baseline for the next steps. The four-substep streak (3e.1, 3e.2, 3e.3, 3e.4) of "no bugs caught on the first run" is now backed by the broader differential gate — the unit tests AND the corpus comparison both pass cleanly.
+- **Why this is "step 4a" not "step 4"**: the design doc step 4 includes both the differential gate AND capture trail in JIT'd code. The capture trail is a substantial separate piece of work — the JIT needs to maintain a per-call capture buffer + a trail recording every modification + restore on backtrack. Splitting the design doc step 4 into 4a (differential gate) and 4b (capture trail) keeps each commit accuracy-first scoped. After step 4b, capture-bearing patterns become JIT-eligible (currently the decoder rejects `SaveStart`/`SaveEnd` with group_id > 0).
+- 2 small clippy warnings introduced and fixed: `cast_sign_loss` on `result as usize` (we already check `result >= 0` so it's safe — added `#[allow]` with the explanatory comment), `doc_markdown` on `0..=text.len()` needing backticks in the helper doc.
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 passing (unchanged from step 3e.4 — `c1/` still doesn't exist when the feature is off), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit --lib c1` **212 C1 tests passing** (185 from step 3e.4 + 27 new differential), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 4a is complete.** The differential gate is active for the existing JIT-eligible subset. Next: C1 step 4b (capture trail in JIT'd code — extends the JIT'd function signature to take a capture buffer pointer, emits real codegen for `SaveStart`/`SaveEnd` with non-zero group ids, maintains a trail for backtrack-undo). After 4b: step 5 (engine dispatch wiring), then steps 6–8.
+
 ### 2026-04-11 - C1 step 3e.4: lazy quantifier variants
 - Scope: Eleventh code commit for the C1 JIT compilation backend. Adds the three lazy optimized quantifier opcodes — `QuestionLazy` (`??`), `StarLazy` (`*?`), `PlusLazy` (`+?`) — by reusing the same lowerings as their greedy counterparts but substituting `SplitLazy` for `Split`. **All six optimized quantifier opcodes are now supported.** Patterns like `a??`, `a*?`, `a+?`, `a*?b`, `a+?b`, `\w+?\z`, and the canonical lazy-vs-greedy contrast `a*?` against `aaa` (returns 0 vs greedy `a*` returning 3) are now JIT-compilable.
 - **The lowerings**: each lazy variant uses the same shape as its greedy counterpart, with `Split` swapped for `SplitLazy`:

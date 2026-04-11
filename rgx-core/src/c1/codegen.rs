@@ -3867,4 +3867,359 @@ mod tests {
             assert_eq!(question_lazy_fn(b"a".as_ptr(), 1, 0), 0);
         }
     }
+
+    // ============================================================
+    // C1 step 4a — corpus-based differential gate
+    // ============================================================
+    //
+    // For each (pattern, input) pair in the hand-curated corpus,
+    // compile the pattern through both the JIT path
+    // (`compile_program` from this module) and the existing
+    // interpreter (`Regex::compile`), then assert the match spans
+    // are byte-for-byte equivalent. Patterns the JIT can't handle
+    // (CodegenUnsupported) are skipped — they would route through
+    // the interpreter in production anyway.
+    //
+    // The JIT'd function tests the pattern at *exactly* `pos`, so
+    // the test harness wraps it in a scan loop that tries every
+    // position from 0 to text.len() (inclusive) and returns the
+    // leftmost successful match — mimicking the interpreter's
+    // `find_first` scan semantics.
+    //
+    // This is the design doc step 4 "differential gate active"
+    // piece for the existing JIT subset. Capture trail (step 4b)
+    // is a separate commit.
+
+    /// Wrap a JIT'd `Step3aJittedFn` in a scan loop. For each
+    /// position from `0..=text.len()` (inclusive — to allow empty
+    /// matches at end of text), call the JIT'd function and
+    /// return the leftmost (start, end) where the function
+    /// returned a non-negative value. Returns `None` if no
+    /// position produces a match.
+    fn jit_find_first_via_scan(func: Step3aJittedFn, text: &[u8]) -> Option<(usize, usize)> {
+        for start in 0..=text.len() {
+            // SAFETY: text outlives the call; func is alive for
+            // the lifetime of the host the caller still owns.
+            let result = unsafe { func(text.as_ptr(), text.len(), start) };
+            if result >= 0 {
+                // The `>= 0` check above proves the cast is safe.
+                #[allow(clippy::cast_sign_loss)]
+                let end = result as usize;
+                return Some((start, end));
+            }
+        }
+        None
+    }
+
+    /// Compile `pattern` via both the JIT and the interpreter,
+    /// then assert that for every input in `inputs` they produce
+    /// byte-for-byte identical match spans. Returns a bool
+    /// indicating whether the JIT path was actually exercised
+    /// (false = pattern wasn't JIT-eligible at this step's
+    /// codegen subset, so the test was skipped).
+    fn assert_jit_interp_equivalent(pattern: &str, inputs: &[&[u8]]) -> bool {
+        // Build the interpreter Regex via the public API.
+        let regex = match crate::Regex::compile(pattern) {
+            Ok(r) => r,
+            Err(e) => panic!("interpreter compile failed for `{pattern}`: {e}"),
+        };
+
+        // Build the JIT'd function via compile_program. Skip if
+        // the pattern is outside the current step's codegen subset.
+        let program = compile(pattern);
+        let mut host = JitHost::new().expect("JitHost::new must succeed");
+        let func_id = match compile_program(&program, &mut host) {
+            Ok(id) => id,
+            Err(JitHostError::CodegenUnsupported(_)) => return false,
+            Err(other) => panic!("compile_program for `{pattern}` failed: {other}"),
+        };
+        host.finalize_definitions().expect("finalize must succeed");
+        // SAFETY: signature `(i64, i64, i64) -> i64` matches the
+        // Step3aJittedFn C ABI; host outlives the calls.
+        let func: Step3aJittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(func_id)) };
+
+        for input in inputs {
+            // Interpreter result via the public Regex API.
+            let interp_text =
+                std::str::from_utf8(input).expect("differential corpus inputs must be valid UTF-8");
+            let interp_span = regex.find_first(interp_text).map(|m| (m.start, m.end));
+
+            // JIT result via scan-loop wrapper.
+            let jit_span = jit_find_first_via_scan(func, input);
+
+            assert_eq!(
+                interp_span, jit_span,
+                "differential divergence on pattern={pattern:?} input={input:?}: \
+                 interp={interp_span:?} jit={jit_span:?}"
+            );
+        }
+        true
+    }
+
+    // ----- Differential corpus: literals -----
+
+    #[test]
+    fn differential_pure_literals() {
+        assert!(assert_jit_interp_equivalent(
+            "abc",
+            &[b"abc", b"abcdef", b"xyzabc", b"xabcy", b"ab", b"", b"xyz", b"AAAAabc",]
+        ));
+    }
+
+    #[test]
+    fn differential_single_char_literals() {
+        assert!(assert_jit_interp_equivalent(
+            "a",
+            &[b"a", b"", b"aaa", b"b", b"xa"]
+        ));
+    }
+
+    // ----- Differential corpus: char classes -----
+
+    #[test]
+    fn differential_digit_class() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d",
+            &[b"5", b"a", b"", b"abc123", b"123abc", b"_5"]
+        ));
+    }
+
+    #[test]
+    fn differential_word_class() {
+        assert!(assert_jit_interp_equivalent(
+            r"\w",
+            &[b"a", b"5", b"_", b"!", b" ", b"", b"hello world"]
+        ));
+    }
+
+    #[test]
+    fn differential_space_class() {
+        assert!(assert_jit_interp_equivalent(
+            r"\s",
+            &[b" ", b"\t", b"\n", b"a", b"", b"  abc"]
+        ));
+    }
+
+    #[test]
+    fn differential_negated_char_classes() {
+        assert!(assert_jit_interp_equivalent(
+            r"\D",
+            &[b"a", b"5", b" ", b"!"]
+        ));
+        assert!(assert_jit_interp_equivalent(
+            r"\W",
+            &[b"!", b"a", b"_", b" "]
+        ));
+        assert!(assert_jit_interp_equivalent(
+            r"\S",
+            &[b"a", b" ", b"\t", b"!"]
+        ));
+    }
+
+    // ----- Differential corpus: anchors -----
+
+    #[test]
+    fn differential_start_text_anchor() {
+        assert!(assert_jit_interp_equivalent(
+            r"\Aabc",
+            &[b"abc", b"abcdef", b"xabc", b"", b"abxabc"]
+        ));
+    }
+
+    #[test]
+    fn differential_end_text_anchor() {
+        assert!(assert_jit_interp_equivalent(
+            r"abc\z",
+            &[b"abc", b"xabc", b"abcd", b"", b"abc\n"]
+        ));
+    }
+
+    #[test]
+    fn differential_both_anchors() {
+        assert!(assert_jit_interp_equivalent(
+            r"\Aabc\z",
+            &[b"abc", b"abcd", b"abx", b"", b"xabc"]
+        ));
+    }
+
+    #[test]
+    fn differential_word_boundary() {
+        assert!(assert_jit_interp_equivalent(
+            r"\bword\b",
+            &[
+                b"word",
+                b"abc word def",
+                b"aword",
+                b"worda",
+                b"awordb",
+                b"",
+                b"word!",
+                b"!word",
+            ]
+        ));
+    }
+
+    // ----- Differential corpus: alternations -----
+
+    #[test]
+    fn differential_simple_alternation() {
+        assert!(assert_jit_interp_equivalent(
+            "cat|dog",
+            &[b"cat", b"dog", b"bird", b"", b"catdog", b"dogcat", b"xcat"]
+        ));
+    }
+
+    #[test]
+    fn differential_three_branch_alternation() {
+        assert!(assert_jit_interp_equivalent(
+            "cat|dog|bird",
+            &[b"cat", b"dog", b"bird", b"fish", b""]
+        ));
+    }
+
+    #[test]
+    fn differential_alternation_with_overlap() {
+        // ab|abc — leftmost-first wins, returns 2-char match even
+        // when 3-char would also match.
+        assert!(assert_jit_interp_equivalent(
+            "ab|abc",
+            &[b"abc", b"ab", b"a", b""]
+        ));
+    }
+
+    // ----- Differential corpus: quantifiers (greedy) -----
+
+    #[test]
+    fn differential_plus_greedy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d+",
+            &[b"5", b"123", b"123abc", b"abc", b"", b"a1b2c3"]
+        ));
+    }
+
+    #[test]
+    fn differential_star_greedy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d*",
+            &[b"5", b"123", b"abc", b"", b"abc123"]
+        ));
+    }
+
+    #[test]
+    fn differential_question_greedy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d?",
+            &[b"5", b"a", b"", b"55", b"abc"]
+        ));
+    }
+
+    // ----- Differential corpus: quantifiers (lazy) -----
+
+    #[test]
+    fn differential_plus_lazy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d+?",
+            &[b"5", b"123", b"abc", b""]
+        ));
+    }
+
+    #[test]
+    fn differential_star_lazy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d*?",
+            &[b"5", b"123", b"abc", b""]
+        ));
+    }
+
+    #[test]
+    fn differential_question_lazy() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d??",
+            &[b"5", b"a", b"", b"55"]
+        ));
+    }
+
+    // ----- Differential corpus: combinations -----
+
+    #[test]
+    fn differential_quantifier_followed_by_literal() {
+        assert!(assert_jit_interp_equivalent(
+            r"\d+x",
+            &[b"5x", b"123x", b"x", b"", b"abc5x", b"5", b"123"]
+        ));
+    }
+
+    #[test]
+    fn differential_anchor_class_quantifier_anchor() {
+        assert!(assert_jit_interp_equivalent(
+            r"\A\d+\z",
+            &[b"123", b"5", b"", b"123abc", b"abc"]
+        ));
+    }
+
+    #[test]
+    fn differential_email_like() {
+        assert!(assert_jit_interp_equivalent(
+            r"\w+@\w+\.\w+",
+            &[
+                b"user@example.com",
+                b"a@b.c",
+                b"hello world",
+                b"user@example",
+                b"@.com",
+                b"",
+            ]
+        ));
+    }
+
+    #[test]
+    fn differential_word_alternation() {
+        assert!(assert_jit_interp_equivalent(
+            r"\w+|word",
+            &[b"hello", b"123", b"!", b"", b"word", b"a"]
+        ));
+    }
+
+    #[test]
+    fn differential_combined_quantifiers() {
+        assert!(assert_jit_interp_equivalent(
+            r"a*b+",
+            &[b"b", b"ab", b"aaab", b"bbb", b"aaa", b"", b"abbabb"]
+        ));
+    }
+
+    #[test]
+    fn differential_lazy_with_following() {
+        // The classic lazy-vs-greedy distinction: `a*?b` matches
+        // the minimum a's needed to allow b. Both engines must
+        // return the same match span.
+        assert!(assert_jit_interp_equivalent(
+            r"a*?b",
+            &[b"b", b"ab", b"aab", b"aaab", b"aaa", b""]
+        ));
+    }
+
+    #[test]
+    fn differential_word_boundary_with_class_quantifier() {
+        assert!(assert_jit_interp_equivalent(
+            r"\b\d+\b",
+            &[
+                b"123",
+                b"abc 123 def",
+                b"123abc",
+                b"abc123",
+                b"",
+                b" 123",
+                b"123 ",
+            ]
+        ));
+    }
+
+    #[test]
+    fn differential_multi_anchor_pattern() {
+        assert!(assert_jit_interp_equivalent(
+            r"\Ahello\b",
+            &[b"hello", b"hello world", b"helloworld", b"", b"xhello"]
+        ));
+    }
 }
