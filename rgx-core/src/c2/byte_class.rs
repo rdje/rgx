@@ -97,6 +97,33 @@ impl ByteClassMap {
     pub fn build_from_ast(ast: &Regex) -> Self {
         let mut oracles: Vec<Vec<(u8, u8)>> = Vec::new();
         collect_oracles(ast, &mut oracles);
+        // Force the partition to distinguish UTF-8 byte categories
+        // (continuation, 2/3/4-byte leading) from ASCII bytes when
+        // the AST contains a construct that produces multi-byte
+        // chains in the NFA. Without this, a negated character class
+        // like `[^0-9]` produces an NFA with multi-byte chains
+        // (because the negated range spans non-ASCII Unicode), but
+        // the byte_class_map only knows about the positive ASCII
+        // range — so the chains' transitions on "non-digit" fire on
+        // ANY non-digit byte, including ASCII bytes that are not
+        // valid UTF-8 continuation/leading bytes. The result is
+        // that `pike_match_at` walks past the leftmost single-char
+        // accept and records subsequent "longer" matches that don't
+        // correspond to valid UTF-8 characters in the input.
+        //
+        // Adding the UTF-8 boundary oracles forces the partition to
+        // separate ASCII bytes from continuation bytes, leading
+        // bytes, etc. The chains' transitions on the leading-byte
+        // ranges then ONLY fire for actual leading bytes, which
+        // means the multi-byte chains correctly die when they
+        // encounter ASCII input.
+        //
+        // We add the oracles unconditionally — the partition cost
+        // is at most 5 extra equivalence classes for every pattern,
+        // which is negligible given that DFA states are sparse
+        // arrays indexed by class. See `byte_class.rs::tests::partition_distinguishes_utf8_byte_categories`
+        // for the partition shape.
+        push_utf8_byte_boundary_oracles(&mut oracles);
         Self::from_oracles(&oracles)
     }
 
@@ -361,6 +388,35 @@ fn collect_char_class_into(cc: &CharClass, set: &mut Vec<(u8, u8)>) {
     }
 }
 
+/// Append UTF-8 byte-category boundary oracles to the oracle list.
+///
+/// The four UTF-8 byte categories that need to be distinguishable
+/// in the byte-class partition are:
+///   - 0x80-0xBF: continuation bytes (any multi-byte char)
+///   - 0xC0-0xDF: 2-byte UTF-8 leading bytes
+///   - 0xE0-0xEF: 3-byte UTF-8 leading bytes
+///   - 0xF0-0xF7: 4-byte UTF-8 leading bytes
+///
+/// Each category becomes its own oracle so the partition algorithm
+/// assigns each category a distinct equivalence class. ASCII bytes
+/// (0x00-0x7F) and invalid bytes (0xF8-0xFF) share a "no UTF-8
+/// category" signature; this is fine because invalid bytes can
+/// never appear in valid UTF-8 input.
+///
+/// Without these oracles, a pattern like `[^0-9]` partitions the
+/// byte alphabet into just two classes (digit / non-digit), which
+/// causes the NFA's multi-byte chains for the negated range to
+/// fire on ASCII bytes that aren't valid UTF-8 continuation /
+/// leading bytes. See [`ByteClassMap::build_from_ast`] for the
+/// full rationale and the bug history (the C1 step 6 differential
+/// gate exposed this).
+fn push_utf8_byte_boundary_oracles(oracles: &mut Vec<Vec<(u8, u8)>>) {
+    oracles.push(vec![(0x80, 0xBF)]); // continuation
+    oracles.push(vec![(0xC0, 0xDF)]); // 2-byte leading
+    oracles.push(vec![(0xE0, 0xEF)]); // 3-byte leading
+    oracles.push(vec![(0xF0, 0xF7)]); // 4-byte leading
+}
+
 /// Decompose a `[start, end]` codepoint range into per-position UTF-8
 /// byte ranges and append them to `set`.
 ///
@@ -442,23 +498,37 @@ mod tests {
     // ============================================================
 
     #[test]
-    fn empty_ast_yields_one_class_for_all_bytes() {
+    fn empty_ast_yields_utf8_category_classes() {
+        // Even with no pattern oracles, the partition is forced to
+        // distinguish UTF-8 byte categories (continuation, 2/3/4-byte
+        // leading) from ASCII bytes by `push_utf8_byte_boundary_oracles`.
+        // See `ByteClassMap::build_from_ast` for the rationale (the C1
+        // step 6 negated-char-class fix). Five categories: ASCII (incl.
+        // invalid bytes 0xF8-0xFF), continuation, 2-byte leading,
+        // 3-byte leading, 4-byte leading.
         let map = ByteClassMap::build_from_ast(&Regex::Empty);
-        assert_eq!(map.num_classes(), 1);
-        for b in 0..=255u8 {
-            assert_eq!(map.class_of(b), 0, "byte 0x{b:02X} should be class 0");
-        }
+        assert_eq!(map.num_classes(), 5);
+        // ASCII bytes share class 0 (and so do invalid bytes 0xF8-0xFF).
+        let ascii_class = map.class_of(0x00);
+        assert_eq!(map.class_of(0x7F), ascii_class);
+        assert_eq!(map.class_of(0xFF), ascii_class);
+        // The four UTF-8 categories each get their own distinct class.
+        assert_ne!(map.class_of(0x80), ascii_class);
+        assert_ne!(map.class_of(0xC0), ascii_class);
+        assert_ne!(map.class_of(0xE0), ascii_class);
+        assert_ne!(map.class_of(0xF0), ascii_class);
     }
 
     #[test]
-    fn anchor_only_pattern_yields_one_class() {
+    fn anchor_only_pattern_yields_utf8_category_classes() {
         // ^$ — both anchors are zero-width, contribute no byte ranges.
+        // Same five UTF-8-category-driven classes as the empty AST.
         let ast = seq(vec![
             Regex::Anchor(crate::ast::AnchorType::Start),
             Regex::Anchor(crate::ast::AnchorType::End),
         ]);
         let map = ByteClassMap::build_from_ast(&ast);
-        assert_eq!(map.num_classes(), 1);
+        assert_eq!(map.num_classes(), 5);
     }
 
     #[test]
@@ -475,10 +545,21 @@ mod tests {
     // ============================================================
 
     #[test]
-    fn single_ascii_literal_yields_two_classes() {
+    fn single_ascii_literal_yields_six_classes() {
+        // 'a' adds one oracle (0x61, 0x61). Combined with the four
+        // UTF-8 byte-category oracles, the partition has 6 classes:
+        //   class 0: ASCII non-'a' + invalid bytes (0xF8-0xFF)
+        //   class 1: 'a' (0x61)
+        //   class 2: continuation bytes (0x80-0xBF)
+        //   class 3: 2-byte leading (0xC0-0xDF)
+        //   class 4: 3-byte leading (0xE0-0xEF)
+        //   class 5: 4-byte leading (0xF0-0xF7)
+        // (Class IDs are assigned by first-encounter order so the
+        // exact numbering may differ; the count is what matters.)
         let map = ByteClassMap::build_from_ast(&lit('a'));
-        assert_eq!(map.num_classes(), 2);
+        assert_eq!(map.num_classes(), 6);
         let class_a = map.class_of(b'a');
+        // 'a' is in its own class — distinct from every other byte.
         for b in 0..=255u8 {
             if b == b'a' {
                 assert_eq!(map.class_of(b), class_a);
@@ -505,9 +586,12 @@ mod tests {
     #[test]
     fn class_abc_groups_a_b_c_into_one_class() {
         // [abc] — bytes 'a', 'b', 'c' are all in the same class because
-        // they appear identically in the only oracle.
+        // they appear identically in the only pattern oracle. Combined
+        // with the four UTF-8 byte-category oracles the total is 6
+        // classes: ASCII non-{a,b,c}, {a,b,c}, continuation, 2/3/4-byte
+        // leading.
         let map = ByteClassMap::build_from_ast(&custom(vec![('a', 'a'), ('b', 'b'), ('c', 'c')]));
-        assert_eq!(map.num_classes(), 2);
+        assert_eq!(map.num_classes(), 6);
         let abc_class = map.class_of(b'a');
         assert_eq!(map.class_of(b'b'), abc_class);
         assert_eq!(map.class_of(b'c'), abc_class);
@@ -517,8 +601,10 @@ mod tests {
 
     #[test]
     fn class_a_to_z_groups_all_lowercase_into_one_class() {
+        // [a-z] — same shape as [abc], 6 classes total: ASCII non-letter,
+        // 'a-z', continuation, 2/3/4-byte leading.
         let map = ByteClassMap::build_from_ast(&custom(vec![('a', 'z')]));
-        assert_eq!(map.num_classes(), 2);
+        assert_eq!(map.num_classes(), 6);
         let lower_class = map.class_of(b'a');
         for b in b'a'..=b'z' {
             assert_eq!(map.class_of(b), lower_class);
@@ -537,14 +623,14 @@ mod tests {
     }
 
     #[test]
-    fn two_disjoint_classes_partition_into_three_classes() {
-        // [a-c][d-f] — alternation creates two oracles. Resulting partition:
-        //   class 0: everything outside both
-        //   class 1: bytes in {a-c}
-        //   class 2: bytes in {d-f}
+    fn two_disjoint_classes_partition_into_seven_classes() {
+        // [a-c][d-f] — alternation creates two pattern oracles. Combined
+        // with the four UTF-8 byte-category oracles, the partition has
+        // 7 classes: ASCII non-pattern, {a-c}, {d-f}, continuation,
+        // 2-byte leading, 3-byte leading, 4-byte leading.
         let ast = seq(vec![custom(vec![('a', 'c')]), custom(vec![('d', 'f')])]);
         let map = ByteClassMap::build_from_ast(&ast);
-        assert_eq!(map.num_classes(), 3);
+        assert_eq!(map.num_classes(), 7);
         let abc = map.class_of(b'a');
         assert_eq!(map.class_of(b'b'), abc);
         assert_eq!(map.class_of(b'c'), abc);
@@ -562,9 +648,12 @@ mod tests {
         //   'a' is only in oracle 0
         //   'b' and 'c' are in BOTH oracles (so they share a class)
         //   'd' is only in oracle 1
+        // Combined with the four UTF-8 byte-category oracles, the
+        // partition has 8 classes: ASCII non-pattern, 'a', {'b','c'},
+        // 'd', continuation, 2/3/4-byte leading.
         let ast = seq(vec![custom(vec![('a', 'c')]), custom(vec![('b', 'd')])]);
         let map = ByteClassMap::build_from_ast(&ast);
-        assert_eq!(map.num_classes(), 4);
+        assert_eq!(map.num_classes(), 8);
         // 'b' and 'c' have identical membership and must share a class.
         assert_eq!(map.class_of(b'b'), map.class_of(b'c'));
         // 'a' and 'd' must each have their own class distinct from 'b'/'c'.
@@ -579,8 +668,11 @@ mod tests {
 
     #[test]
     fn digit_class_distinguishes_digits_from_others() {
+        // \d — single pattern oracle (0x30, 0x39). With the four UTF-8
+        // byte-category oracles the total is 6 classes: ASCII
+        // non-digit, digit, continuation, 2/3/4-byte leading.
         let map = ByteClassMap::build_from_ast(&Regex::Digit { negated: false });
-        assert_eq!(map.num_classes(), 2);
+        assert_eq!(map.num_classes(), 6);
         let digit_class = map.class_of(b'0');
         for b in b'0'..=b'9' {
             assert_eq!(map.class_of(b), digit_class);
@@ -628,12 +720,21 @@ mod tests {
     #[test]
     fn dot_distinguishes_newline_from_other_bytes() {
         let map = ByteClassMap::build_from_ast(&Regex::Dot);
-        // Dot's oracle is `[0x00..=0x09] ∪ [0x0B..=0xFF]`. Byte 0x0A is
-        // outside the oracle, so it has signature (false). All other
-        // bytes have signature (true). Two classes.
-        assert_eq!(map.num_classes(), 2);
+        // Dot's oracle is `[0x00..=0x09] ∪ [0x0B..=0xFF]`. Byte 0x0A
+        // is outside the dot oracle. Combined with the four UTF-8
+        // byte-category oracles the partition has 6 classes:
+        //   class 0: ASCII non-newline (0x00-0x09, 0x0B-0x7F) + invalid (0xF8-0xFF)
+        //   class 1: newline (0x0A)
+        //   class 2: continuation (0x80-0xBF)
+        //   class 3: 2-byte leading (0xC0-0xDF)
+        //   class 4: 3-byte leading (0xE0-0xEF)
+        //   class 5: 4-byte leading (0xF0-0xF7)
+        assert_eq!(map.num_classes(), 6);
+        // Newline is in its own class, distinct from other ASCII.
         assert_ne!(map.class_of(0x0A), map.class_of(0x09));
         assert_eq!(map.class_of(0x09), map.class_of(0x0B));
+        // 0xFF (invalid byte) shares the ASCII non-newline class
+        // because both have signature (1, 0, 0, 0, 0).
         assert_eq!(map.class_of(0x09), map.class_of(0xFF));
     }
 
@@ -676,10 +777,11 @@ mod tests {
 
     #[test]
     fn quantified_node_descends_into_inner_expression() {
-        // a* — the partition is the same as a single 'a' literal.
+        // a* — the partition is the same as a single 'a' literal:
+        // 6 classes (ASCII non-'a', 'a', plus four UTF-8 byte categories).
         let q = quantified(lit('a'), Quantifier::ZeroOrMore { lazy: false });
         let map = ByteClassMap::build_from_ast(&q);
-        assert_eq!(map.num_classes(), 2);
+        assert_eq!(map.num_classes(), 6);
         assert_ne!(map.class_of(b'a'), map.class_of(b'b'));
     }
 

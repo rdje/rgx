@@ -902,6 +902,43 @@ mod tests {
         assert_eq!(pike_find_first(&prog, b"123x"), Some((3, 4)));
     }
 
+    #[test]
+    fn negated_class_matches_first_non_digit_with_run_of_non_digits() {
+        // Regression test for the C1 step 6 bug: `[^0-9]` against
+        // "123abc" used to return (3, 6) — the entire run of
+        // non-digits — because the byte_class_map didn't distinguish
+        // ASCII bytes from UTF-8 continuation/leading bytes, which
+        // allowed the NFA's multi-byte chains for the negated range
+        // to fire on ASCII input. The fix in c2/byte_class.rs adds
+        // UTF-8 byte-category boundary oracles unconditionally,
+        // forcing a finer partition that correctly separates ASCII
+        // from non-ASCII byte ranges.
+        let prog = compile(r"[^0-9]");
+        // Both pike_find_first AND pike_captures_at must return
+        // (3, 4) — one non-digit character, not the whole run.
+        assert_eq!(pike_find_first(&prog, b"123abc"), Some((3, 4)));
+        let caps = pike_captures_at(&prog, b"123abc", 3).expect("must match");
+        assert_eq!((caps.start, caps.end), (3, 4));
+    }
+
+    #[test]
+    fn negated_class_correctly_consumes_multibyte_unicode_char() {
+        // Verify the fix doesn't break valid multi-byte UTF-8 matching.
+        // `[^0-9]` against "1café" (where 'é' is 0xC3 0xA9, 2 bytes):
+        //   - pos 0,1,2,3: '1' is a digit, no match.
+        //   - pos 1: 'c' is non-digit ASCII → match (1,2). ✓
+        //   - At pos 4: 'é' is the start of a 2-byte UTF-8 char →
+        //     match (4, 6) consuming both bytes. ✓
+        let prog = compile(r"[^0-9]");
+        let text = "1café".as_bytes();
+        // First match starts at pos 1 ('c'), span (1, 2).
+        assert_eq!(pike_find_first(&prog, text), Some((1, 2)));
+        // Verify we can match the multi-byte 'é' at pos 4 (after
+        // "1caf"). The 'é' is bytes [0xC3, 0xA9] at positions 4..=5.
+        let caps_at_e = pike_captures_at(&prog, text, 4).expect("must match");
+        assert_eq!((caps_at_e.start, caps_at_e.end), (4, 6));
+    }
+
     // ============================================================
     // Sequence and alternation
     // ============================================================
