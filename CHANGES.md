@@ -14,6 +14,38 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 3e.2: StarGreedy via decoder unfolding
+- Scope: Ninth code commit for the C1 JIT compilation backend. Adds `StarGreedy` (`*` quantifier) support via the same decoder-unfolding approach as step 3e.1, now reused for both `+` and `*`. The lowering for `*` puts the `Split` BEFORE the inner subprogram (since `*` allows zero matches): `[Split{exit}, inner_jit_ops..., Jump{back to Split}]`. On the very first visit to the Split, it pushes `(exit_op_idx, current_pos)` so the loop can exit at zero iterations if the inner immediately fails. Patterns like `a*`, `\d*`, `\w*`, `\s*`, `(?:ab)*`, `\A\d*\z`, `a*b+` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics.
+- **The unfolding lowering**: `StarGreedy(inner)` decodes to:
+  ```text
+  [Split { branch_b_op_idx: exit }]      ← greedy: fall-through to inner; on backtrack go to exit
+  [inner_jit_ops...]
+  [Jump { target_op_idx: split_idx }]    ← back to the Split (NOT to inner_start)
+  exit                                   ← first op after the unfolded sequence
+  ```
+  Each visit to the Split pushes `(exit, current_pos)` and falls through to the inner. If the inner consumes successfully, fall through to Jump → back to Split → push another frame, try again. If the inner fails (eof or non-matching byte), failure_dispatch pops the most recent frame and dispatches to exit at the saved pos. Each successful iteration adds one bt_stack frame; the very first visit (zero iterations consumed) ALSO adds a frame with `current_pos == entry_pos`, so backtracking can shrink all the way to "zero iterations" — which is a valid match for `*`.
+- **The Jump target is `split_op_idx`, NOT `inner_start_op_idx`**. This is the key difference from PlusGreedy. By looping back to the Split, each iteration pushes a new bt_stack frame, accumulating one frame per successful iteration. If the Jump went directly to inner_start, we'd skip the Split on subsequent iterations and only have one bt_stack frame for the entire loop — backtracking would only be able to exit, not shrink.
+- **Both PlusGreedy and StarGreedy share the same `compute_jit_op_count` formula** (`inner_count + 2`) since both unfold to one Split + one Jump in addition to the inner. The helper has been generalized to handle both opcodes via a single match arm.
+- **New helper `read_inline_subprogram`** factored out of the PlusGreedy decoder arm and reused by StarGreedy. Reads the 1-byte length prefix + body bytes from an optimized quantifier opcode operand, advances `ip` past both, and returns a borrow into `code`. Will be reused by step 3e.3 for QuestionGreedy and the lazy variants.
+- **`decode_program` StarGreedy arm**: reserves the Split slot up front (before decoding the inner) so we know `split_op_idx` and can compute `exit_op_idx = split_op_idx + inner_count + 2` from `simple_inner_jit_op_count`. Then decodes the inner via `decode_simple_inner_into`, then appends the Jump back to `split_op_idx`. Includes debug assertions that the emitted count matches the computed count and that the final ops length equals the computed exit_op_idx (catches any drift between the count helper and the actual emission).
+- **14 new step 3e.2 tests** in `c1::codegen::tests::step3e2_*`:
+  - **Zero iterations**: `a*` against `bbb` (zero a's matches, returns 0); `a*` against `""` (empty input, returns 0)
+  - **Single iteration**: `a*` against `a` (returns 1)
+  - **Many iterations**: `a*` against `aaaaa` (returns 5)
+  - **Partial**: `a*` against `aaab` (returns 3, stops at `b`)
+  - **`a*b` followed by literal**: zero a's then b (`b` returns 1), three a's then b (`aaab` returns 4), no b at all (`aaa` returns -1 — backtracks to zero a's, b still fails)
+  - **`a*a` backtrack-into-quantifier**: single `a` matches via 0 iterations of `a*` then trailing `a`; `aa` matches via 1 iter + trailing; `aaa` via 2 iter + trailing; empty input fails (no a to match the trailing); `b` fails (zero iter is fine but trailing `a` doesn't match `b`)
+  - **`\d*`, `\w*`, `\s*`**: each tested against matching, non-matching, and empty input
+  - **Multi-char inner `(?:ab)*`**: empty (returns 0), `ab` (returns 2), `abab` (returns 4), `aba` partial (first iter matches, second fails on missing `b`, backtrack exits at pos 2), `xyz` (zero iterations match)
+  - **Anchored `\A\d*\z`**: digit string passes, empty input passes (zero iterations + end-of-text both match), mixed input fails
+  - **Alternation `\d*|word`**: digit string matches first branch with positive iterations; non-digit input matches first branch with zero iterations
+  - **Combined `a*b+`**: tests Star + Plus together — zero a's then one b, three a's then two b's, zero a's then three b's, no b at all (fails)
+- **No bugs caught on the first run**: all 14 step 3e.2 tests pass on the first attempt. The decoder-unfolding architecture proved easy to extend — the only new code is the StarGreedy arm and the `read_inline_subprogram` helper extraction. The bt_stack semantics from step 3d.2 handled the new "frame-per-iteration including the zero-iteration case" pattern without modification.
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 passing (unchanged from step 3e.1 — `c1/` still doesn't exist when the feature is off), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit --lib c1` **161 C1 tests passing** (147 from step 3e.1 + 14 new step 3e.2), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 3e.2 is complete.** The `*` and `+` greedy quantifiers are now JIT-compilable via the same unfolding architecture. Next: C1 step 3e.3 (QuestionGreedy `?` — single conditional execution, no loop). Then the lazy variants (StarLazy `*?`, PlusLazy `+?`, QuestionLazy `??` with reversed Split/SplitLazy semantics). After all step 3e substeps: step 4 (capture trail + differential gate active), step 5 (engine dispatch wiring), steps 6–8.
+
 ### 2026-04-11 - C1 step 3e.1: PlusGreedy via decoder unfolding
 - Scope: Eighth code commit for the C1 JIT compilation backend. Adds `PlusGreedy` (`+` quantifier) support via decoder unfolding — when the decoder hits the `PlusGreedy(inner)` opcode, it recursively decodes the inline subprogram into a Vec<JitOp> and unfolds the quantifier into a Split/Jump-based loop using the step 3d.2 backtracking infrastructure. Patterns like `a+`, `\d+`, `\w+`, `\s+`, `(?:ab)+`, `\w+@\w+\.\w+`, `\A\d+\z`, `\d+|word` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics. The first iteration of the inner is mandatory; subsequent iterations are tried greedily with backtracking via the existing bt_stack.
 - **The unfolding lowering**: `PlusGreedy(inner)` decodes to:
