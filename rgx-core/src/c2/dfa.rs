@@ -304,6 +304,81 @@ impl LazyDfa {
         TransitionResult::Next(target_id)
     }
 
+    /// Run the DFA simulator BACKWARD over `input` starting just
+    /// before byte position `end` and walking toward byte 0.
+    ///
+    /// Used by the **reverse-DFA pipeline** (the C2 follow-up
+    /// optimization sketched in the C2 chapter): once the forward
+    /// DFA has found the END position of a match, this method walks
+    /// the reverse-anchored DFA backward from that end to find the
+    /// START position of the match. The combined forward + reverse
+    /// pass replaces the per-position scan loop with a single
+    /// O(n) sweep.
+    ///
+    /// The DFA must be built from a **reverse-anchored** NFA — i.e.,
+    /// constructed via `LazyDfa::new(Arc::new(c2.reverse_anchored.clone()), ...)`.
+    /// Calling this method on a forward DFA produces meaningless
+    /// results (the byte order assumption is wrong). The caller is
+    /// responsible for using the right DFA.
+    ///
+    /// On `Match(start)`, `start` is the START byte position of the
+    /// LEFTMOST match in the forward direction. The reverse DFA
+    /// records the latest accept seen during the backward walk;
+    /// because the input bytes are consumed in reverse order, the
+    /// "latest accept" corresponds to the smallest forward index,
+    /// which is the leftmost match start.
+    ///
+    /// On `NoMatch`, no leftmost-start was found in the input prefix
+    /// (which would indicate a bug — the forward DFA should not have
+    /// signaled a match if the reverse DFA can't find the start).
+    ///
+    /// On `Exhausted`, the cache filled up before the walk completed
+    /// and the caller should fall back to the Pike-VM.
+    ///
+    /// **Status:** foundation only. The dispatch path that consumes
+    /// this method lands in a follow-up commit per the
+    /// `docs/BACKLOG.md` "C2 follow-up: reverse-DFA pipeline" entry.
+    pub fn find_match_start_at_reverse(&mut self, input: &[u8], end: usize) -> DfaSearchOutcome {
+        // The reverse-anchored DFA accepts at the START of the
+        // reversed pattern, which is the END of the forward pattern.
+        // Walking backward from `end` consumes input bytes from
+        // index `end - 1` downward. The latest accept seen during
+        // this walk is at the smallest forward index, which is the
+        // leftmost forward start.
+        debug_assert!(end <= input.len(), "end out of bounds for input");
+        let mut state = self.start_state();
+        // The DFA could already accept the empty string at the end
+        // position (e.g., for patterns like `a*` matching the empty
+        // span at any position). Record that as a tentative match.
+        let mut leftmost_start = if self.is_accept(state) {
+            Some(end)
+        } else {
+            None
+        };
+        let mut pos = end;
+        while pos > 0 {
+            pos -= 1;
+            let byte = input[pos];
+            let cls = self.byte_class_map.class_of(byte);
+            match self.transition(state, cls) {
+                TransitionResult::Next(next_state) => {
+                    state = next_state;
+                    if self.is_accept(state) {
+                        leftmost_start = Some(pos);
+                    }
+                }
+                TransitionResult::Dead => break,
+                TransitionResult::Exhausted => {
+                    return DfaSearchOutcome::Exhausted;
+                }
+            }
+        }
+        match leftmost_start {
+            Some(start) => DfaSearchOutcome::Match(start),
+            None => DfaSearchOutcome::NoMatch,
+        }
+    }
+
     /// Run the DFA simulator over `input` starting at byte position
     /// `start`. Returns a [`DfaSearchOutcome`] distinguishing match,
     /// no-match, and cache-exhausted cases.
@@ -676,5 +751,125 @@ mod tests {
     fn find_first_via_scan_matches_pike() {
         assert_dfa_matches_pike(r"\d+", "abc 12345 xyz");
         assert_dfa_matches_pike(r"[a-z]+", "ABC abc XYZ");
+    }
+
+    // ============================================================
+    // Reverse-DFA pipeline foundation (C2 follow-up)
+    // ============================================================
+    //
+    // The reverse-DFA pipeline replaces the per-position scan loop
+    // with a single forward-then-reverse sweep:
+    //   1. forward DFA finds the END of the leftmost match
+    //   2. reverse-anchored DFA walks backward from that end and
+    //      finds the START of the leftmost match
+    //   3. Pike-VM is then run bounded over [start, end] to recover
+    //      capture groups
+    //
+    // The methods on `LazyDfa` (`find_match_at` for the forward
+    // walk, `find_match_start_at_reverse` for the backward walk)
+    // are the foundation. The dispatch wiring in `engine.rs` lands
+    // in a follow-up commit per `docs/BACKLOG.md`.
+    //
+    // These tests pin the contract of `find_match_start_at_reverse`:
+    // given a forward end position, it returns the leftmost start
+    // such that the reverse-anchored DFA accepts the slice walked
+    // backward.
+
+    /// Build a reverse-anchored DFA from `pattern`. Returns `None`
+    /// if the pattern is outside the C2 subset or if the reverse
+    /// NFA contains assertions (the existing eligibility check).
+    fn try_build_reverse_dfa(pattern: &str) -> Option<(LazyDfa, CompiledC2Program)> {
+        let prog = CompiledC2Program::try_compile(pattern)?;
+        if prog.reverse_anchored.has_assertions() {
+            return None;
+        }
+        let nfa = Arc::new(prog.reverse_anchored.clone());
+        let bcm = Arc::new(prog.byte_class_map.clone());
+        let dfa = LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT).ok()?;
+        Some((dfa, prog))
+    }
+
+    #[test]
+    fn reverse_dfa_builds_for_literal_pattern() {
+        let (dfa, _) = try_build_reverse_dfa("abc").expect("buildable");
+        assert!(dfa.num_states() >= 1);
+    }
+
+    #[test]
+    fn reverse_dfa_finds_start_of_literal_match() {
+        // Pattern "abc" against "xyzabc" — forward end is 6, reverse
+        // walk should find the start at 3.
+        let (mut dfa, _) = try_build_reverse_dfa("abc").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"xyzabc", 6);
+        assert_eq!(outcome, DfaSearchOutcome::Match(3));
+    }
+
+    #[test]
+    fn reverse_dfa_finds_start_of_match_at_input_start() {
+        // Pattern "abc" against "abcdef" — forward end is 3, reverse
+        // walk should find the start at 0.
+        let (mut dfa, _) = try_build_reverse_dfa("abc").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"abcdef", 3);
+        assert_eq!(outcome, DfaSearchOutcome::Match(0));
+    }
+
+    #[test]
+    fn reverse_dfa_finds_start_of_char_class_match() {
+        // Pattern "[a-z]+" against "ABC123abcXYZ" — forward end is 9
+        // (after "abc"), reverse walk should find the start at 6.
+        let (mut dfa, _) = try_build_reverse_dfa(r"[a-z]+").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"ABC123abcXYZ", 9);
+        assert_eq!(outcome, DfaSearchOutcome::Match(6));
+    }
+
+    #[test]
+    fn reverse_dfa_finds_leftmost_start_for_repeated_pattern() {
+        // Pattern "a+" against "bbaaa" — forward end is 5 (the full
+        // run "aaa"), reverse walk should find the start at 2.
+        let (mut dfa, _) = try_build_reverse_dfa(r"a+").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"bbaaa", 5);
+        assert_eq!(outcome, DfaSearchOutcome::Match(2));
+    }
+
+    #[test]
+    fn reverse_dfa_handles_full_input_match() {
+        // Pattern "[a-z]+" against "abcdef" — forward end is 6,
+        // reverse walk should find the start at 0.
+        let (mut dfa, _) = try_build_reverse_dfa(r"[a-z]+").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"abcdef", 6);
+        assert_eq!(outcome, DfaSearchOutcome::Match(0));
+    }
+
+    #[test]
+    fn reverse_dfa_no_match_when_no_pattern_in_prefix() {
+        // Pattern "abc" walked backward from end=2 in input "abcdef"
+        // — only the prefix "ab" is visible, the reverse pattern
+        // (which is also "cba" in NFA terms) cannot find an accept.
+        let (mut dfa, _) = try_build_reverse_dfa("abc").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"abcdef", 2);
+        assert_eq!(outcome, DfaSearchOutcome::NoMatch);
+    }
+
+    #[test]
+    fn reverse_dfa_finds_start_for_quantified_class_pattern() {
+        // Pattern "\d+" against "abc12345xyz" — forward end is 8,
+        // reverse walk should find the start at 3.
+        let (mut dfa, _) = try_build_reverse_dfa(r"\d+").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"abc12345xyz", 8);
+        assert_eq!(outcome, DfaSearchOutcome::Match(3));
+    }
+
+    #[test]
+    fn reverse_dfa_finds_zero_width_match_at_end() {
+        // Pattern "a*" against "bbb" — the empty match span at
+        // any position is valid. From end=3 the reverse walk
+        // should find the leftmost-acceptable start, which for
+        // "a*" against "bbb" is... well, walking backward from
+        // pos 3, the DFA accepts the empty string immediately
+        // (zero a's), and any 'b' byte transitions to dead. So
+        // leftmost start = 3 (the zero-width match at end).
+        let (mut dfa, _) = try_build_reverse_dfa(r"a*").expect("buildable");
+        let outcome = dfa.find_match_start_at_reverse(b"bbb", 3);
+        assert_eq!(outcome, DfaSearchOutcome::Match(3));
     }
 }

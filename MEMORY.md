@@ -294,6 +294,16 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-12 (nineteenth commit) — Reverse-DFA pipeline foundation
+- **First commit on the post-C1 perf-headroom track.** Lays the foundation for the reverse-DFA pipeline (the C2 follow-up that replaces per-position scans with a single forward-then-reverse sweep). This commit ships the foundation only — the dispatch wiring lands in the follow-up commit alongside the leftmost-longest-vs-leftmost-first fix.
+- **New `LazyDfa::find_match_start_at_reverse(input, end)` method**. Walks the DFA simulator backward from `end` toward byte 0. The reverse-anchored DFA's "latest accept seen during the backward walk" corresponds to the smallest forward index = leftmost match start.
+- **New `Engine::c2_reverse_dfa: Option<Mutex<LazyDfa>>` field** built in `Engine::new` alongside the existing `c2_dfa`. Same eligibility gate. Shares the byte-class equivalence map with the forward DFA via `Arc::clone`.
+- **New `build_reverse_dfa_if_eligible` helper** + **`Engine::should_dispatch_to_reverse_dfa` accessor** mirroring the forward DFA equivalents.
+- **9 new unit tests** in `c2::dfa::tests::reverse_dfa_*` covering literals, char classes, quantified patterns, no-match cases, full-input matches, and zero-width matches.
+- **Status**: foundation only. The dispatch wiring is the next commit (and is tightly coupled to (4)'s leftmost-longest fix because the C2 DFA path's leftmost-LONGEST semantics for negated char classes is what would conflict with naively wiring the reverse pipeline).
+- **Validation**: `cargo test -p rgx-core --lib` 966/0 (= 957 baseline + 9 new reverse-DFA tests). `cargo clippy -p rgx-core --all-targets` zero RGX-owned errors. `cargo fmt --check` clean.
+- **Next concrete action**: (4) DFA negated-char-class semantics fix — investigate the C1 step 6 divergence between `Regex::find_first("[^0-9]", "123abc")` (returns (3,6) via the C2 DFA) and the raw VM (returns (3,4)). Fix the leftmost-longest behavior. The fix may also wire the reverse-DFA pipeline as the new (correct) dispatch path, depending on whether the bug is in `find_match_at` or in `pike_captures_at`.
+
 ### 2026-04-12 (eighteenth commit) — C1 step 8: production cutover, JIT default-on, Book chapter
 - **THE C1 SERIES IS COMPLETE.** All 9 steps (0–8) of the design doc plan have shipped. C1 step 8 is the final step: it flips the `jit` Cargo feature from opt-in to default-on, writes the public Book chapter `book/src/internals/jit-compiler.md`, and updates the surrounding documentation to reflect C1 as a shipped engine. **C1 is now production code on the public API path.**
 - **`jit` Cargo feature flipped to default-on**. The `default = ["std", "pgen-parser"]` line in `rgx-core/Cargo.toml` becomes `default = ["std", "pgen-parser", "jit"]`. The Cranelift dependencies are now part of the default build (~2 MiB closure). Users who want to avoid them can opt out via `default-features = false` and explicitly include the other features they need.

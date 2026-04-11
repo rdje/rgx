@@ -86,6 +86,21 @@ pub struct Engine {
     /// the DFA's `transition` method mutates its state cache, and
     /// public `Regex` API methods are `&self`.
     c2_dfa: Option<Mutex<LazyDfa>>,
+    /// C2 lazy DFA built over the **reverse-anchored** NFA.
+    /// Foundation for the reverse-DFA pipeline that replaces the
+    /// per-position scan loop with a single forward-then-reverse
+    /// sweep: forward DFA finds the END of the leftmost match,
+    /// reverse DFA walks backward from that end to find the START.
+    /// Built in [`Engine::new`] alongside `c2_dfa` for any pattern
+    /// where `is_c2_dfa_eligible` returns `true` AND the reverse
+    /// NFA passes the same construction constraints.
+    ///
+    /// **Status:** foundation only. The dispatch wiring that
+    /// consumes this DFA lands in a follow-up commit per
+    /// `docs/BACKLOG.md` "C2 follow-up: reverse-DFA pipeline". The
+    /// DFA is built and stored here so the wiring step is purely
+    /// additive when it lands.
+    c2_reverse_dfa: Option<Mutex<LazyDfa>>,
     /// C1 JIT-compiled program for native dispatch (step 5).
     /// Built in [`Engine::new`] only when the pattern is
     /// JIT-eligible per `c1::is_jit_eligible` AND the codegen
@@ -333,6 +348,38 @@ fn build_dfa_if_eligible(
         .map(Mutex::new)
 }
 
+/// Build a `Mutex<LazyDfa>` over the **reverse-anchored** NFA for
+/// the given AST + C2 program if the pattern is DFA-eligible. Used
+/// by the **reverse-DFA pipeline** (a C2 follow-up): once the
+/// forward DFA finds the END of a match, the reverse-anchored DFA
+/// walks backward from that end to find the START of the leftmost
+/// match in a single O(n) pass.
+///
+/// **Status:** foundation only. The dispatch wiring that consumes
+/// this DFA lands in a follow-up commit. The DFA is built and
+/// stored on the engine here so the wiring step is purely additive
+/// when it lands. Returns `None` for the same reasons
+/// [`build_dfa_if_eligible`] does (pattern outside the C2 subset
+/// or contains assertions the DFA can't model).
+fn build_reverse_dfa_if_eligible(
+    ast: &crate::ast::Regex,
+    c2_program: &Option<crate::c2::CompiledC2Program>,
+) -> Option<Mutex<LazyDfa>> {
+    let c2 = c2_program.as_ref()?;
+    if !crate::c2::program::is_c2_dfa_eligible(ast) {
+        return None;
+    }
+    // Build the lazy DFA from the reverse-anchored NFA. Same
+    // construction path as the forward DFA — just a different
+    // input NFA. The byte-class map is shared with the forward
+    // DFA (cloned into a fresh Arc).
+    let nfa = Arc::new(c2.reverse_anchored.clone());
+    let bcm = Arc::new(c2.byte_class_map.clone());
+    LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT)
+        .ok()
+        .map(Mutex::new)
+}
+
 /// Try to JIT-compile the given program into a `JitProgram`.
 /// Returns `None` if the pattern is outside the JIT-eligible
 /// subset (the most common case — anything with captures,
@@ -392,6 +439,14 @@ impl Engine {
         // The DFA serves `is_match` dispatch via `should_dispatch_to_dfa`.
         let c2_dfa = build_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
 
+        // C2 follow-up: build the reverse-anchored DFA as the
+        // foundation for the reverse-DFA pipeline. The dispatch
+        // wiring lands in a follow-up commit; for now this DFA
+        // is built and stored so the wiring is purely additive.
+        // Same eligibility gate as the forward DFA.
+        let c2_reverse_dfa =
+            build_reverse_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
+
         // C1 step 5: JIT-compile the pattern if possible. On
         // `CodegenUnsupported` (or any other error), we silently
         // store None and the engine falls back to the existing
@@ -407,6 +462,7 @@ impl Engine {
             vm,
             mode: pattern.mode,
             c2_dfa,
+            c2_reverse_dfa,
             #[cfg(feature = "jit")]
             jit_program,
         };
@@ -430,6 +486,32 @@ impl Engine {
     #[doc(hidden)]
     pub fn should_dispatch_to_dfa(&self) -> Option<&Mutex<LazyDfa>> {
         let dfa = self.c2_dfa.as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
+            return None;
+        }
+        Some(dfa)
+    }
+
+    /// Returns the reverse-anchored lazy DFA for this engine if the
+    /// pattern is DFA-eligible. Built in [`Engine::new`] alongside
+    /// the forward DFA. Used by the **reverse-DFA pipeline**
+    /// (foundation only at this commit; the dispatch wiring lands
+    /// in a follow-up).
+    ///
+    /// The returned `Mutex` must be locked by the caller, same
+    /// reason as `should_dispatch_to_dfa`. Access is gated by the
+    /// same runtime constraints as the forward DFA so the reverse
+    /// pipeline doesn't surprise users who expect the existing
+    /// dispatch behaviour for limited patterns.
+    #[doc(hidden)]
+    pub fn should_dispatch_to_reverse_dfa(&self) -> Option<&Mutex<LazyDfa>> {
+        let dfa = self.c2_reverse_dfa.as_ref()?;
         if self.vm.has_event_observer() {
             return None;
         }
