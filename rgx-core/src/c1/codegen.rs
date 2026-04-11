@@ -1406,38 +1406,21 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 // stack. Restricted to "simple linear inner"
                 // subprograms (no nested control flow); nested
                 // optimized quantifiers will land in a later step.
-                let inner_bytes = read_inline_subprogram(code, &mut ip, "PlusGreedy")?;
-
-                // Decode the simple-linear-inner subprogram into JitOps.
-                // Each inner bytecode opcode becomes exactly one JitOp
-                // (no further unfolding) since the simple-inner subset
-                // excludes nested optimized quantifiers and control flow.
-                let inner_start_op_idx = ops.len();
-                decode_simple_inner_into(inner_bytes, &mut ops)?;
-                let inner_end_op_idx = ops.len();
-                // Sanity check: the unfolded count we computed in
-                // pass 1 must match what we just emitted, otherwise
-                // pass 1 and pass 2 have drifted apart and forward
-                // Split/Jump targets pointing at this PlusGreedy
-                // would be misresolved.
-                debug_assert_eq!(
-                    inner_end_op_idx - inner_start_op_idx,
-                    simple_inner_jit_op_count(inner_bytes)?,
-                    "step 3e.1 PlusGreedy unfolded count drift between pass 1 and pass 2"
-                );
-
-                // Append the loop tail: Split (greedy: try another
-                // iteration; on backtrack go to exit) + Jump (back
-                // to the inner). The exit op idx is the index of
-                // the FIRST OUTER op AFTER this PlusGreedy unfold,
-                // which is `ops.len() + 2` (after we push Split + Jump).
-                let exit_op_idx = ops.len() + 2;
-                ops.push(JitOp::Split {
-                    branch_b_op_idx: exit_op_idx,
-                });
-                ops.push(JitOp::Jump {
-                    target_op_idx: inner_start_op_idx,
-                });
+                emit_plus_quantifier(code, &mut ip, &mut ops, "PlusGreedy", false)?;
+            }
+            OpCode::PlusLazy => {
+                // Step 3e.4 lowering: PlusLazy(inner) →
+                // [inner_jit_ops..., SplitLazy{exit}, Jump{back to inner_start}]
+                //
+                // Same shape as PlusGreedy but with SplitLazy. The
+                // first iteration is still mandatory. After it,
+                // SplitLazy jumps to exit FIRST (try one iteration
+                // = the minimum for `+`), and on backtrack falls
+                // through to Jump → inner_start (try one more
+                // iteration). Lazy `+?` matches the minimum number
+                // of iterations consistent with the rest of the
+                // pattern matching.
+                emit_plus_quantifier(code, &mut ip, &mut ops, "PlusLazy", true)?;
             }
             OpCode::QuestionGreedy => {
                 // Step 3e.3 lowering: QuestionGreedy(inner) →
@@ -1453,36 +1436,18 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 // the inner fails, failure_dispatch pops the
                 // frame and dispatches to exit at the saved pos.
                 // No loop because `?` is "zero or one".
-                let inner_bytes = read_inline_subprogram(code, &mut ip, "QuestionGreedy")?;
-
-                // Reserve the Split slot up front. exit_op_idx is
-                // `split_op_idx + inner_count + 1` (the Split plus
-                // the inner; no Jump tail).
-                let split_op_idx = ops.len();
-                let inner_count = simple_inner_jit_op_count(inner_bytes)?;
-                let exit_op_idx = split_op_idx + inner_count + 1;
-                ops.push(JitOp::Split {
-                    branch_b_op_idx: exit_op_idx,
-                });
-
-                // Decode the inner directly after the Split. The
-                // last inner op falls through to the next outer
-                // op via the per-op-block iteration in
-                // `compile_program` — no Jump needed because the
-                // sequence is naturally linear.
-                let inner_start_op_idx = ops.len();
-                debug_assert_eq!(inner_start_op_idx, split_op_idx + 1);
-                decode_simple_inner_into(inner_bytes, &mut ops)?;
-                debug_assert_eq!(
-                    ops.len() - inner_start_op_idx,
-                    inner_count,
-                    "step 3e.3 QuestionGreedy unfolded count drift between pass 1 and pass 2"
-                );
-                debug_assert_eq!(
-                    ops.len(),
-                    exit_op_idx,
-                    "step 3e.3 QuestionGreedy emitted count != computed exit_op_idx"
-                );
+                emit_question_quantifier(code, &mut ip, &mut ops, "QuestionGreedy", false)?;
+            }
+            OpCode::QuestionLazy => {
+                // Step 3e.4 lowering: QuestionLazy(inner) →
+                // [SplitLazy{exit}, inner_jit_ops...]
+                //
+                // Same shape as QuestionGreedy but with SplitLazy
+                // instead of Split. SplitLazy jumps to exit FIRST
+                // (zero iterations) and on backtrack falls through
+                // to the inner (one iteration). Lazy `??` matches
+                // as few iterations as possible.
+                emit_question_quantifier(code, &mut ip, &mut ops, "QuestionLazy", true)?;
             }
             OpCode::StarGreedy => {
                 // Step 3e.2 lowering: StarGreedy(inner) →
@@ -1497,49 +1462,21 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                 // jumps back to the Split which pushes another frame
                 // and tries again, accumulating one frame per
                 // iteration so backtracking can shrink toward zero.
-                let inner_bytes = read_inline_subprogram(code, &mut ip, "StarGreedy")?;
-
-                // Reserve the Split slot up front. We compute the
-                // exit_op_idx as `split_op_idx + inner_count + 2`
-                // (the index right after Split, ...inner..., Jump).
-                // simple_inner_jit_op_count walks the inner bytes
-                // and returns the unfolded count; we reuse the same
-                // helper from pass 1 / step 3e.1.
-                let split_op_idx = ops.len();
-                let inner_count = simple_inner_jit_op_count(inner_bytes)?;
-                let exit_op_idx = split_op_idx + inner_count + 2;
-                ops.push(JitOp::Split {
-                    branch_b_op_idx: exit_op_idx,
-                });
-
-                // Now decode the inner. The inner_start_op_idx is
-                // `split_op_idx + 1` (right after the Split we just
-                // pushed). The inner does not contain any internal
-                // jumps (simple-linear-inner restriction) so we
-                // append straight without index shifting.
-                let inner_start_op_idx = ops.len();
-                debug_assert_eq!(inner_start_op_idx, split_op_idx + 1);
-                decode_simple_inner_into(inner_bytes, &mut ops)?;
-                debug_assert_eq!(
-                    ops.len() - inner_start_op_idx,
-                    inner_count,
-                    "step 3e.2 StarGreedy unfolded count drift between pass 1 and pass 2"
-                );
-
-                // Loop tail: Jump back to the Split. The Jump's
-                // target is split_op_idx (NOT inner_start_op_idx —
-                // we want to push another bt_stack frame on each
-                // iteration so backtracking can shrink the count).
-                ops.push(JitOp::Jump {
-                    target_op_idx: split_op_idx,
-                });
-
-                // Sanity check: ops.len() should now equal exit_op_idx.
-                debug_assert_eq!(
-                    ops.len(),
-                    exit_op_idx,
-                    "step 3e.2 StarGreedy emitted count != computed exit_op_idx"
-                );
+                emit_star_quantifier(code, &mut ip, &mut ops, "StarGreedy", false)?;
+            }
+            OpCode::StarLazy => {
+                // Step 3e.4 lowering: StarLazy(inner) →
+                // [SplitLazy{exit}, inner_jit_ops..., Jump{back to SplitLazy}]
+                //
+                // Same shape as StarGreedy but with SplitLazy. The
+                // SplitLazy jumps to exit FIRST (try zero iterations
+                // first), and on backtrack falls through to the
+                // inner (try one more iteration). Each successful
+                // iteration loops back to the SplitLazy which pushes
+                // another frame; backtracking grows the iteration
+                // count UP toward whatever satisfies the rest of
+                // the pattern.
+                emit_star_quantifier(code, &mut ip, &mut ops, "StarLazy", true)?;
             }
             OpCode::SaveStart | OpCode::SaveEnd => {
                 let Some(&group_id) = code.get(ip) else {
@@ -1643,19 +1580,25 @@ fn collect_op_positions(code: &[u8]) -> Result<Vec<(usize, usize)>, JitHostError
 /// itself). Most opcodes return 1; optimized quantifier opcodes
 /// return more.
 ///
-/// Step 3e.1/3e.2/3e.3: `PlusGreedy`, `StarGreedy`, and
-/// `QuestionGreedy` are implemented as unfolding quantifiers.
-/// `Plus`/`Star` unfold to `inner_count + 2` (for the
-/// [Split, ...inner..., Jump] or [...inner..., Split, Jump]
-/// lowering). `Question` unfolds to `inner_count + 1` because
-/// it's "zero or one" with no loop — just `[Split, ...inner...]`
-/// with no Jump back. Other optimized quantifier opcodes (lazy
-/// variants) return `CodegenUnsupported`.
+/// Step 3e.1/3e.2/3e.3/3e.4: all six optimized quantifier opcodes
+/// are implemented as unfolding quantifiers — `PlusGreedy`,
+/// `StarGreedy`, `QuestionGreedy`, `PlusLazy`, `StarLazy`,
+/// `QuestionLazy`. The lazy variants share the same unfolded
+/// counts as their greedy counterparts (only the Split→SplitLazy
+/// substitution differs in the codegen). `Plus*`/`Star*` unfold
+/// to `inner_count + 2` (Split + inner + Jump or inner + Split +
+/// Jump). `Question*` unfolds to `inner_count + 1` because `?` is
+/// "zero or one" with no loop — just Split + inner.
 fn compute_jit_op_count(op: OpCode, operand_bytes: &[u8]) -> Result<usize, JitHostError> {
     match op {
-        OpCode::PlusGreedy | OpCode::StarGreedy | OpCode::QuestionGreedy => {
-            // PlusGreedy / StarGreedy: inner + Split + Jump = +2 ops.
-            // QuestionGreedy: inner + Split = +1 op (no loop).
+        OpCode::PlusGreedy
+        | OpCode::StarGreedy
+        | OpCode::QuestionGreedy
+        | OpCode::PlusLazy
+        | OpCode::StarLazy
+        | OpCode::QuestionLazy => {
+            // Plus/Star (greedy or lazy): inner + Split + Jump = +2 ops.
+            // Question (greedy or lazy): inner + Split = +1 op (no loop).
             let length_byte = operand_bytes.first().copied().ok_or_else(|| {
                 JitHostError::CodegenUnsupported(format!(
                     "truncated {op:?} opcode (missing length prefix)"
@@ -1668,7 +1611,7 @@ fn compute_jit_op_count(op: OpCode, operand_bytes: &[u8]) -> Result<usize, JitHo
             }
             let inner_bytes = &operand_bytes[1..=length_byte];
             let inner_jit_count = simple_inner_jit_op_count(inner_bytes)?;
-            let extra = if matches!(op, OpCode::QuestionGreedy) {
+            let extra = if matches!(op, OpCode::QuestionGreedy | OpCode::QuestionLazy) {
                 1 // Split only
             } else {
                 2 // Split + Jump
@@ -1855,6 +1798,142 @@ fn read_inline_subprogram<'a>(
     let inner_bytes = &code[*ip..*ip + length];
     *ip += length;
     Ok(inner_bytes)
+}
+
+/// Emit `JitOp`s for a `?` quantifier (greedy or lazy). The lowering
+/// is `[Split{exit}, inner_jit_ops...]` for greedy or
+/// `[SplitLazy{exit}, inner_jit_ops...]` for lazy. No Jump back
+/// because `?` is "zero or one" with no loop. The greedy variant
+/// tries the inner first (fall-through) and exits on backtrack;
+/// the lazy variant tries exit first (zero iterations) and falls
+/// through to inner on backtrack.
+fn emit_question_quantifier(
+    code: &[u8],
+    ip: &mut usize,
+    ops: &mut Vec<JitOp>,
+    op_name: &str,
+    lazy: bool,
+) -> Result<(), JitHostError> {
+    let inner_bytes = read_inline_subprogram(code, ip, op_name)?;
+
+    let split_op_idx = ops.len();
+    let inner_count = simple_inner_jit_op_count(inner_bytes)?;
+    let exit_op_idx = split_op_idx + inner_count + 1;
+    if lazy {
+        ops.push(JitOp::SplitLazy {
+            branch_b_op_idx: exit_op_idx,
+        });
+    } else {
+        ops.push(JitOp::Split {
+            branch_b_op_idx: exit_op_idx,
+        });
+    }
+
+    let inner_start_op_idx = ops.len();
+    debug_assert_eq!(inner_start_op_idx, split_op_idx + 1);
+    decode_simple_inner_into(inner_bytes, ops)?;
+    debug_assert_eq!(
+        ops.len() - inner_start_op_idx,
+        inner_count,
+        "step 3e.3/3e.4 {op_name} unfolded count drift between pass 1 and pass 2"
+    );
+    debug_assert_eq!(
+        ops.len(),
+        exit_op_idx,
+        "step 3e.3/3e.4 {op_name} emitted count != computed exit_op_idx"
+    );
+    Ok(())
+}
+
+/// Emit `JitOp`s for a `*` quantifier (greedy or lazy). The lowering
+/// is `[Split{exit}, inner_jit_ops..., Jump{back to Split}]` for
+/// greedy or `[SplitLazy{exit}, inner_jit_ops..., Jump{back to
+/// SplitLazy}]` for lazy. The Jump targets the Split (NOT
+/// `inner_start`) so each iteration pushes a fresh `bt_stack` frame.
+/// The greedy variant tries the inner first; the lazy variant
+/// tries exit first.
+fn emit_star_quantifier(
+    code: &[u8],
+    ip: &mut usize,
+    ops: &mut Vec<JitOp>,
+    op_name: &str,
+    lazy: bool,
+) -> Result<(), JitHostError> {
+    let inner_bytes = read_inline_subprogram(code, ip, op_name)?;
+
+    let split_op_idx = ops.len();
+    let inner_count = simple_inner_jit_op_count(inner_bytes)?;
+    let exit_op_idx = split_op_idx + inner_count + 2;
+    if lazy {
+        ops.push(JitOp::SplitLazy {
+            branch_b_op_idx: exit_op_idx,
+        });
+    } else {
+        ops.push(JitOp::Split {
+            branch_b_op_idx: exit_op_idx,
+        });
+    }
+
+    let inner_start_op_idx = ops.len();
+    debug_assert_eq!(inner_start_op_idx, split_op_idx + 1);
+    decode_simple_inner_into(inner_bytes, ops)?;
+    debug_assert_eq!(
+        ops.len() - inner_start_op_idx,
+        inner_count,
+        "step 3e.2/3e.4 {op_name} unfolded count drift between pass 1 and pass 2"
+    );
+
+    ops.push(JitOp::Jump {
+        target_op_idx: split_op_idx,
+    });
+
+    debug_assert_eq!(
+        ops.len(),
+        exit_op_idx,
+        "step 3e.2/3e.4 {op_name} emitted count != computed exit_op_idx"
+    );
+    Ok(())
+}
+
+/// Emit `JitOp`s for a `+` quantifier (greedy or lazy). The lowering
+/// is `[inner_jit_ops..., Split{exit}, Jump{back to inner_start}]`
+/// for greedy or `[inner_jit_ops..., SplitLazy{exit}, Jump{back to
+/// inner_start}]` for lazy. The first iteration of inner is
+/// mandatory; the Split-based loop handles 2nd+ iterations. The
+/// greedy variant tries another iteration first; the lazy variant
+/// tries exit first (one iteration is the minimum for `+`).
+fn emit_plus_quantifier(
+    code: &[u8],
+    ip: &mut usize,
+    ops: &mut Vec<JitOp>,
+    op_name: &str,
+    lazy: bool,
+) -> Result<(), JitHostError> {
+    let inner_bytes = read_inline_subprogram(code, ip, op_name)?;
+
+    let inner_start_op_idx = ops.len();
+    decode_simple_inner_into(inner_bytes, ops)?;
+    let inner_end_op_idx = ops.len();
+    debug_assert_eq!(
+        inner_end_op_idx - inner_start_op_idx,
+        simple_inner_jit_op_count(inner_bytes)?,
+        "step 3e.1/3e.4 {op_name} unfolded count drift between pass 1 and pass 2"
+    );
+
+    let exit_op_idx = ops.len() + 2;
+    if lazy {
+        ops.push(JitOp::SplitLazy {
+            branch_b_op_idx: exit_op_idx,
+        });
+    } else {
+        ops.push(JitOp::Split {
+            branch_b_op_idx: exit_op_idx,
+        });
+    }
+    ops.push(JitOp::Jump {
+        target_op_idx: inner_start_op_idx,
+    });
+    Ok(())
 }
 
 /// Decode a 2-byte u16 forward offset from the bytecode (the
@@ -3550,6 +3629,242 @@ mod tests {
             assert_eq!(func(b"bbb".as_ptr(), 3, 0), 3);
             assert_eq!(func(b"a".as_ptr(), 1, 0), -1);
             assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+        }
+    }
+
+    // ============================================================
+    // C1 step 3e.4 — lazy quantifier variants
+    // ============================================================
+    //
+    // Lazy quantifiers (`??`, `*?`, `+?`) match as FEW iterations
+    // as possible while still allowing the rest of the pattern to
+    // match. The lowering uses SplitLazy instead of Split, which
+    // swaps the branch ordering: try exit first (zero/minimum
+    // iterations), and on backtrack take one more iteration.
+    //
+    // The most informative tests are the ones where greedy and
+    // lazy produce DIFFERENT results — pure standalone tests like
+    // `a*?` against `aaa` would return 0 (zero iterations is the
+    // lazy minimum) whereas `a*` against `aaa` returns 3.
+
+    // ----- QuestionLazy `??` -----
+
+    #[test]
+    fn step3e4_question_lazy_zero_match_when_standalone() {
+        // a?? against `a` — lazy `?` prefers zero iterations.
+        // Standalone (no following op) the zero-iteration choice
+        // wins immediately because there's nothing for the
+        // backtracking to satisfy.
+        let (_host, func) = jit_compile("a??");
+        unsafe {
+            // Returns 0 (zero iterations) NOT 1 (greedy would
+            // return 1 here).
+            assert_eq!(func(b"a".as_ptr(), 1, 0), 0);
+        }
+    }
+
+    #[test]
+    fn step3e4_question_lazy_one_match_when_required() {
+        // a??a — lazy `?` prefers zero, but the following `a`
+        // needs the `a?` to match if there's only one `a` to
+        // share. Wait — for single `a`, lazy `a??` matches zero,
+        // then trailing `a` matches the only `a`. So result is 1.
+        // For two `a`s, lazy matches zero, trailing matches one
+        // → result 1.
+        let (_host, func) = jit_compile("a??a");
+        unsafe {
+            // Single `a` → lazy `a??` zero, then `a` matches → 1
+            assert_eq!(func(b"a".as_ptr(), 1, 0), 1);
+            // Two `a`s → lazy `a??` zero, then `a` matches first → 1
+            // (NOT 2 — lazy stays at minimum even when more is possible)
+            assert_eq!(func(b"aa".as_ptr(), 2, 0), 1);
+            // No `a`s → fails
+            assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+            assert_eq!(func(b"b".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e4_question_lazy_followed_by_b() {
+        // a??b — lazy `a?` then `b`. For `b`, zero a's then b →
+        // returns 1. For `ab`, zero a's then `b` doesn't match
+        // (char is `a`), backtrack to one `a`, then `b` matches.
+        let (_host, func) = jit_compile("a??b");
+        unsafe {
+            // `b` alone → zero a's + b → 1
+            assert_eq!(func(b"b".as_ptr(), 1, 0), 1);
+            // `ab` → zero a's first, but then b at pos 0 fails
+            // (char is `a`), backtrack to one a, then b at pos 1
+            // matches → 2
+            assert_eq!(func(b"ab".as_ptr(), 2, 0), 2);
+            // No b at all → fails
+            assert_eq!(func(b"a".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    // ----- StarLazy `*?` -----
+
+    #[test]
+    fn step3e4_star_lazy_zero_match_when_standalone() {
+        // a*? against `aaa` — standalone lazy star prefers zero.
+        let (_host, func) = jit_compile("a*?");
+        unsafe {
+            // Returns 0 (zero iterations) NOT 3.
+            assert_eq!(func(b"aaa".as_ptr(), 3, 0), 0);
+            assert_eq!(func(b"".as_ptr(), 0, 0), 0);
+            assert_eq!(func(b"bbb".as_ptr(), 3, 0), 0);
+        }
+    }
+
+    #[test]
+    fn step3e4_star_lazy_minimum_to_satisfy_following() {
+        // a*?b — lazy star matches the minimum number of a's
+        // needed to allow b to match. For `aab`, that's 2.
+        let (_host, func) = jit_compile("a*?b");
+        unsafe {
+            // `b` → zero a's + b → 1
+            assert_eq!(func(b"b".as_ptr(), 1, 0), 1);
+            // `ab` → zero a's, b at pos 0 fails, one a, b at pos 1 matches → 2
+            assert_eq!(func(b"ab".as_ptr(), 2, 0), 2);
+            // `aab` → zero a's then b fails, one a then b fails
+            // (char is `a`), two a's then b matches → 3
+            assert_eq!(func(b"aab".as_ptr(), 3, 0), 3);
+            // `aaab` → similar, three a's → 4
+            assert_eq!(func(b"aaab".as_ptr(), 4, 0), 4);
+            // No b → fails
+            assert_eq!(func(b"aaa".as_ptr(), 3, 0), -1);
+            assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e4_star_lazy_digit() {
+        // \d*? against `123` standalone — zero iterations
+        let (_host, func) = jit_compile(r"\d*?");
+        unsafe {
+            assert_eq!(func(b"123".as_ptr(), 3, 0), 0);
+        }
+    }
+
+    #[test]
+    fn step3e4_star_lazy_multi_char_inner() {
+        // (?:ab)*?ab — lazy multi-char inner; lazy prefers zero
+        // iterations of `ab`, but then needs the trailing `ab`.
+        let (_host, func) = jit_compile("(?:ab)*?ab");
+        unsafe {
+            // `ab` → zero iterations of `(?:ab)*?` then trailing
+            // `ab` matches → 2
+            assert_eq!(func(b"ab".as_ptr(), 2, 0), 2);
+            // `abab` → zero iterations would leave trailing `ab`
+            // matching the first `ab` → 2 (lazy: minimum first)
+            assert_eq!(func(b"abab".as_ptr(), 4, 0), 2);
+        }
+    }
+
+    // ----- PlusLazy `+?` -----
+
+    #[test]
+    fn step3e4_plus_lazy_one_match_when_standalone() {
+        // a+? against `aaa` — lazy `+` matches the minimum (one).
+        let (_host, func) = jit_compile("a+?");
+        unsafe {
+            // Returns 1 (the minimum for `+`) NOT 3 (greedy)
+            assert_eq!(func(b"aaa".as_ptr(), 3, 0), 1);
+            // Single a → 1
+            assert_eq!(func(b"a".as_ptr(), 1, 0), 1);
+            // No a → fails (the mandatory first iteration)
+            assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+            assert_eq!(func(b"b".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e4_plus_lazy_minimum_to_satisfy_following() {
+        // a+?b — lazy plus matches the minimum number of a's then
+        // b. For `ab` that's 1; for `aab` that's 2 (need to grow
+        // until b matches).
+        let (_host, func) = jit_compile("a+?b");
+        unsafe {
+            // `ab` → one a, then b → 2
+            assert_eq!(func(b"ab".as_ptr(), 2, 0), 2);
+            // `aab` → one a then b fails (next char is `a`),
+            // backtrack to two a's then b matches → 3
+            assert_eq!(func(b"aab".as_ptr(), 3, 0), 3);
+            // `aaab` → grows to three a's → 4
+            assert_eq!(func(b"aaab".as_ptr(), 4, 0), 4);
+            // No b → fails
+            assert_eq!(func(b"aaa".as_ptr(), 3, 0), -1);
+            // No a → fails (mandatory first iteration)
+            assert_eq!(func(b"b".as_ptr(), 1, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e4_plus_lazy_digit() {
+        // \d+? against `123` standalone — minimum of 1
+        let (_host, func) = jit_compile(r"\d+?");
+        unsafe {
+            assert_eq!(func(b"123".as_ptr(), 3, 0), 1);
+            assert_eq!(func(b"5".as_ptr(), 1, 0), 1);
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), -1);
+        }
+    }
+
+    #[test]
+    fn step3e4_plus_lazy_word_then_anchor() {
+        // \w+?\z — lazy word chars to end of text. Has to grow
+        // all the way to consume the entire input.
+        let (_host, func) = jit_compile(r"\w+?\z");
+        unsafe {
+            assert_eq!(func(b"abc".as_ptr(), 3, 0), 3);
+            assert_eq!(func(b"a".as_ptr(), 1, 0), 1);
+            assert_eq!(func(b"".as_ptr(), 0, 0), -1);
+        }
+    }
+
+    // ----- Lazy vs Greedy comparison test -----
+
+    #[test]
+    fn step3e4_lazy_vs_greedy_produce_different_results() {
+        // The classic distinction: `a*b` and `a*?b` against `aaab`.
+        // Both end up consuming all 3 a's because `b` needs to
+        // match. The match span is the same (4 bytes). Where they
+        // differ is in what they'd report for INTERNAL captures
+        // (which we don't track in the JIT yet) and which paths
+        // they explore.
+        //
+        // For an externally-observable difference, we need a
+        // pattern where the OVERALL match length differs. Use
+        // standalone quantifiers: `a*` vs `a*?` against `aaa`.
+        let (_star_greedy_host, star_greedy_fn) = jit_compile("a*");
+        let (_star_lazy_host, star_lazy_fn) = jit_compile("a*?");
+        unsafe {
+            assert_eq!(
+                star_greedy_fn(b"aaa".as_ptr(), 3, 0),
+                3,
+                "greedy `a*` consumes all"
+            );
+            assert_eq!(
+                star_lazy_fn(b"aaa".as_ptr(), 3, 0),
+                0,
+                "lazy `a*?` consumes none"
+            );
+        }
+
+        // Same for `a+` vs `a+?`
+        let (_plus_greedy_host, plus_greedy_fn) = jit_compile("a+");
+        let (_plus_lazy_host, plus_lazy_fn) = jit_compile("a+?");
+        unsafe {
+            assert_eq!(plus_greedy_fn(b"aaa".as_ptr(), 3, 0), 3);
+            assert_eq!(plus_lazy_fn(b"aaa".as_ptr(), 3, 0), 1);
+        }
+
+        // And `a?` vs `a??`
+        let (_question_greedy_host, question_greedy_fn) = jit_compile("a?");
+        let (_question_lazy_host, question_lazy_fn) = jit_compile("a??");
+        unsafe {
+            assert_eq!(question_greedy_fn(b"a".as_ptr(), 1, 0), 1);
+            assert_eq!(question_lazy_fn(b"a".as_ptr(), 1, 0), 0);
         }
     }
 }

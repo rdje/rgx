@@ -14,6 +14,39 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-11 - C1 step 3e.4: lazy quantifier variants
+- Scope: Eleventh code commit for the C1 JIT compilation backend. Adds the three lazy optimized quantifier opcodes — `QuestionLazy` (`??`), `StarLazy` (`*?`), `PlusLazy` (`+?`) — by reusing the same lowerings as their greedy counterparts but substituting `SplitLazy` for `Split`. **All six optimized quantifier opcodes are now supported.** Patterns like `a??`, `a*?`, `a+?`, `a*?b`, `a+?b`, `\w+?\z`, and the canonical lazy-vs-greedy contrast `a*?` against `aaa` (returns 0 vs greedy `a*` returning 3) are now JIT-compilable.
+- **The lowerings**: each lazy variant uses the same shape as its greedy counterpart, with `Split` swapped for `SplitLazy`:
+  - `QuestionLazy(inner)` → `[SplitLazy{exit}, inner_jit_ops...]`
+  - `StarLazy(inner)` → `[SplitLazy{exit}, inner_jit_ops..., Jump{back to SplitLazy}]`
+  - `PlusLazy(inner)` → `[inner_jit_ops..., SplitLazy{exit}, Jump{back to inner_start}]`
+  
+  The `SplitLazy` semantics from step 3d.2 swap the branch ordering: instead of "fall through to inner first, on backtrack jump to exit", it's "jump to exit first, on backtrack fall through to inner". The result is that the lazy quantifier prefers ZERO (or minimum) iterations and only takes more on backtrack when the rest of the pattern requires it.
+- **Refactor: extracted three helper functions** (`emit_question_quantifier`, `emit_star_quantifier`, `emit_plus_quantifier`) that take a `lazy: bool` flag and emit either `Split` or `SplitLazy` depending on the flag. This eliminates code duplication between the greedy and lazy decoder arms — the six decoder arms (3 greedy + 3 lazy) now collapse to one helper invocation each. The previous greedy arms (steps 3e.1, 3e.2, 3e.3) were rewritten to call the new helpers.
+- **`compute_jit_op_count` extended** to recognize the lazy variants. The same match arm now covers all six optimized quantifier opcodes; the `extra` count (`+1` for question, `+2` for star/plus) is computed via `matches!(op, OpCode::QuestionGreedy | OpCode::QuestionLazy)`. The lazy variants share the same unfolded count as their greedy counterparts because the lowering shape is identical (just Split → SplitLazy).
+- **12 new step 3e.4 tests** in `c1::codegen::tests::step3e4_*`:
+  - **QuestionLazy (4 tests)**:
+    - `a??` against `a` standalone → returns 0 (NOT 1 like greedy `a?`)
+    - `a??a` — lazy prefers zero, then trailing `a` matches the only/first `a`. Tested against single `a` (returns 1), `aa` (returns 1, NOT 2), empty (fails), wrong char (fails)
+    - `a??b` — `b` alone returns 1 (zero a's then b); `ab` returns 2 (zero a's first fails, backtrack to one a)
+  - **StarLazy (3 tests)**:
+    - `a*?` against `aaa` standalone → returns 0 (NOT 3 like greedy `a*`)
+    - `a*?b` — minimum a's to allow b to match: `b` → 1, `ab` → 2, `aab` → 3, `aaab` → 4
+    - `\d*?` against `123` standalone → returns 0
+    - `(?:ab)*?ab` multi-char inner — zero iterations of `(?:ab)*?` then trailing `ab` matches the first `ab`
+  - **PlusLazy (4 tests)**:
+    - `a+?` against `aaa` standalone → returns 1 (the minimum for `+`, NOT 3 like greedy `a+`)
+    - `a+?b` — grows from 1 iteration up until `b` matches: `ab` → 2, `aab` → 3, `aaab` → 4
+    - `\d+?` against `123` standalone → returns 1
+    - `\w+?\z` — has to grow all the way to consume the entire input because `\z` requires end-of-text
+  - **Lazy vs greedy comparison test** that JIT-compiles all six quantifier patterns and asserts the externally observable difference: `a*` returns 3 vs `a*?` returns 0; `a+` returns 3 vs `a+?` returns 1; `a?` returns 1 vs `a??` returns 0. This is the most informative test in step 3e.4 because it directly proves the lazy/greedy semantic difference is correctly captured by the JIT codegen.
+- **No bugs caught on the first run**: all 12 step 3e.4 tests pass on the first attempt. The four-commit streak of clean step 3e substeps (3e.1, 3e.2, 3e.3, 3e.4) shows the decoder-unfolding architecture is well-suited to incremental quantifier additions.
+- 1 small clippy warning fixed (`similar_names` on the test variable bindings — `func_g`/`func_l`/`func_pg`/`func_pl`/`func_qg`/`func_ql` were too similar; renamed to descriptive names like `star_greedy_fn` / `star_lazy_fn` / etc.). 1 small `doc_markdown` warning fixed (`bt_stack` and `inner_start` needed backticks in the new helper docs).
+- Validation: full quality gates green on **two configurations**.
+  - **Default features**: `cargo fmt --check`, `cargo test -p rgx-core` 902 passing (unchanged from step 3e.3 — `c1/` still doesn't exist when the feature is off), `cargo test -p rgx-cli` 30/0, `cargo test -p rgx-bench` 39/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+  - **With `jit` feature**: `cargo test -p rgx-core --features jit --lib c1` **185 C1 tests passing** (173 from step 3e.3 + 12 new step 3e.4), `cargo clippy -p rgx-core --features jit --all-targets` zero RGX-owned errors.
+- **C1 step 3e is COMPLETE.** All six optimized quantifier opcodes are JIT-compilable: `PlusGreedy`, `StarGreedy`, `QuestionGreedy`, `PlusLazy`, `StarLazy`, `QuestionLazy`. With this commit the JIT covers a meaningful subset of real-world patterns: literals, char classes, anchors, word boundaries, alternations, and all six quantifier flavours. The "simple linear inner" restriction still applies (no nested optimized quantifiers in the inner subprogram); lifting that restriction is a future widening. **Next: C1 step 4** (capture trail in JIT'd code with the differential gate active across the existing test suite). Then step 5 (engine dispatch wiring), steps 6–8.
+
 ### 2026-04-11 - C1 step 3e.3: QuestionGreedy via decoder unfolding
 - Scope: Tenth code commit for the C1 JIT compilation backend. Adds `QuestionGreedy` (`?` quantifier) support via the same decoder-unfolding approach as steps 3e.1 and 3e.2. The lowering is the SIMPLEST of the optimized quantifier lowerings: `[Split{exit}, inner_jit_ops...]` with NO Jump back, because `?` is "zero or one" and there's no loop. Patterns like `a?`, `\d?`, `\w?`, `(?:ab)?`, `\Aa?\z`, `a?b+` are now JIT-compilable end-to-end with byte-for-byte correct greedy semantics. With this commit, all three greedy optimized quantifier opcodes (`PlusGreedy`, `StarGreedy`, `QuestionGreedy`) are supported.
 - **The unfolding lowering**: `QuestionGreedy(inner)` decodes to:
