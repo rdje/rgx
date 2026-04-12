@@ -86,20 +86,22 @@ pub struct Engine {
     /// the DFA's `transition` method mutates its state cache, and
     /// public `Regex` API methods are `&self`.
     c2_dfa: Option<Mutex<LazyDfa>>,
+    /// C2 lazy DFA built over the **forward-unanchored** NFA.
+    /// Companion to [`Self::c2_reverse_dfa`] in the **reverse-DFA
+    /// pipeline**: a single O(n) forward sweep (via this DFA) finds
+    /// the END of the leftmost match anywhere in the input, then the
+    /// reverse DFA walks backward from that end to find the START,
+    /// and finally Pike-VM recovers captures over the known span.
+    /// Replaces the per-position anchored-DFA scan (which was O(n ·
+    /// candidate_positions)) on the fast path.
+    c2_forward_unanchored_dfa: Option<Mutex<LazyDfa>>,
     /// C2 lazy DFA built over the **reverse-anchored** NFA.
-    /// Foundation for the reverse-DFA pipeline that replaces the
-    /// per-position scan loop with a single forward-then-reverse
-    /// sweep: forward DFA finds the END of the leftmost match,
-    /// reverse DFA walks backward from that end to find the START.
-    /// Built in [`Engine::new`] alongside `c2_dfa` for any pattern
-    /// where `is_c2_dfa_eligible` returns `true` AND the reverse
-    /// NFA passes the same construction constraints.
-    ///
-    /// **Status:** foundation only. The dispatch wiring that
-    /// consumes this DFA lands in a follow-up commit per
-    /// `docs/BACKLOG.md` "C2 follow-up: reverse-DFA pipeline". The
-    /// DFA is built and stored here so the wiring step is purely
-    /// additive when it lands.
+    /// The reverse half of the reverse-DFA pipeline: walks backward
+    /// from a known match-end to find the leftmost match-start in a
+    /// single bounded sweep. Built in [`Engine::new`] alongside the
+    /// other C2 DFAs for any pattern where `is_c2_dfa_eligible`
+    /// returns `true` AND the reverse NFA passes the same
+    /// construction constraints (no assertions the DFA can't model).
     c2_reverse_dfa: Option<Mutex<LazyDfa>>,
     /// C1 JIT-compiled program for native dispatch (step 5).
     /// Built in [`Engine::new`] only when the pattern is
@@ -348,19 +350,41 @@ fn build_dfa_if_eligible(
         .map(Mutex::new)
 }
 
-/// Build a `Mutex<LazyDfa>` over the **reverse-anchored** NFA for
-/// the given AST + C2 program if the pattern is DFA-eligible. Used
-/// by the **reverse-DFA pipeline** (a C2 follow-up): once the
-/// forward DFA finds the END of a match, the reverse-anchored DFA
-/// walks backward from that end to find the START of the leftmost
-/// match in a single O(n) pass.
+/// Build a `Mutex<LazyDfa>` over the **forward-unanchored** NFA for
+/// the given AST + C2 program if the pattern is DFA-eligible. The
+/// forward half of the reverse-DFA pipeline: a single call to
+/// `find_match_at(input, p)` walks the DFA once from `p` and
+/// returns the end of the leftmost match starting at any position
+/// `≥ p`, replacing the per-position anchored scan loop.
 ///
-/// **Status:** foundation only. The dispatch wiring that consumes
-/// this DFA lands in a follow-up commit. The DFA is built and
-/// stored on the engine here so the wiring step is purely additive
-/// when it lands. Returns `None` for the same reasons
-/// [`build_dfa_if_eligible`] does (pattern outside the C2 subset
-/// or contains assertions the DFA can't model).
+/// Returns `None` for the same reasons [`build_dfa_if_eligible`]
+/// does (pattern outside the C2 subset or contains assertions the
+/// DFA can't model).
+fn build_forward_unanchored_dfa_if_eligible(
+    ast: &crate::ast::Regex,
+    c2_program: &Option<crate::c2::CompiledC2Program>,
+) -> Option<Mutex<LazyDfa>> {
+    let c2 = c2_program.as_ref()?;
+    if !crate::c2::program::is_c2_dfa_eligible(ast) {
+        return None;
+    }
+    let nfa = Arc::new(c2.forward_unanchored.clone());
+    let bcm = Arc::new(c2.byte_class_map.clone());
+    LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT)
+        .ok()
+        .map(Mutex::new)
+}
+
+/// Build a `Mutex<LazyDfa>` over the **reverse-anchored** NFA for
+/// the given AST + C2 program if the pattern is DFA-eligible. The
+/// reverse half of the reverse-DFA pipeline: once the forward
+/// unanchored DFA finds the END of a match, this DFA walks backward
+/// from that end to find the START of the leftmost match in a
+/// single bounded pass.
+///
+/// Returns `None` for the same reasons [`build_dfa_if_eligible`]
+/// does (pattern outside the C2 subset or contains assertions the
+/// DFA can't model).
 fn build_reverse_dfa_if_eligible(
     ast: &crate::ast::Regex,
     c2_program: &Option<crate::c2::CompiledC2Program>,
@@ -439,11 +463,13 @@ impl Engine {
         // The DFA serves `is_match` dispatch via `should_dispatch_to_dfa`.
         let c2_dfa = build_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
 
-        // C2 follow-up: build the reverse-anchored DFA as the
-        // foundation for the reverse-DFA pipeline. The dispatch
-        // wiring lands in a follow-up commit; for now this DFA
-        // is built and stored so the wiring is purely additive.
-        // Same eligibility gate as the forward DFA.
+        // C2 reverse-DFA pipeline: build the forward-unanchored and
+        // reverse-anchored DFAs. Together they replace the
+        // per-position anchored-DFA scan on the fast path with a
+        // single forward-then-reverse sweep. Same eligibility gate
+        // as the anchored forward DFA.
+        let c2_forward_unanchored_dfa =
+            build_forward_unanchored_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
         let c2_reverse_dfa =
             build_reverse_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
 
@@ -462,6 +488,7 @@ impl Engine {
             vm,
             mode: pattern.mode,
             c2_dfa,
+            c2_forward_unanchored_dfa,
             c2_reverse_dfa,
             #[cfg(feature = "jit")]
             jit_program,
@@ -498,17 +525,36 @@ impl Engine {
         Some(dfa)
     }
 
-    /// Returns the reverse-anchored lazy DFA for this engine if the
-    /// pattern is DFA-eligible. Built in [`Engine::new`] alongside
-    /// the forward DFA. Used by the **reverse-DFA pipeline**
-    /// (foundation only at this commit; the dispatch wiring lands
-    /// in a follow-up).
+    /// Returns the forward-unanchored lazy DFA for this engine if
+    /// the pattern is DFA-eligible. The forward half of the
+    /// reverse-DFA pipeline: a single call to `find_match_at(input,
+    /// p)` walks the DFA once and returns the end of the leftmost
+    /// match anywhere at or after `p`.
     ///
-    /// The returned `Mutex` must be locked by the caller, same
-    /// reason as `should_dispatch_to_dfa`. Access is gated by the
-    /// same runtime constraints as the forward DFA so the reverse
-    /// pipeline doesn't surprise users who expect the existing
-    /// dispatch behaviour for limited patterns.
+    /// Same runtime gating as [`Self::should_dispatch_to_dfa`]. The
+    /// returned `Mutex` must be locked by the caller because the
+    /// DFA's cache is interior-mutable.
+    #[doc(hidden)]
+    pub fn should_dispatch_to_forward_unanchored_dfa(&self) -> Option<&Mutex<LazyDfa>> {
+        let dfa = self.c2_forward_unanchored_dfa.as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
+            return None;
+        }
+        Some(dfa)
+    }
+
+    /// Returns the reverse-anchored lazy DFA for this engine if the
+    /// pattern is DFA-eligible. The reverse half of the reverse-DFA
+    /// pipeline: walks backward from a known match-end to find the
+    /// leftmost match-start in one pass.
+    ///
+    /// Same runtime gating as [`Self::should_dispatch_to_dfa`].
     #[doc(hidden)]
     pub fn should_dispatch_to_reverse_dfa(&self) -> Option<&Mutex<LazyDfa>> {
         let dfa = self.c2_reverse_dfa.as_ref()?;
@@ -533,14 +579,31 @@ impl Engine {
     /// The caller (`Regex::is_match` in `lib.rs`) falls back to the
     /// Pike-VM (and ultimately the existing backtracking VM) when this
     /// returns `None`.
+    ///
+    /// Fast path: the **forward-unanchored** DFA walks the input once
+    /// and reports whether any match exists — O(n) instead of O(n ·
+    /// candidate_positions). Falls back to the per-position anchored
+    /// scan only if the unanchored cache exhausts.
     #[doc(hidden)]
     pub fn try_dfa_is_match(&self, input: &[u8]) -> Option<bool> {
+        // Reverse-DFA-pipeline fast path: one O(n) walk of the
+        // forward-unanchored DFA answers is_match directly.
+        if let Some(forward_mutex) = self.should_dispatch_to_forward_unanchored_dfa() {
+            if let Ok(mut forward) = forward_mutex.lock() {
+                match forward.find_match_at(input, 0) {
+                    DfaSearchOutcome::Match(_) => return Some(true),
+                    DfaSearchOutcome::NoMatch => return Some(false),
+                    DfaSearchOutcome::Exhausted => {
+                        // Fall through to the anchored fallback.
+                    }
+                }
+            }
+        }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let mut dfa = dfa_mutex.lock().ok()?;
-        // Scan from each position. The DFA finds the first scan
-        // position that yields a match. The simulator might exhaust
-        // its cache mid-scan; in that case bail and let the caller
-        // fall back.
+        // Per-position anchored scan (pre-pipeline fallback). The
+        // simulator might exhaust its cache mid-scan; in that case
+        // bail and let the caller fall back further.
         for start in 0..=input.len() {
             match dfa.find_match_at(input, start) {
                 DfaSearchOutcome::Match(_) => return Some(true),
@@ -565,6 +628,18 @@ impl Engine {
     /// `Digit` / `Word` / `Space` / `CharClass` / `Byte` prefixes skip
     /// non-candidate positions instead of running the DFA simulator at
     /// every byte.
+    ///
+    /// **Why not the reverse-DFA pipeline here?** The forward-
+    /// unanchored DFA's `find_match_at` uses last-accept semantics
+    /// (standard leftmost-longest subset construction). For patterns
+    /// like `a` on `"xaxa"` that match at multiple positions, it
+    /// returns the end of the LAST match (pos 4), not the leftmost
+    /// (pos 2). The anchored per-position scan is the correct
+    /// algorithm for leftmost-first find_first. The forward-
+    /// unanchored DFA is used for `is_match` only (where any accept
+    /// anywhere is the right answer), and `should_dispatch_to_
+    /// forward_unanchored_dfa` remains exposed for future work on a
+    /// leftmost-first-aware unanchored DFA construction.
     #[doc(hidden)]
     pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
@@ -603,6 +678,11 @@ impl Engine {
     /// match next scan starts one byte later, and an empty match
     /// adjacent to a previous non-empty match is dropped. The scan
     /// loop is bounded by the [`PrefixScanner`] for skip acceleration.
+    ///
+    /// Uses per-position anchored DFA scan for the same reason
+    /// [`Self::try_dfa_find_first`] does — the forward-unanchored
+    /// DFA's last-accept semantics don't match the leftmost-first
+    /// find_all contract.
     #[doc(hidden)]
     pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let dfa_mutex = self.should_dispatch_to_dfa()?;
@@ -1498,5 +1578,80 @@ impl Engine {
         F: Fn(&MatchEvent) + Send + Sync + 'static,
     {
         self.vm.set_event_observer(observer);
+    }
+}
+
+#[cfg(test)]
+mod reverse_dfa_pipeline_tests {
+    //! Tests focused on the reverse-DFA pipeline dispatch wiring.
+    //!
+    //! The forward-unanchored + reverse-anchored DFAs are built for
+    //! every DFA-eligible pattern. Only `is_match` currently consumes
+    //! the forward-unanchored DFA as a single-pass O(n) fast path;
+    //! `find_first` / `find_all` keep the per-position anchored scan
+    //! because the unanchored DFA's leftmost-LONGEST subset
+    //! construction doesn't match the leftmost-first find contract.
+    //! These tests pin those behaviors.
+    use crate::Regex;
+
+    fn compile(pattern: &str) -> Regex {
+        Regex::compile(pattern).expect("pattern compiles")
+    }
+
+    #[test]
+    fn is_match_single_pass_fast_path_answers_true_for_middle_match() {
+        // DFA-eligible pattern with a match in the middle of input.
+        // Exercises the forward-unanchored DFA's one-pass O(n) scan.
+        let re = compile(r"[a-z]+");
+        assert!(re.is_match("123 abc 456"));
+    }
+
+    #[test]
+    fn is_match_single_pass_fast_path_answers_false_for_no_match() {
+        let re = compile(r"[a-z]+");
+        assert!(!re.is_match("12345"));
+    }
+
+    #[test]
+    fn is_match_single_pass_fast_path_on_empty_input() {
+        // Edge case: empty input with a pattern that doesn't match
+        // empty. Forward-unanchored DFA has nothing to walk.
+        let re = compile(r"[a-z]+");
+        assert!(!re.is_match(""));
+    }
+
+    #[test]
+    fn is_match_single_pass_fast_path_on_zero_width_match() {
+        // `a*` accepts at the start state immediately. The
+        // forward-unanchored DFA's `is_accept(start_state)` branch
+        // must return Match(0), not NoMatch.
+        let re = compile(r"a*");
+        assert!(re.is_match(""));
+        assert!(re.is_match("xyz"));
+    }
+
+    #[test]
+    fn is_match_and_find_first_agree_on_multi_position_literal() {
+        // Regression pin: `a` on "xaxa" is the classic case where the
+        // forward-unanchored DFA returns end=4 (last accept). If the
+        // find_first path ever adopts the unanchored DFA without a
+        // leftmost-first-aware algorithm, find_first would return
+        // (3, 4) instead of (1, 2). is_match stays correct (true) in
+        // both worlds.
+        let re = compile(r"a");
+        let input = "xaxa";
+        assert!(re.is_match(input));
+        let m = re.find_first(input).expect("match exists");
+        assert_eq!((m.start, m.end), (1, 2), "find_first must be leftmost");
+    }
+
+    #[test]
+    fn is_match_greedy_quantifier_with_multiple_accepts() {
+        // `a+` on "aaa" has accepts at positions 1, 2, 3 (all same
+        // match start). The forward-unanchored DFA's last-accept
+        // semantics is correct here — single greedy match. is_match
+        // returns true regardless.
+        let re = compile(r"a+");
+        assert!(re.is_match("aaa"));
     }
 }

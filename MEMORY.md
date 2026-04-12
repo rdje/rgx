@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-third commit) — Reverse-DFA pipeline: is_match single-pass fast path
+- **The reverse-DFA pipeline's first real consumer lands**: `Engine::try_dfa_is_match` now walks the forward-unanchored `LazyDfa` once per call instead of running the anchored DFA at every candidate position.
+- **Pitfall noted and respected**: the forward-unanchored DFA's `find_match_at` records the LAST accept seen during the scan (subset-construction's leftmost-LONGEST semantics). For `a` on `"xaxa"` this returns end=4 (the LAST match) not the leftmost end=2. That's wrong for `find_first` / `find_all` which need leftmost-first. It's CORRECT for `is_match` because any accept anywhere makes the answer true. So this commit wires the fast path ONLY for `is_match`.
+- **What's needed to extend to find_first / find_all**: a leftmost-first-aware unanchored NFA — specifically the lazy prefix `(?s:.)*?` needs to die after the first accept is reached, so subset construction preserves leftmost semantics. Not in this commit; scoped for follow-up. The DFA plumbing is in place.
+- **Fields added**: `c2_forward_unanchored_dfa: Option<Mutex<LazyDfa>>` on `Engine`, built in `Engine::new` via `build_forward_unanchored_dfa_if_eligible`. Companion to the existing `c2_dfa` (anchored) and `c2_reverse_dfa` (foundation from eeb64fb). Same eligibility gate.
+- **Regression-pinning test**: `is_match_and_find_first_agree_on_multi_position_literal` asserts `a` on `"xaxa"` gives is_match=true and find_first=(1,2). If a future commit naively adopts the forward-unanchored DFA for find_first, this test fails immediately.
+- **Validation**: `cargo test -p rgx-core --lib` 990/0/1 (up 6 from 984: 6 new tests in `engine::reverse_dfa_pipeline_tests`). All existing tests continue to pass — the fast path is purely additive on top of the existing per-position fallback.
+- **Next concrete action**: either (a) implement the lazy-prefix-dies-after-accept NFA construction to extend the pipeline to find_first / find_all, (b) A8 crate publishing prep, or (c) another tier-2 perf item from the backlog. User input on priority.
+
 ### 2026-04-13 (twenty-second commit) — PGEN 1.1.10 bump closes A13 end-to-end
 - **PGEN submodule bumped** from `ac2acb3` (1.1.9) to `8783757` (1.1.10). PGEN 1.1.10 carries the grammar recognition for `(?(VERSION op X.Y)...)` that PGEN-RGX-0016 was blocking on.
 - **Zero RGX code changes beyond unignoring tests**: the A13 commit on 2026-04-12 shipped everything on the RGX side speculatively. This commit removes `#[ignore]` from three tests in `parsing::tests::version_conditional_*` and drops the `#[allow(dead_code)]` on `contains_conditional`. That's all the RGX-side code that needed to change.
