@@ -4,16 +4,18 @@ summary: |
   (?(VERSION op X.Y)yes|no). This blocks RGX backlog item A13. The
   RGX-side parser short-circuit logic is in place; only the PGEN
   grammar update is needed.
-status: open
+status: closed
 opened_at: 2026-04-12T00:00:00Z
 first_seen_at: 2026-04-12T00:00:00Z
-last_updated_at: 2026-04-12T00:00:00Z
+last_updated_at: 2026-04-13T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
 parser_backend_version: "ac2acb3"
 parser_release_version: "1.1.9"
 integration_contract_version: "1.1.9"
+fixed_in_parser_release_version: "1.1.10"
+fixed_in_parser_backend_version: "8783757"
 parser_family: regex
 profile: regex_default
 integration_surface: parseability_probe
@@ -132,8 +134,22 @@ impact: |
   #[ignore]" once PGEN catches up.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-04-13T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.10 (commit 8783757) recognises `(?(VERSION op X.Y)...)` as
+    a valid conditional and delivers the condition body as bare text
+    to the RGX adapter, where `parse_version_conditional` then
+    short-circuits the conditional at parse time.
+
+    RGX submodule bumped from 1.1.9 (ac2acb3) to 1.1.10 (8783757).
+    The three previously-`#[ignore]`'d integration tests in
+    rgx-core/src/parsing.rs now pass unmodified:
+      - version_conditional_passing_check_returns_yes_branch_only
+      - version_conditional_failing_check_returns_no_branch_only
+      - version_conditional_failing_check_with_no_else_returns_empty
+    Ran: `cargo test -p rgx-core --lib version_conditional_`
+    Result: 3 passed / 0 failed / 0 ignored.
+
+    A13 (PCRE2 VERSION conditionals) is now fully shipped end-to-end.

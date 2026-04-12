@@ -98,7 +98,7 @@ These layers are what the host integration guide in Part IV of this book covers.
 
 ## Where PGEN fits in
 
-PGEN is a separate project — a parser generator with its own repository and its own release cadence. RGX consumes PGEN as a git submodule pinned to a specific release (currently **1.1.9**). PGEN owns the **regex grammar** itself: the actual job of reading a pattern like `(?<year>\d{4})-\d{2}` and producing structured syntax is PGEN's responsibility.
+PGEN is a separate project — a parser generator with its own repository and its own release cadence. RGX consumes PGEN as a git submodule pinned to a specific release (currently **1.1.10**). PGEN owns the **regex grammar** itself: the actual job of reading a pattern like `(?<year>\d{4})-\d{2}` and producing structured syntax is PGEN's responsibility.
 
 RGX's `parsing.rs` is the adapter layer. It calls into PGEN, receives PGEN's parse tree, and translates that tree into RGX's own `ast.rs` types. The recursive-descent parser in `parser.rs` still exists but is gated behind a compile-time switch and is used only as a reference implementation when we need to debug an AST divergence.
 

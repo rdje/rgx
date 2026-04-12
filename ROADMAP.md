@@ -167,17 +167,7 @@ Live forward-looking tracker for rgx.
   - Tag v0.1.0 release.
 
 ### Remaining PCRE2 feature gaps
-The compatibility matrix is now at ~98% parity. JIT compilation has shipped as of the C1 production cutover (2026-04-12, default-on). The remaining gaps are:
-
-#### VERSION conditionals `(?(VERSION>=...)...)`
-- Priority: `very low`
-- Status: `planned`
-- Rationale: allows patterns to branch on the PCRE2 engine version. This is a PCRE2-specific construct with no semantic equivalent in other engines. Almost never seen in real-world patterns.
-
-#### `(*SKIP:name)` named skip
-- Priority: `low`
-- Status: `planned`
-- Rationale: `(*SKIP)` (without name) is already shipped. The named form `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to the position of a specific mark. This requires wiring the mark name registry into the skip logic. The unnamed form covers the vast majority of use cases.
+The compatibility matrix is now at ~99% parity. JIT compilation has shipped as of the C1 production cutover (2026-04-12, default-on). A11 `(*SKIP:name)` shipped 2026-04-12. A13 VERSION conditionals shipped end-to-end 2026-04-13 (RGX-side + PGEN 1.1.10). No hard gaps remain; residual work is in the newer PCRE2 10.47+ advanced surface captured under "Next".
 
 ### Binding/runtime expansion (A9)
 - Status: `deferred` (deprioritized 2026-04-09)
@@ -186,6 +176,9 @@ The compatibility matrix is now at ~98% parity. JIT compilation has shipped as o
 - Reactivation criteria: a real user or use case pulling for a specific binding. Without a demand signal, this is speculative work. If it does reactivate, **C bindings via cbindgen first** (cheapest, unlocks every other FFI host for free) — not Python.
 
 ## Done recently (snapshot)
+- **PGEN 1.1.10 bump — A13 VERSION conditionals closed end-to-end** (2026-04-13). Submodule pointer moved from `ac2acb3` (1.1.9) to `8783757` (1.1.10). PGEN now accepts `(?(VERSION op X.Y)...)` as a conditional with a bare-text condition body; the RGX-side `parse_version_conditional` short-circuit (already shipped 2026-04-12) now runs for real. The three previously-`#[ignore]`'d integration tests in `parsing::tests::version_conditional_*` pass unmodified. `pgen-issues/PGEN-RGX-0016.yaml` marked closed.
+- **A11 `(*SKIP:name)` named skip verb** (2026-04-12). `Regex::Skip` became `Skip(Option<String>)`, new `VerbSkipNamed = 0xA5` opcode with length-prefixed name operand, per-attempt mark registry on `ExecContext`, forward-progress guards at all 12 scan-loop sites. Completes the backtracking verb surface.
+- **A13 VERSION conditionals — RGX-side** (2026-04-12). New `RGX_PCRE2_COMPAT_VERSION = (10, 47)` constant, `parse_version_conditional` helper in `parsing.rs`, compile-time short-circuit in `convert_conditional`. Integration tests gated on PGEN 1.1.10 (closed 2026-04-13, above).
 - **C1 JIT compilation production cutover** (2026-04-12). All 9 steps (0–8) of the design doc plan complete. The `jit` Cargo feature is now default-on; existing users get the JIT for free at the next `cargo update`. The 4-tier dispatch chain (`DFA → Pike-VM → JIT → backtracking VM`) is in production and exercised by every test in the suite. Public design lives in `book/src/internals/jit-compiler.md` (new chapter, ~250 lines). With the new default, `cargo test -p rgx-core` runs 957 lib tests (= 695 baseline + 262 C1) — up from 695 baseline. Opt-out via `--no-default-features --features pgen-parser` still works (drops Cranelift entirely from the dependency closure, runs 695 baseline tests). See `CHANGES.md` 2026-04-12 entry for the full step-by-step history.
 - **C2 NFA/DFA hybrid production cutover** (2026-04-11). All 9 steps (0–8) complete. Sparse-set Pike-VM, lazy DFA cache, byte-class equivalence partitioning, two-pass capture recovery, and the 3-tier dispatch chain wired into `Engine::find_first` / `find_all` / `is_match`. Patterns the DFA can handle run ~1.9x faster than PCRE2; pure-literal patterns ~3.2x faster. Public design lives in `book/src/internals/nfa-dfa-engine.md`.
 - Extended Perl extended character classes again so nested ordinary bracket terms inside `(?[...])` now accept the current ordinary char-class atom subset, including representative shorthand/range, POSIX, and Unicode-property forms such as `(?[[\dA-F]])`, `(?[[[:graph:]]])`, and `(?[[\p{L}] - [\p{Lu}]])`, with parser-path, parser-contract, compiler/unit, and differential parity coverage.

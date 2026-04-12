@@ -1051,7 +1051,7 @@ impl<'a> PgenAstAdapter<'a> {
     /// We inspect the structured `subroutine_target` child to build the
     /// `Recursion` AST node.
     fn convert_subroutine_call(&self, node: &PgenAstNode) -> Result<Regex> {
-        // PGEN 1.1.9+: check for returned-capture subroutine first.
+        // PGEN 1.1.9+ (pinned at 1.1.10): check for returned-capture subroutine first.
         if let Some(rcs) = self.first_descendant(node, "returned_capture_subroutine") {
             return self.convert_returned_capture_subroutine(rcs);
         }
@@ -3018,25 +3018,13 @@ mod tests {
     // ============================================================
     //
     // End-to-end tests that compile `(?(VERSION op X.Y)yes|no)`
-    // patterns through the parser. The parser-level short-circuit
-    // logic in `convert_conditional` is in place and would handle
-    // the AST if PGEN delivered a Conditional with a `VERSION...`
-    // condition body — but PGEN's current grammar does not
-    // recognise `(?(VERSION...)...)` as a valid conditional, so
-    // the input is rejected at the parse stage before our fallback
-    // ever runs. These tests are `#[ignore]`'d until the PGEN
-    // grammar is extended to recognise VERSION conditionals as a
-    // bare-text condition body (similar to how `DEFINE` already
-    // works). When that lands, removing `#[ignore]` should be the
-    // only change needed.
-    //
-    // The helper `parse_version_conditional` and the short-circuit
-    // logic in `convert_conditional` are exercised end-to-end by
-    // the unit tests above, which is sufficient correctness
-    // coverage for the parser-side work.
+    // patterns through the parser. PGEN 1.1.10 delivers the VERSION
+    // conditional as a Conditional with a bare-text condition body,
+    // which `convert_conditional` short-circuits at parse time via
+    // `parse_version_conditional`. The resulting AST contains only
+    // the matching branch — never a `Regex::Conditional` node.
 
     #[test]
-    #[ignore = "blocked on PGEN grammar update — see pgen-issues/ for the gap report"]
     fn version_conditional_passing_check_returns_yes_branch_only() {
         // VERSION>=10.0 is true (RGX_PCRE2_COMPAT_VERSION is 10.47).
         // The parser should return just `cat`, never a Conditional.
@@ -3049,7 +3037,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "blocked on PGEN grammar update — see pgen-issues/ for the gap report"]
     fn version_conditional_failing_check_returns_no_branch_only() {
         let ast =
             parse_pattern("(?(VERSION>=99.0)cat|dog)").expect("VERSION conditional should parse");
@@ -3060,7 +3047,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "blocked on PGEN grammar update — see pgen-issues/ for the gap report"]
     fn version_conditional_failing_check_with_no_else_returns_empty() {
         let ast = parse_pattern("(?(VERSION>=99.0)cat)")
             .expect("VERSION conditional with no else should parse");
@@ -3074,7 +3060,6 @@ mod tests {
     /// `Regex::Conditional` node. Used by the VERSION conditional
     /// integration tests to assert that the conditional was
     /// short-circuited at parse time.
-    #[allow(dead_code)] // used only by the #[ignore]'d integration tests
     fn contains_conditional(ast: &Regex) -> bool {
         match ast {
             Regex::Conditional { .. } => true,

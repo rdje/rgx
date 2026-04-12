@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-second commit) — PGEN 1.1.10 bump closes A13 end-to-end
+- **PGEN submodule bumped** from `ac2acb3` (1.1.9) to `8783757` (1.1.10). PGEN 1.1.10 carries the grammar recognition for `(?(VERSION op X.Y)...)` that PGEN-RGX-0016 was blocking on.
+- **Zero RGX code changes beyond unignoring tests**: the A13 commit on 2026-04-12 shipped everything on the RGX side speculatively. This commit removes `#[ignore]` from three tests in `parsing::tests::version_conditional_*` and drops the `#[allow(dead_code)]` on `contains_conditional`. That's all the RGX-side code that needed to change.
+- **PGEN-RGX-0016 closed**: `status: closed`, `resolution.status: verified-fixed-upstream`, `fixed_in_parser_release_version: 1.1.10`, `fixed_in_parser_backend_version: 8783757`. Follows the same closure shape as PGEN-RGX-0015.
+- **Pin references updated** in README.md, RUST_CODEBASE_ANALYSIS.md, book/src/internals/architecture.md, book/src/internals/pgen-integration.md, book/src/internals/project-status.md, docs/BACKLOG.md, ROADMAP.md. The MSRV is unchanged (PGEN 1.1.10 keeps edition 2024).
+- **Parity number**: ticks from ~98% to ~99%. A11 `(*SKIP:name)` and A13 VERSION conditionals are both shipped end-to-end now; no hard PCRE2 gaps remain on the tracked surface. Remaining work is in the PCRE2 10.47+ advanced-syntax category already captured under the "Next" roadmap section (returned-capture subroutine forms, wider `(?[...])` algebra beyond the shipped subset).
+- **Validation**: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` 984/0/1 (up 2 from 982/0/3 — 2 integration tests un-ignored + 0 new tests), `cargo test -p rgx-cli` 30/0, `cargo clippy -p rgx-core --all-targets` zero RGX-owned errors.
+- **Next concrete action**: back to the ROADMAP "Now" track — reverse-DFA dispatch wiring (consume the foundation from `eeb64fb`) or A8 crate publishing prep. User preference pending.
+
 ### 2026-04-12 (twenty-first commit) — A13 VERSION conditionals (RGX side; PGEN gap filed as PGEN-RGX-0016)
 - **First commit on the Tier-3 parity polish track.** Implements the RGX-side parser-level short-circuit for `(?(VERSION op X.Y)yes|no)` conditionals. The parser-side infrastructure is complete; the full integration is gated on PGEN recognising VERSION conditionals (filed as `pgen-issues/PGEN-RGX-0016.yaml`).
 - **`RGX_PCRE2_COMPAT_VERSION` public constant** in `lib.rs`. Currently `(10, 47)`. The PCRE2 release that the RGX feature surface tracks. Bump when the parity matrix is re-aligned.

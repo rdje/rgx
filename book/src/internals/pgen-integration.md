@@ -10,7 +10,7 @@ PGEN is a parser generator with its own repository, its own release cadence, and
 
 PGEN ships a grammar for the regex language. That grammar describes everything PCRE2 understands: literals, classes, escapes, groups, quantifiers, lookarounds, conditionals, subroutines, code blocks, backtracking verbs, extended character classes, and so on. When PGEN is compiled, that grammar produces a parser that reads pattern strings and emits a parse tree.
 
-RGX consumes PGEN through the `subs/pgen` git submodule, currently pinned to release **1.1.9** at commit `ac2acb3`. Fresh clones need `git clone --recurse-submodules` or a subsequent `git submodule update --init --recursive` — this is covered in the [Contributing](./contributing.md) chapter.
+RGX consumes PGEN through the `subs/pgen` git submodule, currently pinned to release **1.1.10** at commit `8783757`. Fresh clones need `git clone --recurse-submodules` or a subsequent `git submodule update --init --recursive` — this is covered in the [Contributing](./contributing.md) chapter.
 
 ## Why bother with an external parser
 
@@ -89,8 +89,8 @@ The `pgen-issues/artifacts/` subdirectory holds additional supporting material �
 
 RGX pins PGEN to a **specific commit**, not a range. The current pin is:
 
-- Release: **PGEN 1.1.9**
-- Commit: `ac2acb3`
+- Release: **PGEN 1.1.10**
+- Commit: `8783757`
 - Submodule path: `subs/pgen`
 
 This choice is deliberate. Regex parsing is sensitive to grammar changes, and an accidental PGEN bump between RGX releases could silently change what patterns RGX accepts. Pinning to a commit means:

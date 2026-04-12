@@ -16,7 +16,7 @@ The numbers and status claims here are tied to what is in the repository as of t
 | Property test cases | **11 properties × 256+ cases** per run |
 | Fuzz targets | **4** (cargo-fuzz) |
 | Clippy errors | **Zero** on RGX-owned code |
-| PGEN dependency | Pinned to **1.1.9**, commit `ac2acb3`, via `subs/pgen` submodule |
+| PGEN dependency | Pinned to **1.1.10**, commit `8783757`, via `subs/pgen` submodule |
 | Crates.io publication | **Not yet** — pending public release prep |
 
 The parity number is worth elaborating. "98%" is a rough hand-maintained estimate of tracked feature families in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. The remaining 2% is concentrated in a handful of low-priority edge cases plus the performance story (JIT). The matrix has individual line items for every feature — if you want the details, read the matrix directly.
@@ -89,7 +89,7 @@ RGX went through a significant sprint in the current session, with **42+ items**
 - CLI additions: `--var NAME=VALUE`, `--show-details`, `--wasm-module NAME=PATH`, `--color` auto-detect, `--file`, `--follow`.
 - Benchmark trend capture: mode-scoped latest snapshots, rolling history, cross-mode overview, label-paired quick/full summaries, git-derived capture labels, explicit baseline selection.
 - Stabilized local and GitHub CI around explicit RGX package tests with feature-matrix coverage.
-- Switched the default build to the submodule-backed PGEN 1.1.9 parser.
+- Switched the default build to the submodule-backed PGEN 1.1.10 parser (bumped from 1.1.9 on 2026-04-13 to unblock A13 VERSION conditionals end-to-end).
 - Capture API rebuild: `Captures<'t>`, `Match<'t>`, `find_iter`, `captures_iter`, `split_iter`, `capture_names`, `captures_read`, `captures_read_at`, `replacen`, `shortest_match`, `escape`, `Cow<str>` for replace.
 - Safety limits: `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth`.
 - Compilation cache (`RegexCache`) with LRU eviction.
@@ -126,8 +126,8 @@ None of these are blockers for using the code. They are blockers for calling it 
 
 Every RGX build depends on PGEN. The current state:
 
-- **Version:** 1.1.9
-- **Commit:** `ac2acb3`
+- **Version:** 1.1.10
+- **Commit:** `8783757`
 - **Integration:** `subs/pgen` git submodule
 - **Workflow:** `git submodule update --init --recursive` on fresh clones, or `git clone --recurse-submodules`
 
