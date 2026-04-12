@@ -14,7 +14,7 @@ Backtracking is the only model that can handle the features users actually want 
 - Lookbehind with variable width — hard in a DFA, natural in a VM.
 - Recursion and subroutines (`(?R)`, `(?&name)`) — needs a call stack.
 - Embedded code blocks (`(?{lua:...})`) — needs the ability to call out mid-match.
-- Backtracking verbs (`(*COMMIT)`, `(*SKIP)`, `(*PRUNE)`) — meaningless in a DFA.
+- Backtracking verbs (`(*COMMIT)`, `(*SKIP)`, `(*SKIP:name)`, `(*PRUNE)`, `(*MARK:name)`) — meaningless in a DFA.
 
 The tradeoff is that pathological patterns can blow up exponentially. `(a+)+b` on `"aaaaaaaaaaaaa"` with no `b` at the end is the classic example. RGX handles this with explicit safety limits (`set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth`) — see the [Safety Limits](../core-api/safety-limits.md) chapter and the [Sandboxing](./sandboxing.md) chapter later in this part.
 

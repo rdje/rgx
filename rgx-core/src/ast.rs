@@ -169,8 +169,13 @@ pub enum Regex {
     Commit,
     /// (*PRUNE) - If the match fails after this point, fail the current attempt immediately
     Prune,
-    /// (*SKIP) - If the match fails after this point, restart search at the skip position
-    Skip,
+    /// (*SKIP) - If the match fails after this point, restart search at
+    /// the skip position. The optional name is for the `(*SKIP:name)`
+    /// form which interacts with `(*MARK:name)` to restart search at
+    /// the position of the most recent matching mark instead of the
+    /// position of `(*SKIP)` itself. `None` is the unnamed `(*SKIP)`
+    /// which records `ctx.pos` directly.
+    Skip(Option<String>),
     /// (*THEN) - If the current alternative fails after this point, skip to the next alternative
     Then,
     /// (*MARK:name) / (*:name) - Set a named mark (no-op for match behavior)

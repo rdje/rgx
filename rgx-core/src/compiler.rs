@@ -1603,7 +1603,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
@@ -1865,7 +1865,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
@@ -2019,7 +2019,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
@@ -2484,7 +2484,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
@@ -2644,7 +2644,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)
@@ -2733,7 +2733,7 @@ impl Compiler {
             | RegexAst::Accept
             | RegexAst::Commit
             | RegexAst::Prune
-            | RegexAst::Skip
+            | RegexAst::Skip(_)
             | RegexAst::Then
             | RegexAst::Mark(_)
             | RegexAst::WhitespaceLiteral(_)

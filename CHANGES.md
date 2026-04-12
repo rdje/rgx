@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-12 - A11 `(*SKIP:name)` named skip verb
+- Scope: Ships the named form of `(*SKIP)` which interacts with `(*MARK:name)` to advance the scan position to the most recent matching mark on match failure, instead of the position where `(*SKIP)` was encountered. Completes the backtracking verb surface.
+- **AST change**: `Regex::Skip` changed from unit variant to `Skip(Option<String>)`. `None` is the unnamed `(*SKIP)`, `Some(name)` is the named `(*SKIP:name)`.
+- **New opcode `VerbSkipNamed = 0xA5`**: length-prefixed name operand (same encoding as `Mark`). Looks up the most recent matching mark in `ctx.marks` and sets `ctx.skip_position` to that mark's recorded text position. No-op if no matching mark exists (PCRE2 fallback semantics).
+- **`ExecContext.marks: Vec<(String, usize)>`**: per-attempt mark registry. `(*MARK:name)` now pushes `(name, ctx.pos)` during execution (previously a no-op). Cleared on per-attempt reset alongside `skip_position`, `committed`, etc.
+- **`VmResumeState.marks`**: snapshot of the marks stack for async/suspendable resume paths.
+- **Forward-progress guard**: all 12 scan-loop sites where `skip_position` is consumed now use `skip_pos.max(start + 1)` (or equivalent) to prevent infinite loops when a named SKIP targets a mark position behind the current scan start.
+- **Parser**: `extract_directive_payload` reused for `(*SKIP:name)` payload extraction, same as `(*MARK:name)`.
+- **C1/C2 compatibility**: `VerbSkipNamed` added to JIT eligibility exclusion list. AST pattern matches updated in byte_class, classifier, nfa, and compiler for the new `Skip(Option<String>)` shape.
+- **5 new tests**: `test_skip_named_jumps_to_matching_mark_position`, `test_skip_named_with_nonexistent_mark_is_noop`, `test_skip_named_uses_most_recent_matching_mark`, `test_skip_named_distinguishes_mark_names`, `test_skip_named_parses_via_public_api`. Plus updated existing `(*SKIP)` tests for the new AST shape.
+- Validation: `cargo fmt` clean, `cargo clippy --workspace --all-targets` zero errors, `cargo test -p rgx-core` 1188 passed / 0 failed / 4 ignored, `cargo test -p rgx-cli` 30 passed / 0 failed.
+
 ### 2026-04-12 - A13 VERSION conditionals — RGX-side parser-level short-circuit (PGEN gap filed)
 - Scope: First commit on the Tier-3 parity polish track. Implements the RGX-side parser-level short-circuit for `(?(VERSION op X.Y)yes|no)` conditionals. The parser-side infrastructure is complete; the full integration is gated on PGEN recognising VERSION conditionals as a valid bare-text condition body (filed as `pgen-issues/PGEN-RGX-0016.yaml`).
 - **New `RGX_PCRE2_COMPAT_VERSION` public constant** in `lib.rs`. Currently `(10, 47)` — the PCRE2 release that the RGX feature surface tracks (per `docs/PCRE2_COMPATIBILITY_MATRIX.md` ~98% parity). Bump this when the parity matrix is re-aligned to a newer PCRE2 release.

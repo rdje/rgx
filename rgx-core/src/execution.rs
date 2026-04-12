@@ -3051,6 +3051,11 @@ pub(crate) struct VmResumeState {
     pub(crate) code_result: Option<CodeBlockValue>,
     pub(crate) committed: bool,
     pub(crate) skip_position: Option<usize>,
+    /// A11: snapshot of `ExecContext.marks` for `(*MARK:name)` /
+    /// `(*SKIP:name)` interaction. Restored on resume so the
+    /// post-resume continuation sees the same mark stack as the
+    /// pre-suspend execution.
+    pub(crate) marks: Vec<(String, usize)>,
     pub(crate) match_start_override: Option<usize>,
     pub(crate) previous_match_end: Option<usize>,
     pub(crate) scan_start: usize,

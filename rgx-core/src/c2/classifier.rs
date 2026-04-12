@@ -214,7 +214,7 @@ fn first_exclusion(ast: &Regex) -> Option<ExclusionReason> {
         Regex::Accept
         | Regex::Commit
         | Regex::Prune
-        | Regex::Skip
+        | Regex::Skip(_)
         | Regex::Then
         | Regex::Mark(_) => Some(ExclusionReason::BacktrackingVerb),
     }
@@ -598,7 +598,11 @@ mod tests {
         assert_needs_vm(&Regex::Accept, ExclusionReason::BacktrackingVerb);
         assert_needs_vm(&Regex::Commit, ExclusionReason::BacktrackingVerb);
         assert_needs_vm(&Regex::Prune, ExclusionReason::BacktrackingVerb);
-        assert_needs_vm(&Regex::Skip, ExclusionReason::BacktrackingVerb);
+        assert_needs_vm(&Regex::Skip(None), ExclusionReason::BacktrackingVerb);
+        assert_needs_vm(
+            &Regex::Skip(Some("foo".to_string())),
+            ExclusionReason::BacktrackingVerb,
+        );
         assert_needs_vm(&Regex::Then, ExclusionReason::BacktrackingVerb);
         assert_needs_vm(
             &Regex::Mark("name".to_string()),

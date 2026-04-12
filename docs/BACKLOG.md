@@ -81,12 +81,9 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Use `unicode-segmentation` crate. Compile `\X` as a VM opcode that advances by one grapheme cluster.
 - **Dependencies**: Add `unicode-segmentation` dependency.
 
-### A11. `(*SKIP:name)` named skip
+### A11. `(*SKIP:name)` named skip ✅ DONE (2026-04-12)
 - **What**: `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to a specific mark position.
-- **Effort**: `small`
-- **Rationale**: PCRE2 parity gap. Low usage.
-- **How**: Wire mark name registry to skip position lookup.
-- **Dependencies**: `(*MARK)` and `(*SKIP)` (both shipped).
+- **Shipped**: New `VerbSkipNamed` opcode, per-attempt mark registry on `ExecContext`, forward-progress guards at all scan-loop sites. See `CHANGES.md` entry for details.
 
 ### A12. Returned-capture subroutines
 - **What**: `(?1(grouplist))` — PCRE2 10.47+ syntax for subroutines that return captures.

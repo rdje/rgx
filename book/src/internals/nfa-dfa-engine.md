@@ -47,7 +47,7 @@ The classifier (`c2/classifier.rs`) walks the AST once and decides whether C2 ca
 - **Lookaround** (`(?=…)`, `(?!…)`, `(?<=…)`, `(?<!…)`) — context-dependent.
 - **Atomic groups** (`(?>…)`) and **possessive quantifiers** (`a*+`, `a++`, `a?+`) — these are *defined* in terms of backtracking suppression, so they only have meaning in a backtracking engine.
 - **Inline code blocks** (`(?{lua:…})`, `(?{js:…})`, `(?{native:…})`) — they invoke host code mid-match.
-- **Backtracking verbs** (`(*COMMIT)`, `(*SKIP)`, `(*PRUNE)`, `(*THEN)`, `(*ACCEPT)`, `(*MARK:name)`) — semantics are defined in terms of backtracking interactions.
+- **Backtracking verbs** (`(*COMMIT)`, `(*SKIP)`, `(*SKIP:name)`, `(*PRUNE)`, `(*THEN)`, `(*ACCEPT)`, `(*MARK:name)`) — semantics are defined in terms of backtracking interactions.
 - **`\K`** — moves the match start retroactively, which the NFA cannot model.
 
 If none of those appear in the AST, the classifier returns `NoBacktracking` and the compile pipeline builds a `CompiledC2Program` alongside the bytecode for the existing VM.

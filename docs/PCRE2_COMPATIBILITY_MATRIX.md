@@ -143,11 +143,11 @@ Live compatibility tracker for `rgx` against PCRE2.
 | `(*ACCEPT)` | Yes | Yes | `shipped` |
 | `(*FAIL)` / `(*F)` | Yes | Yes | `shipped` |
 | `(*SKIP)` | Yes | Yes | `shipped` |
-| `(*SKIP:name)` | Yes | No | `rgx-gap` — requires `(*MARK:name)` interaction |
+| `(*SKIP:name)` | Yes | Yes | `shipped` — looks up matching `(*MARK:name)` position |
 | `(*PRUNE)` | Yes | Yes | `shipped` |
 | `(*THEN)` | Yes | Yes | `partial` — simplified as `(*PRUNE)`; full alternation-aware behavior not yet implemented |
 | `(*COMMIT)` | Yes | Yes | `shipped` |
-| `(*MARK:name)` / `(*:name)` | Yes | Yes | `partial` — parses and compiles as no-op; mark names not queryable |
+| `(*MARK:name)` / `(*:name)` | Yes | Yes | `shipped` — records mark position for `(*SKIP:name)` lookup |
 
 ### Mode settings
 

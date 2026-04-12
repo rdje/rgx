@@ -367,6 +367,7 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
         | OpCode::Commit
         | OpCode::Prune
         | OpCode::VerbSkip
+        | OpCode::VerbSkipNamed
         | OpCode::Then
         | OpCode::Mark
 

@@ -217,7 +217,7 @@ pub fn reverse_ast(ast: &Regex) -> Regex {
         Regex::Accept => Regex::Accept,
         Regex::Commit => Regex::Commit,
         Regex::Prune => Regex::Prune,
-        Regex::Skip => Regex::Skip,
+        Regex::Skip(name) => Regex::Skip(name.clone()),
         Regex::Then => Regex::Then,
         Regex::Mark(n) => Regex::Mark(n.clone()),
     }
@@ -617,7 +617,7 @@ impl<'a> NfaBuilder<'a> {
             | Regex::Accept
             | Regex::Commit
             | Regex::Prune
-            | Regex::Skip
+            | Regex::Skip(_)
             | Regex::Then
             | Regex::Mark(_) => self.build_unmatchable(),
         }

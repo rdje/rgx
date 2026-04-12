@@ -1803,3 +1803,22 @@ For sparse-match patterns where the prefix byte is rare in the input (e.g., `ERR
 ### C2 step 7 is complete
 - The dispatch path now has its hottest optimization for the common case (patterns with literal prefixes).
 - Next: step 8 (production cutover, benchmarks, Book chapter).
+
+## 2026-04-12 session — A11 `(*SKIP:name)` named skip verb shipped
+
+### What landed
+- `Regex::Skip` changed from unit variant to `Skip(Option<String>)`. New `VerbSkipNamed = 0xA5` opcode with length-prefixed name operand.
+- `ExecContext.marks: Vec<(String, usize)>` per-attempt mark registry. `(*MARK:name)` now pushes `(name, pos)` during execution.
+- `VerbSkipNamed` handler looks up the most recent matching mark and sets `ctx.skip_position`. No-op if no matching mark exists.
+- `VmResumeState.marks` for async/suspendable resume paths.
+- Forward-progress guard (`skip_pos.max(start + 1)`) at all 12 scan-loop sites where `skip_position` is consumed.
+- `marks` cleared on per-attempt reset alongside `skip_position`, `committed`, etc.
+- Parser reuses `extract_directive_payload` for `(*SKIP:name)`.
+- C1/C2: `VerbSkipNamed` added to JIT exclusion list, AST pattern matches updated for new `Skip(Option<String>)` shape.
+- 5 new tests + updated existing `(*SKIP)` tests.
+
+### One correctness bug caught and fixed during recovery
+- **Forward-progress infinite loop**. When `(*SKIP:name)` set `skip_position` to a mark position behind the current scan start, the scan loop didn't advance. Fixed by adding `.max(start + 1)` guards at all 12 consumption sites. Also added `marks.clear()` to the per-attempt reset to prevent stale marks from a previous attempt leaking into the next one.
+
+### Next concrete action
+- Continue Tier-2 perf headroom + parity polish: reverse-DFA pipeline, A8 crate publishing prep.

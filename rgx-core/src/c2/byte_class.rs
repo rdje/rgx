@@ -344,7 +344,7 @@ fn collect_oracles(ast: &Regex, oracles: &mut Vec<Vec<(u8, u8)>>) {
         | Regex::Accept
         | Regex::Commit
         | Regex::Prune
-        | Regex::Skip
+        | Regex::Skip(_)
         | Regex::Then
         | Regex::Mark(_) => {
             // No children to descend into.

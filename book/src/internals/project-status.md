@@ -25,7 +25,7 @@ The parity number is worth elaborating. "98%" is a rough hand-maintained estimat
 
 If you were to use RGX today, you would get:
 
-**Core regex features** — literals, classes, escapes, quantifiers (greedy/lazy/possessive/counted), alternation, capture groups (numbered, named, Python-style `(?P<name>...)`), backreferences (numeric and named), anchors, boundaries, lookarounds (positive/negative, lookahead/lookbehind), atomic groups, branch-reset groups, duplicate-name groups, comments, inline flag toggles `(?imsx)`, conditional groups, recursive subroutines, named subroutines, Unicode property classes `\p{...}`, POSIX classes, newline sequence `\R`, non-newline `\N`, extended grapheme cluster `\X`, Perl extended char classes `(?[...])` with set algebra, and backtracking control verbs (`(*COMMIT)`, `(*FAIL)`, `(*MARK)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*ACCEPT)`).
+**Core regex features** — literals, classes, escapes, quantifiers (greedy/lazy/possessive/counted), alternation, capture groups (numbered, named, Python-style `(?P<name>...)`), backreferences (numeric and named), anchors, boundaries, lookarounds (positive/negative, lookahead/lookbehind), atomic groups, branch-reset groups, duplicate-name groups, comments, inline flag toggles `(?imsx)`, conditional groups, recursive subroutines, named subroutines, Unicode property classes `\p{...}`, POSIX classes, newline sequence `\R`, non-newline `\N`, extended grapheme cluster `\X`, Perl extended char classes `(?[...])` with set algebra, and backtracking control verbs (`(*COMMIT)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, `(*SKIP)`, `(*SKIP:name)`, `(*THEN)`, `(*ACCEPT)`).
 
 **Public API** — `Regex`, `RegexBuilder` with flag overrides, `Captures` with indexed/named/expand access, `Match` with `as_str`/`range`/`len`, lazy iterators (`find_iter`, `captures_iter`, `split_iter`), `replace`/`replacen`/`replace_all` with `$1`-style interpolation, `Replacer` trait for closure-based replacement, `escape`, `shortest_match`/`shortest_match_at`, `is_match_at`/`find_at`, `capture_names`, `captures_len`, `as_str`, `Cow<str>` returns from replace, `CaptureLocations` for reusable capture storage.
 
@@ -59,7 +59,7 @@ These are the remaining items, grouped by priority.
 
 ### Tier 3: Parity edge cases
 
-**A11 — `(*SKIP:name)` named skip.** `(*SKIP)` without a name is shipped. The named form interacts with `(*MARK:name)` and requires wiring the mark registry to the skip position lookup. Low priority because the unnamed form covers most real use cases.
+**A11 — `(*SKIP:name)` named skip.** ✅ Shipped. The named form `(*SKIP:name)` now interacts with `(*MARK:name)` via a per-attempt mark registry on `ExecContext`. When a match attempt fails past `(*SKIP:name)`, the scan loop advances to the position of the most recent matching mark instead of the position where `(*SKIP)` was encountered. If no matching mark exists, the verb is a no-op (PCRE2 fallback semantics). New `VerbSkipNamed` opcode with length-prefixed name operand. Forward-progress guards at all 12 scan-loop sites prevent infinite loops when the mark position is behind the current scan start.
 
 **A13 — `(?(VERSION>=...)...)` conditionals.** Branch on engine version. Trivial to implement, almost never used in real patterns. Deferred on priority, not complexity.
 

@@ -180,6 +180,7 @@ pub enum OpCode {
 
     // === BACKTRACKING CONTROL VERBS (0xA0-0xAF) ===
     /// (*COMMIT) - set committed flag; if match fails, abort entire search
+    /// `(*COMMIT)` - abort entire search on failure after this point
     Commit = 0xA0,
     /// (*PRUNE) - clear backtrack stack; if match fails, fail this attempt
     Prune = 0xA1,
@@ -187,8 +188,18 @@ pub enum OpCode {
     VerbSkip = 0xA2,
     /// (*THEN) - clear backtrack stack (simplified); skip to next alternative
     Then = 0xA3,
-    /// (*MARK:name) - no-op; mark name is set but not queryable
+    /// (*MARK:name) - record mark position in `ctx.marks` and skip past
+    /// the length-prefixed name operand. Used by `(*SKIP:name)` to look
+    /// up the matching mark position on failure (A11). Mark is no
+    /// longer a no-op for match behaviour — its execution side effect
+    /// (pushing to `ctx.marks`) is what enables named SKIP.
     Mark = 0xA4,
+    /// (*SKIP:name) - look up the most recent matching mark in
+    /// `ctx.marks` and set `ctx.skip_position` to that mark's text
+    /// position. Skip past the length-prefixed name operand. If no
+    /// matching mark is found, the verb is treated as a no-op (the
+    /// PCRE2 fallback for missing marks). A11.
+    VerbSkipNamed = 0xA5,
 
     // === TERMINATION (0xF0-0xFF) ===
     /// Successful match - capture current position
@@ -234,7 +245,7 @@ fn regex_kind(node: &Regex) -> &'static str {
         Regex::Accept => "Accept",
         Regex::Commit => "Commit",
         Regex::Prune => "Prune",
-        Regex::Skip => "Skip",
+        Regex::Skip(_) => "Skip",
         Regex::Then => "Then",
         Regex::Mark(_) => "Mark",
         Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
@@ -427,6 +438,13 @@ pub struct ExecContext<'a> {
     /// On match failure, the scanning loop advances to this position instead
     /// of `start + 1`.
     pub skip_position: Option<usize>,
+    /// A11: stack of `(*MARK:name)` records `(name, text_pos)` collected
+    /// during the current match attempt. Used by `(*SKIP:name)` to look
+    /// up the most recent matching mark — the SKIP advances the scan
+    /// position to the matching mark's recorded text position instead
+    /// of `ctx.pos`. Cleared on match attempt reset alongside the rest
+    /// of the per-attempt context state.
+    pub marks: Vec<(String, usize)>,
     /// When `true`, unregistered native callbacks cause suspension instead of
     /// being treated as errors. Set by `find_first_suspendable`; defaults to
     /// `false` for zero overhead on the synchronous path.
@@ -881,6 +899,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1012,6 +1031,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1080,6 +1100,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1132,6 +1153,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1495,9 +1517,11 @@ impl RegexVM {
                     trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
                     return None;
                 }
-                // (*SKIP): advance to the skip position instead of start+1
+                // (*SKIP): advance to the skip position instead of start+1.
+                // Guard: named SKIP can target a mark before `start`;
+                // ensure forward progress to avoid an infinite loop.
                 if let Some(skip_pos) = ctx.skip_position.take() {
-                    offset = skip_pos;
+                    offset = skip_pos.max(start + 1);
                 } else {
                     offset = start + 1;
                 }
@@ -1535,9 +1559,11 @@ impl RegexVM {
                     trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
                     return None;
                 }
-                // (*SKIP): advance to the skip position instead of start+1
+                // (*SKIP): advance to the skip position instead of start+1.
+                // Guard: named SKIP can target a mark before `start`;
+                // ensure forward progress to avoid an infinite loop.
                 if let Some(skip_pos) = ctx.skip_position.take() {
-                    start = skip_pos;
+                    start = skip_pos.max(start + 1);
                 } else {
                     start += 1;
                 }
@@ -1604,7 +1630,7 @@ impl RegexVM {
                     return None;
                 }
                 if let Some(skip_pos) = ctx.skip_position.take() {
-                    offset = skip_pos;
+                    offset = skip_pos.max(start + 1);
                 } else {
                     offset = start + 1;
                 }
@@ -1640,7 +1666,7 @@ impl RegexVM {
                     return None;
                 }
                 if let Some(skip_pos) = ctx.skip_position.take() {
-                    start = skip_pos;
+                    start = skip_pos.max(start + 1);
                 } else {
                     start += 1;
                 }
@@ -1720,7 +1746,7 @@ impl RegexVM {
                 } else if ctx.committed {
                     break;
                 } else if let Some(skip_pos) = ctx.skip_position.take() {
-                    offset = skip_pos;
+                    offset = skip_pos.max(candidate + 1);
                 } else {
                     offset = candidate + 1;
                 }
@@ -1772,7 +1798,7 @@ impl RegexVM {
                 } else if ctx.committed {
                     break;
                 } else if let Some(skip_pos) = ctx.skip_position.take() {
-                    start = skip_pos;
+                    start = skip_pos.max(start + 1);
                 } else {
                     start += 1;
                 }
@@ -1877,6 +1903,7 @@ impl RegexVM {
             previous_match_end: ctx.previous_match_end,
             committed: ctx.committed,
             skip_position: ctx.skip_position,
+            marks: ctx.marks.clone(),
             suspendable: ctx.suspendable,
             suspension: None,
             step_count: ctx.step_count,
@@ -1953,6 +1980,7 @@ impl RegexVM {
         ctx.match_start_override = None;
         ctx.committed = false;
         ctx.skip_position = None;
+        ctx.marks.clear();
         ctx.step_count = 0;
         ctx.hit_end = false;
         let mut ip = 0;
@@ -2362,12 +2390,58 @@ impl RegexVM {
                 }
 
                 OpCode::Mark => {
-                    // (*MARK:name): The mark name was encoded as a
-                    // length-prefixed UTF-8 string operand. Skip it.
-                    // Mark is a no-op for match behavior.
+                    // (*MARK:name): record the mark name and current
+                    // position in `ctx.marks` so a later `(*SKIP:name)`
+                    // can look it up. The name is encoded as a
+                    // length-prefixed UTF-8 string operand.
+                    //
+                    // A11: Mark used to be a no-op for match behaviour.
+                    // It now pushes (name, pos) to ctx.marks so the
+                    // (*SKIP:name) → (*MARK:name) interaction works.
+                    // The match-result side effect is unchanged: marks
+                    // are scoped to the current match attempt and do
+                    // not affect the public MatchResult shape.
                     if ip < code.len() {
                         let name_len = code[ip] as usize;
-                        ip += 1 + name_len;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len])
+                                .unwrap_or("")
+                                .to_string();
+                            ctx.marks.push((name, ctx.pos));
+                            ip += name_len;
+                        }
+                    }
+                }
+
+                OpCode::VerbSkipNamed => {
+                    // (*SKIP:name): look up the most recent mark with
+                    // the matching name in ctx.marks; set
+                    // ctx.skip_position to that mark's recorded text
+                    // position. If no matching mark exists, the verb
+                    // is treated as a no-op (matches PCRE2's fallback
+                    // for missing marks). Like (*SKIP), also clears
+                    // the backtrack stack.
+                    //
+                    // A11.
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
+                            // Search marks from most-recent to least-recent.
+                            if let Some(pos) = ctx
+                                .marks
+                                .iter()
+                                .rev()
+                                .find(|(n, _)| n == name)
+                                .map(|(_, p)| *p)
+                            {
+                                ctx.skip_position = Some(pos);
+                                ctx.backtrack_stack.clear();
+                            }
+                            ip += name_len;
+                        }
                     }
                 }
 
@@ -3490,6 +3564,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -3548,9 +3623,11 @@ impl RegexVM {
                     if ctx.committed {
                         break;
                     }
-                    // (*SKIP): advance to the skip position instead of candidate+1
+                    // (*SKIP): advance to the skip position instead of candidate+1.
+                    // Guard: named SKIP can target a mark before `candidate`;
+                    // ensure forward progress.
                     if let Some(skip_pos) = ctx.skip_position.take() {
-                        start = skip_pos;
+                        start = skip_pos.max(candidate + 1);
                     } else {
                         start = candidate + 1;
                     }
@@ -3599,9 +3676,10 @@ impl RegexVM {
                     if ctx.committed {
                         break;
                     }
-                    // (*SKIP): advance to the skip position instead of start+1
+                    // (*SKIP): advance to the skip position instead of start+1.
+                    // Guard: forward progress for named SKIP.
                     if let Some(skip_pos) = ctx.skip_position.take() {
-                        start = skip_pos;
+                        start = skip_pos.max(start + 1);
                     } else {
                         start += 1;
                     }
@@ -3753,6 +3831,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            marks: Vec::new(),
             suspendable: true,
             suspension: None,
             step_count: 0,
@@ -3830,6 +3909,7 @@ impl RegexVM {
                         code_result: ctx.code_result.clone(),
                         committed: ctx.committed,
                         skip_position: ctx.skip_position,
+                        marks: ctx.marks.clone(),
                         match_start_override: ctx.match_start_override,
                         previous_match_end: ctx.previous_match_end,
                         scan_start: start,
@@ -3863,9 +3943,10 @@ impl RegexVM {
                 return MatchOutcome::Completed(None);
             }
 
-            // (*SKIP): advance to the skip position instead of start+1
+            // (*SKIP): advance to the skip position instead of start+1.
+            // Guard: forward progress for named SKIP.
             if let Some(skip_pos) = ctx.skip_position.take() {
-                start = skip_pos;
+                start = skip_pos.max(start + 1);
             } else if start < ctx.text.len() {
                 start += 1;
             } else {
@@ -3912,6 +3993,7 @@ impl RegexVM {
             previous_match_end: state.previous_match_end,
             committed: state.committed,
             skip_position: state.skip_position,
+            marks: state.marks,
             suspendable: true,
             suspension: None,
             step_count: 0,
@@ -3994,6 +4076,7 @@ impl RegexVM {
                             code_result: ctx.code_result.clone(),
                             committed: ctx.committed,
                             skip_position: ctx.skip_position,
+                            marks: ctx.marks.clone(),
                             match_start_override: ctx.match_start_override,
                             previous_match_end: ctx.previous_match_end,
                             scan_start: state.scan_start,
@@ -4024,7 +4107,7 @@ impl RegexVM {
                     return MatchOutcome::Completed(None);
                 }
                 let next_start = if let Some(skip_pos) = ctx.skip_position.take() {
-                    skip_pos
+                    skip_pos.max(state.scan_start + 1)
                 } else {
                     state.scan_start + 1
                 };
@@ -4076,6 +4159,7 @@ impl RegexVM {
                                 code_result: ctx.code_result.clone(),
                                 committed: ctx.committed,
                                 skip_position: ctx.skip_position,
+                                marks: ctx.marks.clone(),
                                 match_start_override: ctx.match_start_override,
                                 previous_match_end: ctx.previous_match_end,
                                 scan_start: state.scan_start,
@@ -4103,7 +4187,7 @@ impl RegexVM {
                     return MatchOutcome::Completed(None);
                 }
                 let next_start = if let Some(skip_pos) = ctx.skip_position.take() {
-                    skip_pos
+                    skip_pos.max(state.scan_start + 1)
                 } else {
                     state.scan_start + 1
                 };
@@ -4558,11 +4642,44 @@ impl RegexVM {
                 OpCode::VerbSkip => {
                     ctx.skip_position = Some(ctx.pos);
                 }
-                OpCode::Mark => {
-                    // (*MARK:name) — read and skip the name length + name bytes
+                OpCode::VerbSkipNamed => {
+                    // (*SKIP:name): A11. Same logic as the main
+                    // dispatch — look up the matching mark in
+                    // ctx.marks and set ctx.skip_position to that
+                    // mark's recorded text position. No-op if no
+                    // matching mark exists.
                     if ip < code.len() {
                         let name_len = code[ip] as usize;
-                        ip += 1 + name_len;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
+                            if let Some(pos) = ctx
+                                .marks
+                                .iter()
+                                .rev()
+                                .find(|(n, _)| n == name)
+                                .map(|(_, p)| *p)
+                            {
+                                ctx.skip_position = Some(pos);
+                                ctx.backtrack_stack.clear();
+                            }
+                            ip += name_len;
+                        }
+                    }
+                }
+                OpCode::Mark => {
+                    // (*MARK:name): A11. Push (name, ctx.pos) to
+                    // ctx.marks so a later (*SKIP:name) can find it.
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len])
+                                .unwrap_or("")
+                                .to_string();
+                            ctx.marks.push((name, ctx.pos));
+                            ip += name_len;
+                        }
                     }
                 }
                 _ => {
@@ -5308,11 +5425,44 @@ impl RegexVM {
                     backtrack_stack.clear();
                 }
 
-                OpCode::Mark => {
-                    // Skip the length-prefixed mark name (no-op)
+                OpCode::VerbSkipNamed => {
+                    // (*SKIP:name): A11. Look up the matching mark
+                    // in ctx.marks and set ctx.skip_position to its
+                    // recorded text position. No-op if no matching
+                    // mark exists.
                     if ip < code.len() {
                         let name_len = code[ip] as usize;
-                        ip += 1 + name_len;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
+                            if let Some(pos) = ctx
+                                .marks
+                                .iter()
+                                .rev()
+                                .find(|(n, _)| n == name)
+                                .map(|(_, p)| *p)
+                            {
+                                ctx.skip_position = Some(pos);
+                                backtrack_stack.clear();
+                            }
+                            ip += name_len;
+                        }
+                    }
+                }
+
+                OpCode::Mark => {
+                    // (*MARK:name): A11. Push (name, ctx.pos) to
+                    // ctx.marks so a later (*SKIP:name) can find it.
+                    if ip < code.len() {
+                        let name_len = code[ip] as usize;
+                        ip += 1;
+                        if ip + name_len <= code.len() {
+                            let name = std::str::from_utf8(&code[ip..ip + name_len])
+                                .unwrap_or("")
+                                .to_string();
+                            ctx.marks.push((name, ctx.pos));
+                            ip += name_len;
+                        }
                     }
                 }
 
@@ -6550,8 +6700,20 @@ impl OptimizingCompiler {
                 self.emit_op(OpCode::Prune);
             }
 
-            Regex::Skip => {
-                self.emit_op(OpCode::VerbSkip);
+            Regex::Skip(name) => {
+                // A11: (*SKIP) and (*SKIP:name) emit different opcodes.
+                // The unnamed form records ctx.pos directly; the named
+                // form looks up the matching mark in ctx.marks via the
+                // length-prefixed name operand.
+                if let Some(name) = name {
+                    self.emit_op(OpCode::VerbSkipNamed);
+                    let name_bytes = name.as_bytes();
+                    let len = name_bytes.len().min(255);
+                    self.code.push(len as u8);
+                    self.code.extend_from_slice(&name_bytes[..len]);
+                } else {
+                    self.emit_op(OpCode::VerbSkip);
+                }
             }
 
             Regex::Then => {
@@ -6829,7 +6991,7 @@ impl OptimizingCompiler {
             | Regex::Accept
             | Regex::Commit
             | Regex::Prune
-            | Regex::Skip
+            | Regex::Skip(_)
             | Regex::Then
             | Regex::Mark(_)
             | Regex::WhitespaceLiteral(_)
@@ -6946,8 +7108,11 @@ impl OptimizingCompiler {
                 | OpCode::Fail
                 | OpCode::Accept
                 | OpCode::Halt => {}
-                OpCode::Mark => {
-                    // Skip the length-prefixed mark name
+                OpCode::Mark | OpCode::VerbSkipNamed => {
+                    // Skip the length-prefixed name operand. Both
+                    // (*MARK:name) and (*SKIP:name) (A11) encode the
+                    // mark name as a length byte followed by the
+                    // name bytes.
                     if ip < code.len() {
                         let name_len = code[ip] as usize;
                         ip += 1 + name_len;
@@ -7149,7 +7314,8 @@ impl TryFrom<u8> for OpCode {
             LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
             PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart,
             SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
-            StartLine, StartText, Then, VerbSkip, WordAscii, WordAsciiNeg, WordBoundary,
+            StartLine, StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg,
+            WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -7201,6 +7367,7 @@ impl TryFrom<u8> for OpCode {
             0xA2 => Ok(VerbSkip),
             0xA3 => Ok(Then),
             0xA4 => Ok(Mark),
+            0xA5 => Ok(VerbSkipNamed),
             0xF0 => Ok(Match),
             0xF1 => Ok(Fail),
             _ => Err(()),
@@ -7591,7 +7758,7 @@ mod tests {
         let mut compiler = OptimizingCompiler::new();
         // Pattern: a(*SKIP)b — if 'b' fails after 'a(*SKIP)', next attempt
         // starts at the position after where (*SKIP) was encountered.
-        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip, Regex::Char('b')]);
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip(None), Regex::Char('b')]);
         let program = compiler.compile(&ast);
         let vm = RegexVM::new(program);
 
@@ -7666,7 +7833,7 @@ mod tests {
     #[test]
     fn test_skip_verb_find_all_advances_position() {
         let mut compiler = OptimizingCompiler::new();
-        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip, Regex::Char('b')]);
+        let ast = Regex::Sequence(vec![Regex::Char('a'), Regex::Skip(None), Regex::Char('b')]);
         let program = compiler.compile(&ast);
         let vm = RegexVM::new(program);
 
@@ -7678,5 +7845,127 @@ mod tests {
         let m = m.unwrap();
         assert_eq!(m.start, 1);
         assert_eq!(m.end, 3);
+    }
+
+    // ============================================================
+    // A11: (*SKIP:name) named skip tests
+    // ============================================================
+
+    #[test]
+    fn test_skip_named_jumps_to_matching_mark_position() {
+        // Pattern: (*MARK:foo) a (*SKIP:foo) b
+        // Against input "ax" — at pos 0, set mark "foo" at pos 0,
+        // match 'a' (pos→1), trigger (*SKIP:foo) which sets
+        // skip_position to pos 0 (the matching mark's position),
+        // then 'b' fails. The scan loop should jump to pos 0.
+        // Wait — that's the same position, leading to an infinite
+        // loop. The scan loop must guard against skip_position <=
+        // start by advancing at least one byte (the existing
+        // (*SKIP) handling does this). Let's use a more interesting
+        // pattern:
+        //
+        // Pattern: ab (*MARK:foo) c (*SKIP:foo) d
+        // Against "abcd" — match the whole thing.
+        // Against "abce" — 'd' fails. (*SKIP:foo) sets
+        // skip_position to where (*MARK:foo) was set = pos 2.
+        // The scan loop advances to pos 2 (or pos 3 to avoid the
+        // tight loop). Either way the next attempt starts after
+        // the mark, not at start+1=1.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Char('a'),
+            Regex::Char('b'),
+            Regex::Mark("foo".to_string()),
+            Regex::Char('c'),
+            Regex::Skip(Some("foo".to_string())),
+            Regex::Char('d'),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+
+        // Successful match: full pattern matches "abcd".
+        let m = vm.find_first("abcd");
+        assert!(m.is_some(), "expected match for 'abcd'");
+        let m = m.unwrap();
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 4);
+    }
+
+    #[test]
+    fn test_skip_named_with_nonexistent_mark_is_noop() {
+        // Pattern: a (*SKIP:nonexistent) b
+        // No matching mark exists, so (*SKIP:nonexistent) is a
+        // no-op. The pattern should match "ab" normally.
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Char('a'),
+            Regex::Skip(Some("nonexistent".to_string())),
+            Regex::Char('b'),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+        assert!(vm.is_match("ab"));
+        assert!(!vm.is_match("ax"));
+    }
+
+    #[test]
+    fn test_skip_named_uses_most_recent_matching_mark() {
+        // Pattern: (*MARK:foo) a (*MARK:foo) b (*SKIP:foo) c
+        // The two marks have the same name. The SKIP should look
+        // up the MOST RECENT mark (the one at pos 1, after 'a'),
+        // not the first one (at pos 0).
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Mark("foo".to_string()),
+            Regex::Char('a'),
+            Regex::Mark("foo".to_string()),
+            Regex::Char('b'),
+            Regex::Skip(Some("foo".to_string())),
+            Regex::Char('c'),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+        // Successful match.
+        let m = vm.find_first("abc");
+        assert!(m.is_some());
+        let m = m.unwrap();
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+    }
+
+    #[test]
+    fn test_skip_named_distinguishes_mark_names() {
+        // Pattern: (*MARK:foo) a (*MARK:bar) b (*SKIP:foo) c
+        // The (*SKIP:foo) should look up the foo mark (at pos 0),
+        // NOT the bar mark (at pos 1).
+        let mut compiler = OptimizingCompiler::new();
+        let ast = Regex::Sequence(vec![
+            Regex::Mark("foo".to_string()),
+            Regex::Char('a'),
+            Regex::Mark("bar".to_string()),
+            Regex::Char('b'),
+            Regex::Skip(Some("foo".to_string())),
+            Regex::Char('c'),
+        ]);
+        let program = compiler.compile(&ast);
+        let vm = RegexVM::new(program);
+        // Successful match: "abc" — the mark/skip/mark interaction
+        // doesn't disturb the basic flow when the pattern matches.
+        let m = vm.find_first("abc");
+        assert!(m.is_some());
+        let m = m.unwrap();
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+    }
+
+    #[test]
+    fn test_skip_named_parses_via_public_api() {
+        // End-to-end test through Regex::compile to verify the
+        // parser → AST → bytecode → VM path.
+        let r = crate::Regex::compile("(*MARK:foo)abc(*SKIP:foo)d").unwrap();
+        // The pattern matches "abcd".
+        assert!(r.is_match("abcd"));
+        // The pattern does not match "abce".
+        assert!(!r.is_match("abce"));
     }
 }

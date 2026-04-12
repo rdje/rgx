@@ -956,8 +956,19 @@ impl<'a> PgenAstAdapter<'a> {
             "COMMIT" => Ok(Regex::Commit),
             // (*PRUNE): fail the entire attempt at this start position
             "PRUNE" => Ok(Regex::Prune),
-            // (*SKIP): advance to the skip position on failure
-            "SKIP" => Ok(Regex::Skip),
+            // (*SKIP) / (*SKIP:name): advance to the skip position on
+            // failure. The named form interacts with (*MARK:name) to
+            // restart search at the position of the most recent
+            // matching mark; the unnamed form restarts at the
+            // position of (*SKIP) itself.
+            "SKIP" => {
+                let payload = self.extract_directive_payload(node);
+                if payload.is_empty() {
+                    Ok(Regex::Skip(None))
+                } else {
+                    Ok(Regex::Skip(Some(payload)))
+                }
+            }
             // (*THEN): skip to the next alternative on failure
             "THEN" => Ok(Regex::Then),
             // (*MARK:name): set a named mark (no-op for match behavior)
@@ -2896,7 +2907,10 @@ mod tests {
     #[test]
     fn skip_verb_parses() {
         let ast = parse_pattern("(*SKIP)").expect("(*SKIP) should parse");
-        assert!(matches!(ast, Regex::Skip), "expected Skip, got: {ast:?}");
+        assert!(
+            matches!(ast, Regex::Skip(None)),
+            "expected Skip(None), got: {ast:?}"
+        );
     }
 
     #[test]
