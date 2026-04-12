@@ -294,6 +294,19 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-fourth commit) — A8 crate publishing prep: metadata + READMEs + dry-run
+- **rgx-core and rgx-cli are now crates.io-metadata-ready.** Every field populated: `description`, `readme`, `documentation`, `homepage`, `keywords`, `categories`, `repository`, `license`, plus `version` on the internal path dep.
+- **New per-crate READMEs** live at `rgx-core/README.md` and `rgx-cli/README.md` — user-focused, with install/example recipes and feature-flag tables. Root `README.md` stays contributor-heavy and is unaffected.
+- **`cargo publish --dry-run` on rgx-core**: metadata gate passes. Surfaces **one hard blocker**: `pgen` is a path dep on a private submodule, not on crates.io.
+  - Three paths forward (user decision):
+    1. Publish `pgen` to crates.io first → bump rgx-core to `pgen = "1.1.10"`.
+    2. Vendor pgen's generated Rust code into rgx-core so the dep disappears.
+    3. Make `pgen-parser` truly optional so rgx-core can publish without it.
+- **Binary-rename decision also pending**: CLI is currently named `rgx-cli`. README markets it as `rgx`. Adding `[[bin]] name = "rgx"` is a 1-line change but touches 461 downstream references across docs and scripts — deferred to a coordinated follow-up.
+- **Placeholder fixed**: author email was `richarddje@example.com`; now `richard.dje@gmail.com` (from `git config`).
+- **Validation**: `cargo fmt` clean, `cargo test -p rgx-core --lib` 990/0/1, `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` zero errors, `cargo publish --dry-run` metadata gate ✅ blocked only on pgen.
+- **Next concrete action**: user decision on the pgen-publish strategy. Without that, A8 is as far forward as it can go. Other tier-2 work still on the table: extending the reverse-DFA pipeline to find_first / find_all via a leftmost-first-aware unanchored NFA; opcode fusion; per-opcode bounds-check reduction.
+
 ### 2026-04-13 (twenty-third commit) — Reverse-DFA pipeline: is_match single-pass fast path
 - **The reverse-DFA pipeline's first real consumer lands**: `Engine::try_dfa_is_match` now walks the forward-unanchored `LazyDfa` once per call instead of running the anchored DFA at every candidate position.
 - **Pitfall noted and respected**: the forward-unanchored DFA's `find_match_at` records the LAST accept seen during the scan (subset-construction's leftmost-LONGEST semantics). For `a` on `"xaxa"` this returns end=4 (the LAST match) not the leftmost end=2. That's wrong for `find_first` / `find_all` which need leftmost-first. It's CORRECT for `is_match` because any accept anywhere makes the answer true. So this commit wires the fast path ONLY for `is_match`.

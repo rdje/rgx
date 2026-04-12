@@ -5,8 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "rgx command-line interface"
 repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Command-line interface for the rgx regex engine — grep-like matching with color output, live tailing, and embedded code blocks"
+documentation = "https://docs.rs/rgx-cli"
+readme = "README.md"
 
 [features]
 default = []
@@ -18,7 +23,7 @@ wasm = ["rgx-core/wasm"]
 all-languages = ["lua", "javascript", "rhai", "wasm"]
 
 [dependencies]
-rgx-core = { path = "../rgx-core" }
+rgx-core = { path = "../rgx-core", version = "0.1.0" }
 clap = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }

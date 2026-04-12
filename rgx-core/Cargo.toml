@@ -5,8 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "High-performance regex engine core"
 repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "High-performance, programmable regex engine — ~99% PCRE2 feature parity, JIT-compiled, with embedded Lua/JS/Rhai/WASM code blocks"
+documentation = "https://docs.rs/rgx-core"
+readme = "README.md"
 
 [dependencies]
 # SIMD and performance

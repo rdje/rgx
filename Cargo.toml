@@ -12,12 +12,13 @@ exclude = ["subs/pgen/rust"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
-authors = ["Richard De Jesus <richarddje@example.com>"]
+authors = ["Richard De Jesus <richard.dje@gmail.com>"]
 license = "Apache-2.0"
-description = "High-performance regex engine with multi-language code execution"
+description = "High-performance, programmable regex engine for Rust"
 repository = "https://github.com/rdje/rgx"
-keywords = ["regex", "pattern", "performance", "webassembly", "jit"]
-categories = ["text-processing", "parser-implementations", "development-tools"]
+homepage = "https://github.com/rdje/rgx"
+keywords = ["regex", "pattern", "jit", "pcre", "wasm"]
+categories = ["text-processing", "parser-implementations", "command-line-utilities"]
 
 [workspace.dependencies]
 # Core dependencies

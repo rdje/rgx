@@ -61,10 +61,19 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ### A8. Crate publishing
 - **What**: Publish `rgx-core` and `rgx-cli` to crates.io.
-- **Effort**: `small`
+- **Effort**: `small` (metadata+docs) + `medium` (pgen-publish strategy decision)
+- **Status**: **Metadata + READMEs ready (2026-04-13).** Both crates have `description`, `readme`, `documentation`, `homepage`, `keywords`, `categories`, `repository`, `license` populated; per-crate READMEs written for crates.io display; `rgx-cli` now specifies a version on the `rgx-core` path dep; LICENSE (Apache-2.0) is in place at repo root. `cargo publish --dry-run` on rgx-core surfaces **one hard blocker**:
+  ```
+  error: all dependencies must have a version specified when publishing.
+  dependency `pgen` does not specify a version
+  ```
+  The `pgen` crate lives in `subs/pgen/rust` (private submodule) and is not on crates.io. Three paths forward, user decision:
+  1. Publish `pgen` (and its dependency chain) to crates.io first, then bump rgx-core's dep to `pgen = "1.1.10"`.
+  2. Vendor pgen's generated Rust code into rgx-core so the dependency disappears.
+  3. Make `pgen` an optional dep so `rgx-core` can publish without it, with the caveat that `pgen-parser` feature is only usable from git.
+- **Binary rename decision pending**: the CLI binary is currently named `rgx-cli` (package default). The README advertises `rgx foo bar` but `cargo install rgx-cli` will install `rgx-cli` unless an explicit `[[bin]] name = "rgx"` is added. Touches 461 references across docs and scripts — a coordinated follow-up commit.
 - **Rationale**: Users can't use what they can't install. Critical for adoption.
-- **How**: Clean up Cargo.toml metadata, add README, `cargo publish`.
-- **Dependencies**: Decide on public API stability guarantees.
+- **Dependencies**: pgen-publish strategy (above) + API stability decision + explicit user authorization to actually publish.
 
 ### A9. Language bindings (Python, Node, C) — DEFERRED 2026-04-09
 - **What**: Use rgx from Python, JavaScript/Node, and C/C++ programs.
