@@ -294,6 +294,26 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-12 (twenty-first commit) — A13 VERSION conditionals (RGX side; PGEN gap filed as PGEN-RGX-0016)
+- **First commit on the Tier-3 parity polish track.** Implements the RGX-side parser-level short-circuit for `(?(VERSION op X.Y)yes|no)` conditionals. The parser-side infrastructure is complete; the full integration is gated on PGEN recognising VERSION conditionals (filed as `pgen-issues/PGEN-RGX-0016.yaml`).
+- **`RGX_PCRE2_COMPAT_VERSION` public constant** in `lib.rs`. Currently `(10, 47)`. The PCRE2 release that the RGX feature surface tracks. Bump when the parity matrix is re-aligned.
+- **`parse_version_conditional` helper** in `parsing.rs`. Parses `VERSION op X.Y` text and evaluates against `RGX_PCRE2_COMPAT_VERSION`. Operators: `=`, `!=`, `>=`, `<=`, `>`, `<`. Missing minor defaults to 0. Returns `Some(true/false)` for VERSION conditionals, `None` for non-VERSION text.
+- **`convert_conditional` short-circuit** in `parsing.rs`. Before building the `Regex::Conditional` AST node, the parser checks the condition text against `parse_version_conditional`. If it's a VERSION check, the parser evaluates at parse time and returns ONLY the matching branch as a Regex AST — the conditional never wraps in `Regex::Conditional`. Mirrors PCRE2's compile-time evaluation.
+- **8 new unit tests** in `parsing::tests::parse_version_conditional_*`. Cover all operators, missing minor, whitespace, non-VERSION fallback, malformed version strings.
+- **3 new integration tests** `#[ignore]`'d with a clear reference to PGEN-RGX-0016. They will start passing the moment PGEN catches up — no RGX-side change required.
+- **`pgen-issues/PGEN-RGX-0016.yaml`** filed per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`. Includes:
+  - Parser identity: PGEN commit ac2acb3, parser release version 1.1.9, integration contract version 1.1.9, family `regex`, profile `regex_default`, integration surface `parseability_probe`
+  - Host identity: rgx commit 7d195a4, macOS Darwin 24.6.0, rust-version 1.88
+  - Bug class: `should_parse_but_fails`
+  - Reproduction artifacts in `pgen-issues/artifacts/PGEN-RGX-0016/`:
+    - `repro_input.txt` — the failing pattern
+    - `pgen_contract.json` — captured PGEN version metadata
+    - `pgen_parse_outcome.json` — structured parse rejection (position 0)
+    - `pgen_trace.log` — full PGEN_TRACE_VERBOSITY=debug trace from the parseability_probe run
+- **Why ship the RGX side speculatively**: when PGEN catches up, the integration is purely "remove `#[ignore]` from three tests". Doing the work now means the gap is documented and the RGX side won't need re-investigation later.
+- **Validation**: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` 976/0 (= 968 baseline + 8 new parse_version_conditional unit tests + 3 new ignored integration tests), `cargo clippy -p rgx-core --all-targets` zero RGX-owned errors.
+- **Next**: A11 (*SKIP:name) named skip — should not have the same PGEN gap because (*SKIP:name) is more standard syntax. Then A12 capture-return semantics. Then the Tier-2 perf items.
+
 ### 2026-04-12 (twentieth commit) — C2 negated-char-class semantics fix
 - **Fixes the C1 step 6 bug.** `Regex::find_first("[^0-9]", "123abc")` now returns `(3, 4)` instead of the buggy `(3, 6)`. The bug was in the byte-class map, not in dispatch.
 - **Root cause**: For `[^0-9]`, `byte_class.rs::collect_oracles` collected only the positive range `(0x30, 0x39)`, producing a 2-class partition (digit/non-digit). The non-digit class lumped together ASCII bytes AND continuation bytes (0x80-0xBF) AND leading bytes (0xC0-0xF7). Meanwhile, `nfa.rs::build_char_ranges` for the negated form generated multi-byte UTF-8 chains. Each chain's leading-byte and continuation-byte transitions all fired on the same byte_class 0 (non-digit), so when Pike-VM walked ASCII input "abc", the multi-byte chains advanced byte-by-byte through their state chains as if "abc" were valid UTF-8 continuation bytes, reaching accept at positions 4, 5, AND 6. Pike-VM recorded the latest accept = (start, start+3).

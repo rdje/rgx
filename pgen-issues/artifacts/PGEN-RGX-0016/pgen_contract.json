@@ -1,0 +1,9 @@
+{
+  "supports_regex_generated_backend": true,
+  "regex_parser_release_version": "1.1.9",
+  "regex_integration_contract_version": "1.1.9",
+  "regex_ast_dump_schema_version": 1,
+  "embedding_api_version": "1.2.0",
+  "embedding_api_schema_version": 2,
+  "note": "PGEN 1.1.9 at pinned submodule commit ac2acb3 (rgx subs/pgen). Captured from rust/src/embedding_api.rs constants since parseability_probe does not expose a contract dump option."
+}

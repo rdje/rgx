@@ -119,6 +119,20 @@ pub mod log;
 /// Fluent builder API for host variables — see [`vars::VarsBuilder`].
 pub mod vars;
 
+/// PCRE2 compatibility version that this RGX engine claims.
+///
+/// Used by `(?(VERSION>=X.Y)yes|no)` conditionals which are
+/// evaluated at parse time and short-circuited to the matching
+/// branch. The conditional never reaches the AST as a
+/// `Regex::Conditional` node — instead the parser returns the
+/// branch directly.
+///
+/// Currently set to `(10, 47)` because the RGX feature surface
+/// (per `docs/PCRE2_COMPATIBILITY_MATRIX.md` ~98% parity) tracks
+/// PCRE2 10.47 as its target. Bump this when the parity matrix
+/// is re-aligned to a newer PCRE2 release.
+pub const RGX_PCRE2_COMPAT_VERSION: (u32, u32) = (10, 47);
+
 // Re-exports for convenience
 pub use cache::RegexCache;
 pub use compiler::Compiler;

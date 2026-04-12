@@ -1,0 +1,139 @@
+id: PGEN-RGX-0016
+summary: |
+  PGEN regex parser does not recognize PCRE2 VERSION conditionals:
+  (?(VERSION op X.Y)yes|no). This blocks RGX backlog item A13. The
+  RGX-side parser short-circuit logic is in place; only the PGEN
+  grammar update is needed.
+status: open
+opened_at: 2026-04-12T00:00:00Z
+first_seen_at: 2026-04-12T00:00:00Z
+last_updated_at: 2026-04-12T00:00:00Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "ac2acb3"
+parser_release_version: "1.1.9"
+integration_contract_version: "1.1.9"
+parser_family: regex
+profile: regex_default
+integration_surface: parseability_probe
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: 7d195a4
+host_os: macOS (Darwin 24.6.0)
+rust_toolchain: "rustc per workspace rust-version = 1.88"
+cargo_features: "default + pgen-parser (jit feature is default-on but unrelated)"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+    cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+      --bin parseability_probe -- --parse regex \
+      ../../pgen-issues/artifacts/PGEN-RGX-0016/repro_input.txt \
+      --profile regex_default --trace \
+      --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0016/pgen_trace.log
+  pattern: "(?(VERSION>=10.0)cat|dog)"
+  input: ""
+  notes: |
+    PCRE2 supports `(?(VERSION op X.Y)yes|no)` conditionals to branch
+    on the engine's claimed PCRE2 compatibility version. The
+    operators are =, !=, >=, <=, >, <. The version is parsed as
+    MAJOR[.MINOR]; missing minor defaults to 0.
+
+    PCRE2 evaluates the comparison at pattern compile time so the
+    engine version is fixed before any matching happens. RGX does
+    the same: the parser short-circuits the conditional to its
+    matching branch and the conditional never reaches the AST as a
+    Regex::Conditional node.
+
+    The RGX-side implementation is already in place:
+    - rgx-core/src/lib.rs defines RGX_PCRE2_COMPAT_VERSION = (10, 47)
+    - rgx-core/src/parsing.rs::parse_version_conditional parses the
+      condition body and evaluates against RGX_PCRE2_COMPAT_VERSION
+    - rgx-core/src/parsing.rs::convert_conditional checks for a
+      VERSION condition body BEFORE building the Conditional node
+      and returns only the matching branch directly
+    - 8 unit tests for parse_version_conditional cover all
+      operators, missing-minor, whitespace, and malformed cases
+    - 3 integration tests assert short-circuiting end-to-end —
+      currently #[ignore]'d with a reference to this issue
+
+    The only missing piece is PGEN's recognition of `VERSION op X.Y`
+    as a valid bare-text condition body (similar to how `DEFINE` is
+    already recognised). When PGEN ships the grammar update, the
+    RGX integration is purely "remove #[ignore] from three tests".
+
+# === Bug class (per protocol §4) ===
+bug_class: should_parse_but_fails
+
+expected_behavior: |
+  PGEN should parse `(?(VERSION>=10.0)cat|dog)` and similar VERSION
+  conditional patterns. The condition body (`VERSION>=10.0`) can be
+  delivered as bare condition text to convert_condition_text_fallback
+  (the current path for DEFINE), where the RGX-side
+  parse_version_conditional helper will handle it.
+
+  Alternatively, PGEN could produce a structured `version_condition`
+  child node alongside `recursion_condition`, `name_ref`, and
+  `signed_digits` — but the bare-text path is sufficient and
+  matches how DEFINE is already handled.
+
+actual_behavior: |
+  PGEN rejects `(?(VERSION>=10.0)cat|dog)` with:
+    "Parser did not consume full input at position 0"
+
+  The pattern fails to parse at all — the conditional is not
+  recognised as a valid regex construct. The error positions the
+  failure at byte 0 (the very first character), indicating the
+  entire conditional construct is unrecognised by the regex
+  grammar.
+
+reproduction: |
+  Reproducer artifacts under pgen-issues/artifacts/PGEN-RGX-0016/:
+    - repro_input.txt — exact failing input: (?(VERSION>=10.0)cat|dog)
+    - pgen_contract.json — captured contract metadata (PGEN 1.1.9)
+    - pgen_parse_outcome.json — structured parse rejection outcome
+    - pgen_trace.log — full PGEN_TRACE_VERBOSITY=debug trace from parseability_probe
+
+  Reproduction command (from rgx repo root):
+    cd subs/pgen
+    export PGEN_TRACE_VERBOSITY=debug
+    cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+      --bin parseability_probe -- \
+      --parse regex ../../pgen-issues/artifacts/PGEN-RGX-0016/repro_input.txt \
+      --profile regex_default \
+      --trace \
+      --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0016/pgen_trace.log
+
+  Expected output: "parse_full passed"
+  Actual output: "Error: parse_full rejected sample for grammar 'regex' on '...': Parser did not consume full input at position 0"
+
+  RGX-side test reproductions in rgx-core/src/parsing.rs (currently
+  #[ignore]'d with reference to this issue):
+    - parsing::tests::version_conditional_passing_check_returns_yes_branch_only
+    - parsing::tests::version_conditional_failing_check_returns_no_branch_only
+    - parsing::tests::version_conditional_failing_check_with_no_else_returns_empty
+
+impact: |
+  Blocks RGX backlog item A13 (PCRE2 VERSION conditionals). Very low
+  user impact in practice — VERSION conditionals are rarely used in
+  real-world patterns. RGX has shipped the parser-side
+  infrastructure speculatively so the integration is purely "remove
+  #[ignore]" once PGEN catches up.
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

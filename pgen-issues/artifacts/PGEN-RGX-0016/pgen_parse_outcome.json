@@ -1,0 +1,14 @@
+{
+  "input_file": "repro_input.txt",
+  "input_content": "(?(VERSION>=10.0)cat|dog)",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "outcome": "rejected",
+  "error": "parse_full rejected sample for grammar 'regex': Parser did not consume full input at position 0",
+  "byte_offset": 0,
+  "line": 1,
+  "column": 1,
+  "captured_via": "parseability_probe --parse regex repro_input.txt --profile regex_default --trace --trace-log-file pgen_trace.log",
+  "pgen_trace_verbosity": "debug",
+  "note": "PGEN 1.1.9 (commit ac2acb3) does not recognise (?(VERSION>=10.0)...) as a valid regex pattern. The parser fails at position 0 (the very first character), indicating the entire conditional construct is unrecognised."
+}

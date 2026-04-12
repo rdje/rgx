@@ -96,10 +96,11 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ### A13. `(?(VERSION>=...)...)` conditionals
 - **What**: Branch on engine version.
-- **Effort**: `trivial`
+- **Effort**: `trivial` (RGX side); blocked at PGEN level
+- **Status**: **RGX side shipped 2026-04-12. Blocked at PGEN level on PGEN-RGX-0016.** When PGEN catches up, integration is purely "remove `#[ignore]` from three tests in `parsing::tests::version_conditional_*`".
 - **Rationale**: Very rare. PCRE2-specific concept.
-- **How**: Evaluate the version condition at compile time, emit only the matching branch.
-- **Dependencies**: None.
+- **How**: Evaluate the version condition at parse time and short-circuit the conditional to its matching branch. The RGX-side parser-level helper `parse_version_conditional` and the short-circuit logic in `convert_conditional` are in place. The `RGX_PCRE2_COMPAT_VERSION = (10, 47)` constant is exposed in `lib.rs`. 8 unit tests for the helper; 3 integration tests `#[ignore]`'d pending PGEN. See `pgen-issues/PGEN-RGX-0016.yaml`.
+- **Dependencies**: PGEN grammar update to recognise `(?(VERSION op X.Y)...)` as a valid conditional with bare-text condition body.
 
 ### A14. Partial matching API
 - **What**: `PCRE2_PARTIAL_SOFT` / `PCRE2_PARTIAL_HARD` — report when the input ends mid-potential-match.
