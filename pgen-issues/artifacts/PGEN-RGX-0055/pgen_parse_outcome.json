@@ -1,0 +1,7 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "aborted",
+  "note": "Calling parse_grammar_profile_named with this input aborts the process via stack overflow in PGEN's 'pgen-generated-regex' worker thread. The thread is created with an 8 MiB stack (GENERATED_REGEX_WORKER_STACK_BYTES). The pattern defines six named groups (regex, name, index, indices, complex, segment) with mutual recursion through \\g<...> references; PGEN's recursive-descent grammar enters one of these cycles deep enough to exhaust the stack. No structured ParseOutcome could be captured."
+}

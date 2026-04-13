@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-second commit) — Second PGEN stack-overflow pattern filed + skip guard widened
+- **What**: The `file_pgen_issues --scan testinput2` bin located the second process-aborting PGEN pattern — a Python-interpolation grammar at testinput2:2880 with six mutually-recursive named groups (`\g<regex>`, `\g<name>`, etc). Same bug class as the 80-nesting one (PGEN-RGX-0054) — the pgen-generated-regex worker exhausts its 8 MiB stack walking `\g<>` cross-references.
+- **Filed**: PGEN-RGX-0055 with full bundle (repro_input.txt, pgen_contract.json, placeholder pgen_parse_outcome.json).
+- **Guards widened**: both `pcre2_conformance.rs::is_pgen_stack_overflow_pattern` and `file_pgen_issues.rs` now skip patterns starting with `(?=(?<regex>(?#simplesyntax)` in addition to the 80-paren case.
+- **Deferred**: the bin's end-to-end scan across all 23 files still hangs (~20 min wall) on a different pattern — the slowness is per-pattern `parse_grammar_profile_named` time, not an abort. Investigation deferred; the 39 existing PGEN-RGX reports (0017..0055) remain the initial set. Next session can add a per-pattern wall-clock timeout or progress-line tracing to narrow further.
+- **Next concrete action**: (C) — the 200-false-negatives bucket. Starting with `/^[W-c]+$/i` on `wxy_^ABC` (case-insensitive char-class range with `/i` flag).
+
 ### 2026-04-13 (thirty-first commit) — Fix the 9-panic `(?[...])` + FlagGroup bug
 - **Bug class**: `(?i)(?[...])` or any FlagGroup-wrapped `ExtendedCharClass` reached VM codegen with the extended-class node un-lowered because `Compiler::lower_extended_char_classes` didn't recurse through FlagGroup — only Sequence/Alt/Quant/Group/Lookahead/Lookbehind/Conditional.
 - **Fix**: 4-line addition, one arm added that lowers the inner expr. Zero clippy errors, no API change.

@@ -1034,7 +1034,19 @@ fn run_full_conformance() {
 /// stress-test case at line 4674.
 fn is_pgen_stack_overflow_pattern(pat: &str) -> bool {
     let leading_parens = pat.bytes().take_while(|&b| b == b'(').count();
-    leading_parens >= 80
+    if leading_parens >= 80 {
+        // testinput2:4674 — filed as PGEN-RGX-0054.
+        return true;
+    }
+    if pat.starts_with("(?=(?<regex>(?#simplesyntax)") {
+        // testinput2:2880 — Python-interpolation grammar with
+        // mutually-recursive named groups. PGEN's recursive-descent
+        // parser exhausts its 8 MiB worker stack on the cross-
+        // references (`\g<regex>` / `\g<complex>` / `\g<segment>`).
+        // Filed as PGEN-RGX-0055.
+        return true;
+    }
+    false
 }
 
 /// Classify a failure `detail` string into a bucket name for the

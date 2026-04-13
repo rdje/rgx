@@ -107,10 +107,16 @@ fn main() {
                 continue;
             };
             // Skip patterns known to abort the process via PGEN
-            // stack overflow (>= 80 leading parens). These are filed
-            // manually as PGEN reports since the compile step can't
-            // be safely attempted.
+            // stack overflow. These are filed manually as PGEN
+            // reports (PGEN-RGX-0054, 0055) since the compile step
+            // can't be safely attempted.
             if pat_str.bytes().take_while(|&b| b == b'(').count() >= 80 {
+                // 80+ leading parens: PGEN-RGX-0054 (testinput2:4674)
+                continue;
+            }
+            if pat_str.starts_with("(?=(?<regex>(?#simplesyntax)") {
+                // mutually-recursive `\g<>` grammar: PGEN-RGX-0055
+                // (testinput2:2880)
                 continue;
             }
             let compile_result = Regex::compile(pat_str);
