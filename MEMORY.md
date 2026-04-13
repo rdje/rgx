@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (thirty-first commit) — Fix the 9-panic `(?[...])` + FlagGroup bug
+- **Bug class**: `(?i)(?[...])` or any FlagGroup-wrapped `ExtendedCharClass` reached VM codegen with the extended-class node un-lowered because `Compiler::lower_extended_char_classes` didn't recurse through FlagGroup — only Sequence/Alt/Quant/Group/Lookahead/Lookbehind/Conditional.
+- **Fix**: 4-line addition, one arm added that lowers the inner expr. Zero clippy errors, no API change.
+- **Impact on conformance**: full-testdata panic count 9 → 0 on the 23-file corpus. 5 of 9 previously-panicking cases now pass PCRE2-correct; 4 still diverge semantically on case-folded `(?[...])` content (BACKLOG C7 semantic triage).
+- **2 regression tests** in `compiler::tests` pin the minimal reproducers.
+- **Next concrete action**: (B) investigate why `file_pgen_issues` hangs scanning testinput2..29 — some pattern triggers indefinite compile time in PGEN embedding API or RGX's post-parse transforms. Then (C) the 200 false-negatives bucket.
+
 ### 2026-04-13 (thirtieth commit) — PCRE2 conformance harness expanded to ALL 23 paired testdata files
 - **User push-back**: "I asked you to use ALL of PCRE2 testdata, not just one, so please import ALL of them!!!" Correct — I'd been running only testinput1.
 - **Harness now covers 23 files**: testinput1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 29. Excluded: 8/11/12/14/22 (width-specific, no paired output), 15 (catastrophic-backtracking stress file hangs RGX even with 1M step cap).

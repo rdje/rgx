@@ -1035,6 +1035,10 @@ impl Compiler {
                 expr: Box::new(Self::lower_extended_char_classes(*expr)?),
                 positive,
             }),
+            RegexAst::FlagGroup { flags, expr } => Ok(RegexAst::FlagGroup {
+                flags,
+                expr: Box::new(Self::lower_extended_char_classes(*expr)?),
+            }),
             RegexAst::Conditional {
                 condition,
                 true_branch,
@@ -2966,6 +2970,38 @@ mod tests {
         assert!(range_contains(&ranges, 'a'));
         assert!(range_contains(&ranges, '!'));
         assert!(!range_contains(&ranges, '5'));
+    }
+
+    #[test]
+    fn lower_extended_char_classes_recurses_into_flag_group() {
+        // Regression: `(?i)(?[...])` left the ExtendedCharClass node
+        // inside a FlagGroup unlowered because the transform's
+        // fall-through `other => Ok(other)` branch caught FlagGroup.
+        // That resulted in a panic at vm.rs codegen_pass when the
+        // case-insensitive prefix was used via RegexBuilder. Surfaced
+        // by testinput4 lines 3066 / 3081 in the PCRE2 conformance
+        // harness; minimal reproducer below.
+        use crate::Regex;
+        let r = Regex::compile(r"(?i)(?[ [\p{Lu}1] ^ \p{Ll} ])").expect("compiles");
+        // With /i case-folding: the set symmetric-difference of
+        // (uppercase letters or '1') XOR (lowercase letters) reduces
+        // to the '1' character after case-folding collapses `\p{Lu}`
+        // onto `\p{Ll}`. Semantics aren't the test target here; the
+        // test is that the pattern compiles and matches without
+        // panicking.
+        let _ = r.is_match("1");
+        let _ = r.is_match("a");
+        let _ = r.is_match("A");
+        let _ = r.is_match("_");
+    }
+
+    #[test]
+    fn lower_extended_char_classes_recurses_into_nested_flag_group() {
+        // Same bug would apply with nested FlagGroup containers.
+        use crate::Regex;
+        let r = Regex::compile(r"(?i)((?m)(?[[a-c]]))").expect("nested flag groups compile");
+        let _ = r.is_match("a");
+        let _ = r.is_match("B");
     }
 
     #[test]

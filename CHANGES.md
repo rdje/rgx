@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-13 - Lower extended char classes inside FlagGroup (panic → 0)
+- Scope: Fixes the 9-panic bug class surfaced by the full PCRE2 testdata conformance harness. Patterns like `(?i)(?[ [\p{Lu}1] ^ \p{Ll} ])` compiled through `RegexBuilder::case_insensitive()` (which prepends `(?i)` to the pattern, producing an AST with `FlagGroup { expr: ExtendedCharClass {...} }`) blew past the compiler's lowering pass and hit a panic at `vm.rs:6273` during codegen. Root cause: `Compiler::lower_extended_char_classes` handled every AST container variant (Sequence, Alternation, Quantified, Group, Lookahead, Lookbehind, Conditional) except `FlagGroup`, which fell through the `other => Ok(other)` catch-all with its inner `ExtendedCharClass` node un-lowered.
+- **Fix** (4 lines): add a `RegexAst::FlagGroup { flags, expr }` arm to `lower_extended_char_classes` that recursively lowers `expr`. Same pattern as the existing Group / Lookahead / Lookbehind arms.
+- **2 regression tests** added in `compiler::tests`:
+  - `lower_extended_char_classes_recurses_into_flag_group` — `(?i)(?[ [\p{Lu}1] ^ \p{Ll} ])` compiles + `is_match` against varied subjects without panic. Minimal reproducer of the testinput4 line-3066 case.
+  - `lower_extended_char_classes_recurses_into_nested_flag_group` — same bug would apply with nested FlagGroup containers; pinned with `(?i)((?m)(?[[a-c]]))`.
+- **Conformance before → after** on the full 23-file corpus:
+  - before: 11,216 parsed / 3,613 pass / 1,018 fail / **9 panic** / 6,576 skip / 78.0%
+  - after:  11,216 parsed / 3,618 pass / 1,022 fail / **0 panic** / 6,576 skip / 78.0%
+  - 5 of the 9 previously-panicking cases now produce PCRE2-correct matches; the other 4 compile and execute without crashing but their case-folded `(?[...])` output still diverges semantically from PCRE2's. That drops into the broader BACKLOG C7 semantic triage.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` **1003/0/1** (1001 baseline + 2 new regression tests), `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-13 - PCRE2 conformance harness expanded to the full testdata corpus (23 paired files)
 - Scope: per user request "use ALL of PCRE2 testdata, not just one". Expands `rgx-core/tests/pcre2_conformance.rs` from one hardcoded file (`testinput1`) to every PCRE2 10.47 testinput/testoutput pair RGX can meaningfully process — **23 files**, ~11,200 unique test cases. Per-file and aggregate stats are reported; the harness still `#[ignore]`'d by default.
 - **Files covered** (excluded files in parens):

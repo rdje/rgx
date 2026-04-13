@@ -313,7 +313,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
   - 42 other compile errors — `(*pla:foo)` backtracking-verb aliases RGX doesn't know, etc.
   - 16 PGEN AST contract mismatch (other) — POSIX classes inside char classes (`[[:space:]]+`)
   - 2 unterminated char class — `\c[` control-char escape parsing
-- **9 panics in testinput4 from `(?[...])` with Unicode properties + set operators** — patterns like `(?[ [\p{Lu}1] ^ \p{Ll} ])` and `(?[ [\p{Lu}1] & [\p{Ll}1] ])` reach RGX codegen because compiler validation doesn't reject them first. Error: "Perl extended character classes '(?[...])' should be lowered or rejected during compiler validation before codegen". Should be a tight compile-boundary fix (expand `feature_validation_message` or equivalent to cover these variants).
+- ✅ **9 panics fixed (2026-04-13)**. Root cause was `Compiler::lower_extended_char_classes` not recursing through `FlagGroup`, so `(?i)(?[...])` left the `ExtendedCharClass` node unlowered under the FlagGroup wrapper. 4-line fix + 2 regression tests. Full-corpus panic count now 0/11,216.
 - **Excluded files** (see harness comments for details):
   - `testinput15` — match-limiting stress file with catastrophic-backtracking patterns (`(a+)*zz`). Some cases don't honor the harness's `max_steps=1M` cap and hang indefinitely. BACKLOG follow-up: audit every RGX hot path to ensure it checks `max_steps`.
 - **Per-file pass rates** (for reference; see the harness output for the full table):
