@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-13 - PCRE2 10.47 differential conformance harness (testinput1)
+- Scope: First of five stress-testing efforts requested by the user to delay publishing until RGX has real battle-testing. Imports PCRE2 10.47's `testinput1` + `testoutput1` — the core-syntax Perl-compatible suite curated by PCRE2 maintainers over decades, ~1500 pattern/subject tuples — as a differential conformance harness. The harness parses the PCRE2 testformat, runs each case through RGX's public API, compares against PCRE2's expected output, and emits a per-category report (pass / fail / panic / skip).
+- **`subs/pcre2` submodule**: PCRE2 upstream added at commit `f454e231fe5006dd7ff8f4693fd2b8eb94333429` (tag `pcre2-10.47`). Mirrors the `subs/pgen` convention — versioned pin via git, clean separation of BSD-licensed testdata from our Apache-2.0 code, bumpable via `git submodule update --remote subs/pcre2`. `.gitmodules` updated.
+- **New integration test `rgx-core/tests/pcre2_conformance.rs`** (~600 lines):
+  - Minimal parser for the PCRE2 `testinput` / `testoutput` line format: pattern lines `/pattern/modifiers`, `#if !ebcdic` / `#endif` conditionals, `\= Expect no match` subject annotations, subject/output escape decoding (`\xHH`, `\x{H..H}`, `\NNN` octal, `\t` / `\n` / `\r` / `\f` / `\a` / `\e` / `\\` / `\?` / `\"` / `\'` / `\$` / `\/`). Multi-line patterns, non-UTF-8 subjects, and cases with named PCRE2 modifiers are classified as `Skip` so the pass-rate metric reflects only tests the harness actually ran.
+  - Runner: compiles the PCRE2 pattern through `RegexBuilder` with the flag subset `{i, m, s, x, g}`, runs `find_first` / `find_all[0]`, compares the matched span byte-for-byte against PCRE2's expected output.
+  - Panic-safe: every case runs inside `std::panic::catch_unwind` so one VM crash doesn't abort the ~2871-case survey. Default panic hook silenced during the harness so the per-case crash details don't drown the summary.
+  - `#[ignore]`'d by default (heavy: ~30s runtime). Run with `cargo test --test pcre2_conformance -- --ignored --nocapture`.
+  - Asserts only that at least 100 cases ran (so the harness itself can't silently degrade). Does NOT assert a pass threshold in this first commit — the report is the tool; a known-failures baseline lands in a follow-up after the panicking bug classes are fixed.
+- **First-run results** (PCRE2 10.47 testinput1, `cd00786`-built RGX):
+  - parsed: 2871 cases
+  - pass: 1061
+  - fail: 1616 (mix of compile-gap cases like `\c[` / `\"` / `[\b]`, semantic divergences, and harness limitations like multi-line pattern skipping)
+  - panic: **12** (real VM crashes — a concrete bug class uncovered on commit 1)
+  - skip: 182 (named PCRE2 modifiers, non-UTF-8 subjects, unknown escape forms)
+  - ran pass-rate: 39.6%
+- **Bug classes surfaced by the harness** (tracked in `docs/BACKLOG.md` C7):
+  1. `{0,0}` / `{0}` quantifiers wrapping a captured group crash the VM with `index out of bounds: the len is 1 but the index is 1` at `rgx-core/src/vm.rs:6899`. Five minimal reproducers captured: `(a|(bc)){0,0}?xyz`, `^(a){0,0}`, `(?1)(?:(b)){0}`, `(a(*COMMIT)b){0}a(?1)|aac`, `(?:(a(*PRUNE)b)){0}(?:(?1)|ac)`.
+  2. High-min-count range quantifier overflows an internal single-byte operand: `word (?:[a-zA-Z0-9]+ ){0,300}otherword` panics with `char class table exceeded single-byte operand range`.
+- **README**: the submodule bootstrap paragraph now mentions `subs/pcre2` + how to run the harness. The `git submodule update --init --recursive` command already pulls both submodules; no new instruction needed for fresh clones.
+- **BACKLOG**: new item C7 added documenting the bug classes found plus the triage plan.
+- Validation: `cargo fmt` clean, `cargo test -p rgx-core --lib` 990/0/1 (unchanged — the new test is `#[ignore]`'d), `cargo test -p rgx-cli` 30/0, `cargo test --test pcre2_conformance -- --ignored` 1/0 (the harness itself passes because it doesn't fail on divergence, only on "too few cases ran"). The 12 panic-class bugs and 1616 failures are tracked in C7, not in this commit's gates.
+- **Position on the five-item stress test program**: (1) PCRE2 10.47 testdata conformance ✅ shipped. Next: (2) 4-tier cross-dispatch differential, (3) real-world-regex mutation fuzzing, (4) equivalence-class testing, (5) metamorphic testing. Each as its own commit.
+
 ### 2026-04-13 - A8 crate publishing prep: metadata, per-crate READMEs, dry-run
 - Scope: Prepares `rgx-core` and `rgx-cli` for `cargo publish`. Populates every crates.io metadata field, writes user-facing per-crate READMEs that render on crates.io, and runs `cargo publish --dry-run` to confirm the metadata gate is clean and surface the one remaining structural blocker. **Does not actually publish** — that's gated on the pgen-publish decision plus explicit user authorization.
 - **`Cargo.toml` workspace package metadata**: author email corrected from the `richarddje@example.com` placeholder to `richard.dje@gmail.com` (the real address from `git config`); description tightened to `"High-performance, programmable regex engine for Rust"`; `homepage` added; `keywords` refined to `["regex", "pattern", "jit", "pcre", "wasm"]` (drops the generic `"performance"`, adds `"pcre"` and `"wasm"`); `categories` refined to `["text-processing", "parser-implementations", "command-line-utilities"]` (drops the generic `"development-tools"`).

@@ -1,3 +1,6 @@
 [submodule "subs/pgen"]
 	path = subs/pgen
 	url = https://github.com/rdje/pgen.git
+[submodule "subs/pcre2"]
+	path = subs/pcre2
+	url = https://github.com/PCRE2Project/pcre2.git

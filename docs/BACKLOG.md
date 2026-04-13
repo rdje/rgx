@@ -289,6 +289,20 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Dependencies**: Significant new engine code, but the existing AST is sufficient — no parser changes needed.
 - **Open design questions**: DFA cache eviction policy, when to bail out of the lazy DFA back to NFA simulation, how to expose runtime stats, whether to run NFA/DFA + VM in parallel for comparison during development.
 
+### C7. PCRE2 10.47 differential conformance — bug triage
+- **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13). First-run results on `subs/pcre2/testdata/testinput1`: 1061 pass, 1616 fail, 12 panic, 182 skip across 2871 parsed cases (39.6% ran-pass-rate).
+- **Effort**: `medium` (each bug class is its own investigation)
+- **Status**: harness shipped; bugs NOT yet fixed.
+- **Confirmed bug classes** (from the panic list — each is a crash, not just a miscompare):
+  1. **`{0,0}` / `{0}` quantifier with captures panics the VM** — `(a|(bc)){0,0}?xyz`, `^(a){0,0}`, `(?1)(?:(b)){0}`, `(a(*COMMIT)b){0}a(?1)|aac`, `(?:(a(*PRUNE)b)){0}(?:(?1)|ac)` all crash with `index out of bounds: the len is 1 but the index is 1` at `rgx-core/src/vm.rs:6899`. Root cause: a quantifier that matches zero times still reserves a capture slot that is never entered, and the VM dereferences the slot without bounds-checking.
+  2. **Counter overflow on high-min-count quantifiers** — `word (?:[a-zA-Z0-9]+ ){0,300}otherword` panics with `char class table exceeded single-byte operand range`. The `{0,300}` counter width is encoded as a single byte somewhere; needs widening or overflow check.
+- **Known parse/compile gaps** (large failure count in testinput1):
+  - `\c[` (control-char escape with `[`)
+  - `\"` / `\'` (literal escaped quote marks — PGEN rejects)
+  - `[\b]` (backspace character inside a char class — compile-unsupported)
+  - Other rarely-used escapes that PGEN/RGX don't lower yet
+- **Dependencies**: the harness itself is in place and gated `#[ignore]` so it doesn't run on `cargo test` by default.
+
 ### C3. Fuzzing infrastructure
 - **What**: `cargo-fuzz` integration for continuous fuzzing.
 - **Effort**: `small`

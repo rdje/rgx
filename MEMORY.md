@@ -294,6 +294,19 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-fifth commit) — PCRE2 10.47 differential conformance harness shipped
+- **Strategic context**: user explicitly pushed back on publishing — "RGX should be tested much much more" before crates.io. Asked for five stress-testing approaches: (1) PCRE2 10.47 testdata import, (2) 4-tier cross-dispatch differential, (3) real-world-regex mutation fuzzing, (4) equivalence-class testing, (5) metamorphic testing. This commit lands (1).
+- **Mistake + lesson on submodules**: I reached for `curl` to fetch the tarball. User pushed back: "why didn't you git submodule add PCRE2?" Right answer. The `subs/pgen` convention was right there. Saved as feedback memory `feedback_submodule_for_external_deps.md` — when pulling in external source/data with its own release cadence, default to `git submodule add` under `subs/<name>`.
+- **Submodule**: `subs/pcre2` added at `pcre2-10.47` tag, commit `f454e231`.
+- **Harness**: `rgx-core/tests/pcre2_conformance.rs` (~600 lines). Parses PCRE2 testformat, runs each pattern through RGX public API, compares against expected output. Panic-safe via `catch_unwind` — one crash doesn't abort the ~2871-case survey. `#[ignore]`'d (heavy, ~30s).
+- **First-run findings** (FROM COMMIT 1):
+  - 1061 pass / 1616 fail / **12 panic** / 182 skip out of 2871 parsed
+  - **Real VM bug class uncovered**: `{0,0}` / `{0}` quantifiers wrapping captured groups → `index out of bounds: the len is 1 but the index is 1` at `vm.rs:6899`. 5 minimal reproducers. Tracked as BACKLOG C7 item 1.
+  - Second panic class: high-min-count quantifier overflow (`{0,300}`). BACKLOG C7 item 2.
+  - Many failures are compile-gap cases (`\c[`, `\"`, `[\b]`) and harness limitations (multi-line patterns), not semantic bugs.
+- **What's NOT in this commit**: fixing the bugs. Each is its own investigation. The harness emits a report but doesn't assert a pass threshold — baseline wiring is follow-up.
+- **Next concrete action**: continue with (2) 4-tier cross-dispatch differential. Or — if the user wants — pause to fix the panic-class bugs C7 found first.
+
 ### 2026-04-13 (twenty-fourth commit) — A8 crate publishing prep: metadata + READMEs + dry-run
 - **rgx-core and rgx-cli are now crates.io-metadata-ready.** Every field populated: `description`, `readme`, `documentation`, `homepage`, `keywords`, `categories`, `repository`, `license`, plus `version` on the internal path dep.
 - **New per-crate READMEs** live at `rgx-core/README.md` and `rgx-cli/README.md` — user-focused, with install/example recipes and feature-flag tables. Root `README.md` stays contributor-heavy and is unaffected.
