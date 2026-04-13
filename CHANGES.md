@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-13 - Crash-class bugs from PCRE2 conformance harness fixed (0 panics remaining)
+- Scope: Fixes both crash-class bugs uncovered by the PCRE2 10.47 conformance harness (commit `ccbf459`). **Panic count drops from 12 to 0** on `testinput1`. Semantic-class divergences still exist (1626 failures) but the engine no longer CRASHES on any pattern in the core PCRE2 suite — a step change in production-readiness.
+- **Bug 1 fix: `compile_subroutines` size based on AST-observed max group id**. For patterns like `^(a){0,0}` / `(?1)(?:(b)){0}` / `(a(*COMMIT)b){0}a(?1)|aac`, a capturing group nested inside a zero-repetition quantifier is present in the AST but never visited by `codegen_pass` — so `self.group_counter` stays behind the actual max group id. `compile_subroutines` sized `subroutines` via `group_counter + 1`, which then overflowed when `collect_capturing_group_defs` (which walks the raw AST) wrote `subroutines[group_id]` for `group_id > group_counter`. Fix: compute `max_group_id` from `collect_capturing_group_defs`, size as `max(group_counter, max_group_id) + 1`. Three-line change at `rgx-core/src/vm.rs:compile_subroutines`.
+- **Bug 2 fix: char-class table deduplication during sub-compiler merge**. For patterns like `word (?:[a-zA-Z0-9]+ ){0,300}otherword`, the Range quantifier emits the inner expression 300 times; each `emit_subexpr_opcode` → `compile_nested_code` call creates a fresh sub-compiler whose char_classes get appended unconditionally to the parent. 300 identical `[a-zA-Z0-9]` entries then overflow the single-byte operand at `rebase_inline_char_class_ids`. Fix: (a) derive `PartialEq, Eq` on `CompiledCharClass`; (b) linear-search the parent's table for each incoming sub-class and reuse its id if found; (c) replace `rebase_inline_char_class_ids` (base-offset rewrite) with `remap_inline_char_class_ids` (remap-table rewrite) so duplicates can resolve to existing ids anywhere in the table, not just at the old `base` offset. `rebase_conditional_operand` correspondingly renamed to `remap_conditional_operand`. Also added `compile_char_class`-local dedup inside a single compiler context for the same reason.
+- **Conformance harness after the fixes**:
+  - before: 1061 pass / 1616 fail / **12 panic** / 182 skip
+  - after:  1063 pass / 1626 fail / **0 panic**  / 182 skip
+  - Two of the 12 previously-panicking cases now produce PCRE2-correct output; the other 10 compile and execute without crashing but still diverge semantically — those drop into the "semantic failures" triage in `docs/BACKLOG.md` C7.
+- **7 new regression-pin tests** in `rgx-core/src/vm.rs::tests`, one per minimal reproducer from `subs/pcre2/testdata/testinput1`:
+  - `regression_zero_zero_quantifier_with_nested_capture_does_not_panic` — `(a|(bc)){0,0}?xyz`
+  - `regression_zero_zero_quantifier_on_anchored_pattern_does_not_panic` — `^(a){0,0}` against "bcd" / "abc" / "aab     "
+  - `regression_zero_quantifier_with_subroutine_call_does_not_panic` — `(?1)(?:(b)){0}`
+  - `regression_zero_quantifier_with_backtracking_verb_does_not_panic` — `(a(*COMMIT)b){0}a(?1)|aac`
+  - `regression_zero_quantifier_with_nested_prune_does_not_panic` — `(?:(a(*PRUNE)b)){0}(?:(?1)|ac)`
+  - `regression_char_class_table_no_longer_overflows_single_byte_on_high_repeat` — `word (?:[a-zA-Z0-9]+ ){0,300}otherword`
+  - `regression_char_class_dedup_keeps_unique_classes_separate` — sanity check that dedup doesn't collapse distinct classes (e.g. `[a-z]+[0-9]+`)
+- **Secondary benefit of the char-class dedup**: code size shrinks for any pattern that uses the same class multiple times through different AST paths. For repetition-heavy patterns this is a real bytecode reduction, though the primary motivation was crash correctness.
+- **BACKLOG C7 updated** to reflect the fix status — crash-class bugs marked ✅ done, semantic-class failures retained as the remaining work.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` **997/0/1** (= 990 baseline + 7 regression pins), `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors, `cargo test --test pcre2_conformance -- --ignored` confirms the 0-panic result above.
+
 ### 2026-04-13 - PCRE2 10.47 differential conformance harness (testinput1)
 - Scope: First of five stress-testing efforts requested by the user to delay publishing until RGX has real battle-testing. Imports PCRE2 10.47's `testinput1` + `testoutput1` — the core-syntax Perl-compatible suite curated by PCRE2 maintainers over decades, ~1500 pattern/subject tuples — as a differential conformance harness. The harness parses the PCRE2 testformat, runs each case through RGX's public API, compares against PCRE2's expected output, and emits a per-category report (pass / fail / panic / skip).
 - **`subs/pcre2` submodule**: PCRE2 upstream added at commit `f454e231fe5006dd7ff8f4693fd2b8eb94333429` (tag `pcre2-10.47`). Mirrors the `subs/pgen` convention — versioned pin via git, clean separation of BSD-licensed testdata from our Apache-2.0 code, bumpable via `git submodule update --remote subs/pcre2`. `.gitmodules` updated.

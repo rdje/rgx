@@ -313,7 +313,7 @@ impl Instruction {
 }
 
 /// Character class definition optimized for fast matching
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledCharClass {
     /// Bitmap for ASCII characters (0-127) - 16 bytes, SIMD-friendly
     pub ascii_bitmap: [u16; 8], // 128 bits packed into u16s for SIMD
@@ -6870,11 +6870,29 @@ impl OptimizingCompiler {
         sub_compiler.case_insensitive = self.case_insensitive;
         sub_compiler.codegen_pass(expr, false);
 
-        let char_class_base = self.char_classes.len();
         let mut sub_code = sub_compiler.code;
         if !sub_compiler.char_classes.is_empty() {
-            self.rebase_inline_char_class_ids(&mut sub_code, char_class_base);
-            self.char_classes.extend(sub_compiler.char_classes);
+            // Merge the sub-compiler's char_classes into self, deduping
+            // against entries already present. Without dedup, repeating
+            // the same subexpression N times (e.g. `[a-z]{0,300}`) would
+            // push N identical entries and overflow the single-byte
+            // operand at `rebase_inline_char_class_ids`. PCRE2 testinput1
+            // regression: `word (?:[a-zA-Z0-9]+ ){0,300}otherword`.
+            //
+            // Build a per-sub-class remap from "sub id" to "parent id" so
+            // `rebase_inline_char_class_ids` can consult it. If every
+            // sub class is new, the remap is identity-plus-base and we
+            // fall back to the old path for free.
+            let mut remap = Vec::with_capacity(sub_compiler.char_classes.len());
+            for cc in sub_compiler.char_classes {
+                if let Some(existing_id) = self.char_classes.iter().position(|e| e == &cc) {
+                    remap.push(existing_id);
+                } else {
+                    remap.push(self.char_classes.len());
+                    self.char_classes.push(cc);
+                }
+            }
+            self.remap_inline_char_class_ids(&mut sub_code, &remap);
         }
         self.strings.extend(sub_compiler.strings);
         self.group_counter = sub_compiler.group_counter;
@@ -6892,10 +6910,23 @@ impl OptimizingCompiler {
     }
 
     fn compile_subroutines(&mut self, ast: &Regex) -> Vec<Vec<u8>> {
-        let mut subroutines = vec![Vec::new(); self.group_counter as usize + 1];
+        // Size `subroutines` by the true max group id in the AST, not
+        // `self.group_counter`. A capturing group nested inside a
+        // zero-repetition quantifier like `{0,0}` or `{0}` is present in
+        // the AST (and found by `collect_capturing_group_defs`) but is
+        // never visited by `codegen_pass` — so `group_counter` stays
+        // behind and `subroutines[group_id]` would write out of bounds.
+        // PCRE2 testinput1 regression pins: `^(a){0,0}`, `(a|(bc)){0,0}?xyz`,
+        // `(?1)(?:(b)){0}`, `(a(*COMMIT)b){0}a(?1)|aac`, and
+        // `(?:(a(*PRUNE)b)){0}(?:(?1)|ac)` — all crashed at this site
+        // before the fix.
+        let defs = Self::collect_capturing_group_defs(ast);
+        let max_group_id = defs.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let size = (self.group_counter.max(max_group_id) as usize) + 1;
+        let mut subroutines = vec![Vec::new(); size];
         subroutines[0] = self.compile_nested_code(ast, 0);
 
-        for (group_id, group_ast) in Self::collect_capturing_group_defs(ast) {
+        for (group_id, group_ast) in defs {
             subroutines[group_id as usize] = self.compile_nested_code(&group_ast, group_id - 1);
         }
 
@@ -6999,11 +7030,18 @@ impl OptimizingCompiler {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)] // Char-class IDs are single-byte operands.
+    #[allow(clippy::cast_possible_truncation)] // Char-class IDs are single-byte operands; overflow is caught by the bounds check below.
     #[allow(clippy::only_used_in_recursion)]
     #[allow(clippy::too_many_lines)] // Opcode dispatch covers all variants in a single walk — splitting would scatter the iteration logic.
-    fn rebase_inline_char_class_ids(&self, code: &mut [u8], char_class_base: usize) {
-        if char_class_base == 0 || code.is_empty() {
+    fn remap_inline_char_class_ids(&self, code: &mut [u8], remap: &[usize]) {
+        if remap.is_empty() || code.is_empty() {
+            return;
+        }
+        // Fast-path: if the remap is the identity (`remap[i] == i`) then
+        // the sub-compiler's ids already match the parent's, nothing to
+        // rewrite. This is the common case when dedup matched every
+        // entry (all duplicates) OR when there was nothing to merge.
+        if remap.iter().enumerate().all(|(i, &target)| target == i) {
             return;
         }
 
@@ -7026,9 +7064,17 @@ impl OptimizingCompiler {
                     if ip >= code.len() {
                         return;
                     }
-                    code[ip] = code[ip]
-                        .checked_add(char_class_base as u8)
-                        .expect("char class table exceeded single-byte operand range");
+                    let old = code[ip] as usize;
+                    let Some(&new_id) = remap.get(old) else {
+                        return;
+                    };
+                    assert!(
+                        new_id < 256,
+                        "char class table exceeded single-byte operand range \
+                         (remapped id {new_id} >= 256); pattern needs deduplication or \
+                         a wider operand"
+                    );
+                    code[ip] = new_id as u8;
                     ip += 1;
                 }
                 OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
@@ -7060,7 +7106,7 @@ impl OptimizingCompiler {
                     if end > code.len() {
                         return;
                     }
-                    self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
+                    self.remap_inline_char_class_ids(&mut code[ip..end], remap);
                     ip = end;
                 }
                 OpCode::CodeBlock => {
@@ -7076,7 +7122,7 @@ impl OptimizingCompiler {
                     ip += 2 + body_len;
                 }
                 OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
-                    match self.rebase_conditional_operand(code, ip, char_class_base) {
+                    match self.remap_conditional_operand(code, ip, remap) {
                         Some(next_ip) => ip = next_ip,
                         None => return,
                     }
@@ -7124,14 +7170,15 @@ impl OptimizingCompiler {
     }
 
     /// Advance past a conditional (JumpIfMatch/JumpIfNoMatch) operand,
-    /// rebasing any embedded char-class ids.  Returns the new `ip`, or
-    /// `None` when the bytecode is malformed and iteration should stop.
+    /// remapping any embedded char-class ids via the provided table.
+    /// Returns the new `ip`, or `None` when the bytecode is malformed
+    /// and iteration should stop.
     #[allow(clippy::only_used_in_recursion)]
-    fn rebase_conditional_operand(
+    fn remap_conditional_operand(
         &self,
         code: &mut [u8],
         mut ip: usize,
-        char_class_base: usize,
+        remap: &[usize],
     ) -> Option<usize> {
         if ip >= code.len() {
             return None;
@@ -7154,7 +7201,7 @@ impl OptimizingCompiler {
                 if end > code.len() {
                     return None;
                 }
-                self.rebase_inline_char_class_ids(&mut code[ip..end], char_class_base);
+                self.remap_inline_char_class_ids(&mut code[ip..end], remap);
                 ip = end;
             }
             _ => return None,
@@ -7287,7 +7334,16 @@ impl OptimizingCompiler {
             unicode_ranges: merged,
         };
 
-        // Store the character class and return its index
+        // Dedup: if this exact class is already in the table, reuse its
+        // id. Without this, repeated-expression quantifiers like
+        // `[a-z]+{0,300}` push 300 identical entries and overflow the
+        // single-byte operand at `rebase_inline_char_class_ids`. PCRE2
+        // testinput1 regression: `word (?:[a-zA-Z0-9]+ ){0,300}otherword`.
+        if let Some(existing_id) = self.char_classes.iter().position(|cc| cc == &char_class) {
+            return existing_id;
+        }
+
+        // Store the character class and return its index.
         let id = self.char_classes.len();
         self.char_classes.push(char_class);
         self.stats.char_classes += 1;
@@ -7967,5 +8023,91 @@ mod tests {
         assert!(r.is_match("abcd"));
         // The pattern does not match "abce".
         assert!(!r.is_match("abce"));
+    }
+
+    // ==================================================================
+    // Regression pins — PCRE2 10.47 testinput1 conformance crash-bugs
+    // ==================================================================
+    //
+    // These patterns crashed the VM before the fixes landed in
+    // `compile_subroutines` (size `subroutines` by AST-observed max
+    // group id, not `group_counter`) and `compile_nested_code` (dedup
+    // char class table entries during sub-compiler merge). Each is a
+    // minimal reproducer taken straight from
+    // `subs/pcre2/testdata/testinput1`.
+    //
+    // The tests assert the engine **does not panic**. Matching
+    // semantics for some patterns (especially `{0,0}` with captures on
+    // non-matching subjects) are still tracked in `docs/BACKLOG.md` C7
+    // — the PCRE2 conformance harness will surface any regression there.
+
+    #[test]
+    fn regression_zero_zero_quantifier_with_nested_capture_does_not_panic() {
+        // testinput1 line 1515: `(a|(bc)){0,0}?xyz` vs "xyz" — used to
+        // crash with `index out of bounds: the len is 1 but the index is 1`
+        // at the old `compile_subroutines` site.
+        let r = crate::Regex::compile(r"(a|(bc)){0,0}?xyz").expect("compiles");
+        let _ = r.is_match("xyz");
+    }
+
+    #[test]
+    fn regression_zero_zero_quantifier_on_anchored_pattern_does_not_panic() {
+        // testinput1 line 1709: `^(a){0,0}` vs multiple subjects.
+        let r = crate::Regex::compile(r"^(a){0,0}").expect("compiles");
+        for subject in &["bcd", "abc", "aab     "] {
+            let _ = r.is_match(subject);
+            let _ = r.find_first(subject);
+        }
+    }
+
+    #[test]
+    fn regression_zero_quantifier_with_subroutine_call_does_not_panic() {
+        // testinput1 line 4942: `(?1)(?:(b)){0}` vs "b" — subroutine call
+        // pointing at a group that only exists inside a {0} quantifier.
+        let r = crate::Regex::compile(r"(?1)(?:(b)){0}").expect("compiles");
+        let _ = r.is_match("b");
+    }
+
+    #[test]
+    fn regression_zero_quantifier_with_backtracking_verb_does_not_panic() {
+        // testinput1 line 5314: `(a(*COMMIT)b){0}a(?1)|aac` vs "aac".
+        let r = crate::Regex::compile(r"(a(*COMMIT)b){0}a(?1)|aac").expect("compiles");
+        let _ = r.is_match("aac");
+    }
+
+    #[test]
+    fn regression_zero_quantifier_with_nested_prune_does_not_panic() {
+        // testinput1 line 5354: `(?:(a(*PRUNE)b)){0}(?:(?1)|ac)` vs
+        // various subjects including empty and subjects with backslashes.
+        let r = crate::Regex::compile(r"(?:(a(*PRUNE)b)){0}(?:(?1)|ac)").expect("compiles");
+        for subject in &["ac", "", r"/(?:(a(*SKIP)b)){0}(?:(?1)|ac)/"] {
+            let _ = r.is_match(subject);
+        }
+    }
+
+    #[test]
+    fn regression_char_class_table_no_longer_overflows_single_byte_on_high_repeat() {
+        // testinput1 line 1705: `word (?:[a-zA-Z0-9]+ ){0,300}otherword`
+        // used to crash with `char class table exceeded single-byte
+        // operand range` because the Range quantifier emits the inner
+        // expression 300 times, each sub-compile producing a fresh char
+        // class entry. The dedup merge in `compile_nested_code` collapses
+        // all 300 into a single shared entry.
+        let r = crate::Regex::compile(r"word (?:[a-zA-Z0-9]+ ){0,300}otherword").expect("compiles");
+        let subject = "word cat dog elephant mussel cow horse canary baboon snake \
+                       shark the quick brown fox and the lazy dog and several other \
+                       words getting close to thirty by now I hope";
+        let _ = r.is_match(subject);
+    }
+
+    #[test]
+    fn regression_char_class_dedup_keeps_unique_classes_separate() {
+        // Sanity check that dedup doesn't collapse *different* classes
+        // into the same entry. `[a-z]+[0-9]+` has two distinct classes;
+        // the compiled program must tell them apart.
+        let r = crate::Regex::compile(r"[a-z]+[0-9]+").expect("compiles");
+        assert!(r.is_match("abc123"));
+        assert!(!r.is_match("abc")); // missing digit
+        assert!(!r.is_match("123")); // missing letter
     }
 }
