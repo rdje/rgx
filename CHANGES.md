@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-14 - Case-fold ASCII ranges that span both cases (PCRE2 testinput1:1381)
+- Scope: Fixes a case-insensitive char-class-range bug surfaced by the full PCRE2 conformance. `[W-c]/i` — a bracket expression whose endpoints span from uppercase `W` (87) to lowercase `c` (99), including symbols and both letter cases — was losing its case-fold expansion because `Compiler::case_fold_ranges` produced an inverted mirror range that never matched. Pattern `/^[W-c]+$/i` on subject `"wxy_^ABC"` returned no match; PCRE2 expects a full match.
+- **Root cause**: for a multi-char `CharRange`, `case_fold_ranges` built a single "mirror" range by folding each endpoint independently. For `[W-c]` with endpoints (W=87, c=99), the fold produced (w=119, C=67) — `start > end`, an empty range. The rest of the case-insensitive path never widened the class beyond the original `W..c`.
+- **Fix**: for pure-ASCII ranges (both endpoints `<= 0x7F`), iterate each codepoint in the range and, if it's an ASCII letter, push its case-swapped single-char `CharRange` into the class. The compile_char_class sort-and-merge step consolidates the additions into proper sub-ranges. Non-ASCII / mixed ranges keep the prior "best-effort fold the endpoints" path so bulk Unicode property ranges don't pay a per-codepoint cost.
+- **4 new regression tests** in `vm::tests`:
+  - `regression_case_fold_range_spanning_both_cases_matches_mixed_subject` — the testinput1:1381 minimal reproducer
+  - `regression_case_fold_range_spanning_both_cases_does_not_match_out_of_range` — confirms the fix widens coverage without turning `[W-c]/i` into `.`
+  - `regression_case_fold_preserves_ascii_range_not_spanning_cases` — `[a-f]/i` still matches both `abc` and `ABC`
+  - `regression_case_fold_preserves_uppercase_only_range` — `[W-Z]/i` still matches both `WXYZ` and `wxyz`
+- **Conformance impact**:
+  - before: 11,216 parsed / 3,618 pass / 1,022 fail / 0 panic / 6,576 skip / 78.0%
+  - after:  11,216 parsed / **3,624 pass** / **1,016 fail** / 0 panic / 6,576 skip / **78.1%**
+  - +6 / -6. The `[W-c]/i` shape is one of several false-negative classes; 194 false-negatives remain for future triage (e.g., `\s` semantics on CR/LF, anchor/whitespace interactions).
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` **1007/0/1** (1003 baseline + 4 new regression tests), `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-14 - Second PGEN stack-overflow pattern (PGEN-RGX-0055) + widened skip guard
 - Scope: Identifies and skips the second known pattern that aborts PGEN's regex worker thread via stack overflow — a Python-interpolation grammar at `subs/pcre2/testdata/testinput2` line 2880 with six mutually-recursive named groups (`regex`, `name`, `index`, `indices`, `complex`, `segment`) cross-referenced via `\g<name>`. Filed as PGEN-RGX-0055 with full reproducer bundle.
 - **Detection**: ran `file_pgen_issues --scan testinput2` with per-pattern print-before-compile; the scan aborted (SIGABRT, exit 134) after reaching pattern 848 (the interpolation grammar at line 2880). The bin-level `--scan` mode printed that specific pattern last in the log before the abort.

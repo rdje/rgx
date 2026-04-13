@@ -7220,34 +7220,46 @@ impl OptimizingCompiler {
                         result.push(CharRange::single(variant));
                     }
                 }
+            } else if (range.start as u32) <= 0x7F && (range.end as u32) <= 0x7F {
+                // ASCII range — iterate each letter and add its case
+                // variant as a single-char range. The compile_char_class
+                // sort+merge step consolidates adjacent singles into
+                // runs. This is exact for any ASCII range shape, INCLUDING
+                // ranges that span both cases like `[W-c]` (W=87, c=99,
+                // contains upper Z, the symbols [\\]^_`, and lower a-c).
+                // The prior implementation folded the two endpoints to
+                // build a single mirror range which degenerated to
+                // `[w..C]` (start=119 > end=67 — empty set) for cross-
+                // case ranges. Regression pinned as
+                // `regression_case_fold_range_spanning_both_cases` in
+                // the tests module.
+                let start = range.start as u32;
+                let end = range.end as u32;
+                for cp in start..=end {
+                    if let Some(ch) = char::from_u32(cp) {
+                        if ch.is_ascii_alphabetic() {
+                            let swapped = if ch.is_ascii_lowercase() {
+                                ch.to_ascii_uppercase()
+                            } else {
+                                ch.to_ascii_lowercase()
+                            };
+                            result.push(CharRange::single(swapped));
+                        }
+                    }
+                }
             } else {
-                // Range — fold each endpoint. For ASCII ranges this is exact;
-                // for Unicode ranges it's a best-effort approximation.
+                // Non-ASCII or mixed range — best-effort fold the
+                // endpoints (the prior implementation's path). Exact
+                // expansion across large Unicode ranges is expensive
+                // and rare in practice; this covers the common cases
+                // and keeps the performance profile for bulk Unicode
+                // property ranges.
                 for ch in [range.start, range.end] {
                     for variant in Self::unicode_case_variants(ch) {
                         if variant != ch {
                             result.push(CharRange::single(variant));
                         }
                     }
-                }
-                // Also add the mirror-case range for pure ASCII letter ranges.
-                let s = range.start;
-                let e = range.end;
-                if s.is_ascii_alphabetic() && e.is_ascii_alphabetic() {
-                    let folded_s = if s.is_ascii_lowercase() {
-                        s.to_ascii_uppercase()
-                    } else {
-                        s.to_ascii_lowercase()
-                    };
-                    let folded_e = if e.is_ascii_lowercase() {
-                        e.to_ascii_uppercase()
-                    } else {
-                        e.to_ascii_lowercase()
-                    };
-                    result.push(CharRange {
-                        start: folded_s,
-                        end: folded_e,
-                    });
                 }
             }
         }
@@ -8109,5 +8121,82 @@ mod tests {
         assert!(r.is_match("abc123"));
         assert!(!r.is_match("abc")); // missing digit
         assert!(!r.is_match("123")); // missing letter
+    }
+
+    // ==================================================================
+    // Regression pins — case-insensitive char-class range folding
+    // ==================================================================
+    //
+    // PCRE2 testinput1 line 1381: `/^[W-c]+$/i` on subject `"wxy_^ABC"`
+    // expects a full match. Before the fix, `case_fold_ranges` added a
+    // single "mirror-case" range for ASCII alphabetic endpoints. For
+    // `[W-c]` the endpoints (W=87, c=99) fold to (w=119, C=67), which
+    // is an inverted range that matches nothing. The fix switches to
+    // per-character iteration within ASCII ranges so each letter's
+    // case variant is added independently; the sort+merge step then
+    // consolidates adjacent singles into proper sub-ranges.
+
+    #[test]
+    fn regression_case_fold_range_spanning_both_cases_matches_mixed_subject() {
+        // testinput1:1381 — the minimal PCRE2 reproducer.
+        use crate::RegexBuilder;
+        let r = RegexBuilder::new(r"^[W-c]+$")
+            .case_insensitive()
+            .build()
+            .expect("compiles");
+        assert!(r.is_match("wxy_^ABC"), "all chars in case-folded [W-c]");
+        let m = r.find_first("wxy_^ABC").expect("matches");
+        assert_eq!((m.start, m.end), (0, 8));
+    }
+
+    #[test]
+    fn regression_case_fold_range_spanning_both_cases_does_not_match_out_of_range() {
+        // Sanity: characters outside the case-folded range must still
+        // be rejected. `.` (46) and `!` (33) are not in W..c nor in
+        // their case-folded additions A..C / w..z. Confirms the fix
+        // widens coverage without turning [W-c]/i into ".".
+        use crate::RegexBuilder;
+        let r = RegexBuilder::new(r"^[W-c]+$")
+            .case_insensitive()
+            .build()
+            .expect("compiles");
+        assert!(!r.is_match("."));
+        assert!(!r.is_match("!"));
+        assert!(!r.is_match("d")); // d (100) is outside W..c (87..99)
+        assert!(!r.is_match("D")); // D (68) is outside A..C / W..c
+    }
+
+    #[test]
+    fn regression_case_fold_preserves_ascii_range_not_spanning_cases() {
+        // `[a-f]/i` is a lowercase-only range; case-folded should
+        // include [A-F]. This path worked before the fix but needs
+        // to keep working after the refactor.
+        use crate::RegexBuilder;
+        let r = RegexBuilder::new(r"^[a-f]+$")
+            .case_insensitive()
+            .build()
+            .expect("compiles");
+        assert!(r.is_match("abc"));
+        assert!(r.is_match("ABC"));
+        assert!(r.is_match("aBcDeF"));
+        assert!(!r.is_match("g"));
+        assert!(!r.is_match("G"));
+    }
+
+    #[test]
+    fn regression_case_fold_preserves_uppercase_only_range() {
+        // `[W-Z]/i` is an uppercase-only range; case-folded should
+        // include [w-z]. The per-letter iteration path must handle
+        // this correctly.
+        use crate::RegexBuilder;
+        let r = RegexBuilder::new(r"^[W-Z]+$")
+            .case_insensitive()
+            .build()
+            .expect("compiles");
+        assert!(r.is_match("WXYZ"));
+        assert!(r.is_match("wxyz"));
+        assert!(r.is_match("WxYz"));
+        assert!(!r.is_match("a"));
+        assert!(!r.is_match("V"));
     }
 }

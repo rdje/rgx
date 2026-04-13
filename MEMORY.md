@@ -294,6 +294,20 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-third commit) — Case-fold ranges spanning both cases — fix (C) from the A-B-C plan
+- **Bug**: `[W-c]/i` produced an inverted mirror range (w=119, C=67, start > end, matches nothing) in `Compiler::case_fold_ranges`. Any ASCII char-class range whose endpoints crossed the case boundary lost its case-fold expansion.
+- **Fix**: for pure-ASCII ranges, iterate each codepoint and push case-swapped single-char ranges; the sort+merge step consolidates. Non-ASCII ranges keep the old endpoint-fold path.
+- **4 regression tests** pinning: the testinput1:1381 minimal reproducer, out-of-range rejection, and the two non-spanning cases (lowercase-only + uppercase-only ranges).
+- **Conformance delta**: 3618 → 3624 pass (+6), 1022 → 1016 fail (-6). Pass rate 78.0% → 78.1%. Small because `[W-c]/i` is one of ~200 distinct false-negative shapes; most of that bucket is other bugs (CR/LF `\s`, anchor + whitespace interactions, etc.).
+- **A-B-C plan complete for this session**:
+  - (A) Fix 9-panic `(?[...])` + FlagGroup bug ✅
+  - (B) PGEN-RGX-0055 filed + widened skip guard ✅
+  - (C) Case-fold range spanning both cases ✅
+- **Next concrete actions** (from the "what's left" inventory I gave Oz):
+  - Trivial adapter wins: `\"`/`\/` simple_escape fallback (+78), `[\b]`/`[\c]` class_escape (+62)
+  - Medium harness wins: named-modifier support (~3000 skip→run), multi-line pattern support
+  - Larger RGX triage: 194 remaining false-negative shapes, 200 false-positives, 173 span mismatches
+
 ### 2026-04-14 (thirty-second commit) — Second PGEN stack-overflow pattern filed + skip guard widened
 - **What**: The `file_pgen_issues --scan testinput2` bin located the second process-aborting PGEN pattern — a Python-interpolation grammar at testinput2:2880 with six mutually-recursive named groups (`\g<regex>`, `\g<name>`, etc). Same bug class as the 80-nesting one (PGEN-RGX-0054) — the pgen-generated-regex worker exhausts its 8 MiB stack walking `\g<>` cross-references.
 - **Filed**: PGEN-RGX-0055 with full bundle (repro_input.txt, pgen_contract.json, placeholder pgen_parse_outcome.json).
