@@ -1,0 +1,1 @@
+(?(*negative_lookbehind:foo)bar|baz)

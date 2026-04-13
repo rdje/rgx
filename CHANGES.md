@@ -14,6 +14,38 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-13 - File 37 PGEN bug reports per the canonical reporting protocol
+- Scope: Per user request "log the PGEN related misbehaviors, one report per failing case", per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`. Adds 37 new `PGEN-RGX-NNNN.yaml` entries (PGEN-RGX-0017 through PGEN-RGX-0053) covering every unique PGEN-related failing pattern from `subs/pcre2/testdata/testinput1`, plus a reusable internal generator binary that can be re-run on any PCRE2 testfile.
+- **New binary `rgx-core/src/bin/file_pgen_issues.rs`** (gated on `pgen-parser` feature). Walks the testdata, identifies patterns where RGX's compile error matches a PGEN signature (`E_PARSE_FAILURE` from PGEN's regex grammar, `unterminated character class`, or `class_item has no known variant` contract mismatches), deduplicates by pattern string, then for each unique pattern:
+  - allocates the next available PGEN-RGX-NNNN id by scanning existing yaml files,
+  - calls `pgen::embedding_api::parse_grammar_profile_named("regex", "regex_default", pattern)` and dumps the JSON outcome,
+  - calls `pgen::embedding_api::parser_embedding_api_contract()` and dumps the JSON contract,
+  - writes `pgen-issues/PGEN-RGX-NNNN.yaml` with the full protocol §1–§5 metadata block (parser identity, host identity, repro context, expected/actual behavior, reproduction command, impact, resolution placeholder),
+  - writes `pgen-issues/artifacts/PGEN-RGX-NNNN/{repro_input.txt,pgen_contract.json,pgen_parse_outcome.json}`.
+  - The `pgen_trace.log` artifact is intentionally NOT auto-generated (would require invoking parseability_probe per-pattern at ~5s each); the YAML's `command` field carries the exact `PGEN_TRACE_VERBOSITY=debug parseability_probe ...` invocation a maintainer can run when a specific report needs trace-level context.
+- **Bug-class breakdown** (per protocol §4):
+  - 32 `should_parse_but_fails` — PGEN rejects valid PCRE2 patterns. Examples:
+    - `^\ca\cA\c[;\c:` — `\c[` control-char escape (PGEN treats `[` as opening a char class instead of as the control byte after `\c`)
+    - `([[:` / `([[=` / `([[.` — POSIX class delimiters in unusual positions
+    - `abc\Q(*+|\Eabc` — `\Q...\E` literal-quoting
+    - `(*PRUNE:m(m)(?&y)(?(DEFINE)(?<y>b))` — backtracking verb with parens inside mark name
+    - `(?(*pla:foo).{6}|a..)` — `(*pla:...)` callout-style lookahead alias
+    - `a{1,2,3}b`, `X{`, `X{A`, `X{}`, `X{1234`, `a{(?#XYZ),2}` — malformed-quantifier-falls-back-to-literal
+    - `(A)(\g{ -2 }B)`, `(?'name'ab)\k{ name }(?P=name)` — whitespace inside `\g{}` / `\k{}`
+  - 5 `parses_but_returns_wrong_ast` — PGEN parses but emits a `class_item` node shape RGX's adapter has no case for. Examples:
+    - `[[:space:]]+`, `[[:blank:]]+`, `[[:digit:]-]+`, `[[:digit:]-   ]` — POSIX classes inside char classes
+    - `^[:a[:digit:]]+`, `^[:a[:digit:]:b]+` — POSIX class with surrounding garbage
+- **Reports NOT filed as PGEN bugs** (these are RGX adapter gaps, tracked in `docs/BACKLOG.md` C7):
+  - `simple_escape` rejected chars (`\"`, `\/`) — PGEN successfully routes the escape; RGX's `convert_simple_escape` lacks a fallback case for "unknown escape char → literal char". Should be a one-line RGX fix.
+  - `class_escape unsupported variant` cases (`[\b]`, `[\c]` etc) — PGEN routes to `class_escape` variants RGX hasn't lowered. Should expand RGX's class_escape converter.
+- **Pattern identity for each report**:
+  - `parser_backend_version`: PGEN commit short SHA, derived via `git -C subs/pgen rev-parse --short=7 HEAD` (currently `8783757`)
+  - `parser_release_version` and `integration_contract_version`: pulled live from `parser_embedding_api_contract().regex_parser_release_version` and `.regex_integration_contract_version` (currently both `1.1.10`)
+  - `rgx_commit`: derived via `git rev-parse --short=7 HEAD`
+  - `host_os` / `host_arch`: from `std::env::consts::OS` / `ARCH`
+- **Cargo.toml**: declares the new binary with `required-features = ["pgen-parser"]`.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` 1001/0/1 (unchanged), `cargo clippy --workspace --all-targets` zero RGX-owned errors. Tool successfully generated 37 reports + 111 artifact files.
+
 ### 2026-04-13 - PCRE2 octal-fallback for backref-to-missing-group (\NNN) at compile time
 - Scope: PCRE2 semantics for numeric escape sequences: `\N` (or `\NN`, `\NNN`) where N exceeds the pattern's capture count is NOT an error — PCRE2 reinterprets the digits as an octal byte literal. RGX previously rejected these patterns at compile time with `backreference '\\NNN' refers to missing capture group`. This fixes the 35 cases in PCRE2 testinput1 that exercise this fallback (most involve `\123`, `\223`, `\323` etc. for high-byte literals).
 - **New compile-time AST transform `Compiler::resolve_octal_backreferences`**: walks the AST after `resolve_recursion_conditionals` and before `backreference_validation_message`. For each `Backreference(n)` where `n > total_groups`, checks whether every decimal digit of `n` is a valid octal digit (0..=7). If yes, parses the digit string as base-8 and rewrites the node to `RegexAst::Char(char::from_u32(value))`. If the value exceeds 0xFF, falls back to the Unicode codepoint (acceptable for ASCII-range patterns, byte-accurate matching for 128..=255 is BACKLOG follow-up). Backreferences with non-octal digits (e.g. `\89`) fall through unchanged and hit the existing validation.

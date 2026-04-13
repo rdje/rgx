@@ -97,3 +97,13 @@ proptest = "1"
 [[bench]]
 name = "core_performance"
 harness = false
+
+# Internal tool: scans PCRE2 testdata for patterns that surface PGEN
+# misbehaviors and writes a structured report bundle per unique
+# pattern under `pgen-issues/`. Gated on `pgen-parser` because it
+# calls the PGEN embedding API directly. Run with:
+#   cargo run --bin file_pgen_issues --features pgen-parser
+[[bin]]
+name = "file_pgen_issues"
+path = "src/bin/file_pgen_issues.rs"
+required-features = ["pgen-parser"]
