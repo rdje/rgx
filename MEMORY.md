@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-eighth commit) — PCRE2 octal-fallback for backref-to-missing-group
+- **Pass rate: 1957/424/0/139 — 82.2%.** +5 pass / -5 fail vs commit 27.
+- **Real RGX bug fixed**: PCRE2 reinterprets `\NNN` as octal when group N doesn't exist; RGX previously errored. Same bug class as `\0` from commit 27 (commit 27 fixed the single-digit `\0` → NUL routing; commit 28 fixes the multi-digit `\NNN` → octal-byte fallback).
+- **Implementation**: new compile-time AST transform `Compiler::resolve_octal_backreferences` rewrites `Backreference(n)` with `n > total_groups` to `Char(octal_value)` when every decimal digit of n is a valid octal digit (0..=7). Backrefs with non-octal digits (e.g. `\89`) fall through to the existing validation.
+- **Behavioral change**: `\2` with no group 2 now compiles as `Char(0x02)` instead of erroring. PCRE2-correct. Existing test renamed to use `\9` (which still errors); new test added for the octal behavior.
+- **Octal values 128..=255 caveat**: my fix uses `char::from_u32` which encodes as Unicode codepoint (1-2 UTF-8 bytes). PCRE2's `\NNN` for 128..=255 is a single byte. For ASCII-range cases (0..=127) the fix is byte-accurate; for high-byte cases the divergence shows as RGX matching the codepoint via 2-byte UTF-8 vs PCRE2's 1-byte literal. Tracked as follow-up.
+- **Next concrete action**: continue tackling the 424 remaining PCRE2 conformance failures. Top buckets to investigate: 103 false negatives (case-insensitive char-class range semantics like `[W-c]/i`), 88 PGEN parse failures (POSIX class syntax in unusual positions), 56 false positives, 56 span mismatches, 42 unsupported `[\b]` `[\c]` class escapes, 40 PGEN rejects on `\"` `\/`. Each is its own commit.
+
 ### 2026-04-13 (twenty-seventh commit) — PCRE2 harness block refactor + `\0` → NUL fix → 82% pass rate
 - **Pass rate jumps 39.5% → 82.0%** on the PCRE2 10.47 testinput1 conformance. Most of the jump was harness-side false positives cleared by a block-based parser; the one real RGX parse bug fixed is `\0`.
 - **Harness refactor**: line-cursor alignment was fragile. Rewrote as block-based parser — both files split by blank lines (including whitespace-only lines), blocks paired by index. Added a separate `decode_output` (narrower than `decode_subject`: only `\xHH` and `\\`), fixed `\=` annotation-echo consumption, handled PCRE2's trailing-`\` "empty subject" convention. Added categorized failure histogram so the remaining work is prioritizable by bug class.

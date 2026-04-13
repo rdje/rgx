@@ -4672,14 +4672,35 @@ mod tests {
     }
 
     #[test]
-    fn parser_backreference_to_missing_group_reports_compile_error() {
-        let result = Regex::compile(r"(a)\2");
+    fn parser_backreference_to_missing_group_with_non_octal_digits_reports_compile_error() {
+        // PCRE2 semantics: `\N` where N > total_groups AND at least one
+        // digit of N is non-octal (8, 9) cannot be rewritten to an
+        // octal literal, so the compile error is retained. `\9` with
+        // no group 9 falls through the octal-fallback transform and
+        // hits the existing validation.
+        let result = Regex::compile(r"(a)\9");
         assert!(
             result.is_err(),
-            "Backreference to a missing group should not silently compile"
+            "Backreference to a missing group with non-octal digit should not silently compile"
         );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains(r"backreference '\2' refers to missing capture group"));
+        assert!(
+            msg.contains(r"backreference '\9' refers to missing capture group"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn parser_single_digit_backreference_to_missing_group_becomes_octal() {
+        // PCRE2 semantics (per the PCRE2 10.47 manual): `\N` with N
+        // less than 10 AND no group N is an octal escape. `\2` with
+        // no group 2 is byte 0x02. This mirrors PCRE2 testinput1's
+        // `/abc\0def/`, `/(abc)\123/`, and similar single/multi-digit
+        // patterns.
+        let r = Regex::compile(r"\2")
+            .expect("single-digit backref with no group should compile as octal");
+        // 0x02 is the character matched by `\2` in octal.
+        assert!(r.is_match("\x02"));
     }
 
     #[test]

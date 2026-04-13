@@ -504,6 +504,7 @@ impl Compiler {
         let named_groups = Self::collect_named_groups(&ast);
         let ast = Self::resolve_relative_conditionals(ast, total_groups)?;
         let ast = Self::resolve_recursion_conditionals(ast, total_groups, &named_groups)?;
+        let ast = Self::resolve_octal_backreferences(ast, total_groups);
 
         if let Some(msg) = Self::backreference_validation_message(&ast) {
             trace_exit!(
@@ -619,6 +620,115 @@ impl Compiler {
             Self::resolve_relative_conditionals_inner(ast, 0, total_groups)?;
         debug_assert_eq!(resolved_groups, total_groups);
         Ok(ast)
+    }
+
+    /// PCRE2 octal-fallback for numeric backreferences that don't
+    /// name an existing group. `\NNN` is parsed by PGEN as
+    /// `Backreference(NNN)` because the grammar can't know the
+    /// capture count upfront. If N > total_groups AND the decimal
+    /// digits of N are ALL valid octal digits (0..=7), PCRE2 semantics
+    /// say the escape is an octal byte literal, not a backref.
+    ///
+    /// Examples (from PCRE2 testinput1 lines 1471 / 1474 / 1477):
+    /// - `(abc)\123` → `\123` → group 123 doesn't exist, digits 1/2/3
+    ///   are octal → byte 0o123 = 0x53 = 'S'
+    /// - `(abc)\223` → digits 2/2/3 octal → byte 0o223 = 0x93
+    /// - `(abc)\323` → digits 3/2/3 octal → byte 0o323 = 0xD3
+    ///
+    /// `Backreference(0)` is handled upstream by
+    /// `convert_simple_escape` (which routes `\0` directly to
+    /// `Char('\0')`); it doesn't reach this transform.
+    ///
+    /// Backrefs with at least one non-octal digit (e.g. `\89`,
+    /// `\123` when group 123 exists) fall through unchanged: the
+    /// subsequent `backreference_validation_message` catches any
+    /// remaining truly-invalid references.
+    fn resolve_octal_backreferences(ast: RegexAst, total_groups: u32) -> RegexAst {
+        match ast {
+            RegexAst::Backreference(n) if n > total_groups => {
+                // If every decimal digit of n is a valid octal digit
+                // (0..=7), reinterpret n's decimal digit string as
+                // octal. `Backreference(123)` ⇒ digits "123" ⇒ octal
+                // 0o123 = 83 ⇒ Char('S'). Backrefs with non-octal
+                // digits (e.g. `\89`) keep their Backreference form
+                // and flow into `backreference_validation_message` for
+                // a clean compile error.
+                let s = n.to_string();
+                if !s.bytes().all(|b| b.is_ascii_digit() && b < b'8') {
+                    return RegexAst::Backreference(n);
+                }
+                let Ok(code) = u32::from_str_radix(&s, 8) else {
+                    return RegexAst::Backreference(n);
+                };
+                // PCRE2 accepts octal escapes up to 0o777 = 0xFF (one
+                // byte). For three-digit 0o400..=0o777 (128..=255),
+                // the value is NOT a valid single-byte ASCII char,
+                // but Rust's `char::from_u32` does accept 128..=255
+                // as valid Unicode codepoints. The char encodes to
+                // TWO UTF-8 bytes, which diverges from PCRE2's
+                // single-byte literal semantics. For the initial
+                // octal-fallback we surface the Unicode codepoint;
+                // byte-accurate matching for octal values 128..=255
+                // is follow-up work and is tracked in BACKLOG C7.
+                match char::from_u32(code) {
+                    Some(ch) => RegexAst::Char(ch),
+                    None => RegexAst::Backreference(n),
+                }
+            }
+            RegexAst::Sequence(items) => RegexAst::Sequence(
+                items
+                    .into_iter()
+                    .map(|item| Self::resolve_octal_backreferences(item, total_groups))
+                    .collect(),
+            ),
+            RegexAst::Alternation(items) => RegexAst::Alternation(
+                items
+                    .into_iter()
+                    .map(|item| Self::resolve_octal_backreferences(item, total_groups))
+                    .collect(),
+            ),
+            RegexAst::Quantified { expr, quantifier } => RegexAst::Quantified {
+                expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
+                quantifier,
+            },
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => RegexAst::Group {
+                expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
+                kind,
+                index,
+                name,
+            },
+            RegexAst::Lookahead { expr, positive } => RegexAst::Lookahead {
+                expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
+                positive,
+            },
+            RegexAst::Lookbehind { expr, positive } => RegexAst::Lookbehind {
+                expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
+                positive,
+            },
+            RegexAst::FlagGroup { flags, expr } => RegexAst::FlagGroup {
+                flags,
+                expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
+            },
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => RegexAst::Conditional {
+                condition,
+                true_branch: Box::new(Self::resolve_octal_backreferences(
+                    *true_branch,
+                    total_groups,
+                )),
+                false_branch: false_branch
+                    .map(|b| Box::new(Self::resolve_octal_backreferences(*b, total_groups))),
+            },
+            other => other,
+        }
     }
 
     fn extended_char_class_subset_error() -> RgxError {
