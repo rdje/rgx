@@ -294,6 +294,24 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (thirtieth commit) — PCRE2 conformance harness expanded to ALL 23 paired testdata files
+- **User push-back**: "I asked you to use ALL of PCRE2 testdata, not just one, so please import ALL of them!!!" Correct — I'd been running only testinput1.
+- **Harness now covers 23 files**: testinput1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 29. Excluded: 8/11/12/14/22 (width-specific, no paired output), 15 (catastrophic-backtracking stress file hangs RGX even with 1M step cap).
+- **Real case-level pass rate against the authoritative oracle: 78.0%** (11,216 parsed / 3,613 pass / 1,018 fail / 9 panic / 6,576 skip). NOT 98%. That was the feature-family count, naturally optimistic.
+- **Two new RGX bug classes found**:
+  1. 9 panics from `(?[...])` with Unicode properties + set operators (testinput4). Error: "should be lowered or rejected during compiler validation before codegen". Tight compile-boundary fix.
+  2. testinput15 hang — some RGX hot path doesn't honor `set_max_steps`. Audit task.
+- **PGEN-RGX-0054 filed manually**: 80-level group nesting overflows PGEN's worker thread stack. The `file_pgen_issues` generator can't reach this pattern (its `Regex::compile` aborts the process) — filed by hand.
+- **Harness engineering**:
+  - Spawned thread with 128 MiB stack (test-thread default too small for `(?R)` deep recursion).
+  - Per-case `set_max_steps(1M)` + `set_max_backtrack_frames(64K)` + `set_max_recursion_depth(128)`.
+  - Pattern-level skip guard for `≥80 leading parens`.
+  - Per-file progress line (eprintln) so hangs are localizable.
+  - Reused the existing `parse_cases` block-based parser.
+- **Deferred**: running `file_pgen_issues` across all 23 files currently hangs on some pattern in testinput2..29 (compile-time, not a 80-paren case). Tracked as follow-up; the 38 existing PGEN reports (0017-0054) remain the initial set.
+- **README honest**: the "~98% PCRE2 feature parity" line now reads as two numbers: ~98% feature-family coverage (hand-maintained matrix, naturally optimistic) + 78.0% case-level pass rate (authoritative differential against PCRE2 10.47 testdata). Bridging the gap is the C7 bug-triage track.
+- **Next concrete action**: fix the 9-panic compile-boundary issue in testinput4 (expand `feature_validation_message` for `(?[...])` + Unicode-property + set-operator), then take the next RGX-side bucket from the histogram.
+
 ### 2026-04-13 (twenty-ninth commit) — Filed 37 PGEN bug reports per the canonical protocol
 - **User asked**: "log the PGEN related misbehaviors, one report per failing case" per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - **Built**: `rgx-core/src/bin/file_pgen_issues.rs` — internal generator that walks PCRE2 testdata, identifies PGEN-related compile failures, deduplicates by pattern string, and writes one full report bundle per unique pattern using PGEN's `embedding_api`. Reusable for any future PCRE2 testfile.

@@ -292,25 +292,43 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### C7. PCRE2 10.47 differential conformance — bug triage
 - **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13).
 - **Effort**: `medium` (each bug class is its own investigation)
-- **Status**: harness shipped; **crash-class bugs fixed**; harness-side false positives cleaned up; first real RGX parse bug (`\0`) fixed; semantic-class failures still in progress.
-- **Timeline of pass-rate**:
-  - 2026-04-13 commit 1 (harness): 1061 pass / 1616 fail / 12 panic / 182 skip / 2871 parsed / 39.6% ran-pass-rate
-  - 2026-04-13 commit 2 (crash fixes): 1063 pass / 1626 fail / **0 panic** / 182 skip / 39.5%
-  - 2026-04-13 commit 3 (harness refactor + `\0` fix): **1952 pass / 429 fail / 0 panic / 139 skip / 2520 parsed / 82.0% ran-pass-rate**
+- **Status**: harness shipped and expanded to all 23 paired testinput files; **crash-class bugs fixed**; harness-side false positives cleaned up; first three real RGX parse bugs fixed (`\0`, `\NNN`-octal-fallback, `{0,0}`-with-captures); semantic-class failures still in progress.
+- **Timeline of pass-rate** (testinput1 only early, full corpus later):
+  - 2026-04-13 commit 1 (harness, testinput1): 1061 pass / 1616 fail / 12 panic / 182 skip / 2871 parsed / 39.6% ran-pass-rate
+  - 2026-04-13 commit 2 (crash fixes, testinput1): 1063 / 1626 / **0 panic** / 182 / 39.5%
+  - 2026-04-13 commit 3 (harness refactor + `\0` fix, testinput1): 1952 / 429 / 0 / 139 / 2520 / 82.0%
+  - 2026-04-13 commit 4 (`\NNN` octal fallback, testinput1): 1957 / 424 / 0 / 139 / 82.2%
+  - **2026-04-13 commit 5 (full corpus expansion, 23 files): 3613 pass / 1018 fail / 9 panic / 6576 skip / 11216 parsed / 78.0% ran-pass-rate**
 - **Fixed bugs**:
   1. ✅ **`{0,0}` / `{0}` quantifier with captures** — sized `subroutines` in `compile_subroutines` via AST-observed max group id. 5 regression tests.
   2. ✅ **Char class operand overflow on `{0,N}` with large N** — deduplicated identical `CompiledCharClass` entries during sub-compiler merge via remap-table rewrite. 1 regression test.
   3. ✅ **`\0` treated as `Regex::Backreference(0)` instead of NUL byte** — `convert_simple_escape` now handles `'0'` explicitly before the `is_ascii_digit()` backref arm. Group 0 is the overall match and is never a valid backref target. 3 regression tests.
-- **Remaining failure categories (429 total, after commit 3)** — sorted by count:
-  - 103 false negatives — RGX misses matches PCRE2 finds (e.g. `/^[W-c]+$/i` on `wxy_^ABC` — case-insensitive char-class range interaction)
-  - 88 PGEN parse failures — `/([[:]+)/` style patterns that PGEN rejects
-  - 56 false positives — RGX matches where PCRE2 doesn't (e.g. `[^k]$` matching `abk   ` — trailing whitespace / anchor semantics)
-  - 56 span mismatches — semantic divergences on specific patterns
-  - 42 class_escape unsupported variant — `[\b]`, `[\c]` in char classes
-  - 40 PGEN rejects simple escape — `\"`, `\/` literal escapes in patterns
-  - 35 other compile errors — `(abc)\123` treated as backref to group 123 instead of octal
-  - 8 other PGEN contract mismatches — `[[:space:]]+` (POSIX class inside bracket)
-  - 1 unterminated char class — `\c[` control-char escape parsing
+- **Aggregate failure categories across all 23 files (1018 total, after commit 5)** — sorted by count:
+  - 245 PGEN parse failures — `/([[:]+)/`, `\Q...\E`, `(?(*pla:...))`, etc.
+  - 200 false negatives — RGX misses matches PCRE2 finds (case-insensitive char-class ranges, `\s` semantics, etc.)
+  - 200 false positives — RGX matches where PCRE2 doesn't (anchor/whitespace interactions)
+  - 173 span mismatches — semantic divergences on specific patterns
+  - 78 PGEN rejects simple escape — `\"`, `\/` literal escapes
+  - 62 class_escape unsupported variant — `[\b]`, `[\c]` in char classes (RGX adapter gap)
+  - 42 other compile errors — `(*pla:foo)` backtracking-verb aliases RGX doesn't know, etc.
+  - 16 PGEN AST contract mismatch (other) — POSIX classes inside char classes (`[[:space:]]+`)
+  - 2 unterminated char class — `\c[` control-char escape parsing
+- **9 panics in testinput4 from `(?[...])` with Unicode properties + set operators** — patterns like `(?[ [\p{Lu}1] ^ \p{Ll} ])` and `(?[ [\p{Lu}1] & [\p{Ll}1] ])` reach RGX codegen because compiler validation doesn't reject them first. Error: "Perl extended character classes '(?[...])' should be lowered or rejected during compiler validation before codegen". Should be a tight compile-boundary fix (expand `feature_validation_message` or equivalent to cover these variants).
+- **Excluded files** (see harness comments for details):
+  - `testinput15` — match-limiting stress file with catastrophic-backtracking patterns (`(a+)*zz`). Some cases don't honor the harness's `max_steps=1M` cap and hang indefinitely. BACKLOG follow-up: audit every RGX hot path to ensure it checks `max_steps`.
+- **Per-file pass rates** (for reference; see the harness output for the full table):
+  - testinput10, testinput13, testinput18: 100%
+  - testinput28: 97.6%
+  - testinput6 (DFA): 88.9%
+  - testinput4 (UTF): 86.3%
+  - testinput1 (core Perl-compatible): 81.9%
+  - testinput17 (JIT): 76.5%
+  - testinput7 (UTF DFA): 58.8%
+  - testinput2 (PCRE2-specific API + Python/.NET syntax): 28.3%
+  - testinput5 (UTF API internals): 20.0%
+  - testinput24 (pattern conversion API): 12.2%
+  - testinput3 (fr_FR locale): 0.0% (all skipped — locale not applicable)
+  - testinput26 / testinput27 (UCP-generated): 0% ran, 100% skipped (all use modifiers our harness doesn't parse yet)
 - **Next bugs to investigate** (prioritized by count + value):
   - ✅ The `\123` → octal fallback when group 123 doesn't exist (shipped 2026-04-13, see entry above)
   - Case-insensitive char-class range handling (`[W-c]/i`)

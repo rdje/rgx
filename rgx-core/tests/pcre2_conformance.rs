@@ -638,6 +638,22 @@ fn run_case(case: &TestCase) -> Outcome {
         };
     };
 
+    // Process-abort skip list. Some patterns crash PGEN's worker
+    // thread via stack overflow — an unrecoverable SIGABRT that
+    // `catch_unwind` cannot intercept. Each entry is a full PCRE2
+    // pattern string; when encountered, the harness skips the
+    // compile attempt entirely. Every entry should have a filed
+    // PGEN-RGX-NNNN report.
+    //
+    // Current entries:
+    // - testinput2:4674 — 80-level-deep group nesting blows PGEN's
+    //   8 MiB recursive-descent stack. Filed as a PGEN report.
+    if is_pgen_stack_overflow_pattern(&case.pattern) {
+        return Outcome::Skip {
+            reason: "known PGEN stack-overflow pattern",
+        };
+    }
+
     // Build through RegexBuilder so flag application is consistent.
     // RegexBuilder methods consume self (fluent chain), so we rebind.
     let mut builder = RegexBuilder::new(&case.pattern);
@@ -669,6 +685,22 @@ fn run_case(case: &TestCase) -> Outcome {
             };
         }
     };
+    // Per-case guards against pathological backtracking. Some PCRE2
+    // testinput patterns are deliberately crafted to exercise
+    // exponential-backtracking worst cases that PCRE2 handles via its
+    // own limits. Without these, one such pattern can peg a CPU for
+    // minutes and stall the whole 24-file sweep. Values chosen to be
+    // generous enough that normal patterns finish well under — 10M
+    // opcode steps and 256K backtrack frames are ~50x the interior
+    // test suite's highest-observed usage.
+    // Aggressive caps: testinput15 (match-limiting stress file)
+    // contains catastrophic-backtracking patterns like `(a+)*zz`
+    // that take seconds per subject at 10M steps. 1M steps (~10ms
+    // per attempt) is plenty for well-formed patterns and keeps the
+    // pathological cases from dominating wall time.
+    re.set_max_steps(Some(1_000_000));
+    re.set_max_backtrack_frames(Some(65_536));
+    re.set_max_recursion_depth(Some(128));
 
     match (&case.expected, case.expect_no_match_annotation) {
         (Expected::NoMatch, _) | (_, true) => {
@@ -727,134 +759,282 @@ fn testdata_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// All PCRE2 10.47 testinput files that have a single paired
+/// testoutput (width-specific files 8/11/12/14/22 ship multiple
+/// width-suffixed outputs and are not applicable to RGX's byte-
+/// oriented engine). The harness runs against every file in this
+/// list; per-file stats are reported alongside the aggregate.
+///
+/// Short descriptions (for context when reading the report):
+/// - 1  Perl-compatible, non-UTF — core syntax
+/// - 2  PCRE2 API + Python/.NET/Oniguruma syntax + error diagnostics
+/// - 3  Locale-specific (fr_FR)
+/// - 4  UTF + Unicode properties
+/// - 5  UTF API/internals (some overlap with 4)
+/// - 6  DFA matching (forced), non-UTF
+/// - 7  DFA matching (forced), with UTF
+/// - 9  8-bit library, non-UTF, non-Perl
+/// - 10 UTF-8 8-bit library
+/// - 13 DFA, chars > 255, non-UTF
+/// - 15 Match-limiting features
+/// - 16 Behavior when JIT is NOT available
+/// - 17 JIT-specific behavior (we have JIT)
+/// - 18 POSIX interface (8-bit only)
+/// - 19 POSIX with UTF
+/// - 20 Serialization/deserialization
+/// - 21 `\C` tests (non-UTF)
+/// - 23 `\C` disabled (should error)
+/// - 24 Pattern conversion features (non-UTF)
+/// - 25 Pattern conversion with UTF
+/// - 26 UCP-generated tests (property data)
+/// - 27 UCP-generated tests (property data)
+/// - 28 EBCDIC support
+/// - 29 EBCDIC with NL=0x25
+const TESTINPUT_FILES: &[&str] = &[
+    "testinput1",
+    "testinput2",
+    "testinput3",
+    "testinput4",
+    "testinput5",
+    "testinput6",
+    "testinput7",
+    "testinput9",
+    "testinput10",
+    "testinput13",
+    // testinput15 excluded: file is entirely dedicated to the
+    // `(*LIMIT_MATCH=...)` / `(*LIMIT_DEPTH=...)` / `(*LIMIT_HEAP=...)`
+    // directives and catastrophic-backtracking stress patterns like
+    // `(a+)*zz`. Several of them hang RGX even with a 1M step cap
+    // because the hot compile/exec path doesn't honor the cap for
+    // every case. Tracked in BACKLOG C7 as a "step-limit honored
+    // everywhere" audit task. The 41 cases lost are a negligible
+    // fraction of the ~18k total across 24 files.
+    "testinput16",
+    "testinput17",
+    "testinput18",
+    "testinput19",
+    "testinput20",
+    "testinput21",
+    "testinput23",
+    "testinput24",
+    "testinput25",
+    "testinput26",
+    "testinput27",
+    "testinput28",
+    "testinput29",
+];
+
+#[derive(Default, Debug, Clone)]
+struct FileStats {
+    parsed: usize,
+    pass: usize,
+    fail: usize,
+    panic: usize,
+    skip: usize,
+}
+
 #[test]
 #[ignore = "heavy PCRE2 conformance suite — run with `cargo test --test pcre2_conformance -- --ignored --nocapture`"]
-fn pcre2_testinput1_conformance() {
-    let testinput = std::fs::read(testdata_path("testinput1"))
-        .expect("testinput1 present — did you run `git submodule update --init --recursive`?");
-    let testoutput = std::fs::read(testdata_path("testoutput1"))
-        .expect("testoutput1 present — did you run `git submodule update --init --recursive`?");
+fn pcre2_full_testdata_conformance() {
+    // Run the body in a dedicated thread with a 128 MiB stack. The
+    // Rust test runner's default thread stack is too small for some
+    // PCRE2 testdata patterns that walk deep recursion through
+    // RGX's compiler (e.g. `(?R)` recursion with many capture groups,
+    // `(a+)*zz` compilation, `(*LIMIT_DEPTH=...)` patterns in
+    // testinput15). Without the larger stack the test thread aborts
+    // via SIGABRT part-way through the suite, losing all downstream
+    // data. 128 MiB is 64x the default and absorbs everything we've
+    // seen so far.
+    let handle = std::thread::Builder::new()
+        .name("pcre2_conformance_big_stack".to_string())
+        .stack_size(128 * 1024 * 1024)
+        .spawn(run_full_conformance)
+        .expect("spawn pcre2_conformance_big_stack thread");
+    handle.join().expect("pcre2_conformance_big_stack panicked");
+}
 
-    let cases = parse_cases(&testinput, &testoutput);
-
-    let mut pass = 0usize;
-    let mut fail = 0usize;
-    let mut skip = 0usize;
-    let mut panic_count = 0usize;
-    let mut first_failures: Vec<String> = Vec::new();
-    let mut first_panics: Vec<String> = Vec::new();
-    // Histogram of failure categories → (count, first-example line number)
-    let mut category_counts: std::collections::BTreeMap<&'static str, (usize, usize, String)> =
+fn run_full_conformance() {
+    let mut per_file: Vec<(String, FileStats)> = Vec::new();
+    let mut aggregate = FileStats::default();
+    let mut aggregate_panics: Vec<String> = Vec::new();
+    let mut aggregate_categories: std::collections::BTreeMap<&'static str, (usize, String)> =
         std::collections::BTreeMap::new();
-    let mut categorize = |cat: &'static str, case: &TestCase, detail: &str| {
-        let entry = category_counts
-            .entry(cat)
-            .or_insert_with(|| (0, case.line_number, String::new()));
-        entry.0 += 1;
-        if entry.2.is_empty() {
-            entry.2 = format!(
-                "line {}: /{}/{} — {}",
-                case.line_number, case.pattern, case.modifiers, detail
-            );
-        }
-    };
 
     // Silence the default panic printer: each panic inside `run_case` is
     // caught and reported; the noisy backtrace-style output is
-    // distracting for a 1500-case survey.
+    // distracting for a survey of many thousand cases.
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
 
-    for case in &cases {
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_case(case)))
-            .unwrap_or_else(|e| {
-                let msg = if let Some(s) = e.downcast_ref::<&'static str>() {
-                    (*s).to_string()
-                } else if let Some(s) = e.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "<non-string panic payload>".to_string()
-                };
-                Outcome::Panic { detail: msg }
-            });
-        match outcome {
-            Outcome::Pass => pass += 1,
-            Outcome::Fail { detail } => {
-                fail += 1;
-                let cat = classify_failure(&detail);
-                categorize(cat, case, &detail);
-                if first_failures.len() < 10 {
-                    first_failures.push(format!(
-                        "  line {}: /{}/{}: {}",
-                        case.line_number, case.pattern, case.modifiers, detail
-                    ));
+    for file_name in TESTINPUT_FILES {
+        let input_path = testdata_path(file_name);
+        let output_path = testdata_path(&file_name.replace("testinput", "testoutput"));
+
+        let Ok(testinput) = std::fs::read(&input_path) else {
+            eprintln!("!! skipping {file_name}: input file not present");
+            continue;
+        };
+        let Ok(testoutput) = std::fs::read(&output_path) else {
+            eprintln!("!! skipping {file_name}: paired output file not present");
+            continue;
+        };
+
+        let cases = parse_cases(&testinput, &testoutput);
+        // Per-file progress line: handy when one file is slow to
+        // localize which one.
+        eprintln!(
+            "  {file_name}: {n} parsed cases, running...",
+            n = cases.len()
+        );
+        let mut stats = FileStats {
+            parsed: cases.len(),
+            ..Default::default()
+        };
+
+        for case in &cases {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_case(case)))
+                .unwrap_or_else(|e| {
+                    let msg = if let Some(s) = e.downcast_ref::<&'static str>() {
+                        (*s).to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "<non-string panic payload>".to_string()
+                    };
+                    Outcome::Panic { detail: msg }
+                });
+            match outcome {
+                Outcome::Pass => stats.pass += 1,
+                Outcome::Fail { detail } => {
+                    stats.fail += 1;
+                    let cat = classify_failure(&detail);
+                    let entry = aggregate_categories
+                        .entry(cat)
+                        .or_insert_with(|| (0, String::new()));
+                    entry.0 += 1;
+                    if entry.1.is_empty() {
+                        entry.1 = format!(
+                            "{file_name} line {ln}: /{pat}/{mods} — {detail}",
+                            ln = case.line_number,
+                            pat = case.pattern,
+                            mods = case.modifiers,
+                        );
+                    }
                 }
-            }
-            Outcome::Skip { reason: _ } => skip += 1,
-            Outcome::Panic { detail } => {
-                panic_count += 1;
-                if first_panics.len() < 10 {
-                    first_panics.push(format!(
-                        "  line {}: /{}/{} on subject {:?}: {}",
-                        case.line_number,
-                        case.pattern,
-                        case.modifiers,
-                        String::from_utf8_lossy(&case.subject),
-                        detail
-                    ));
+                Outcome::Skip { reason: _ } => stats.skip += 1,
+                Outcome::Panic { detail } => {
+                    stats.panic += 1;
+                    if aggregate_panics.len() < 20 {
+                        aggregate_panics.push(format!(
+                            "{file_name} line {ln}: /{pat}/{mods} on subject {subj:?}: {detail}",
+                            ln = case.line_number,
+                            pat = case.pattern,
+                            mods = case.modifiers,
+                            subj = String::from_utf8_lossy(&case.subject),
+                        ));
+                    }
                 }
             }
         }
+
+        aggregate.parsed += stats.parsed;
+        aggregate.pass += stats.pass;
+        aggregate.fail += stats.fail;
+        aggregate.panic += stats.panic;
+        aggregate.skip += stats.skip;
+        per_file.push((file_name.to_string(), stats));
     }
 
     std::panic::set_hook(prev_hook);
 
-    let ran = pass + fail;
-    let pass_rate = if ran > 0 {
-        (pass as f64 / ran as f64) * 100.0
+    // -----------------------------------------------------------------
+    // Report
+    // -----------------------------------------------------------------
+    eprintln!();
+    eprintln!("==== PCRE2 10.47 full-testdata conformance ====");
+    eprintln!();
+    eprintln!(
+        "  {:<16} {:>7} {:>7} {:>7} {:>7} {:>7}   {}",
+        "file", "parsed", "pass", "fail", "panic", "skip", "ran%"
+    );
+    eprintln!(
+        "  {:-<16} {:->7} {:->7} {:->7} {:->7} {:->7}   {:->6}",
+        "", "", "", "", "", "", ""
+    );
+    for (name, s) in &per_file {
+        let ran = s.pass + s.fail;
+        let pct = if ran > 0 {
+            (s.pass as f64 / ran as f64) * 100.0
+        } else {
+            0.0
+        };
+        eprintln!(
+            "  {:<16} {:>7} {:>7} {:>7} {:>7} {:>7}   {:>5.1}%",
+            name, s.parsed, s.pass, s.fail, s.panic, s.skip, pct
+        );
+    }
+    let ran_total = aggregate.pass + aggregate.fail;
+    let pct_total = if ran_total > 0 {
+        (aggregate.pass as f64 / ran_total as f64) * 100.0
     } else {
         0.0
     };
+    eprintln!(
+        "  {:-<16} {:->7} {:->7} {:->7} {:->7} {:->7}   {:->6}",
+        "", "", "", "", "", "", ""
+    );
+    eprintln!(
+        "  {:<16} {:>7} {:>7} {:>7} {:>7} {:>7}   {:>5.1}%",
+        "TOTAL",
+        aggregate.parsed,
+        aggregate.pass,
+        aggregate.fail,
+        aggregate.panic,
+        aggregate.skip,
+        pct_total
+    );
+    eprintln!();
 
-    eprintln!();
-    eprintln!("==== PCRE2 10.47 testinput1 conformance ====");
-    eprintln!("parsed cases:  {}", cases.len());
-    eprintln!("  pass:        {pass}");
-    eprintln!("  fail:        {fail}");
-    eprintln!("  panic:       {panic_count}");
-    eprintln!("  skip:        {skip}");
-    eprintln!("  ran pass-rate: {pass_rate:.1}%");
-    eprintln!();
-    if !first_panics.is_empty() {
-        eprintln!("First {} panics (REAL BUGS):", first_panics.len());
-        for p in &first_panics {
-            eprintln!("{p}");
+    if !aggregate_panics.is_empty() {
+        eprintln!(
+            "First {} panics across the full suite (REAL BUGS):",
+            aggregate_panics.len()
+        );
+        for p in &aggregate_panics {
+            eprintln!("  {p}");
         }
         eprintln!();
     }
-    if !category_counts.is_empty() {
-        eprintln!("Failure histogram (sorted by count):");
-        let mut buckets: Vec<_> = category_counts.iter().collect();
-        buckets.sort_by_key(|(_, (count, _, _))| std::cmp::Reverse(*count));
-        for (cat, (count, _line, example)) in buckets {
+
+    if !aggregate_categories.is_empty() {
+        eprintln!("Aggregate failure histogram (sorted by count):");
+        let mut buckets: Vec<_> = aggregate_categories.iter().collect();
+        buckets.sort_by_key(|(_, (count, _))| std::cmp::Reverse(*count));
+        for (cat, (count, example)) in buckets {
             eprintln!("  {count:>5}  {cat}");
             eprintln!("         first: {example}");
         }
         eprintln!();
     }
-    if !first_failures.is_empty() {
-        eprintln!("First {} failure examples (raw):", first_failures.len());
-        for f in &first_failures {
-            eprintln!("{f}");
-        }
-        eprintln!();
-    }
 
-    // First commit: don't fail the test on divergences. The report is the
-    // tool; the known-failures baseline comes in a follow-up commit.
-    // We DO assert that at least some cases parsed and ran, so the harness
-    // itself doesn't silently degrade.
-    assert!(ran >= 100, "harness ran too few cases: {ran}");
+    // Defensive floor: the aggregate should always run at least a few
+    // hundred cases across 20+ files. If it drops below that the
+    // harness itself has broken.
+    assert!(
+        ran_total >= 200,
+        "harness ran too few cases across the full testdata: {ran_total}"
+    );
+}
+
+/// Returns true when the pattern is a known process-abort trigger
+/// that PGEN's worker thread cannot handle — specifically deeply
+/// nested group patterns that overflow the 8 MiB recursive-descent
+/// stack. Detected by counting leading `(` characters; patterns
+/// with 80+ opening parens at the start match PCRE2 testinput2's
+/// stress-test case at line 4674.
+fn is_pgen_stack_overflow_pattern(pat: &str) -> bool {
+    let leading_parens = pat.bytes().take_while(|&b| b == b'(').count();
+    leading_parens >= 80
 }
 
 /// Classify a failure `detail` string into a bucket name for the

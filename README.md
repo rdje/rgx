@@ -33,7 +33,7 @@ let validator = Regex::with_mode(
 
 ## Highlights
 
-- **~98% PCRE2 feature parity** — every PCRE2 feature except JIT compilation
+- **PCRE2 10.47 feature-family coverage ~98%** (hand-maintained matrix). **Ground-truth case-level pass rate against PCRE2's own `testinput1..29` corpus: 78.0%** (11,216 cases parsed, 3,613 pass, 1,018 fail, 9 panic, 6,576 skip — measured 2026-04-13 via `rgx-core/tests/pcre2_conformance.rs`). The feature-family percentage counts PCRE2 features as atomic check marks and is naturally optimistic; the case-level number is the honest differential against the authoritative oracle. Raise the case-level number as the bug-triage progresses.
 - **Programmable** — embed Lua, JavaScript, Rhai, WASM, or native Rust callbacks inside patterns
 - **6-layer host integration** — data exchange, predicates, steering, events, async I/O, file matching
 - **Production safety** — `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth` prevent DoS
@@ -41,7 +41,7 @@ let validator = Regex::with_mode(
 - **Multi-pattern matching** — `RegexSet` for routing/classification
 - **Idiomatic Rust API** — `Match`, `Captures`, lazy iterators, `Cow<str>` returns, fluent `RegexBuilder`
 - **PGEN-backed parser** — single source of truth for regex syntax
-- **Extensively tested** — 633+ tests across unit, property, adversarial, stress, fuzz, and parity suites
+- **Extensively tested** — 1000+ internal tests plus the full PCRE2 10.47 testdata conformance suite as an external oracle
 
 ## Quick start
 

@@ -39,52 +39,104 @@ use rgx_core::Regex;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-fn main() {
-    let testinput =
-        std::fs::read(testdata_path("testinput1")).expect("subs/pcre2/testdata/testinput1");
+/// All PCRE2 10.47 testinput files with a single paired testoutput.
+/// Width-specific files (8/11/12/14/22) are omitted because they
+/// ship multi-width output variants that don't map to RGX's
+/// byte-oriented engine.
+const PCRE2_TESTFILES: &[&str] = &[
+    "testinput1",
+    "testinput2",
+    "testinput3",
+    "testinput4",
+    "testinput5",
+    "testinput6",
+    "testinput7",
+    "testinput9",
+    "testinput10",
+    "testinput13",
+    // testinput15 skipped: hangs RGX on catastrophic-backtracking
+    // patterns (see harness comment).
+    "testinput16",
+    "testinput17",
+    "testinput18",
+    "testinput19",
+    "testinput20",
+    "testinput21",
+    "testinput23",
+    "testinput24",
+    "testinput25",
+    "testinput26",
+    "testinput27",
+    "testinput28",
+    "testinput29",
+];
 
-    let blocks = split_into_blocks(&testinput);
+fn main() {
+    // Isolation mode: `--scan <file>` walks one testinput file,
+    // printing each pattern string (with line number) to stderr BEFORE
+    // attempting `Regex::compile`. The last line printed before a
+    // process abort is the culprit. Use this to locate patterns that
+    // trigger PGEN stack overflows (which `catch_unwind` can't catch).
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 3 && args[1] == "--scan" {
+        scan_single_file(&args[2]);
+        return;
+    }
 
     let mut unique_patterns: BTreeSet<String> = BTreeSet::new();
     let mut report_inputs: Vec<ReportInput> = Vec::new();
 
-    for (idx, block) in blocks.iter().enumerate() {
-        let Some(first) = block.lines.first() else {
+    for file_name in PCRE2_TESTFILES {
+        let Ok(testinput) = std::fs::read(testdata_path(file_name)) else {
+            eprintln!("!! skipping {file_name}: file not present");
             continue;
         };
-        if !first.starts_with(b"/") || !is_complete_pattern_line(first) {
-            continue;
+        let blocks = split_into_blocks(&testinput);
+
+        for (idx, block) in blocks.iter().enumerate() {
+            let Some(first) = block.lines.first() else {
+                continue;
+            };
+            if !first.starts_with(b"/") || !is_complete_pattern_line(first) {
+                continue;
+            }
+            let Some((pat_bytes, _mod_bytes)) = split_pattern_line(first) else {
+                continue;
+            };
+            let Ok(pat_str) = std::str::from_utf8(pat_bytes) else {
+                continue;
+            };
+            // Skip patterns known to abort the process via PGEN
+            // stack overflow (>= 80 leading parens). These are filed
+            // manually as PGEN reports since the compile step can't
+            // be safely attempted.
+            if pat_str.bytes().take_while(|&b| b == b'(').count() >= 80 {
+                continue;
+            }
+            let compile_result = Regex::compile(pat_str);
+            let Err(err) = compile_result else { continue };
+            let msg = err.to_string();
+            let Some(category) = classify_pgen_error(&msg) else {
+                continue;
+            };
+            if !unique_patterns.insert(pat_str.to_string()) {
+                continue;
+            }
+            report_inputs.push(ReportInput {
+                pattern: pat_str.to_string(),
+                error_message: msg,
+                category,
+                source_block_index: idx,
+                source_line: block.start_line,
+                source_file: file_name.to_string(),
+            });
         }
-        let Some((pat_bytes, _mod_bytes)) = split_pattern_line(first) else {
-            continue;
-        };
-        let Ok(pat_str) = std::str::from_utf8(pat_bytes) else {
-            continue;
-        };
-        // Compile through RGX's public path. We're scanning for PGEN
-        // surfaces — only failures are interesting.
-        let compile_result = Regex::compile(pat_str);
-        let Err(err) = compile_result else { continue };
-        let msg = err.to_string();
-        let Some(category) = classify_pgen_error(&msg) else {
-            continue;
-        };
-        // Dedup by pattern string.
-        if !unique_patterns.insert(pat_str.to_string()) {
-            continue;
-        }
-        report_inputs.push(ReportInput {
-            pattern: pat_str.to_string(),
-            error_message: msg,
-            category,
-            source_block_index: idx,
-            source_line: block.start_line,
-        });
     }
 
     eprintln!(
-        "Found {} unique PGEN-related failing patterns from testinput1",
-        report_inputs.len()
+        "Found {} unique PGEN-related failing patterns across {} testinput files",
+        report_inputs.len(),
+        PCRE2_TESTFILES.len(),
     );
 
     // Optional cap from CLI for dry-run smoke tests:
@@ -192,6 +244,41 @@ struct ReportInput {
     category: PgenCategory,
     source_block_index: usize,
     source_line: usize,
+    source_file: String,
+}
+
+fn scan_single_file(file_name: &str) {
+    use std::io::Write;
+    let path = testdata_path(file_name);
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("cannot read {}", path.display());
+        return;
+    };
+    let blocks = split_into_blocks(&bytes);
+    for block in blocks.iter() {
+        let Some(first) = block.lines.first() else {
+            continue;
+        };
+        if !first.starts_with(b"/") || !is_complete_pattern_line(first) {
+            continue;
+        }
+        let Some((pat_bytes, _)) = split_pattern_line(first) else {
+            continue;
+        };
+        let Ok(pat_str) = std::str::from_utf8(pat_bytes) else {
+            continue;
+        };
+        // Flush-print BEFORE compile so the abort shows the culprit.
+        eprint!(
+            "[{ln}] trying: {pat}  ... ",
+            ln = block.start_line,
+            pat = pat_str
+        );
+        std::io::stderr().flush().ok();
+        let _ = Regex::compile(pat_str);
+        eprintln!("OK");
+    }
+    eprintln!("scan of {file_name} completed without aborting");
 }
 
 fn classify_pgen_error(msg: &str) -> Option<PgenCategory> {
@@ -317,7 +404,7 @@ context:
   source: |
     Discovered by the RGX PCRE2 conformance harness
     (`rgx-core/tests/pcre2_conformance.rs`) while scanning
-    `subs/pcre2/testdata/testinput1` block #{block_idx} starting
+    `subs/pcre2/testdata/{source_file}` block #{block_idx} starting
     near input line {source_line}. PCRE2 10.47 accepts and matches
     this pattern in its own pcre2test harness; PGEN's regex
     grammar diverges as recorded under `actual_behavior`.
@@ -371,6 +458,7 @@ resolution:
         pat_yaml = yaml_quote_pattern(&report.pattern),
         block_idx = report.source_block_index,
         source_line = report.source_line,
+        source_file = report.source_file,
         bug_class = bug_class,
         expected = indent(&expected, 2),
         actual = indent(&actual, 2),
