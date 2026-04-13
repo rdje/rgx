@@ -55,163 +55,215 @@ enum Expected {
     Match { overall: Vec<u8> },
 }
 
-/// Parse both files in lockstep, yielding test cases. Unknown / complex
-/// cases are dropped silently; the caller counts what lands.
+/// Parse both files into block-level streams, then pair matching
+/// blocks and extract test cases. A "block" is a consecutive run of
+/// non-blank non-comment lines delimited by blank lines — the natural
+/// unit of a PCRE2 test file. Multi-line patterns become one block
+/// with multiple lines; a single-line pattern with subjects is one
+/// block; directives and comments live in their own blocks we skip.
+///
+/// Block-based pairing is robust against most cursor-sync bugs the
+/// previous line-by-line parser had: as long as the blank-line
+/// separators line up (which they always do in PCRE2 testdata), the
+/// block indices stay in lockstep even if individual block contents
+/// differ in length between the two files.
 fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
-    let in_lines: Vec<&[u8]> = split_lines(testinput);
-    let out_lines: Vec<&[u8]> = split_lines(testoutput);
+    let in_blocks = split_into_blocks(testinput);
+    let out_blocks = split_into_blocks(testoutput);
 
     let mut cases = Vec::new();
-    let mut i = 0;
-    let mut o = 0;
-    // Track whether we're inside an `#if !ebcdic` block (ASCII always has
-    // it true, so we just keep running; an `#if !EBCDIC_THAT_IS_ALWAYS_TRUE`
-    // block reads normally). For portability we skip inside `#if ebcdic`.
-    let mut skip_block = false;
+    let mut in_skip = false; // set by #if ebcdic / cleared by #endif
 
-    // Also mirror the #if/#endif state on the output side so we stay
-    // synchronised. pcre2test includes output unconditionally inside the
-    // #if blocks it emits; we mirror skip_block on both sides.
+    // Pair blocks by pattern-block index. Directive and comment
+    // blocks appear in matching positions in both files, so we walk
+    // them in lockstep.
+    let mut oi = 0;
+    for ib in &in_blocks {
+        // Advance the output cursor to the next block that pairs with
+        // this input block. For non-pattern blocks (comments /
+        // directives) both files have matching blocks at the same
+        // positions, so a pure index walk works.
+        let ob = out_blocks.get(oi);
 
-    while i < in_lines.len() && o < out_lines.len() {
-        let line = in_lines[i];
-
-        // Comments and blank lines are shared between files.
-        if line.is_empty() || line.starts_with(b"#") {
-            // Handle conditional blocks
-            if line.starts_with(b"#if ") {
-                let cond = String::from_utf8_lossy(&line[4..]);
-                let c = cond.trim();
-                // We execute on non-EBCDIC ASCII, so `!ebcdic` is TRUE and
-                // `ebcdic` is FALSE.
-                skip_block = matches!(c, "ebcdic");
-            } else if line == b"#endif" {
-                skip_block = false;
+        let kind = classify_block(&ib.lines);
+        if let BlockKind::Directive(directive) = kind {
+            if let Some(cond) = directive.strip_prefix("#if ") {
+                in_skip = matches!(cond.trim(), "ebcdic");
+            } else if directive.trim() == "#endif" {
+                in_skip = false;
             }
-            // Consume the matching comment/blank in testoutput if present.
-            if o < out_lines.len() && (out_lines[o].is_empty() || out_lines[o].starts_with(b"#")) {
-                o += 1;
-            }
-            i += 1;
+            oi += 1;
+            continue;
+        }
+        if matches!(kind, BlockKind::Comment) {
+            oi += 1;
+            continue;
+        }
+        if in_skip {
+            oi += 1;
             continue;
         }
 
-        if skip_block {
-            i += 1;
-            // Consume output too — output also carries the same skipped
-            // section. We step forward until we find a pattern line there.
-            while o < out_lines.len() && !out_lines[o].starts_with(b"/") {
-                o += 1;
+        let Some(ob) = ob else { break };
+
+        match kind {
+            BlockKind::Pattern => {
+                cases.extend(extract_pattern_cases(ib, &ob.lines));
+                oi += 1;
             }
-            continue;
-        }
-
-        // Expect a pattern line: /pattern/modifiers
-        if !line.starts_with(b"/") {
-            // Unknown line shape (e.g. continuation of a multi-line
-            // pattern). Skip it defensively.
-            i += 1;
-            continue;
-        }
-
-        // A pattern can span multiple input lines if it contains newlines
-        // (PCRE2 allows this; the pattern continues until we see a closing
-        // `/` followed by modifiers on a line). For this initial harness
-        // we only handle single-line patterns — multi-line patterns are
-        // dropped.
-        if !is_complete_pattern_line(line) {
-            // Skip until we see the pattern end (a line that looks like
-            // modifiers or a blank line).
-            i += 1;
-            while i < in_lines.len() && !in_lines[i].is_empty() {
-                i += 1;
-            }
-            // Skip the corresponding output until the next blank.
-            while o < out_lines.len() && !out_lines[o].is_empty() {
-                o += 1;
-            }
-            continue;
-        }
-
-        // Advance output to the matching pattern line.
-        while o < out_lines.len() && !out_lines[o].starts_with(b"/") {
-            o += 1;
-        }
-        if o >= out_lines.len() {
-            break;
-        }
-
-        let Some((pattern_bytes, modifiers_bytes)) = split_pattern_line(line) else {
-            i += 1;
-            continue;
-        };
-        let Ok(pattern) = String::from_utf8(pattern_bytes.to_vec()) else {
-            // Non-UTF-8 patterns: skip for this harness
-            i += 1;
-            o += 1;
-            continue;
-        };
-        let full_modifiers = String::from_utf8_lossy(modifiers_bytes).to_string();
-        let modifiers = extract_short_modifiers(&full_modifiers);
-        let pattern_line_number = i + 1;
-        i += 1;
-        o += 1;
-
-        // Now parse subject lines under this pattern in both files, in
-        // lockstep, until the next blank line (= end of this pattern's
-        // block).
-        let mut expect_no_match_annotation = false;
-        while i < in_lines.len() && !in_lines[i].is_empty() {
-            let iline = in_lines[i];
-            let trimmed = trim_leading_spaces(iline);
-
-            // `\= Expect no match` is an annotation that changes the
-            // default interpretation of subsequent subject lines.
-            if trimmed.starts_with(b"\\=") {
-                let annotation = String::from_utf8_lossy(&trimmed[2..]);
-                if annotation.trim().starts_with("Expect no match") {
-                    expect_no_match_annotation = true;
-                }
-                i += 1;
-                // The annotation isn't mirrored in testoutput — it's a
-                // testinput-only marker.
-                continue;
-            }
-
-            // Subject line: strip leading 4 spaces (PCRE2 convention) and
-            // decode escapes.
-            let Some(subject) = decode_subject(trimmed) else {
-                i += 1;
-                continue;
-            };
-
-            // Match up the output for this subject. Output lines belong
-            // to this subject until the next subject line in testinput or
-            // a blank line in testoutput.
-            let (expected, consumed_output) = parse_subject_output(&out_lines, o);
-            o += consumed_output;
-
-            cases.push(TestCase {
-                pattern: pattern.clone(),
-                modifiers: modifiers.clone(),
-                full_modifiers: full_modifiers.clone(),
-                subject,
-                expected,
-                expect_no_match_annotation,
-                line_number: pattern_line_number,
-            });
-            i += 1;
-        }
-
-        // Consume the blank line in both files.
-        if i < in_lines.len() && in_lines[i].is_empty() {
-            i += 1;
-        }
-        if o < out_lines.len() && out_lines[o].is_empty() {
-            o += 1;
+            BlockKind::Directive(_) | BlockKind::Comment => unreachable!(),
         }
     }
 
+    cases
+}
+
+#[derive(Debug)]
+enum BlockKind<'a> {
+    /// Pattern block: first line starts with `/`, possibly spans
+    /// multiple lines if the pattern is multi-line, followed by
+    /// subject lines (indented) and optional `\=` annotations.
+    Pattern,
+    /// `#...` directive like `#if !ebcdic` / `#endif` / `#forbid_utf`.
+    Directive(&'a str),
+    /// Pure `#` comment block (PCRE2 testfiles use leading `#` for
+    /// comments outside #if/#endif blocks).
+    Comment,
+}
+
+fn classify_block<'a>(block: &'a [&[u8]]) -> BlockKind<'a> {
+    if let Some(first) = block.first() {
+        if first.starts_with(b"/") {
+            return BlockKind::Pattern;
+        }
+        if first.starts_with(b"#") {
+            let s = std::str::from_utf8(first).unwrap_or("");
+            if s.starts_with("#if ")
+                || s.trim() == "#endif"
+                || s.starts_with("#perltest")
+                || s.starts_with("#forbid_utf")
+                || s.starts_with("#newline_default")
+                || s.starts_with("#pattern")
+                || s.starts_with("#subject")
+            {
+                return BlockKind::Directive(s);
+            }
+            return BlockKind::Comment;
+        }
+    }
+    BlockKind::Comment
+}
+
+/// Split a testfile into blocks separated by blank lines. Trailing
+/// `\r` is stripped from each line. Empty blocks (consecutive blank
+/// lines) are dropped. Lines containing ONLY whitespace (spaces or
+/// tabs) are treated as block separators — pcre2test uses those
+/// interchangeably with truly-empty lines.
+fn split_into_blocks(bytes: &[u8]) -> Vec<Block> {
+    let lines = split_lines(bytes);
+    let mut blocks = Vec::new();
+    let mut current: Vec<&[u8]> = Vec::new();
+    let mut start_line: usize = 0;
+    for (idx, line) in lines.iter().enumerate() {
+        if is_blank(line) {
+            if !current.is_empty() {
+                blocks.push(Block {
+                    lines: std::mem::take(&mut current),
+                    start_line,
+                });
+            }
+        } else {
+            if current.is_empty() {
+                start_line = idx + 1; // 1-based
+            }
+            current.push(line);
+        }
+    }
+    if !current.is_empty() {
+        blocks.push(Block {
+            lines: current,
+            start_line,
+        });
+    }
+    blocks
+}
+
+/// A parsed PCRE2 testfile block. `start_line` is the 1-based input
+/// line number of the block's first content line — useful for pointing
+/// a failure back at the source file.
+struct Block<'a> {
+    lines: Vec<&'a [u8]>,
+    start_line: usize,
+}
+
+fn is_blank(line: &[u8]) -> bool {
+    line.iter().all(|&b| b == b' ' || b == b'\t')
+}
+
+/// Extract test cases from a paired pattern block. Returns an empty
+/// list if the pattern is multi-line (not currently supported) or if
+/// the block uses modifiers we don't model. Single-line patterns
+/// with any number of subjects produce one case per subject.
+fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
+    let pattern_line_number = ib.start_line;
+    let Some(pattern_line) = ib.lines.first().copied() else {
+        return Vec::new();
+    };
+    // Only handle single-line patterns for this harness pass. Multi-
+    // line patterns require a dedicated parser that concatenates all
+    // pre-modifier lines; deferred work.
+    if !is_complete_pattern_line(pattern_line) {
+        return Vec::new();
+    }
+    let Some((pattern_bytes, modifiers_bytes)) = split_pattern_line(pattern_line) else {
+        return Vec::new();
+    };
+    let Ok(pattern) = std::str::from_utf8(pattern_bytes) else {
+        return Vec::new();
+    };
+    let pattern = pattern.to_string();
+    let full_modifiers = String::from_utf8_lossy(modifiers_bytes).to_string();
+    let modifiers = extract_short_modifiers(&full_modifiers);
+
+    // Walk input subjects in order, tracking `\=` annotations between
+    // them. Output lines are walked forward through `ob` too, with
+    // `\=` annotation echos skipped (pcre2test echoes the annotation
+    // line verbatim).
+    let mut cases = Vec::new();
+    let mut expect_no_match = false;
+    let mut oi = 1; // ob[0] is the pattern echo; subject echos start at 1
+
+    for iline in ib.lines.iter().skip(1) {
+        let trimmed = trim_leading_spaces(iline);
+        if trimmed.starts_with(b"\\=") {
+            let annotation = String::from_utf8_lossy(&trimmed[2..]);
+            if annotation.trim().starts_with("Expect no match") {
+                expect_no_match = true;
+            }
+            // Skip the annotation echo in output if present.
+            while oi < ob.len() && trim_leading_spaces(ob[oi]).starts_with(b"\\=") {
+                oi += 1;
+            }
+            continue;
+        }
+        let Some(subject) = decode_subject(trimmed) else {
+            continue;
+        };
+
+        // Read this subject's expected output from ob[oi..].
+        let (expected, consumed) = parse_subject_output(ob, oi);
+        oi += consumed;
+
+        cases.push(TestCase {
+            pattern: pattern.clone(),
+            modifiers: modifiers.clone(),
+            full_modifiers: full_modifiers.clone(),
+            subject,
+            expected,
+            expect_no_match_annotation: expect_no_match,
+            line_number: pattern_line_number,
+        });
+    }
     cases
 }
 
@@ -296,6 +348,73 @@ fn extract_short_modifiers(full: &str) -> String {
     out
 }
 
+/// Decode a PCRE2 testoutput match-line. Narrower than
+/// [`decode_subject`]: output lines only escape non-printable bytes
+/// as `\xHH` / `\x{...}` and a literal backslash as `\\`. Everything
+/// else — including `\?`, `\=`, `\$` — appears in the output as
+/// literal text (a backslash byte followed by the character).
+fn decode_output(line: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(line.len());
+    let mut i = 0;
+    while i < line.len() {
+        if line[i] != b'\\' {
+            out.push(line[i]);
+            i += 1;
+            continue;
+        }
+        if i + 1 >= line.len() {
+            out.push(b'\\');
+            i += 1;
+            continue;
+        }
+        match line[i + 1] {
+            b'\\' => {
+                out.push(b'\\');
+                i += 2;
+            }
+            b'x' => {
+                if i + 2 < line.len() && line[i + 2] == b'{' {
+                    let mut j = i + 3;
+                    while j < line.len() && line[j] != b'}' {
+                        j += 1;
+                    }
+                    if j >= line.len() {
+                        return None;
+                    }
+                    let hex = std::str::from_utf8(&line[i + 3..j]).ok()?;
+                    let cp = u32::from_str_radix(hex, 16).ok()?;
+                    if cp <= 0xFF {
+                        out.push(cp as u8);
+                    } else {
+                        let c = char::from_u32(cp)?;
+                        let mut buf = [0u8; 4];
+                        let s = c.encode_utf8(&mut buf);
+                        out.extend_from_slice(s.as_bytes());
+                    }
+                    i = j + 1;
+                } else {
+                    if i + 3 >= line.len() {
+                        return None;
+                    }
+                    let hex = std::str::from_utf8(&line[i + 2..i + 4]).ok()?;
+                    let b = u8::from_str_radix(hex, 16).ok()?;
+                    out.push(b);
+                    i += 4;
+                }
+            }
+            // `\<anything else>` in output = literal `\` + literal char.
+            // This is the intentional contract: PCRE2 output uses `\\`
+            // for backslash, so ANY other `\x` sequence is NOT an
+            // escape — we emit both bytes verbatim.
+            _ => {
+                out.push(b'\\');
+                i += 1;
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Decode a subject line's escape sequences per PCRE2's testinput rules.
 /// Returns the raw subject bytes; returns None if the escape form is one
 /// we don't handle.
@@ -310,8 +429,13 @@ fn decode_subject(line: &[u8]) -> Option<Vec<u8>> {
             continue;
         }
         if i + 1 >= line.len() {
-            // Trailing lone backslash — keep as literal.
-            out.push(b'\\');
+            // Trailing lone backslash. PCRE2 testinput convention: a
+            // backslash at the end of a subject line suppresses the
+            // implicit newline — effectively "subject ends here
+            // without adding a newline". For our single-line subjects
+            // (which don't carry a trailing newline anyway), this
+            // translates to "ignore the trailing backslash". Used by
+            // tests like `/^$/` against `    \` to mean empty subject.
             i += 1;
             continue;
         }
@@ -399,9 +523,11 @@ fn decode_subject(line: &[u8]) -> Option<Vec<u8>> {
 fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) {
     let mut consumed = 0;
     // First line is the echoed subject (starts with 4 spaces). Skip it.
+    // `\=` annotation lines are consumed by the outer loop in
+    // `parse_cases`, so here we only expect a subject echo.
     if start < out_lines.len() {
         let l = out_lines[start];
-        if l.starts_with(b"    ") || l.starts_with(b"\\=") {
+        if l.starts_with(b"    ") {
             consumed += 1;
         }
     }
@@ -429,12 +555,14 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
         }
         if trimmed.starts_with("0:") {
             // Overall match line. Format: ` 0: <text>`
-            // PCRE2 escapes control bytes in the displayed match using
-            // `\xHH`, `\\`, `\?`, `\=`, etc. — same grammar as testinput
-            // subject lines. Decode back to raw bytes so the comparison
-            // is byte-for-byte.
+            // PCRE2's pcre2test output escapes ONLY non-printable bytes
+            // as `\xHH` / `\x{H..H}` and a literal backslash as `\\` —
+            // everything else is printed as-is. `\?` in output is NOT
+            // an escape for `?`; it's a literal backslash followed by
+            // a literal question mark. Use `decode_output` which is
+            // intentionally narrower than `decode_subject`.
             let body = trimmed.trim_start_matches("0:").trim_start();
-            overall = decode_subject(body.as_bytes());
+            overall = decode_output(body.as_bytes());
             consumed += 1;
             idx += 1;
             continue;
@@ -615,6 +743,21 @@ fn pcre2_testinput1_conformance() {
     let mut panic_count = 0usize;
     let mut first_failures: Vec<String> = Vec::new();
     let mut first_panics: Vec<String> = Vec::new();
+    // Histogram of failure categories → (count, first-example line number)
+    let mut category_counts: std::collections::BTreeMap<&'static str, (usize, usize, String)> =
+        std::collections::BTreeMap::new();
+    let mut categorize = |cat: &'static str, case: &TestCase, detail: &str| {
+        let entry = category_counts
+            .entry(cat)
+            .or_insert_with(|| (0, case.line_number, String::new()));
+        entry.0 += 1;
+        if entry.2.is_empty() {
+            entry.2 = format!(
+                "line {}: /{}/{} — {}",
+                case.line_number, case.pattern, case.modifiers, detail
+            );
+        }
+    };
 
     // Silence the default panic printer: each panic inside `run_case` is
     // caught and reported; the noisy backtrace-style output is
@@ -638,6 +781,8 @@ fn pcre2_testinput1_conformance() {
             Outcome::Pass => pass += 1,
             Outcome::Fail { detail } => {
                 fail += 1;
+                let cat = classify_failure(&detail);
+                categorize(cat, case, &detail);
                 if first_failures.len() < 10 {
                     first_failures.push(format!(
                         "  line {}: /{}/{}: {}",
@@ -687,8 +832,18 @@ fn pcre2_testinput1_conformance() {
         }
         eprintln!();
     }
+    if !category_counts.is_empty() {
+        eprintln!("Failure histogram (sorted by count):");
+        let mut buckets: Vec<_> = category_counts.iter().collect();
+        buckets.sort_by_key(|(_, (count, _, _))| std::cmp::Reverse(*count));
+        for (cat, (count, _line, example)) in buckets {
+            eprintln!("  {count:>5}  {cat}");
+            eprintln!("         first: {example}");
+        }
+        eprintln!();
+    }
     if !first_failures.is_empty() {
-        eprintln!("First {} failures:", first_failures.len());
+        eprintln!("First {} failure examples (raw):", first_failures.len());
         for f in &first_failures {
             eprintln!("{f}");
         }
@@ -700,4 +855,39 @@ fn pcre2_testinput1_conformance() {
     // We DO assert that at least some cases parsed and ran, so the harness
     // itself doesn't silently degrade.
     assert!(ran >= 100, "harness ran too few cases: {ran}");
+}
+
+/// Classify a failure `detail` string into a bucket name for the
+/// histogram. Buckets are deliberately coarse — we want the top few
+/// categories to point clearly at a single bug or gap to investigate.
+fn classify_failure(detail: &str) -> &'static str {
+    // Compile errors dominate, so split them by sub-cause.
+    if detail.starts_with("compile error:") {
+        if detail.contains("unrecognized simple_escape") {
+            return "compile: PGEN rejects simple escape (\\\" \\/ etc)";
+        }
+        if detail.contains("class_escape resolved to unsupported variant") {
+            return "compile: class_escape unsupported variant (e.g. [\\b] [\\c])";
+        }
+        if detail.contains("unterminated character class") {
+            return "compile: unterminated char class (likely \\c[ form)";
+        }
+        if detail.contains("E_PARSE_FAILURE") {
+            return "compile: PGEN parse failure (other)";
+        }
+        if detail.contains("pgen AST contract mismatch") {
+            return "compile: PGEN AST contract mismatch (other)";
+        }
+        return "compile: other error";
+    }
+    if detail.starts_with("span mismatch") {
+        return "span mismatch (semantic divergence)";
+    }
+    if detail.starts_with("PCRE2 expected no match, RGX matched") {
+        return "false positive (RGX matches where PCRE2 doesn't)";
+    }
+    if detail.starts_with("PCRE2 expected match") && detail.contains("RGX no match") {
+        return "false negative (RGX misses a match PCRE2 finds)";
+    }
+    "other"
 }

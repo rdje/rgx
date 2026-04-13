@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-13 (twenty-seventh commit) — PCRE2 harness block refactor + `\0` → NUL fix → 82% pass rate
+- **Pass rate jumps 39.5% → 82.0%** on the PCRE2 10.47 testinput1 conformance. Most of the jump was harness-side false positives cleared by a block-based parser; the one real RGX parse bug fixed is `\0`.
+- **Harness refactor**: line-cursor alignment was fragile. Rewrote as block-based parser — both files split by blank lines (including whitespace-only lines), blocks paired by index. Added a separate `decode_output` (narrower than `decode_subject`: only `\xHH` and `\\`), fixed `\=` annotation-echo consumption, handled PCRE2's trailing-`\` "empty subject" convention. Added categorized failure histogram so the remaining work is prioritizable by bug class.
+- **Real RGX parse bug fixed — `\0`**: `convert_simple_escape` fell through to the backref arm for `c.is_ascii_digit()` which produced `Regex::Backreference(0)`. Group 0 is never a valid backref target; `\0` must be literal NUL. Fix: explicit `'0' => Ok(Regex::Char('\0'))` arm. `\1`..`\9` continue as backrefs.
+- **Updated snapshot**: 1952 pass / 429 fail / 0 panic / 139 skip / 2520 parsed. Remaining failures cluster into 9 categories — top offenders are false negatives (case-insensitive char-class range semantics), PGEN parse failures on POSIX-class patterns, and false positives on trailing-whitespace anchor interactions. All enumerated in BACKLOG C7.
+- **3 new regression tests** for the `\0` fix. Total lib tests: 1000/0/1 (up from 997).
+- **Strategic: the 429 remaining failures are actionable**. Each category points at either a PGEN parser gap, an RGX adapter gap, or a real VM semantic bug. The histogram makes it trivial to attack them one at a time. Next commits will pick them off bucket by bucket.
+- **Next concrete action**: attack the "35 other compile errors" bucket — `(abc)\123` fails because RGX treats `\123` as backref to group 123 (which doesn't exist) instead of falling back to octal. Same-family fix as the `\0` bug.
+
 ### 2026-04-13 (twenty-sixth commit) — Crash-class bugs from PCRE2 harness FIXED (0 panics)
 - **Result**: panic count on testinput1 goes 12 → **0**. RGX no longer crashes on any pattern in the PCRE2 10.47 core suite. 1063 pass / 1626 fail / 0 panic / 182 skip.
 - **Bug 1: `{0,0}` / `{0}` with captures crashed `compile_subroutines`**. Root cause: when a capturing group is nested inside a zero-repetition quantifier, `codegen_pass` never descends into it, so `group_counter` stays behind the AST's max group id. Then `compile_subroutines` sized `subroutines` by `group_counter+1` but `collect_capturing_group_defs` (which walks the raw AST) wrote `subroutines[group_id]` where `group_id > group_counter`. Fix: derive `max_group_id` from the collected defs first, size via `max(group_counter, max_group_id)+1`.

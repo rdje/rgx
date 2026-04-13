@@ -290,18 +290,31 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Open design questions**: DFA cache eviction policy, when to bail out of the lazy DFA back to NFA simulation, how to expose runtime stats, whether to run NFA/DFA + VM in parallel for comparison during development.
 
 ### C7. PCRE2 10.47 differential conformance — bug triage
-- **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13). First-run results on `subs/pcre2/testdata/testinput1`: 1061 pass, 1616 fail, 12 panic, 182 skip across 2871 parsed cases (39.6% ran-pass-rate).
+- **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13).
 - **Effort**: `medium` (each bug class is its own investigation)
-- **Status**: harness shipped; **crash-class bugs fixed (2026-04-13)**; semantic-class failures still pending.
-- **Crash-class bugs (ALL FIXED 2026-04-13, commit TBD)**:
-  1. ✅ **`{0,0}` / `{0}` quantifier with captures** — fixed by sizing `subroutines` in `compile_subroutines` via AST-observed max group id instead of `group_counter`. Five minimal reproducers pinned as `regression_zero_*` tests in `rgx-core/src/vm.rs`.
-  2. ✅ **Char class operand overflow on `{0,N}` with large N** — fixed by deduplicating identical `CompiledCharClass` entries during sub-compiler merge in `compile_nested_code`. Reverted `rebase_inline_char_class_ids` (base-offset) to `remap_inline_char_class_ids` (remap-table) so duplicates can map to existing ids rather than always appending. Pinned as `regression_char_class_table_no_longer_overflows_single_byte_on_high_repeat`.
-- **Conformance snapshot after the fixes**: 1063 pass, 1626 fail, **0 panic**, 182 skip (2871 parsed). Panic count went from 12 to 0. Two previously-panicking cases now produce correct output; the other 10 compile cleanly but still diverge semantically — those drop into the broader "semantic failures" triage below.
-- **Remaining semantic-class failures (1626)** — high-signal subset, not all addressable:
-  - Compile gaps: `\c[`, `\"`, `\'`, `[\b]`, `[\c]`, and other escapes PGEN/RGX don't lower yet
-  - Backreference edge cases: `^(a)\1{2,3}(.)` vs "aaabcd" — RGX matches "aaab" where PCRE2 matches "abcd"
-  - Extended-mode comment handling: `^abcd#rhubarb/x` interactions with `\= Expect no match`
-  - Harness limitations: multi-line patterns are currently skipped wholesale
+- **Status**: harness shipped; **crash-class bugs fixed**; harness-side false positives cleaned up; first real RGX parse bug (`\0`) fixed; semantic-class failures still in progress.
+- **Timeline of pass-rate**:
+  - 2026-04-13 commit 1 (harness): 1061 pass / 1616 fail / 12 panic / 182 skip / 2871 parsed / 39.6% ran-pass-rate
+  - 2026-04-13 commit 2 (crash fixes): 1063 pass / 1626 fail / **0 panic** / 182 skip / 39.5%
+  - 2026-04-13 commit 3 (harness refactor + `\0` fix): **1952 pass / 429 fail / 0 panic / 139 skip / 2520 parsed / 82.0% ran-pass-rate**
+- **Fixed bugs**:
+  1. ✅ **`{0,0}` / `{0}` quantifier with captures** — sized `subroutines` in `compile_subroutines` via AST-observed max group id. 5 regression tests.
+  2. ✅ **Char class operand overflow on `{0,N}` with large N** — deduplicated identical `CompiledCharClass` entries during sub-compiler merge via remap-table rewrite. 1 regression test.
+  3. ✅ **`\0` treated as `Regex::Backreference(0)` instead of NUL byte** — `convert_simple_escape` now handles `'0'` explicitly before the `is_ascii_digit()` backref arm. Group 0 is the overall match and is never a valid backref target. 3 regression tests.
+- **Remaining failure categories (429 total, after commit 3)** — sorted by count:
+  - 103 false negatives — RGX misses matches PCRE2 finds (e.g. `/^[W-c]+$/i` on `wxy_^ABC` — case-insensitive char-class range interaction)
+  - 88 PGEN parse failures — `/([[:]+)/` style patterns that PGEN rejects
+  - 56 false positives — RGX matches where PCRE2 doesn't (e.g. `[^k]$` matching `abk   ` — trailing whitespace / anchor semantics)
+  - 56 span mismatches — semantic divergences on specific patterns
+  - 42 class_escape unsupported variant — `[\b]`, `[\c]` in char classes
+  - 40 PGEN rejects simple escape — `\"`, `\/` literal escapes in patterns
+  - 35 other compile errors — `(abc)\123` treated as backref to group 123 instead of octal
+  - 8 other PGEN contract mismatches — `[[:space:]]+` (POSIX class inside bracket)
+  - 1 unterminated char class — `\c[` control-char escape parsing
+- **Next bugs to investigate** (prioritized by count + value):
+  - The `\123` → octal fallback when group 123 doesn't exist (similar to the `\0` fix, but for larger numeric backrefs that exceed the group count)
+  - Case-insensitive char-class range handling (`[W-c]/i`)
+  - `[\b]` backspace literal inside char class
 - **Dependencies**: the harness is in place and gated `#[ignore]` so it doesn't run on `cargo test` by default.
 
 ### C3. Fuzzing infrastructure

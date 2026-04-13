@@ -14,6 +14,45 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-13 - PCRE2 conformance harness block refactor + `\0` → NUL parse fix
+- Scope: Second iteration on the PCRE2 conformance triage. Refactors the harness to a block-based parser (eliminating most line-cursor alignment bugs), fixes the first real RGX parse bug uncovered by the harness (`\0` misrouted to `Regex::Backreference(0)`), and adds categorized-histogram output so remaining failures can be prioritized by bug class. **Pass rate jumps from 39.5% → 82.0%.**
+- **Harness refactor — block-based parser**:
+  - `split_into_blocks` splits both testfiles by blank lines into self-contained blocks carrying a `start_line` for line-level failure reporting. Whitespace-only lines (`  ` — spaces/tabs only) count as blank, mirroring pcre2test's convention; previously these leaked into the next block and caused spurious "multiple-subject" parses.
+  - Pairing is by block index: directive/comment blocks advance both cursors; pattern blocks consume one input block + one output block. No more fragile line-by-line cursor arithmetic.
+  - Multi-line patterns are still skipped wholesale (same as commit 1), but now cleanly at the block boundary rather than leaking subject lines into the next pattern's parse.
+- **Harness refactor — output decoding**:
+  - New `decode_output` — narrower than `decode_subject`. PCRE2 output only escapes control bytes as `\xHH` and literal backslash as `\\`. `\?`, `\=`, `\$` in output are NOT escapes — they're literal two-byte sequences. The previous shared decoder over-decoded these, causing 742 spurious "span mismatch" failures.
+  - `parse_subject_output` no longer treats `\=` annotation-echo lines as subject echos — annotation echos are consumed by the outer block-pair walker so subject-echo pairing stays stable.
+  - Trailing `\` at end of subject line treated as "empty subject" (PCRE2 testfile convention for suppressing the implicit newline). Fixes `/^$/` vs `    \` case.
+- **Harness — failure histogram**:
+  - New `classify_failure` buckets each failure by sub-cause (`span mismatch`, `false positive`, `false negative`, `compile: PGEN parse failure`, `compile: PGEN rejects escape`, `compile: class_escape unsupported variant`, `compile: other error`, `compile: unterminated char class`).
+  - Report prints the top categories sorted by count with the first example from each — makes it obvious which bug class to attack next.
+- **First real RGX parse bug fixed — `\0`**:
+  - In `convert_simple_escape`, the `c if c.is_ascii_digit()` arm fell through for `'0'` and produced `Regex::Backreference(0)`. Group 0 is the overall match span and is never a valid backref target — so `\0` should be a literal NUL byte (PCRE2 octal-escape-for-NUL convention).
+  - Fix: explicit `'0' => Ok(Regex::Char('\0'))` branch placed BEFORE the generic digit-backref arm. `\1`..`\9` continue to produce `Backreference(n)` unchanged.
+  - Reproducer: `Regex::compile(r"\0").unwrap().is_match("\0")` used to return `false`; now correctly returns `true`. This is the pattern shape used by PCRE2 testinput1 cases like `/abc\0def\00pqr\000xyz\0000AB/` (octal multi-digit forms go through `octal_escape`; bare `\0` goes through `simple_escape` with just `'0'`).
+  - 3 new regression tests in `parsing::tests`:
+    - `simple_escape_backslash_zero_is_nul_not_backreference`
+    - `simple_escape_backslash_zero_matches_nul_in_longer_literal`
+    - `simple_escape_backreferences_still_work` — sanity that `\1` + `\2` still resolve as backrefs
+- **Conformance snapshot after the commit**:
+  - before: 1063 pass / 1626 fail / 0 panic / 182 skip / 2871 parsed / 39.5% ran-pass-rate
+  - after:  **1952 pass / 429 fail / 0 panic / 139 skip / 2520 parsed / 82.0% ran-pass-rate**
+  - Most of the jump (+889 passes, -1197 fails) is harness false-positives being cleared. The `\0` fix itself moves ~3 cases from fail → pass directly; its real value is that it UNBLOCKS the next wave of bug triage by removing a family of "RGX finds nothing" false-negatives that were drowning the other signal.
+- **Parsed-cases count dropped (2871 → 2520)**: the tighter block parser no longer double-counts cases that were leaking across blocks. The new count reflects true unique cases.
+- **Remaining failure distribution** (429 total, sorted by count):
+  - 103 false negatives (case-insensitive char-class ranges, other semantic gaps)
+  - 88 PGEN parse failures (patterns like `/([[:]+)/` PGEN rejects)
+  - 56 false positives
+  - 56 span mismatches
+  - 42 unsupported class_escape variants (e.g. `[\b]`)
+  - 40 PGEN rejects simple escape (`\"`, `\/`)
+  - 35 other compile errors (`(abc)\123` → backref to missing group 123, should fall back to octal)
+  - 8 PGEN AST contract mismatches on POSIX classes
+  - 1 `\c[` unterminated char class
+  - BACKLOG C7 updated with the triage plan for each.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` **1000/0/1** (997 baseline + 3 NUL-fix regressions), `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-13 - Crash-class bugs from PCRE2 conformance harness fixed (0 panics remaining)
 - Scope: Fixes both crash-class bugs uncovered by the PCRE2 10.47 conformance harness (commit `ccbf459`). **Panic count drops from 12 to 0** on `testinput1`. Semantic-class divergences still exist (1626 failures) but the engine no longer CRASHES on any pattern in the core PCRE2 suite — a step change in production-readiness.
 - **Bug 1 fix: `compile_subroutines` size based on AST-observed max group id**. For patterns like `^(a){0,0}` / `(?1)(?:(b)){0}` / `(a(*COMMIT)b){0}a(?1)|aac`, a capturing group nested inside a zero-repetition quantifier is present in the AST but never visited by `codegen_pass` — so `self.group_counter` stays behind the actual max group id. `compile_subroutines` sized `subroutines` via `group_counter + 1`, which then overflowed when `collect_capturing_group_defs` (which walks the raw AST) wrote `subroutines[group_id]` for `group_id > group_counter`. Fix: compute `max_group_id` from `collect_capturing_group_defs`, size as `max(group_counter, max_group_id) + 1`. Three-line change at `rgx-core/src/vm.rs:compile_subroutines`.

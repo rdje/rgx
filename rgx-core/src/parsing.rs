@@ -677,6 +677,14 @@ impl<'a> PgenAstAdapter<'a> {
             'a' => Ok(Regex::Char('\u{07}')),
             'e' => Ok(Regex::Char('\u{1B}')),
 
+            // `\0` is the PCRE2 NUL octal escape — never a backreference.
+            // Group 0 is the overall match, which is not a valid backref
+            // target. Standalone `\0` reaches us through simple_escape
+            // because PGEN doesn't route it to `octal_escape` (that's
+            // reserved for multi-digit forms `\000`..`\377`). Surface
+            // it as a literal NUL `Char('\u{0}')`.
+            '0' => Ok(Regex::Char('\0')),
+
             // Numeric backreferences \1, \2, etc. are captured as a single
             // digit under simple_escape by PGEN.
             c if c.is_ascii_digit() => {
@@ -3073,5 +3081,43 @@ mod tests {
             | Regex::Lookbehind { expr, .. } => contains_conditional(expr),
             _ => false,
         }
+    }
+
+    // =================================================================
+    // Regression pins — PCRE2 testinput1 bugs (2026-04-13)
+    // =================================================================
+
+    #[test]
+    fn simple_escape_backslash_zero_is_nul_not_backreference() {
+        // testinput1 pattern `/abc\0def\00pqr\000xyz\0000AB/` expects
+        // the literal NUL-byte interpretation for `\0`. Prior to the
+        // fix, `\0` fell through the `c.is_ascii_digit()` arm in
+        // `convert_simple_escape` and became `Regex::Backreference(0)`,
+        // which compiled but never matched. Group 0 is the overall
+        // match — it is never a valid backref target — so `\0` must
+        // surface as a literal NUL.
+        let r = crate::Regex::compile(r"\0").expect("compiles");
+        assert!(r.is_match("\0"), "pattern \\0 should match a NUL byte");
+    }
+
+    #[test]
+    fn simple_escape_backslash_zero_matches_nul_in_longer_literal() {
+        // Same fix, verified inside a longer pattern. Without it, the
+        // literal-finder's needle would include a NUL byte but the VM
+        // bytecode emitted a `Backref(0)` instead of `Char('\0')`, so
+        // the match attempt failed even when the subject did contain
+        // the NUL byte.
+        let r = crate::Regex::compile(r"a\0b").expect("compiles");
+        let m = r.find_first("a\0b").expect("match at position 0");
+        assert_eq!((m.start, m.end), (0, 3));
+    }
+
+    #[test]
+    fn simple_escape_backreferences_still_work() {
+        // Sanity: `\1` / `\2` etc. must continue to be backreferences,
+        // not NUL. The fix applies only to the `'0'` branch.
+        let r = crate::Regex::compile(r"(a)\1").expect("compiles");
+        assert!(r.is_match("aa"));
+        assert!(!r.is_match("ab"));
     }
 }
