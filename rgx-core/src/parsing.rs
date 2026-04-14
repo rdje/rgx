@@ -466,7 +466,7 @@ impl<'a> PgenAstAdapter<'a> {
             })?;
             pieces.push(self.convert_piece(piece)?);
         }
-        Ok(pack_sequence(pieces))
+        Ok(apply_bare_flag_directives(pieces))
     }
 
     fn convert_piece(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -2487,6 +2487,33 @@ fn pack_sequence(items: Vec<Regex>) -> Regex {
         1 => items.into_iter().next().unwrap(),
         _ => Regex::Sequence(items),
     }
+}
+
+/// PCRE2 scoping rule: a bare inline-flag directive such as `(?i)` or
+/// `(?-i)` changes the effective flags for the *remainder of the
+/// enclosing group* (or top-level pattern) — not just for a trailing
+/// empty subexpression. The adapter lowers such directives into
+/// `Regex::FlagGroup { expr: Regex::Empty }`; this walker rewrites each
+/// sequence so subsequent siblings become the directive's body.
+fn apply_bare_flag_directives(items: Vec<Regex>) -> Regex {
+    let mut iter = items.into_iter();
+    let mut prefix: Vec<Regex> = Vec::new();
+    while let Some(item) = iter.next() {
+        if let Regex::FlagGroup { flags, expr } = &item {
+            if matches!(expr.as_ref(), Regex::Empty) && !flags.is_empty() {
+                let flags = flags.clone();
+                let suffix: Vec<Regex> = iter.collect();
+                let body = apply_bare_flag_directives(suffix);
+                prefix.push(Regex::FlagGroup {
+                    flags,
+                    expr: Box::new(body),
+                });
+                return pack_sequence(prefix);
+            }
+        }
+        prefix.push(item);
+    }
+    pack_sequence(prefix)
 }
 
 fn pack_alternation(items: Vec<Regex>) -> Regex {

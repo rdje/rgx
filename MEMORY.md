@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-eighth commit) — Bare inline-flag directives scope forward
+- **What**: Fix `(?i)` / `(?-i)` / `(?x)` etc. written without a trailing body — PCRE2 says they change the effective flags for the remainder of the enclosing group. Adapter was lowering each to `FlagGroup { expr: Empty }`, leaving subsequent siblings under the outer flag context. `convert_concatenation` now folds pieces through `apply_bare_flag_directives`: when a bare directive appears, everything to its right becomes its body. Nested bare directives compose via suffix recursion. Scoped `(?-i:...)` form untouched.
+- **Conformance delta**: 3828 → **3839 pass** (+11), 815 → **804 fail** (−11). 82.4% → **82.7%**.
+- **Next**: the new top false positive `/(?x)(?-x: \s*#\s*)/` is a compile-phase bug — the extended-mode whitespace-ignore pass doesn't respect scope boundaries inside `(?-x:...)` nested under forward `(?x)`. Deeper; defer.
+- Other high-ROI targets: 159 span mismatch (zero-iteration preference for empty-match quantifiers), 138 `\Q..\E` inside char class (new PGEN-RGX report), 184 false negatives starting with `\c[` (control-char edge in parser).
+
 ### 2026-04-14 (thirty-seventh commit) — Conformance harness: pcre2test subject-trim + match-label parsing
 - **What**: Two harness-only fixes in `rgx-core/tests/pcre2_conformance.rs`. Root cause: our harness was miscounting real RGX behavior as divergence on two axes.
   1. `trim_ws` helper added — pcre2test strips leading and trailing ASCII whitespace from subject lines before interpreting escapes. Our old `trim_leading_spaces` only stripped the leading 4-space indent; trailing spaces were fed to RGX verbatim. A pattern like `/[^k]$/` on testdata subject `    abk   ` was run against `"abk   "` (RGX matched the last space) while PCRE2 was testing `"abk"` (no match). Explicit trailing whitespace in subjects uses `\x20`/`\t` — those survive trimming because the raw bytes are backslash sequences.
