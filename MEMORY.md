@@ -294,6 +294,20 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-fifth commit) — PGEN 1.1.21 (source-audit release): all filed reports closed + adapter catch-up
+- **PGEN submodule**: 1.1.19 (`edd3b59`) → **1.1.21 (`e617960`, integration contract 1.1.23)**. PGEN shipped an audit pass against PCRE2's `src/pcre2_compile.c`.
+- **PGEN-RGX-0054 closed**: the 80-level group-nesting stack overflow that PGEN 1.1.19 didn't fix is now resolved. Skip guard removed from both the conformance harness and `file_pgen_issues` (predicate returns false unconditionally). All 41 filed reports in the 0017-0055 batch are now either `verified-fixed-upstream` (26) or `fixed-upstream-pending-adapter` (13 — the RGX adapter work that was already identified in the 1.1.19 commit).
+- **RGX adapter breaks caused by PGEN audit** (fixed in the same commit):
+  1. PGEN 1.1.21 routes `\K`, `\R`, `\N`, `\X` through the `anchor` grammar rule instead of `simple_escape`. Broke 5 `match_reset_*` lib tests. Fix: added those four literals to `convert_anchor`'s match arms.
+  2. PGEN's modifier grammar split: `modifier_group = modifier_char+` became `modifier_group = modifier_item+` where `modifier_item` now wraps `"x"`, `"xx"`, `"a" ascii_restrict_modifier?`. Broke 5 `extended_mode_*` lib tests because `walk_modifier_flags` only scanned `modifier_char`. Fix: added `modifier_item` handling that recursively walks the inner terminals.
+- **Conformance trajectory** (full PCRE2 testdata corpus, 23 paired files):
+  - PGEN 1.1.10 pre-fixes: 78.1%
+  - PGEN 1.1.19 (25 reports closed): 78.9%
+  - PGEN 1.1.21 pre-adapter-catch-up: 77.5% (audit exposed more RGX adapter gaps)
+  - **PGEN 1.1.21 + adapter fixes: 79.1% — new all-time high** (3670 pass / 971 fail / 0 panic / 6575 skip / 11216 parsed)
+- **Pattern discovered**: every PGEN grammar audit moves patterns from "parse rejection" → "AST-shape mismatch in RGX adapter". Net pass rate goes up only if RGX's adapter keeps pace. Worth watching as a pattern for future upstream syncs.
+- **Next concrete action**: the 13+ RGX-side adapter gaps (POSIX `class_item` variants, `quoted_literal` atom, condition-assertion callout aliases, plus whatever new shapes PGEN 1.1.21 introduced that I haven't catalogued yet). Running the conformance histogram diff will show the newly exposed families.
+
 ### 2026-04-14 (thirty-fourth commit) — PGEN 1.1.19 bump: 25 reports closed, 13 partial, 1 remaining
 - **PGEN submodule**: 1.1.10 (`8783757`) → **1.1.19 (`edd3b59`, integration contract 1.1.20)**. 66 upstream commits.
 - **25 PGEN-RGX reports closed** (`verified-fixed-upstream`): POSIX sub-class delimiters (0017-0020, 0024-0026), verb parens (0029-0032), malformed-quantifier literals (0040-0049, 0052), `\g{}`/`\k{}` whitespace (0050, 0051), and **PGEN-RGX-0055** (mutually-recursive named-group stack overflow — no longer aborts, skip guard removed from harness + bin).

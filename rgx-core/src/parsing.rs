@@ -574,6 +574,17 @@ impl<'a> PgenAstAdapter<'a> {
             "\\G" => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
             "\\b" => Ok(Regex::WordBoundary { positive: true }),
             "\\B" => Ok(Regex::WordBoundary { positive: false }),
+            // PGEN 1.1.21+ routes `\K` through the `anchor` rule
+            // (earlier it went through `simple_escape`). Map to the
+            // same `MatchReset` node the simple_escape path uses.
+            "\\K" => Ok(Regex::MatchReset),
+            // PGEN also routes `\R` (newline sequence) and `\N`
+            // (non-newline) through the anchor family in 1.1.21.
+            // Route them to the nodes `convert_simple_escape`
+            // already produces.
+            "\\R" => Ok(Regex::NewlineSequence),
+            "\\N" => Ok(Regex::Dot),
+            "\\X" => Ok(Regex::GraphemeCluster),
             other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
         }
     }
@@ -1997,7 +2008,22 @@ impl<'a> PgenAstAdapter<'a> {
 
     #[allow(clippy::only_used_in_recursion)]
     fn walk_modifier_flags(&self, node: &PgenAstNode, out: &mut String) {
-        // `modifier_char` is a terminal leaf; capture its char directly.
+        // PGEN 1.1.21 audit split `modifier_group` into `modifier_item+`
+        // where `modifier_item` can be `"a" ascii_restrict_modifier?`,
+        // `"x" "x"?` (for `(?xx)` extended+strict), or `modifier_char`.
+        // The `modifier_char` set no longer includes `x`, `a`, `A`, `d`,
+        // `S`, `X`, `R` — those are handled via `modifier_item` now.
+        //
+        // We walk `modifier_item` first so the flag character at the
+        // head of that production (`"a"` or `"x"`) is surfaced; the
+        // optional suffix (`ascii_restrict_modifier` or a second `x`)
+        // is appended after. `modifier_char` leaves are captured on
+        // the fall-through.
+        if node.rule_name == "modifier_item" {
+            // Extract the literal terminal(s) in document order.
+            self.walk_modifier_item_terminals(node, out);
+            return;
+        }
         if node.rule_name == "modifier_char" {
             if let Some(ch) = self.collect_first_terminal_char(node) {
                 out.push(ch);
@@ -2015,6 +2041,27 @@ impl<'a> PgenAstAdapter<'a> {
         }
         for child in node.children() {
             self.walk_modifier_flags(child, out);
+        }
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn walk_modifier_item_terminals(&self, node: &PgenAstNode, out: &mut String) {
+        // `modifier_item` child order: a leading terminal (`"a"` or
+        // `"x"`) followed by an optional suffix (a second terminal
+        // `"x"` for `(?xx)`, or an `ascii_restrict_modifier` wrapper
+        // whose terminal is `D`/`S`/`W`/`P`/`T`). Recursively push
+        // every terminal char we see so each modifier character
+        // reaches the flag string that the compiler then interprets.
+        if let PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) =
+            &node.content
+        {
+            for ch in text.chars() {
+                out.push(ch);
+            }
+            return;
+        }
+        for child in node.children() {
+            self.walk_modifier_item_terminals(child, out);
         }
     }
 

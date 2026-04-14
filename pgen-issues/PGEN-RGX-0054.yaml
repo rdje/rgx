@@ -4,7 +4,7 @@ summary: |
   and aborts the process (SIGABRT) when parsing a pattern with 80
   levels of nested parentheses. The pattern comes from PCRE2
   testinput2 line 4674 and is a deliberate depth stress-test.
-status: open
+status: closed
 opened_at: 2026-04-13T00:00:00Z
 first_seen_at: 2026-04-13T00:00:00Z
 last_updated_at: 2026-04-13T00:00:00Z
@@ -118,11 +118,22 @@ impact: |
   regex patterns from outside their trust boundary is exposed.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.21"
+  fixed_in_parser_backend_version: "e617960"
+  verified_at: 2026-04-14T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
-    The fix should ship a grammar-layer guard that returns a
-    structured parse failure (not an abort) for any input the parser
-    cannot walk within its configured stack budget.
+    PGEN 1.1.21 (commit e617960, "Align regex parser with PCRE2
+    source audit") fixed the recursive-descent stack-overflow on
+    80-level group nesting after a thorough audit of PCRE2's
+    src/pcre2_compile.c source. Verified by running Regex::compile
+    on pgen-issues/artifacts/PGEN-RGX-0054/repro_input.txt against
+    the new submodule pin: the pattern now compiles without the
+    "pgen-generated-regex has overflowed its stack" abort it
+    produced on PGEN 1.1.19 and earlier.
+
+    The 80-leading-parens skip guard has been removed from
+    rgx-core/tests/pcre2_conformance.rs and
+    rgx-core/src/bin/file_pgen_issues.rs — the guard is no longer
+    needed.

@@ -106,14 +106,12 @@ fn main() {
             let Ok(pat_str) = std::str::from_utf8(pat_bytes) else {
                 continue;
             };
-            // Skip patterns known to abort the process via PGEN
-            // stack overflow. PGEN-RGX-0054 (80-level nesting,
-            // testinput2:4674) is still unresolved in PGEN 1.1.19.
-            // PGEN-RGX-0055 was fixed in PGEN 1.1.19 — no guard
-            // needed.
-            if pat_str.bytes().take_while(|&b| b == b'(').count() >= 80 {
-                continue;
-            }
+            // Historical stack-overflow guard: PGEN-RGX-0054 and 0055
+            // were the two known process-aborting patterns. 0055 was
+            // fixed by PGEN 1.1.19; 0054 was fixed by PGEN 1.1.21
+            // (commit e617960, "Align regex parser with PCRE2 source
+            // audit"). No guard currently needed. Add one here if a
+            // new pattern shape overflows PGEN again.
             let compile_result = Regex::compile(pat_str);
             let Err(err) = compile_result else { continue };
             let msg = err.to_string();

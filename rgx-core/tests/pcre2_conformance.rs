@@ -1032,16 +1032,16 @@ fn run_full_conformance() {
 /// stack. Detected by counting leading `(` characters; patterns
 /// with 80+ opening parens at the start match PCRE2 testinput2's
 /// stress-test case at line 4674.
-fn is_pgen_stack_overflow_pattern(pat: &str) -> bool {
-    let leading_parens = pat.bytes().take_while(|&b| b == b'(').count();
-    if leading_parens >= 80 {
-        // testinput2:4674 — PGEN-RGX-0054, still unresolved upstream
-        // as of PGEN 1.1.19 / contract 1.1.20 (commit edd3b59).
-        return true;
-    }
-    // PGEN-RGX-0055 (Python-interpolation grammar at testinput2:2880)
-    // was FIXED by PGEN 1.1.19 — the pattern now compiles cleanly.
-    // Skip guard removed.
+fn is_pgen_stack_overflow_pattern(_pat: &str) -> bool {
+    // Historical guard for PGEN-RGX-0054 (80-level group nesting) and
+    // PGEN-RGX-0055 (mutually-recursive named groups). Both were fixed
+    // upstream:
+    //   - 0055 by PGEN 1.1.19 (commit edd3b59)
+    //   - 0054 by PGEN 1.1.21 (commit e617960, "Align regex parser with
+    //     PCRE2 source audit")
+    // No known patterns currently abort PGEN's worker thread. This
+    // function is retained as a one-line hook: if a new pattern shape
+    // turns up that overflows, add it here and file a new report.
     false
 }
 

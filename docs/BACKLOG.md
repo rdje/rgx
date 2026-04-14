@@ -301,7 +301,9 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
   - 2026-04-13 commit 5 (full corpus expansion, 23 files): 3613 / 1018 / 9 panic / 6576 / 11216 / 78.0%
   - 2026-04-13 commit 6 (FlagGroup lowering fix): 3618 / 1022 / **0 panic** / 6576 / 78.0%
   - 2026-04-14 commit 7 (case-fold ASCII ranges spanning both cases): 3624 / 1016 / 0 / 6576 / 78.1%
-  - **2026-04-14 commit 8 (PGEN 1.1.19 bump — 25 reports closed + 13 partial): 3661 pass / 979 fail / 0 panic / 6576 skip / 11216 parsed / 78.9%**
+  - 2026-04-14 commit 8 (PGEN 1.1.19 bump — 25 reports closed + 13 partial): 3661 / 979 / 0 / 6576 / 11216 / 78.9%
+  - 2026-04-14 commit 9 (PGEN 1.1.21 audit pre-adapter-catch-up — interim regression): 3599 / 1042 / 0 / 6575 / 77.5%
+  - **2026-04-14 commit 10 (PGEN 1.1.21 + adapter catch-up — 0054 closed, `\K`/`\R`/`\N`/`\X` and `modifier_item` handled): 3670 pass / 971 fail / 0 panic / 6575 skip / 11216 parsed / 79.1%**
 - **Fixed bugs**:
   1. ✅ **`{0,0}` / `{0}` quantifier with captures** — sized `subroutines` in `compile_subroutines` via AST-observed max group id. 5 regression tests.
   2. ✅ **Char class operand overflow on `{0,N}` with large N** — deduplicated identical `CompiledCharClass` entries during sub-compiler merge via remap-table rewrite. 1 regression test.

@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-14 - PGEN 1.1.21 bump (PCRE2 source-audit release): closes PGEN-RGX-0054, absorbs new AST shapes
+- Scope: Bumps `subs/pgen` from 1.1.19 (`edd3b59`) to **1.1.21 (`e617960`, integration contract `1.1.23`)**. Upstream shipped five commits after the audit, including "Align regex parser with PCRE2 source audit" (`e617960`) that closes the last open report — PGEN-RGX-0054 (80-level group nesting stack overflow) — and restructures the modifier and anchor rules to match `src/pcre2_compile.c` more faithfully.
+- **PGEN-RGX-0054 closed** (`verified-fixed-upstream`, 1.1.21 / `e617960`). The 80-leading-parens skip guard is removed from both `rgx-core/tests/pcre2_conformance.rs::is_pgen_stack_overflow_pattern` and `rgx-core/src/bin/file_pgen_issues.rs`. The predicate now always returns false — no known patterns abort PGEN's worker thread anymore.
+- **RGX adapter fixes absorbed from the PGEN audit**:
+  - `convert_anchor` extended to recognize `\K`, `\R`, `\N`, `\X` in addition to the existing `\A`/`\Z`/`\z`/`\G`/`\b`/`\B`/`^`/`$`. PGEN 1.1.21 now routes these through the `anchor` rule instead of `simple_escape`. 5 `match_reset_*` lib tests + 1 C1 eligibility test were failing before the fix; all pass after.
+  - `walk_modifier_flags` extended to walk `modifier_item` nodes and their optional `ascii_restrict_modifier` suffix. The audit split `modifier_group = modifier_char+` into `modifier_group = modifier_item+` where `modifier_item = "a" ascii_restrict_modifier? | "x" "x"? | modifier_char`; `x`, `a`, `xx`, and `aD`/`aS`/`aW`/`aP`/`aT` modifier combinations are now under `modifier_item`. 5 `extended_mode_*` lib tests were failing (`(?x:...)` emitted `FlagGroup { flags: "" }` because `walk_modifier_flags` only scanned `modifier_char` nodes); all pass after.
+- **Conformance full-corpus trajectory**:
+  - PGEN 1.1.10 (no audit): 3624 pass / 1016 fail / 0 panic / 6576 skip / 78.1%
+  - PGEN 1.1.19 (25 reports closed): 3661 pass / 979 fail / 0 panic / 6576 skip / 78.9%
+  - PGEN 1.1.21 pre-adapter-catch-up: 3599 pass / 1042 fail / 0 panic / 6575 skip / 77.5% (audit broke RGX's `\K` + `(?x)` adapter assumptions; showed as an interim regression)
+  - **PGEN 1.1.21 + adapter fixes: 3670 pass / 971 fail / 0 panic / 6575 skip / 79.1%** — new all-time high
+- **Failure histogram shift** (1.1.19 → 1.1.21-fixed): PGEN parse failures 162 → 138 (−24), `\"`/`\/` escape rejections 72 → 38 (−34), AST contract mismatches 70 → 144 (+74 — more new shapes exposed by the audit, still RGX adapter work), false negatives 198 → 268 (+70, same reason).
+- **Remaining PGEN-RGX picture**: 1 fully unresolved upstream (none — all filed reports now either closed or `fixed-upstream-pending-adapter`). The 13 partial reports from the 1.1.19 transition plus any new AST-shape gaps the 1.1.21 audit surfaced form the RGX-adapter TODO.
+- Validation: `cargo fmt` clean, `cargo test -p rgx-core --lib` **1007/0/1**, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-14 - PGEN 1.1.19 bump: closes 25 PGEN-RGX reports, 13 more partial
 - Scope: Bumps the `subs/pgen` submodule from 1.1.10 (commit `8783757`) to **1.1.19 (commit `edd3b59`, integration contract `1.1.20`)**. 66 upstream commits including 25 grammar fixes that directly close PGEN-side RGX-filed reports, plus a parser-depth fix that resolves one of the two known stack-overflow patterns.
 - **25 PGEN-RGX reports closed** (`verified-fixed-upstream` resolution):
