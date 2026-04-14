@@ -83,6 +83,61 @@ fn main() {
         return;
     }
 
+    // `--ast-dump-only <pattern> <output_path>` writes the PGEN AST
+    // dump JSON for the supplied pattern to the given path. Used to
+    // backfill `pgen_ast_dump.json` for previously-generated reports.
+    if args.len() >= 4 && args[1] == "--ast-dump-only" {
+        let pat = &args[2];
+        let out = &args[3];
+        let opts = pgen::embedding_api::AstDumpOptions {
+            pretty: true,
+            max_ast_bytes: None,
+        };
+        let dump = pgen::embedding_api::parse_grammar_profile_ast_dump_named(
+            "regex",
+            "regex_default",
+            pat,
+            &opts,
+        );
+        std::fs::write(out, serde_json::to_string_pretty(&dump).expect("serialize"))
+            .expect("write ast dump");
+        eprintln!("wrote ast dump for {pat:?} to {out}");
+        return;
+    }
+
+    // Single-report mode: `--single <pattern> [--source <file:line>]
+    // [--summary-override <text>]`. Generates ONE PGEN-RGX-NNNN report
+    // bundle for the supplied pattern, regardless of whether it's the
+    // first failure of its category. Used when a cluster has been
+    // distilled to a minimal repro and we only want one report for the
+    // whole cluster.
+    if args.len() >= 3 && args[1] == "--single" {
+        let pattern = &args[2];
+        let mut source_file = "<cluster repro>".to_string();
+        let mut source_line: usize = 0;
+        let mut summary_override: Option<String> = None;
+        let mut i = 3;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--source" if i + 1 < args.len() => {
+                    let s = &args[i + 1];
+                    if let Some((f, ln)) = s.split_once(':') {
+                        source_file = f.to_string();
+                        source_line = ln.parse().unwrap_or(0);
+                    }
+                    i += 2;
+                }
+                "--summary-override" if i + 1 < args.len() => {
+                    summary_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+                _ => i += 1,
+            }
+        }
+        emit_single_report(pattern, source_file, source_line, summary_override);
+        return;
+    }
+
     let mut unique_patterns: BTreeSet<String> = BTreeSet::new();
     let mut report_inputs: Vec<ReportInput> = Vec::new();
 
@@ -244,6 +299,101 @@ struct ReportInput {
     source_block_index: usize,
     source_line: usize,
     source_file: String,
+}
+
+fn emit_single_report(
+    pattern: &str,
+    source_file: String,
+    source_line: usize,
+    summary_override: Option<String>,
+) {
+    // Verify PGEN actually produces a divergent outcome for this
+    // pattern. If RGX::compile succeeds, the report would be
+    // misleading.
+    let compile = Regex::compile(pattern);
+    let err_msg = match compile {
+        Ok(_) => {
+            eprintln!("!! RGX successfully compiled the pattern; nothing to report.");
+            return;
+        }
+        Err(e) => e.to_string(),
+    };
+    let category = classify_pgen_error(&err_msg).unwrap_or(PgenCategory::ContractMismatch);
+
+    let next_id = next_available_pgen_issue_id();
+    let id = format!("PGEN-RGX-{next_id:04}");
+    let pgen_issues_root = repo_root().join("pgen-issues");
+    let artifact_dir = pgen_issues_root.join("artifacts").join(&id);
+    std::fs::create_dir_all(&artifact_dir).expect("create artifact dir");
+
+    std::fs::write(artifact_dir.join("repro_input.txt"), pattern).expect("write repro_input");
+    std::fs::write(
+        artifact_dir.join("pgen_contract.json"),
+        capture_pgen_contract(),
+    )
+    .expect("write pgen_contract");
+    let outcome = capture_parse_outcome(pattern);
+    std::fs::write(artifact_dir.join("pgen_parse_outcome.json"), &outcome)
+        .expect("write pgen_parse_outcome");
+    // Per protocol §5: "include AST dump when parse succeeds but the
+    // structure or semantics are wrong". For ContractMismatch we know
+    // PGEN parsed cleanly — capture the dump so PGEN maintainers see
+    // exactly which node shape needs the grammar change.
+    if outcome.contains("\"status\": \"success\"") {
+        let opts = pgen::embedding_api::AstDumpOptions {
+            pretty: true,
+            max_ast_bytes: None,
+        };
+        let dump = pgen::embedding_api::parse_grammar_profile_ast_dump_named(
+            "regex",
+            "regex_default",
+            pattern,
+            &opts,
+        );
+        let dump_json = serde_json::to_string_pretty(&dump).expect("serialize ast dump");
+        std::fs::write(artifact_dir.join("pgen_ast_dump.json"), dump_json)
+            .expect("write pgen_ast_dump");
+    }
+
+    let report = ReportInput {
+        pattern: pattern.to_string(),
+        error_message: err_msg,
+        category,
+        source_block_index: 0,
+        source_line,
+        source_file,
+    };
+
+    let rgx_commit = git_short_head().unwrap_or_else(|| "unknown".into());
+    let host_os = std::env::consts::OS.to_string();
+    let host_arch = std::env::consts::ARCH.to_string();
+    let parser_backend = pgen_commit_short().unwrap_or_else(|| "unknown".into());
+    let parser_release = pgen_release_version();
+    let integration_contract = pgen_integration_contract_version();
+    let mut yaml = build_yaml_report(
+        &id,
+        &report,
+        &rgx_commit,
+        &host_os,
+        &host_arch,
+        &parser_backend,
+        &parser_release,
+        &integration_contract,
+    );
+    if let Some(s) = summary_override {
+        // Replace the auto-generated summary line with the override
+        // for human-readable cluster-level descriptions.
+        if let Some(start) = yaml.find("summary: |\n") {
+            let after = start + "summary: |\n".len();
+            if let Some(end_rel) = yaml[after..].find("\nstatus:") {
+                let end = after + end_rel;
+                let new_line = format!("  {s}");
+                yaml.replace_range(after..end, &new_line);
+            }
+        }
+    }
+    std::fs::write(pgen_issues_root.join(format!("{id}.yaml")), &yaml).expect("write yaml report");
+    eprintln!("wrote {id} (category={category:?}) for pattern {pattern:?}");
 }
 
 fn scan_single_file(file_name: &str) {

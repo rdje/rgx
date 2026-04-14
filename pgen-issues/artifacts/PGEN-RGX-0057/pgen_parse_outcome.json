@@ -1,0 +1,15 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "failure",
+  "diagnostic": {
+    "code": "E_PARSE_FAILURE",
+    "message": "escape is not accepted inside a character class by the regex compile contract",
+    "location": {
+      "byte_offset": 2,
+      "line": 1,
+      "column": 3
+    }
+  }
+}

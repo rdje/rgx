@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (forty-second commit) — File PGEN-RGX-0056 + PGEN-RGX-0057
+- **What**: Two cluster-distilled PGEN bug reports, protocol-compliant per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`:
+  1. **PGEN-RGX-0056**: short-form `\pX`/`\PX` Unicode property escape — PGEN parses but emits wrong AST shape (`simple_escape(p) + literal_char(L)` instead of `property_escape`). AST dump captured. Affects ~66 cases.
+  2. **PGEN-RGX-0057**: `\Q...\E` inside `[...]` — PGEN rejects with E_PARSE_FAILURE; PCRE2 accepts. Affects ~138 cases.
+- **Tooling**: Added `--single <pattern>` and `--ast-dump-only <pattern> <out>` modes to `rgx-core/src/bin/file_pgen_issues.rs` so future cluster-distilled reports can be one-command.
+- **Methodology validation**: 575-bucket → 0 PGEN reports (all RGX adapter). 327-bucket → 2 PGEN reports (after honest re-classification — initial estimate was 3-5, dropped to 2 after user pushback on speculative classifications). Cluster first → file second.
+- **Total PGEN-RGX reports filed**: 0001–0057 (57). Projected ceiling: ~60.
+
 ### 2026-04-14 (forty-first commit) — Compile-error parity + property aliases + napla/naplb
 - **What**: Cluster-first methodology applied to the 327 PGEN-AST-contract-mismatch bucket. 7 distinct root causes; 4 closed here.
   1. Harness `Expected::CompileError` — pcre2test's `Failed: error N` line previously parsed as NoMatch, then RGX's compile error counted as fail. Now: PCRE2-rejected + RGX-rejected = Pass; PCRE2-rejected + RGX-accepted = new "RGX too permissive" bucket
