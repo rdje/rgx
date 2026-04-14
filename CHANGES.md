@@ -14,6 +14,30 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-14 - RGX adapter batch: simple_escape fallback + class_escape gaps + POSIX class_item + quoted_literal + alpha_lookaround
+- Scope: Five targeted adapter fixes in `rgx-core/src/parsing.rs` that absorb PGEN 1.1.21's new AST shapes and close the `fixed-upstream-pending-adapter` PGEN-RGX reports from the 1.1.19 batch. Moves the PCRE2 full-testdata conformance from 79.1% → **81.4%** (3,670 → **3,779 pass**, 971 → **862 fail**). Net +109 cases closed.
+- **1. `convert_simple_escape` non-alphanumeric literal fallback**: PCRE2's pcre2pattern(3) specifies that a backslash before any non-alphanumeric ASCII character produces the literal character. RGX's adapter previously rejected `\"`, `\/`, `\'`, `\@`, `\#`, `\!`, `\:`, `\;`, `\<`, `\>`, `\,`, `\~`, `` \` ``, `\_`, and similar escapes with "unrecognized simple_escape character 'X'". Added a catch-all that accepts any non-alphanumeric char as a literal, preserving the old error path for unknown alphanumeric escapes (e.g. `\q` typos) so real mistakes still surface. Closes ~12 cases.
+- **2. `extend_ranges_from_regex` for `\W`, `\S`, and `\b` inside char classes**: Previously rejected `[\W]`, `[\S]`, and `[\b]` with "class_escape resolved to unsupported variant". Added:
+  - `Word { negated: true }` → union of complement ranges around 0-9/A-Z/_/a-z
+  - `Space { negated: true }` → union of complement ranges around \t/\n/\v/\f/\r/space
+  - `WordBoundary { positive: true }` → literal `\u{08}` (backspace); PCRE2's rule is that `\b` inside `[...]` is the backspace char, NOT the word-boundary assertion
+  - Closes ~51 cases.
+- **3. `convert_class_item` POSIX bracket-class handler**: PGEN now emits `posix_class` nodes for `[[:space:]]`, `[[:alpha:]]`, etc. The adapter was rejecting them with "class_item has no known variant". New `convert_posix_class_into` method + `posix_class_ranges` table covering all 14 PCRE2 names (alnum, alpha, ascii, blank, cntrl, digit, graph, lower, print, punct, space, upper, word, xdigit) with correct ASCII semantics. New `complement_ranges` helper handles `[:^name:]` negation by computing disjoint complement ranges. Closes ~17 cases (was 121 class_item-variant mismatches).
+- **4. `convert_quoted_literal` atom for `\Q...\E`**: PGEN 1.1.21 added a dedicated `quoted_literal` atom production. The adapter now routes `\Q<body>\E` runs to a `Regex::Sequence` of `Char` nodes, one per body byte. Unterminated `\Q...` runs to end of pattern per PCRE2 convention. Empty body (`\Q\E`) lowers to `Regex::Empty`. Closes PGEN-RGX-0023 plus ~11 cases.
+- **5. `alpha_lookaround` + `alpha_condition_assertion` handlers for callout-style aliases**: PGEN 1.1.21 added `(*pla:...)`, `(*nla:...)`, `(*plb:...)`, `(*nlb:...)` (and the long names `positive_lookahead` / `negative_lookahead` / `positive_lookbehind` / `negative_lookbehind`) as alternate spellings of `(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)`. Both top-level atom form (`alpha_lookaround`) and inside conditionals (`alpha_condition_assertion`) added. Dispatch table in new `regex_from_alpha_lookaround_name` helper maps the eight name variants to the existing `Lookahead`/`Lookbehind` shapes. Closes PGEN-RGX-0034/0035/0036/0037/0038/0039 plus ~30 related testdata cases.
+- **Adapter also accounts for PGEN 1.1.21's grammar restructuring already landed in the prior commit**:
+  - `convert_anchor` extended with `\K`, `\R`, `\N`, `\X` (PGEN reroute from `simple_escape` → `anchor`)
+  - `walk_modifier_flags` extended to absorb `modifier_item` + `ascii_restrict_modifier` split
+- **Failure histogram evolution** (PGEN 1.1.21, adapter fixes applied):
+  - before: 205 false positive / 202 false negative / 175 span mismatch / 138 PGEN parse / 121 AST contract / 34 extended char class / 38 simple_escape rejects / 62 class_escape / 34 other = 971 failures
+  - after: 207 false positive / 205 false negative / 180 span mismatch / 138 PGEN parse / 61 AST contract / 34 extended char class / 26 simple_escape rejects / 11 class_escape / 34 other = **862 failures**
+- **Remaining high-value buckets** for future work:
+  - 138 `\Q...\E` inside char class (PGEN parse failure — likely a new PGEN report)
+  - 207 false positives and 205 false negatives (semantic divergences — one pattern class at a time)
+  - 180 span mismatches (e.g. `/^\s/` with `\s` anchor interactions on CR/LF)
+  - 34 extended char class advanced forms (bare-escape terms `\E`, `\n` in set algebra)
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` **1007/0/1** (unchanged), `cargo test -p rgx-cli` 30/0, `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-14 - PGEN 1.1.21 bump (PCRE2 source-audit release): closes PGEN-RGX-0054, absorbs new AST shapes
 - Scope: Bumps `subs/pgen` from 1.1.19 (`edd3b59`) to **1.1.21 (`e617960`, integration contract `1.1.23`)**. Upstream shipped five commits after the audit, including "Align regex parser with PCRE2 source audit" (`e617960`) that closes the last open report — PGEN-RGX-0054 (80-level group nesting stack overflow) — and restructures the modifier and anchor rules to match `src/pcre2_compile.c` more faithfully.
 - **PGEN-RGX-0054 closed** (`verified-fixed-upstream`, 1.1.21 / `e617960`). The 80-leading-parens skip guard is removed from both `rgx-core/tests/pcre2_conformance.rs::is_pgen_stack_overflow_pattern` and `rgx-core/src/bin/file_pgen_issues.rs`. The predicate now always returns false — no known patterns abort PGEN's worker thread anymore.

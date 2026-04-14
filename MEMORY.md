@@ -294,6 +294,24 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-sixth commit) — Adapter batch: five fixes, conformance 79.1% → 81.4%
+- **What**: Five focused RGX adapter fixes in `parsing.rs` that absorb PGEN 1.1.21's new AST shapes and close the `fixed-upstream-pending-adapter` reports:
+  1. `convert_simple_escape` non-alnum literal fallback — accepts `\"`, `\/`, `\'`, `\@`, etc. per PCRE2 rule
+  2. `extend_ranges_from_regex` for `\W`/`\S`/`[\b]` inside char classes — `[\W]` = complement of word, `[\b]` = literal backspace
+  3. POSIX bracket classes (`[[:alpha:]]`, `[[:^digit:]]`, etc.) via new `convert_posix_class_into` + `posix_class_ranges` table + `complement_ranges` helper covering all 14 PCRE2 names
+  4. `convert_quoted_literal` for `\Q...\E` atoms — lowers body to Sequence of Char nodes
+  5. `alpha_lookaround` + `alpha_condition_assertion` for PCRE2 callout-style aliases `(*pla:...)` / `(*nla:...)` / `(*plb:...)` / `(*nlb:...)` plus long-name forms
+- **Conformance delta**: 3670 → 3779 pass (+109), 971 → 862 fail (−109). 79.1% → **81.4%**. 0 panics.
+- **PGEN-RGX reports closed by this adapter batch**: 0023 (quoted_literal), 0034-0039 (condition-assertion aliases), plus parts of 0021/22/27/28/33/53 (POSIX class_item). Adapter side of the 13 `fixed-upstream-pending-adapter` reports is now effectively complete.
+- **Remaining failure buckets** (862 total, prioritized for future work):
+  - 207 false positive, 205 false negative (semantic — one pattern class at a time)
+  - 180 span mismatch
+  - 138 `\Q...\E` inside char class (PGEN parse — new report candidate)
+  - 61 remaining AST contract mismatches (now dominated by `[a-\d]+` class_range endpoint shape, not a shape I've seen before)
+  - 34 extended char class advanced forms
+  - 26 simple_escape rejects now all `\Q` inside simple_escape (should be intercepted but PGEN still routes somewhere)
+- **Next concrete action**: pause adapter work (diminishing returns per commit) and investigate the single-largest semantic bucket next — false positive anchor+whitespace interactions on `$`/`\s`. That's real RGX matching behavior diverging from PCRE2.
+
 ### 2026-04-14 (thirty-fifth commit) — PGEN 1.1.21 (source-audit release): all filed reports closed + adapter catch-up
 - **PGEN submodule**: 1.1.19 (`edd3b59`) → **1.1.21 (`e617960`, integration contract 1.1.23)**. PGEN shipped an audit pass against PCRE2's `src/pcre2_compile.c`.
 - **PGEN-RGX-0054 closed**: the 80-level group-nesting stack overflow that PGEN 1.1.19 didn't fix is now resolved. Skip guard removed from both the conformance harness and `file_pgen_issues` (predicate returns false unconditionally). All 41 filed reports in the 0017-0055 batch are now either `verified-fixed-upstream` (26) or `fixed-upstream-pending-adapter` (13 — the RGX adapter work that was already identified in the 1.1.19 commit).

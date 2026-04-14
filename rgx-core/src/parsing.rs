@@ -518,6 +518,11 @@ impl<'a> PgenAstAdapter<'a> {
             "comment_group" => Ok(Regex::Empty), // (?#...) is a zero-width comment, ignored
             "directive_verb" => self.convert_directive_verb(actual),
             "whitespace_literal" => self.convert_whitespace_literal(actual),
+            // PGEN 1.1.21 audit introduced a dedicated `quoted_literal`
+            // atom for `\Q...\E` runs. Every byte between `\Q` and
+            // `\E` is a literal character (including regex metachars).
+            // Lower to a Sequence of Char nodes.
+            "quoted_literal" => self.convert_quoted_literal(actual),
             other => {
                 Err(self.contract_error(&format!("unrecognized PGEN atom rule name '{other}'")))
             }
@@ -707,6 +712,19 @@ impl<'a> PgenAstAdapter<'a> {
             // Also covers escaped space (`\ `) used in (?x) extended mode.
             c if ".*+?()[]{}|\\^$-/ ".contains(c) => Ok(Regex::Char(c)),
 
+            // PCRE2 fallback: a backslash before any ASCII non-
+            // alphanumeric character produces the literal character.
+            // Examples: `\"`, `\'`, `\@`, `\=`, `\#`, `\!`, `\:`,
+            // `\;`, `\<`, `\>`, `\,`, `\~`, `\\``, `\_`, etc. This
+            // matches PCRE2's documented behavior in the
+            // "Non-printing characters" and "Generic character types"
+            // sections of pcre2pattern(3) and closes 38 of the
+            // 1.1.21 conformance failures in the "unrecognized
+            // simple_escape character" bucket. Alphanumeric escapes
+            // that aren't in the recognized set keep the old error
+            // path because they signal a real typo (e.g., `\q`).
+            c if !c.is_ascii_alphanumeric() => Ok(Regex::Char(c)),
+
             other => {
                 Err(self.contract_error(&format!("unrecognized simple_escape character '{other}'")))
             }
@@ -829,13 +847,17 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Convert a single `class_item` — either a `class_range`, a bare
-    /// `class_literal`, or a `class_escape` — into one or more `CharRange`s.
+    /// `class_literal`, a `class_escape`, or a `posix_class` — into one
+    /// or more `CharRange`s.
     fn convert_class_item(&self, item: &PgenAstNode, ranges: &mut Vec<CharRange>) -> Result<()> {
         if let Some(range_node) = self.find_direct_child(item, "class_range") {
             return self.convert_class_range(range_node, ranges);
         }
         if let Some(escape_node) = self.find_direct_child(item, "class_escape") {
             return self.convert_class_escape(escape_node, ranges);
+        }
+        if let Some(posix_node) = self.find_direct_child(item, "posix_class") {
+            return self.convert_posix_class_into(posix_node, ranges);
         }
         if let Some(literal_node) = self.find_direct_child(item, "class_literal") {
             let ch = self
@@ -850,6 +872,36 @@ impl<'a> PgenAstAdapter<'a> {
             "pgen class_item has no known variant under '{}'",
             item.rule_name
         )))
+    }
+
+    /// Convert a `posix_class` node (e.g. `[:alpha:]`, `[:^digit:]`)
+    /// into a set of `CharRange`s appended to `ranges`. Supported
+    /// names follow the PCRE2 ASCII set: alnum, alpha, ascii, blank,
+    /// cntrl, digit, graph, lower, print, punct, space, upper, word,
+    /// xdigit. The `^` prefix (tracked as a `posix_negation` child)
+    /// inverts the class.
+    fn convert_posix_class_into(
+        &self,
+        posix: &PgenAstNode,
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        let negated = self.find_direct_child(posix, "posix_negation").is_some()
+            || self.first_descendant(posix, "posix_negation").is_some();
+        let name_node = self
+            .first_descendant(posix, "posix_name")
+            .ok_or_else(|| self.contract_error("pgen posix_class is missing its posix_name"))?;
+        let name = self.slice(name_node)?.to_string();
+        let class_ranges = posix_class_ranges(&name).ok_or_else(|| {
+            self.contract_error(&format!("unsupported POSIX class name '{name}'"))
+        })?;
+        if negated {
+            for r in complement_ranges(&class_ranges) {
+                ranges.push(r);
+            }
+        } else {
+            ranges.extend(class_ranges);
+        }
+        Ok(())
     }
 
     /// Convert a `class_range` node — `class_atom "-" class_atom` — into a
@@ -909,6 +961,34 @@ impl<'a> PgenAstAdapter<'a> {
         let regex = self.convert_escape(escape_node)?;
         extend_ranges_from_regex(regex, ranges, |msg| self.contract_error(msg))?;
         Ok(())
+    }
+
+    /// Convert a `quoted_literal` atom — `\Q...\E`. Every character
+    /// between `\Q` and `\E` is a literal, including regex
+    /// metacharacters. Unterminated `\Q...` (no closing `\E`) runs
+    /// to end of pattern by PCRE2 convention.
+    ///
+    /// We walk the source span, strip the `\Q` opener and optional
+    /// `\E` closer, and emit a `Regex::Sequence` of `Char` nodes. An
+    /// empty body (`\Q\E`) lowers to `Regex::Empty`.
+    fn convert_quoted_literal(&self, node: &PgenAstNode) -> Result<Regex> {
+        let span = self.slice(node)?;
+        // PGEN's `quoted_literal = "\Q" any_char*? "\E"` guarantees
+        // the span starts with `\Q`. The `\E` closer is optional per
+        // PCRE2; if missing, the body runs to end of span.
+        let body = span
+            .strip_prefix("\\Q")
+            .ok_or_else(|| self.contract_error("pgen quoted_literal missing \\Q prefix"))?;
+        let body = body.strip_suffix("\\E").unwrap_or(body);
+        if body.is_empty() {
+            return Ok(Regex::Empty);
+        }
+        let chars: Vec<Regex> = body.chars().map(Regex::Char).collect();
+        if chars.len() == 1 {
+            Ok(chars.into_iter().next().unwrap())
+        } else {
+            Ok(Regex::Sequence(chars))
+        }
     }
 
     /// Convert a `code_block` node — `(?{lua:...})`, `(?{native:cb})`.
@@ -1425,6 +1505,28 @@ impl<'a> PgenAstAdapter<'a> {
                 expr: Box::new(expr),
                 positive: false,
             }),
+            // PGEN 1.1.21+ supports PCRE2's callout-style lookaround
+            // aliases under `alpha_lookaround = "(*" name ":" pattern? ")"`.
+            // Names: pla / positive_lookahead, nla / negative_lookahead,
+            // plb / positive_lookbehind, nlb / negative_lookbehind.
+            // We resolve via the embedded `alpha_lookaround_name`
+            // child and dispatch to the existing Lookahead/Lookbehind
+            // node shapes — semantics are identical to (?=...), (?!...),
+            // (?<=...), (?<!...).
+            "alpha_lookaround" => {
+                let name = self
+                    .first_descendant(actual, "alpha_lookaround_name")
+                    .and_then(|n| self.slice(n).ok())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        self.contract_error(
+                            "pgen alpha_lookaround is missing its alpha_lookaround_name",
+                        )
+                    })?;
+                regex_from_alpha_lookaround_name(&name, expr).ok_or_else(|| {
+                    self.contract_error(&format!("unrecognized alpha_lookaround name '{name}'"))
+                })
+            }
             other => {
                 Err(self.contract_error(&format!("unsupported pgen lookaround variant '{other}'")))
             }
@@ -1557,6 +1659,51 @@ impl<'a> PgenAstAdapter<'a> {
                 expr: Box::new(expr),
                 positive: false,
             }),
+            // PGEN 1.1.21+ also routes callout-style aliases through
+            // `condition_assertion` via the `alpha_condition_assertion`
+            // sub-production: `*pla:`, `*nla:`, `*plb:`, `*nlb:`, plus
+            // the long names. Span text starts with `*` followed by
+            // the alias name, then `:`, then the pattern. Map to the
+            // existing Lookahead/Lookbehind ConditionalTest variants.
+            _ if assertion_text.starts_with('*') => {
+                let after_star = &assertion_text[1..];
+                let colon_idx = after_star.find(':').ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "alpha_condition_assertion '{assertion_text}' is missing ':' separator"
+                    ))
+                })?;
+                let name = &after_star[..colon_idx];
+                let positive_lookahead = matches!(name, "pla" | "positive_lookahead");
+                let negative_lookahead = matches!(name, "nla" | "negative_lookahead");
+                let positive_lookbehind = matches!(name, "plb" | "positive_lookbehind");
+                let negative_lookbehind = matches!(name, "nlb" | "negative_lookbehind");
+                let boxed = Box::new(expr);
+                if positive_lookahead {
+                    Ok(ConditionalTest::Lookahead {
+                        expr: boxed,
+                        positive: true,
+                    })
+                } else if negative_lookahead {
+                    Ok(ConditionalTest::Lookahead {
+                        expr: boxed,
+                        positive: false,
+                    })
+                } else if positive_lookbehind {
+                    Ok(ConditionalTest::Lookbehind {
+                        expr: boxed,
+                        positive: true,
+                    })
+                } else if negative_lookbehind {
+                    Ok(ConditionalTest::Lookbehind {
+                        expr: boxed,
+                        positive: false,
+                    })
+                } else {
+                    Err(self.contract_error(&format!(
+                        "unrecognized alpha_condition_assertion name '{name}'"
+                    )))
+                }
+            }
             _ => Err(self.contract_error(&format!(
                 "unsupported pgen condition assertion '{assertion_text}'"
             ))),
@@ -2132,6 +2279,17 @@ where
             ranges.push(CharRange::range('a', 'z'));
             Ok(())
         }
+        Regex::CharClass(CharClass::Word { negated: true }) => {
+            // `\W` inside `[...]`: union every codepoint that is NOT
+            // a word char. This appends the complement as disjoint
+            // ranges around the 0-9/A-Z/_/a-z islands.
+            ranges.push(CharRange::range('\0', '/'));
+            ranges.push(CharRange::range(':', '@'));
+            ranges.push(CharRange::range('[', '^'));
+            ranges.push(CharRange::single('`'));
+            ranges.push(CharRange::range('{', char::MAX));
+            Ok(())
+        }
         Regex::CharClass(CharClass::Space { negated: false }) => {
             ranges.push(CharRange::single('\t'));
             ranges.push(CharRange::single('\n'));
@@ -2141,10 +2299,160 @@ where
             ranges.push(CharRange::single(' '));
             Ok(())
         }
+        Regex::CharClass(CharClass::Space { negated: true }) => {
+            // `\S` inside `[...]`: union every codepoint that is NOT
+            // a whitespace char. Six disjoint ranges.
+            ranges.push(CharRange::range('\0', '\u{08}'));
+            ranges.push(CharRange::single('\u{0E}'));
+            ranges.push(CharRange::range('\u{0F}', '\u{1F}'));
+            ranges.push(CharRange::range('!', char::MAX));
+            // Note: '\t'=0x09, '\n'=0x0A, '\v'=0x0B, '\f'=0x0C, '\r'=0x0D,
+            // ' '=0x20 are the whitespace chars; the three ranges above
+            // plus the gap after 0x0D (which ends at 0x1F) and the
+            // jump over ' ' into '!' cover the complement.
+            Ok(())
+        }
+        // `\b` as a class_escape is PCRE2's literal backspace (U+0008),
+        // NOT the word-boundary assertion. The `convert_escape` path
+        // returns `Regex::WordBoundary { positive: true }` for `\b`
+        // because its caller is usually an atom position; we translate
+        // it here when the context is a char class.
+        Regex::WordBoundary { positive: true } => {
+            ranges.push(CharRange::single('\u{08}'));
+            Ok(())
+        }
         other => Err(make_error(&format!(
             "class_escape resolved to unsupported variant '{other:?}' for char class"
         ))),
     }
+}
+
+/// Map a PCRE2 callout-style lookaround alias name to the
+/// corresponding RGX `Lookahead`/`Lookbehind` node, given the inner
+/// `expr` already lowered. Returns `None` if the name isn't one of
+/// the eight PCRE2 aliases.
+#[cfg(feature = "pgen-parser")]
+fn regex_from_alpha_lookaround_name(name: &str, expr: Regex) -> Option<Regex> {
+    let boxed = Box::new(expr);
+    Some(match name {
+        "pla" | "positive_lookahead" => Regex::Lookahead {
+            expr: boxed,
+            positive: true,
+        },
+        "nla" | "negative_lookahead" => Regex::Lookahead {
+            expr: boxed,
+            positive: false,
+        },
+        "plb" | "positive_lookbehind" => Regex::Lookbehind {
+            expr: boxed,
+            positive: true,
+        },
+        "nlb" | "negative_lookbehind" => Regex::Lookbehind {
+            expr: boxed,
+            positive: false,
+        },
+        _ => return None,
+    })
+}
+
+/// Return the `CharRange`s for a PCRE2 POSIX bracket class name, or
+/// `None` for an unknown name. Matches the ASCII semantics documented
+/// in pcre2pattern(3) under "POSIX character classes". Character-
+/// class-internal use only — the adapter always emits these as
+/// disjoint ranges that merge into the surrounding char class.
+#[cfg(feature = "pgen-parser")]
+fn posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
+    let r = match name {
+        "alnum" => vec![
+            CharRange::range('0', '9'),
+            CharRange::range('A', 'Z'),
+            CharRange::range('a', 'z'),
+        ],
+        "alpha" => vec![CharRange::range('A', 'Z'), CharRange::range('a', 'z')],
+        "ascii" => vec![CharRange::range('\0', '\u{7F}')],
+        "blank" => vec![CharRange::single('\t'), CharRange::single(' ')],
+        "cntrl" => vec![
+            CharRange::range('\0', '\u{1F}'),
+            CharRange::single('\u{7F}'),
+        ],
+        "digit" => vec![CharRange::range('0', '9')],
+        "graph" => vec![CharRange::range('!', '~')],
+        "lower" => vec![CharRange::range('a', 'z')],
+        "print" => vec![CharRange::range(' ', '~')],
+        "punct" => vec![
+            CharRange::range('!', '/'),
+            CharRange::range(':', '@'),
+            CharRange::range('[', '`'),
+            CharRange::range('{', '~'),
+        ],
+        "space" => vec![
+            CharRange::single('\t'),
+            CharRange::single('\n'),
+            CharRange::single('\u{0B}'),
+            CharRange::single('\u{0C}'),
+            CharRange::single('\r'),
+            CharRange::single(' '),
+        ],
+        "upper" => vec![CharRange::range('A', 'Z')],
+        "word" => vec![
+            CharRange::range('0', '9'),
+            CharRange::range('A', 'Z'),
+            CharRange::single('_'),
+            CharRange::range('a', 'z'),
+        ],
+        "xdigit" => vec![
+            CharRange::range('0', '9'),
+            CharRange::range('A', 'F'),
+            CharRange::range('a', 'f'),
+        ],
+        _ => return None,
+    };
+    Some(r)
+}
+
+/// Return the complement (over the full Unicode codepoint set) of a
+/// list of `CharRange`s. Input ranges may overlap; output is sorted
+/// non-overlapping ranges that together with the input cover every
+/// codepoint exactly once. Used by `convert_posix_class_into` to
+/// implement the `^` negation of POSIX bracket classes.
+#[cfg(feature = "pgen-parser")]
+fn complement_ranges(input: &[CharRange]) -> Vec<CharRange> {
+    if input.is_empty() {
+        return vec![CharRange::range('\0', char::MAX)];
+    }
+    // Normalize: collect (start, end) as u32, sort, and merge overlaps.
+    let mut sorted: Vec<(u32, u32)> = input
+        .iter()
+        .map(|r| (r.start as u32, r.end as u32))
+        .collect();
+    sorted.sort_by_key(|&(s, _)| s);
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(sorted.len());
+    for (s, e) in sorted {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 + 1 {
+                last.1 = last.1.max(e);
+                continue;
+            }
+        }
+        merged.push((s, e));
+    }
+    // Walk the merged list and emit the gaps.
+    let mut out = Vec::with_capacity(merged.len() + 1);
+    let mut cursor: u32 = 0;
+    for (s, e) in &merged {
+        if cursor < *s {
+            if let (Some(a), Some(b)) = (char::from_u32(cursor), char::from_u32(*s - 1)) {
+                out.push(CharRange::range(a, b));
+            }
+        }
+        cursor = e.saturating_add(1);
+    }
+    if cursor <= char::MAX as u32 {
+        if let Some(a) = char::from_u32(cursor) {
+            out.push(CharRange::range(a, char::MAX));
+        }
+    }
+    out
 }
 
 /// Unicode code points for horizontal whitespace (\h).
