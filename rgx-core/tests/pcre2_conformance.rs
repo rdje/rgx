@@ -234,7 +234,7 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
     let mut oi = 1; // ob[0] is the pattern echo; subject echos start at 1
 
     for iline in ib.lines.iter().skip(1) {
-        let trimmed = trim_leading_spaces(iline);
+        let trimmed = trim_ws(iline);
         if trimmed.starts_with(b"\\=") {
             let annotation = String::from_utf8_lossy(&trimmed[2..]);
             if annotation.trim().starts_with("Expect no match") {
@@ -287,6 +287,22 @@ fn trim_leading_spaces(line: &[u8]) -> &[u8] {
         i += 1;
     }
     &line[i..]
+}
+
+/// pcre2test strips leading and trailing ASCII whitespace from data
+/// lines before interpreting escapes. Subjects that need explicit
+/// trailing whitespace use `\x20`, `\t`, etc. (which survive trimming
+/// because the raw bytes are backslash sequences, not whitespace).
+fn trim_ws(line: &[u8]) -> &[u8] {
+    let mut lo = 0;
+    while lo < line.len() && matches!(line[lo], b' ' | b'\t' | b'\r') {
+        lo += 1;
+    }
+    let mut hi = line.len();
+    while hi > lo && matches!(line[hi - 1], b' ' | b'\t' | b'\r') {
+        hi -= 1;
+    }
+    &line[lo..hi]
 }
 
 /// A complete pattern line has the form `/.../<modifiers>` with both
@@ -561,7 +577,11 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
             // an escape for `?`; it's a literal backslash followed by
             // a literal question mark. Use `decode_output` which is
             // intentionally narrower than `decode_subject`.
-            let body = trimmed.trim_start_matches("0:").trim_start();
+            // Strip the `0:` label plus exactly one separator space —
+            // not `trim_start`, because the matched text itself may be
+            // leading whitespace (e.g. ` 0:  ` means matched text = " ").
+            let body = trimmed.trim_start_matches("0:");
+            let body = body.strip_prefix(' ').unwrap_or(body);
             overall = decode_output(body.as_bytes());
             consumed += 1;
             idx += 1;

@@ -33,7 +33,7 @@ let validator = Regex::with_mode(
 
 ## Highlights
 
-- **PCRE2 10.47 feature-family coverage ~98%** (hand-maintained matrix). **Ground-truth case-level pass rate against PCRE2's own `testinput1..29` corpus: 81.4%** (11,216 cases parsed, 3,779 pass, 862 fail, 0 panic, 6,575 skip — measured 2026-04-14 via `rgx-core/tests/pcre2_conformance.rs` against PGEN 1.1.21). The feature-family percentage counts PCRE2 features as atomic check marks and is naturally optimistic; the case-level number is the honest differential against the authoritative oracle. Raise the case-level number as the bug-triage progresses.
+- **PCRE2 10.47 feature-family coverage ~98%** (hand-maintained matrix). **Ground-truth case-level pass rate against PCRE2's own `testinput1..29` corpus: 82.4%** (11,218 cases parsed, 3,828 pass, 815 fail, 0 panic, 6,575 skip — measured 2026-04-14 via `rgx-core/tests/pcre2_conformance.rs` against PGEN 1.1.21). The feature-family percentage counts PCRE2 features as atomic check marks and is naturally optimistic; the case-level number is the honest differential against the authoritative oracle. Raise the case-level number as the bug-triage progresses.
 - **Programmable** — embed Lua, JavaScript, Rhai, WASM, or native Rust callbacks inside patterns
 - **6-layer host integration** — data exchange, predicates, steering, events, async I/O, file matching
 - **Production safety** — `set_max_steps`, `set_max_backtrack_frames`, `set_max_recursion_depth` prevent DoS

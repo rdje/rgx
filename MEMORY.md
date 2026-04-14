@@ -294,6 +294,22 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-seventh commit) — Conformance harness: pcre2test subject-trim + match-label parsing
+- **What**: Two harness-only fixes in `rgx-core/tests/pcre2_conformance.rs`. Root cause: our harness was miscounting real RGX behavior as divergence on two axes.
+  1. `trim_ws` helper added — pcre2test strips leading and trailing ASCII whitespace from subject lines before interpreting escapes. Our old `trim_leading_spaces` only stripped the leading 4-space indent; trailing spaces were fed to RGX verbatim. A pattern like `/[^k]$/` on testdata subject `    abk   ` was run against `"abk   "` (RGX matched the last space) while PCRE2 was testing `"abk"` (no match). Explicit trailing whitespace in subjects uses `\x20`/`\t` — those survive trimming because the raw bytes are backslash sequences.
+  2. `0: <text>` label stripping fixed — old code did `trim_start_matches("0:").trim_start()` which wiped leading whitespace from the matched text itself (e.g. matched span `" "` parsed as `""`). Replaced with `strip_prefix(' ')` to remove exactly the one-char label separator.
+- **Conformance delta**: 3779 → **3828 pass** (+49), 862 → **815 fail** (−47). 81.4% → **82.4%**. 0 panics.
+- **Remaining failure buckets** (815 total):
+  - 202 false positive — first real case now `/a(?-i)b/i` on `"aB"` (in-pattern `(?-i)` flag-scope regression, RGX engine bug)
+  - 184 false negative — first is `/^\ca\cA\c[;\c:/` on control-char subject (possibly parsing `\c[` vs `\c:` handling)
+  - 159 span mismatch — first is `/([a]*?)*/` on `"a"` returning `"a"` vs PCRE2 `""` (outer-quantifier zero-iteration preference when inner lazy empty-matches — classic Perl empty-match loop semantics)
+  - 138 `\Q...\E` inside char class (pending PGEN-RGX report)
+  - 61 `[a-\d]` endpoint-shape AST mismatch
+  - 34 extended char class advanced forms
+  - 26 simple_escape rejects (now mostly adapter-escape edge cases)
+  - 11 class_escape Backreference variant for `[\8]` / `[\9]`
+- **Next concrete action**: pivot from harness to engine — tackle the `(?-i)` in-pattern flag-scope regression, since flag scoping is a correctness-critical feature that cascades into many tests. Then the empty-match zero-iteration preference for nested quantifiers.
+
 ### 2026-04-14 (thirty-sixth commit) — Adapter batch: five fixes, conformance 79.1% → 81.4%
 - **What**: Five focused RGX adapter fixes in `parsing.rs` that absorb PGEN 1.1.21's new AST shapes and close the `fixed-upstream-pending-adapter` reports:
   1. `convert_simple_escape` non-alnum literal fallback — accepts `\"`, `\/`, `\'`, `\@`, etc. per PCRE2 rule
