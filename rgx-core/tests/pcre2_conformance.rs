@@ -47,6 +47,11 @@ struct TestCase {
 enum Expected {
     /// `No match` observed in testoutput.
     NoMatch,
+    /// pcre2test printed a `Failed: error NNN ...` line instead of any
+    /// subject output, meaning PCRE2 itself rejects the pattern at
+    /// compile time. RGX should reject it too — comparing two
+    /// rejection outcomes is the right semantic.
+    CompileError,
     /// Match with capture groups (group 0 = overall; groups 1..N may be
     /// `None` if unmatched, surfaced as `<unset>` in PCRE2 output).
     ///
@@ -581,6 +586,7 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
     let mut idx = start + consumed;
     let mut overall: Option<Vec<u8>> = None;
     let mut no_match = false;
+    let mut compile_error = false;
     while idx < out_lines.len() {
         let l = out_lines[idx];
         if l.is_empty() || l.starts_with(b"/") || l.starts_with(b"#") {
@@ -592,6 +598,25 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
         }
         let text = String::from_utf8_lossy(l);
         let trimmed = text.trim_start();
+        // pcre2test emits `Failed: error NNN ...` when PCRE2 itself
+        // refuses to compile the pattern. The current subject line was
+        // written but never tested — record `Expected::CompileError`
+        // so RGX's compile-error response counts as a Pass.
+        if trimmed.starts_with("Failed:") {
+            compile_error = true;
+            consumed += 1;
+            idx += 1;
+            // The subsequent `        here:` line, if present, is part
+            // of the same diagnostic — eat it too.
+            if idx < out_lines.len() {
+                let nxt = String::from_utf8_lossy(out_lines[idx]);
+                if nxt.trim_start().starts_with("here:") {
+                    consumed += 1;
+                    idx += 1;
+                }
+            }
+            break;
+        }
         if trimmed == "No match" {
             no_match = true;
             consumed += 1;
@@ -637,7 +662,9 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
         idx += 1;
     }
 
-    let expected = if no_match {
+    let expected = if compile_error {
+        Expected::CompileError
+    } else if no_match {
         Expected::NoMatch
     } else if let Some(text) = overall {
         Expected::Match { overall: text }
@@ -1043,13 +1070,24 @@ fn run_case(case: &TestCase) -> Outcome {
     let want_global = opts.want_global;
 
     let re: Regex = match builder.build() {
-        Ok(r) => r,
+        Ok(r) => {
+            // PCRE2 expected the pattern to be REJECTED at compile time
+            // (Failed: error N) but RGX accepted it. That's a divergence
+            // in the opposite direction — RGX is too permissive.
+            if matches!(case.expected, Expected::CompileError) {
+                return Outcome::Fail {
+                    detail: format!(
+                        "PCRE2 rejected pattern at compile, RGX accepted it (subject={subject:?})"
+                    ),
+                };
+            }
+            r
+        }
         Err(e) => {
-            // RGX-side compile failure. If PCRE2 expected NoMatch or a
-            // successful match, this is a real parity gap. If PCRE2 also
-            // errored (rare in testinput1 since those go to other files),
-            // the harness here would still classify as Fail. Widening the
-            // "RGX error matches PCRE2 error" comparison is future work.
+            // PCRE2 also rejected → both engines agree, count as Pass.
+            if matches!(case.expected, Expected::CompileError) {
+                return Outcome::Pass;
+            }
             return Outcome::Fail {
                 detail: format!("compile error: {e}"),
             };
@@ -1073,6 +1111,12 @@ fn run_case(case: &TestCase) -> Outcome {
     re.set_max_recursion_depth(Some(128));
 
     match (&case.expected, case.expect_no_match_annotation) {
+        (Expected::CompileError, _) => {
+            // Reached only if RGX successfully compiled but PCRE2
+            // didn't — already handled above. Defensive fall-through:
+            // any subsequent observation is ambiguous, count as Pass.
+            Outcome::Pass
+        }
         (Expected::NoMatch, _) | (_, true) => {
             if re.is_match(subject) {
                 return Outcome::Fail {
@@ -1480,6 +1524,9 @@ fn classify_failure(detail: &str) -> &'static str {
     }
     if detail.starts_with("PCRE2 expected match") && detail.contains("RGX no match") {
         return "false negative (RGX misses a match PCRE2 finds)";
+    }
+    if detail.starts_with("PCRE2 rejected pattern at compile") {
+        return "RGX too permissive (PCRE2 rejects, RGX accepts)";
     }
     "other"
 }

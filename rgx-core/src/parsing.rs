@@ -2377,19 +2377,33 @@ where
 #[cfg(feature = "pgen-parser")]
 fn regex_from_alpha_lookaround_name(name: &str, expr: Regex) -> Option<Regex> {
     let boxed = Box::new(expr);
+    // PCRE2 also offers non-atomic lookaround variants `napla` /
+    // `naplb` (and their long forms `non_atomic_positive_lookahead` /
+    // `non_atomic_positive_lookbehind`). The only behavioral difference
+    // from the ordinary positive forms is that backtracking across the
+    // assertion boundary is permitted — a property that RGX's
+    // backtracking VM already exhibits for `(?=...)` and `(?<=...)`,
+    // so we can soundly map them to the same AST nodes. (There is no
+    // `nanla` / `nanlb`: PCRE2 does not define non-atomic variants of
+    // the negative forms — a negative assertion that failed to match
+    // already makes backtracking moot.)
     Some(match name {
-        "pla" | "positive_lookahead" => Regex::Lookahead {
-            expr: boxed,
-            positive: true,
-        },
+        "pla" | "positive_lookahead" | "napla" | "non_atomic_positive_lookahead" => {
+            Regex::Lookahead {
+                expr: boxed,
+                positive: true,
+            }
+        }
         "nla" | "negative_lookahead" => Regex::Lookahead {
             expr: boxed,
             positive: false,
         },
-        "plb" | "positive_lookbehind" => Regex::Lookbehind {
-            expr: boxed,
-            positive: true,
-        },
+        "plb" | "positive_lookbehind" | "naplb" | "non_atomic_positive_lookbehind" => {
+            Regex::Lookbehind {
+                expr: boxed,
+                positive: true,
+            }
+        }
         "nlb" | "negative_lookbehind" => Regex::Lookbehind {
             expr: boxed,
             positive: false,

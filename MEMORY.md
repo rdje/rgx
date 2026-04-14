@@ -294,6 +294,25 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (forty-first commit) — Compile-error parity + property aliases + napla/naplb
+- **What**: Cluster-first methodology applied to the 327 PGEN-AST-contract-mismatch bucket. 7 distinct root causes; 4 closed here.
+  1. Harness `Expected::CompileError` — pcre2test's `Failed: error N` line previously parsed as NoMatch, then RGX's compile error counted as fail. Now: PCRE2-rejected + RGX-rejected = Pass; PCRE2-rejected + RGX-accepted = new "RGX too permissive" bucket
+  2. PCRE2 property aliases: `L&`/`Lc`, synthetic Xan/Xsp/Xps/Xwd/Xuc, bidicontrol short forms, `sc:`/`scx:`/`script:` prefix stripping
+  3. `napla`/`naplb` (non-atomic positive lookaround) — same AST as positive lookahead/behind; backtracking semantics already match
+  4. Long forms `non_atomic_positive_lookahead`/`non_atomic_positive_lookbehind`
+- **Conformance delta**: 7600 → **7776 pass** (+176), 3618 → 3442 fail. 67.7% → **69.3%**. 0 panic / 0 skip.
+- **Remaining root causes from this bucket** (deferred):
+  - Short-form `\pX` / `\PX` (66 cases) — PGEN grammar gap; needs PGEN report or pattern preprocessor
+  - `scan_substring_group` / `script_run_group` (66 cases) — real PCRE2 feature work
+  - `[a-\d]` class_range with class_escape (6) — most already absorbed by compile-error parity
+- **New top buckets**:
+  - 1,019 false positives (still `/(?x)(?-x: \s*#\s*)/` extended-mode scope)
+  - 931 span mismatches (still octal escapes / Unicode boundaries)
+  - 576 false negatives (`\c[` control-char edge)
+  - 199 PGEN AST mismatch — first now `'non_atomic_lookahead_pos'` lookaround variant needing adapter
+  - 162 "RGX too permissive" — PCRE2 stricter at compile time; clean follow-up
+- **Methodology validation**: 327-failure bucket → 4 fixes → 176 passes closed. Same cluster-then-fix pattern works.
+
 ### 2026-04-14 (fortieth commit) — Adapter: `\p{...}`, `\.`, `\N` inside char classes — closes 575-bucket with 3 shape additions
 - **What**: Clustered the 575 `class_escape unsupported variant` failures. The bucket mapped 1-to-1 to three adapter gaps in `extend_ranges_from_regex` — not PGEN bugs, not 575 bug reports. Added three match arms:
   1. `Regex::UnicodeClass` → resolve via `unicode_support::resolve_unicode_property_class` and union ranges (covers `[\p{Lu}]`, `[\p{Nd}]`, `[\p{Thai}]`, etc. — ~95% of the bucket)
