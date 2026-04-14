@@ -281,6 +281,35 @@ fn split_lines(bytes: &[u8]) -> Vec<&[u8]> {
         .collect()
 }
 
+/// Escape every regex metacharacter in `s` so that the result matches
+/// the literal `s` verbatim. Used to implement PCRE2_LITERAL.
+fn escape_pattern_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for ch in s.chars() {
+        if matches!(
+            ch,
+            '.' | '^'
+                | '$'
+                | '*'
+                | '+'
+                | '?'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '|'
+                | '\\'
+                | '/'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn trim_leading_spaces(line: &[u8]) -> &[u8] {
     let mut i = 0;
     while i < line.len() && line[i] == b' ' {
@@ -634,63 +663,384 @@ enum Outcome {
     Panic { detail: String },
 }
 
-fn run_case(case: &TestCase) -> Outcome {
-    // Skip cases with named modifiers that would change semantics in a way
-    // we don't model (e.g. `no_start_optimize`, `aftertext`, `dupnames`).
-    // We only run the pure-flag subset for this first pass.
-    if case.full_modifiers.contains(',') {
-        return Outcome::Skip {
-            reason: "named PCRE2 modifiers not modelled yet",
-        };
+/// Outcome of classifying a PCRE2 test modifier. pcre2test modifiers
+/// come in three flavors: (a) diagnostic directives that alter
+/// pcre2test's output but NOT match semantics (`B`, `I`, `aftertext`,
+/// `mark`, `auto_callout`, `jitstack`, …) — safe to ignore; (b) compile
+/// or match options that DO change semantics, some of which map to
+/// RGX features and some of which don't; (c) pcre2test-specific
+/// execution directives.
+enum ModifierAction {
+    /// No-op for our purposes (either a diagnostic that doesn't
+    /// change match results, or a setting that already matches RGX's
+    /// default behavior).
+    Ignore,
+    /// Enable `RegexBuilder::case_insensitive`.
+    CaseInsensitive,
+    /// Enable `RegexBuilder::multi_line`.
+    MultiLine,
+    /// Enable `RegexBuilder::dot_matches_new_line`.
+    DotAll,
+    /// Enable `RegexBuilder::ignore_whitespace`.
+    Extended,
+    /// Global matching (`/g`).
+    Global,
+    /// Anchor the pattern at the start — wraps with `\A(?:...)`.
+    Anchored,
+    /// Anchor the pattern at the end — wraps with `(?:...)\z`.
+    EndAnchored,
+    /// Prepend an inline flag like `(?J)` or `(?U)` to the effective
+    /// pattern. Tests can then run end-to-end; if the engine's wiring
+    /// for the flag is incomplete, the test fails (not skips) and
+    /// contributes to the honest conformance number.
+    InlineFlag(&'static str),
+    /// Treat the whole pattern as a literal string (PCRE2_LITERAL).
+    Literal,
+    /// Wrap the pattern with `^(?:…)$` in multi-line mode (match_line).
+    MatchLine,
+    /// Wrap the pattern with `\b(?:…)\b` (match_word).
+    MatchWord,
+    /// Genuinely unsupported by RGX today; record the reason and skip.
+    Unsupported(&'static str),
+}
+
+fn classify_modifier(m: &str) -> ModifierAction {
+    // pcre2test splits the modifier text on commas; we receive one
+    // comma-separated piece here. Some pieces are a single short-flag
+    // letter (e.g. "i"), others are named directives (e.g. "utf",
+    // "aftertext"), and a few come with a value (e.g. "bsr=unicode").
+    // Strip any `name=value` value for classification — we only care
+    // about the key. Also strip surrounding whitespace (pcre2test
+    // tolerates it; some testdata lines have trailing spaces).
+    let m = m.trim();
+    if m.is_empty() {
+        return ModifierAction::Ignore;
     }
-    for c in case.modifiers.chars() {
-        if !matches!(c, 'i' | 'm' | 's' | 'x' | 'g') {
-            return Outcome::Skip {
-                reason: "unmodelled short modifier",
-            };
+    let key = m.split('=').next().unwrap_or(m);
+    match key {
+        // -- Short flags mapped to RegexBuilder knobs -----------------
+        "i" | "caseless" => ModifierAction::CaseInsensitive,
+        "m" | "multiline" => ModifierAction::MultiLine,
+        "s" | "dotall" | "single_line" => ModifierAction::DotAll,
+        "x" | "extended" => ModifierAction::Extended,
+        "g" | "global" => ModifierAction::Global,
+        "A" | "anchored" => ModifierAction::Anchored,
+        "endanchored" => ModifierAction::EndAnchored,
+
+        // -- Compile / match options that happen to match RGX defaults
+        // or are essentially no-ops for the &str-based API we use.
+        // UTF: RGX's str API is codepoint-oriented by default — compatible
+        // with PCRE2_UTF for ASCII and for well-formed UTF-8 subjects.
+        "utf" | "utf8" | "utf16" | "utf32" | "never_utf" | "no_utf_check" => ModifierAction::Ignore,
+        // Extended-char-class and BSUX alternates: RGX's parser accepts
+        // both the default and these alternate forms.
+        "alt_extended_class" | "alt_bsux" | "alt_circumflex" | "alt_verbnames" => {
+            ModifierAction::Ignore
+        }
+        // Empty-class tolerance: RGX already accepts `[]` (empty set)
+        // in its grammar — historical PCRE1 required PCRE2_ALLOW_EMPTY_CLASS.
+        "allow_empty_class" => ModifierAction::Ignore,
+
+        // -- Pcre2test-side diagnostic directives; no effect on match.
+        "B" | "I" | "BI" | "IB" | "debug" | "fullbincode" | "hex" | "info" | "framesize"
+        | "stackguard" | "tables" => ModifierAction::Ignore,
+        "aftertext"
+        | "allaftertext"
+        | "allcaptures"
+        | "allusedtext"
+        | "altglobal"
+        | "getall"
+        | "memory"
+        | "ovector"
+        | "pushcopy"
+        | "push"
+        | "startchar"
+        | "subject_literal"
+        | "replace"
+        | "substitute_extended"
+        | "substitute_overflow_length"
+        | "substitute_unknown_unset"
+        | "substitute_unset_empty"
+        | "substitute_literal"
+        | "substitute_callout"
+        | "substitute_matched"
+        | "substitute_replacement_only"
+        | "substitute_skip"
+        | "substitute_stop"
+        | "substitute_case_callout"
+        | "mark"
+        | "get"
+        | "copy"
+        | "allocmem"
+        | "callout_capture"
+        | "callout_data"
+        | "callout_error"
+        | "callout_fail"
+        | "callout_none"
+        | "callout_no_where"
+        | "jitstack"
+        | "jit"
+        | "jit_verify"
+        | "no_jit"
+        | "auto_callout"
+        | "heap_limit"
+        | "depth_limit"
+        | "match_limit"
+        | "offset"
+        | "offset_limit"
+        | "posix"
+        | "posix_nosub"
+        | "posix_startend"
+        | "print_time"
+        | "null_context"
+        | "null_pattern"
+        | "null_replacement"
+        | "null_subject"
+        | "use_offset_limit"
+        | "locale"
+        | "parens_nest_limit"
+        | "recursion_limit"
+        | "max_pattern_length"
+        | "max_varlookbehind"
+        | "never_backslash_c"
+        | "convert"
+        | "convert_glob_escape"
+        | "convert_glob_no_starstar"
+        | "convert_glob_no_wild_separator"
+        | "convert_glob"
+        | "convert_syntax"
+        | "convert_posix_basic"
+        | "convert_posix_extended"
+        | "convert_length" => ModifierAction::Ignore,
+
+        // -- Optimization disables: no effect on correctness (only on
+        // performance). PCRE2's optimizer and RGX's are different engines
+        // anyway; ignoring keeps tests running against the same answer.
+        "no_start_optimize" | "no_auto_possess" | "no_dotstar_anchor" | "no_auto_capture"
+        | "auto_possess" | "start_optimize" | "use_length" => ModifierAction::Ignore,
+
+        // -- Features we recognize as real but don't yet wire. These
+        // become specific skip reasons so the follow-up backlog is
+        // explicit rather than "unmodelled short modifier".
+        // `a` is a pcre2test shorthand that enables PCRE2_EXTRA_ASCII_BSD +
+        // _BSS + _BSW + _DIGIT + _POSIX — all the ASCII-restricted class
+        // variants at once.
+        "a" => ModifierAction::Ignore,
+        "r" => ModifierAction::Ignore,
+        // pcre2test JIT variants are pure performance diagnostics and
+        // have no effect on match outcome.
+        "jitfast" | "jitverify" | "jit_invalid_utf" => ModifierAction::Ignore,
+        // pcre2test-specific harness directives — no effect on match.
+        "callout_info"
+        | "pushtablescopy"
+        | "null_substitute_match_data"
+        | "expand"
+        | "use_length"
+        | "no_bs0" => ModifierAction::Ignore,
+        // PCRE2 extra flags that influence parsing semantics.
+        "extra_alt_bsux" => ModifierAction::Ignore,
+        "bad_escape_is_literal" => ModifierAction::Ignore,
+        "escaped_cr_is_lf" => ModifierAction::Ignore,
+        "allow_lookaround_bsk" => ModifierAction::Ignore,
+        "never_ucp" => ModifierAction::Ignore,
+        "match_line" => ModifierAction::MatchLine,
+        "match_word" => ModifierAction::MatchWord,
+        "literal" => ModifierAction::Literal,
+        "U" | "ungreedy" => ModifierAction::InlineFlag("(?U)"),
+        "n" => ModifierAction::InlineFlag("(?n)"),
+        "J" | "dupnames" => ModifierAction::InlineFlag("(?J)"),
+        // Real features we don't wire yet. Rather than skip, let the
+        // case RUN through RGX — if the semantic gap affects match
+        // outcome the test will fail, making it an honest part of the
+        // conformance gap rather than a hidden asterisk.
+        "D" | "dollar_endonly" => ModifierAction::Ignore,
+        "ucp" => ModifierAction::Ignore,
+        "match_unset_backref" => ModifierAction::Ignore,
+        "caseless_restrict" => ModifierAction::Ignore,
+        "turkish_casing" => ModifierAction::Ignore,
+        "ascii_all" | "ascii_bsd" | "ascii_bss" | "ascii_bsw" | "ascii_digit" | "ascii_posix" => {
+            ModifierAction::Ignore
+        }
+        "match_invalid_utf" => ModifierAction::Ignore,
+        "extended_more" | "xx" => ModifierAction::Ignore,
+        "firstline" => ModifierAction::Ignore,
+        "no_utf_check_string" => ModifierAction::Ignore,
+        "bsr" => ModifierAction::Ignore,
+        "newline" => ModifierAction::Ignore,
+        "notempty" | "notempty_atstart" | "notbol" | "noteol" => ModifierAction::Ignore,
+        "recursion_context" => ModifierAction::Ignore,
+
+        // Catch-all: any remaining pcre2test modifier is almost
+        // certainly either a further diagnostic or a niche feature.
+        // Fall through to Ignore so the case runs; real divergences
+        // will surface as failures in the conformance report.
+        _ => ModifierAction::Ignore,
+    }
+}
+
+/// Settings collected by classifying the modifier list.
+#[derive(Default)]
+struct EffectiveOptions {
+    case_insensitive: bool,
+    multi_line: bool,
+    dot_all: bool,
+    extended: bool,
+    want_global: bool,
+    anchored_start: bool,
+    anchored_end: bool,
+    /// Inline-flag prefixes like `(?J)` or `(?U)` to prepend to the
+    /// effective pattern (after any wrap transforms).
+    inline_prefixes: Vec<&'static str>,
+    /// `literal`/PCRE2_LITERAL — escape the pattern so every character
+    /// matches itself.
+    literal: bool,
+    /// `match_line` — wrap as `^(?:pat)$` with multi_line on.
+    match_line: bool,
+    /// `match_word` — wrap as `\b(?:pat)\b`.
+    match_word: bool,
+}
+
+fn resolve_modifiers(full: &str) -> Result<EffectiveOptions, &'static str> {
+    let mut opts = EffectiveOptions::default();
+    if full.is_empty() {
+        return Ok(opts);
+    }
+    // Short flags only valid as a bare letter bundle (no `=`, no
+    // lowercase `l`..`z` substring that would signal a named modifier).
+    // Known single-letter flags, per pcre2test documentation.
+    const SHORT_FLAGS: &[char] = &[
+        'i', 'm', 's', 'x', 'g', 'B', 'I', 'A', 'U', 'J', 'D', 'n', 'a', 'r',
+    ];
+
+    for piece in full.split(',') {
+        let is_short_bundle = !piece.is_empty() && piece.chars().all(|c| SHORT_FLAGS.contains(&c));
+        if is_short_bundle {
+            for c in piece.chars() {
+                apply_action(classify_modifier(&c.to_string()), &mut opts)?;
+            }
+        } else {
+            apply_action(classify_modifier(piece), &mut opts)?;
         }
     }
+    Ok(opts)
+}
 
-    // Subject must be valid UTF-8 for the `&str` API.
-    let Ok(subject) = std::str::from_utf8(&case.subject) else {
-        return Outcome::Skip {
-            reason: "non-UTF-8 subject",
-        };
+fn apply_action(action: ModifierAction, opts: &mut EffectiveOptions) -> Result<(), &'static str> {
+    match action {
+        ModifierAction::Ignore => Ok(()),
+        ModifierAction::CaseInsensitive => {
+            opts.case_insensitive = true;
+            Ok(())
+        }
+        ModifierAction::MultiLine => {
+            opts.multi_line = true;
+            Ok(())
+        }
+        ModifierAction::DotAll => {
+            opts.dot_all = true;
+            Ok(())
+        }
+        ModifierAction::Extended => {
+            opts.extended = true;
+            Ok(())
+        }
+        ModifierAction::Global => {
+            opts.want_global = true;
+            Ok(())
+        }
+        ModifierAction::Anchored => {
+            opts.anchored_start = true;
+            Ok(())
+        }
+        ModifierAction::EndAnchored => {
+            opts.anchored_end = true;
+            Ok(())
+        }
+        ModifierAction::InlineFlag(prefix) => {
+            opts.inline_prefixes.push(prefix);
+            Ok(())
+        }
+        ModifierAction::Literal => {
+            opts.literal = true;
+            Ok(())
+        }
+        ModifierAction::MatchLine => {
+            opts.match_line = true;
+            opts.multi_line = true;
+            Ok(())
+        }
+        ModifierAction::MatchWord => {
+            opts.match_word = true;
+            Ok(())
+        }
+        ModifierAction::Unsupported(reason) => Err(reason),
+    }
+}
+
+fn run_case(case: &TestCase) -> Outcome {
+    let opts = match resolve_modifiers(&case.full_modifiers) {
+        Ok(o) => o,
+        Err(reason) => return Outcome::Skip { reason },
     };
 
-    // Process-abort skip list. Some patterns crash PGEN's worker
-    // thread via stack overflow — an unrecoverable SIGABRT that
-    // `catch_unwind` cannot intercept. Each entry is a full PCRE2
-    // pattern string; when encountered, the harness skips the
-    // compile attempt entirely. Every entry should have a filed
-    // PGEN-RGX-NNNN report.
-    //
-    // Current entries:
-    // - testinput2:4674 — 80-level-deep group nesting blows PGEN's
-    //   8 MiB recursive-descent stack. Filed as a PGEN report.
+    // Some patterns crash PGEN's worker via stack overflow that
+    // `catch_unwind` cannot intercept. Currently empty — both
+    // historical entries were fixed upstream.
     if is_pgen_stack_overflow_pattern(&case.pattern) {
         return Outcome::Skip {
             reason: "known PGEN stack-overflow pattern",
         };
     }
 
-    // Build through RegexBuilder so flag application is consistent.
-    // RegexBuilder methods consume self (fluent chain), so we rebind.
-    let mut builder = RegexBuilder::new(&case.pattern);
-    let mut want_global = false;
-    for c in case.modifiers.chars() {
-        builder = match c {
-            'i' => builder.case_insensitive(),
-            'm' => builder.multi_line(),
-            's' => builder.dot_matches_new_line(),
-            'x' => builder.ignore_whitespace(),
-            'g' => {
-                want_global = true;
-                builder
-            }
-            _ => unreachable!("pre-filtered above"),
-        };
+    // Subjects that aren't valid UTF-8 are lossy-decoded as Latin-1
+    // (one codepoint per byte). Well-formed UTF-8 subjects unchanged.
+    let subject_storage: String;
+    let subject: &str = match std::str::from_utf8(&case.subject) {
+        Ok(s) => s,
+        Err(_) => {
+            subject_storage = case.subject.iter().map(|b| *b as char).collect();
+            &subject_storage
+        }
+    };
+
+    // Build the effective pattern: literal-escape → wraps → inline
+    // flag prefixes. Each transform is composable and order-independent
+    // except literal (must run first because subsequent transforms
+    // operate on the escaped text).
+    let core_pattern = if opts.literal {
+        escape_pattern_literal(&case.pattern)
+    } else {
+        case.pattern.clone()
+    };
+    let mut effective_pattern = core_pattern;
+    if opts.match_word {
+        effective_pattern = format!("\\b(?:{effective_pattern})\\b");
     }
+    if opts.match_line {
+        effective_pattern = format!("^(?:{effective_pattern})$");
+    }
+    if opts.anchored_start || opts.anchored_end {
+        let lhs = if opts.anchored_start { "\\A" } else { "" };
+        let rhs = if opts.anchored_end { "\\z" } else { "" };
+        effective_pattern = format!("{lhs}(?:{effective_pattern}){rhs}");
+    }
+    for prefix in &opts.inline_prefixes {
+        effective_pattern = format!("{prefix}{effective_pattern}");
+    }
+    let mut builder = RegexBuilder::new(&effective_pattern);
+    if opts.case_insensitive {
+        builder = builder.case_insensitive();
+    }
+    if opts.multi_line {
+        builder = builder.multi_line();
+    }
+    if opts.dot_all {
+        builder = builder.dot_matches_new_line();
+    }
+    if opts.extended {
+        builder = builder.ignore_whitespace();
+    }
+    let want_global = opts.want_global;
 
     let re: Regex = match builder.build() {
         Ok(r) => r,
@@ -879,6 +1229,10 @@ fn run_full_conformance() {
     let mut aggregate_panics: Vec<String> = Vec::new();
     let mut aggregate_categories: std::collections::BTreeMap<&'static str, (usize, String)> =
         std::collections::BTreeMap::new();
+    let mut skip_histogram: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    let mut skipped_modifier_histogram: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
 
     // Silence the default panic printer: each panic inside `run_case` is
     // caught and reported; the noisy backtrace-style output is
@@ -941,7 +1295,17 @@ fn run_full_conformance() {
                         );
                     }
                 }
-                Outcome::Skip { reason: _ } => stats.skip += 1,
+                Outcome::Skip { reason } => {
+                    stats.skip += 1;
+                    *skip_histogram.entry(reason).or_insert(0) += 1;
+                    if reason == "unmodelled short modifier"
+                        || reason == "named PCRE2 modifiers not modelled yet"
+                    {
+                        *skipped_modifier_histogram
+                            .entry(case.full_modifiers.clone())
+                            .or_insert(0) += 1;
+                    }
+                }
                 Outcome::Panic { detail } => {
                     stats.panic += 1;
                     if aggregate_panics.len() < 20 {
@@ -1033,6 +1397,26 @@ fn run_full_conformance() {
         for (cat, (count, example)) in buckets {
             eprintln!("  {count:>5}  {cat}");
             eprintln!("         first: {example}");
+        }
+        eprintln!();
+    }
+
+    if !skip_histogram.is_empty() {
+        eprintln!("Skip histogram (sorted by count):");
+        let mut buckets: Vec<_> = skip_histogram.iter().collect();
+        buckets.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        for (reason, count) in buckets {
+            eprintln!("  {count:>5}  {reason}");
+        }
+        eprintln!();
+    }
+
+    if !skipped_modifier_histogram.is_empty() {
+        eprintln!("Skipped-case modifier distribution (top 50):");
+        let mut buckets: Vec<_> = skipped_modifier_histogram.iter().collect();
+        buckets.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        for (m, count) in buckets.iter().take(50) {
+            eprintln!("  {count:>5}  {m:?}");
         }
         eprintln!();
     }

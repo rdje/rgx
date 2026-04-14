@@ -294,6 +294,21 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-ninth commit) — Zero skip: all 11,218 PCRE2 cases now run end-to-end
+- **What**: The conformance harness was silently skipping 6,575 of 11,218 PCRE2 test cases because it only understood `{i m s x g}` short modifiers and UTF-8 subjects. User pushed for signoff-quality coverage: every case must execute against RGX. New `ModifierAction` enum + `classify_modifier` table covers every pcre2test short flag and named directive (~100 names), mapping each to Ignore (pcre2test-only diagnostic), an existing `RegexBuilder` knob, an `InlineFlag("(?J)")`-style pattern prefix, or a pattern wrap (`Literal`/`MatchLine`/`MatchWord`). Non-UTF-8 subjects are Latin-1-decoded (one codepoint per byte) to reach the `&str` API. Unknown modifiers fall through to Ignore so the case runs — divergences appear as honest failures, not hidden skips.
+- **Collateral engine fix**: `Compiler::feature_validation_message` was not walking into `RegexAst::FlagGroup`, so unsupported `\p{L&}` / `\p{Xan}` / `\p{Xsp}` / etc. names appearing under a `(?s)…` wrapper escaped validation and panicked at codegen. Added the walker arm; panics are now clean compile errors.
+- **Conformance delta**: 3839 → **7274 pass** (+3435), 804 → 3944 fail, 6575 → **0 skip**. Headline pass rate changed from 82.7% (of the 42% decidable slice) to **64.8%** (of the full corpus). Net +3,435 passing cases; the apparent drop is the first time RGX has been scored against the whole authoritative PCRE2 oracle.
+- **Top remaining failure buckets** (3,944 total):
+  - 1,008 false positives (RGX matches where PCRE2 doesn't) — first: `/(?x)(?-x: \s*#\s*)/` (scope-aware extended-mode whitespace pass)
+  - 887 span mismatches — first: `/(abc)\223/` (octal escape semantics)
+  - 575 `[\8]` / `[\9]` class_escape Backreference variant
+  - 523 false negatives — first: `/^\ca\cA\c[;\c:/` (`\c[` control-char edge)
+  - 293 `\NNN` backref-to-missing-group resolution gaps
+  - 285 `\Q...\E` inside char class (PGEN rule)
+  - 195 `[a-\d]` class_range endpoint-shape mismatches
+  - 178 unrecognized simple_escape chars
+- **Next concrete action**: pick the single largest semantic bucket (false positives) and work top-example by top-example; each root cause fixed will typically close several related cases.
+
 ### 2026-04-14 (thirty-eighth commit) — Bare inline-flag directives scope forward
 - **What**: Fix `(?i)` / `(?-i)` / `(?x)` etc. written without a trailing body — PCRE2 says they change the effective flags for the remainder of the enclosing group. Adapter was lowering each to `FlagGroup { expr: Empty }`, leaving subsequent siblings under the outer flag context. `convert_concatenation` now folds pieces through `apply_bare_flag_directives`: when a bare directive appears, everything to its right becomes its body. Nested bare directives compose via suffix recursion. Scoped `(?-i:...)` form untouched.
 - **Conformance delta**: 3828 → **3839 pass** (+11), 815 → **804 fail** (−11). 82.4% → **82.7%**.

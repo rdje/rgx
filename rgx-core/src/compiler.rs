@@ -2437,7 +2437,8 @@ impl Compiler {
             RegexAst::Quantified { expr, .. }
             | RegexAst::Lookahead { expr, .. }
             | RegexAst::Lookbehind { expr, .. }
-            | RegexAst::Group { expr, .. } => {
+            | RegexAst::Group { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => {
                 self.feature_validation_message(expr, total_groups, named_groups)
             }
             RegexAst::Conditional {
