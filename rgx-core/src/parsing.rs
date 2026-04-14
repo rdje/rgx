@@ -2321,6 +2321,49 @@ where
             ranges.push(CharRange::single('\u{08}'));
             Ok(())
         }
+        // `\p{...}` / `\P{...}` inside a char class: resolve the named
+        // Unicode property to its range set via the shared helper and
+        // union those ranges into the enclosing class. Invalid property
+        // names are reported with the same error shape the atom-level
+        // path uses.
+        Regex::UnicodeClass { name, negated } => {
+            let resolved = crate::unicode_support::resolve_unicode_property_class(&name, negated)
+                .map_err(|msg| make_error(&msg))?;
+            ranges.extend(resolved);
+            Ok(())
+        }
+        // `\.` inside a char class is a literal period. PGEN lowers the
+        // escape to `Regex::Dot` because the token happens to be the
+        // same; inside `[...]` the metaclass interpretation does not
+        // apply and PCRE2 reads it as the literal character.
+        Regex::Dot => {
+            ranges.push(CharRange::single('.'));
+            Ok(())
+        }
+        // `\N` (N = digit) inside a char class. PGEN lowers every `\1`..
+        // `\9` to `Regex::Backreference(N)` because that is the general
+        // escape form, but PCRE2 rule for char classes is:
+        //   - N ∈ 0..=7 : octal escape, value = N as a codepoint
+        //   - N ∈ 8..=9 : literal digit character (octal requires base-8
+        //     digits; 8 and 9 are not valid, so PCRE2 falls back to the
+        //     literal character rule)
+        // Backrefs have no meaning inside `[...]` — there is nothing to
+        // reference against a single-char position.
+        Regex::Backreference(n) => {
+            let ch = match n {
+                1..=7 => char::from_u32(n).ok_or_else(|| {
+                    make_error(&format!("octal escape value {n} is not a valid codepoint"))
+                })?,
+                8..=9 => char::from_u32(b'0' as u32 + n).expect("digit char is always valid"),
+                other => {
+                    return Err(make_error(&format!(
+                        "class_escape Backreference({other}) has no PCRE2 interpretation inside a char class"
+                    )));
+                }
+            };
+            ranges.push(CharRange::single(ch));
+            Ok(())
+        }
         other => Err(make_error(&format!(
             "class_escape resolved to unsupported variant '{other:?}' for char class"
         ))),

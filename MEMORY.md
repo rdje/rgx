@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (fortieth commit) — Adapter: `\p{...}`, `\.`, `\N` inside char classes — closes 575-bucket with 3 shape additions
+- **What**: Clustered the 575 `class_escape unsupported variant` failures. The bucket mapped 1-to-1 to three adapter gaps in `extend_ranges_from_regex` — not PGEN bugs, not 575 bug reports. Added three match arms:
+  1. `Regex::UnicodeClass` → resolve via `unicode_support::resolve_unicode_property_class` and union ranges (covers `[\p{Lu}]`, `[\p{Nd}]`, `[\p{Thai}]`, etc. — ~95% of the bucket)
+  2. `Regex::Dot` → literal `.` (PCRE2 inside-class rule)
+  3. `Regex::Backreference(n)` → octal `\0..\7` = codepoint n; `\8`/`\9` = literal digit (PCRE2 backref-inside-class fallback)
+- **Conformance delta**: 7274 → **7600 pass** (+326), 3944 → 3618 fail. 64.8% → **67.7%**. 0 panic / 0 skip.
+- **Insight for user**: 575 failures ≠ 575 bugs. Always cluster by root cause before filing reports. This one was pure RGX-side adapter work, no PGEN interaction needed.
+- **Next**: `[a-\d]+` class-range endpoint (327, new top adapter bucket) — PGEN emits class_escape subtree as a range endpoint; adapter expects single char.
+
 ### 2026-04-14 (thirty-ninth commit) — Zero skip: all 11,218 PCRE2 cases now run end-to-end
 - **What**: The conformance harness was silently skipping 6,575 of 11,218 PCRE2 test cases because it only understood `{i m s x g}` short modifiers and UTF-8 subjects. User pushed for signoff-quality coverage: every case must execute against RGX. New `ModifierAction` enum + `classify_modifier` table covers every pcre2test short flag and named directive (~100 names), mapping each to Ignore (pcre2test-only diagnostic), an existing `RegexBuilder` knob, an `InlineFlag("(?J)")`-style pattern prefix, or a pattern wrap (`Literal`/`MatchLine`/`MatchWord`). Non-UTF-8 subjects are Latin-1-decoded (one codepoint per byte) to reach the `&str` API. Unknown modifiers fall through to Ignore so the case runs — divergences appear as honest failures, not hidden skips.
 - **Collateral engine fix**: `Compiler::feature_validation_message` was not walking into `RegexAst::FlagGroup`, so unsupported `\p{L&}` / `\p{Xan}` / `\p{Xsp}` / etc. names appearing under a `(?s)…` wrapper escaped validation and panicked at codegen. Added the walker arm; panics are now clean compile errors.

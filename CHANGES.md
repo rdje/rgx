@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-14 - Adapter: three class-item shapes — `\p{...}`, `\.`, `\N` digit — resolved inside char classes
+- Scope: Close the **575-case `class_escape unsupported variant`** bucket with three targeted adapter additions. Clustering the failing patterns showed the bucket was one-to-one with three RGX-side AST-lowering gaps (not PGEN bugs): ~1,094 line entries were `Regex::UnicodeClass` rejections, ~18 were `Regex::Backreference(n)`, and 4 were `Regex::Dot` — each arriving via `extend_ranges_from_regex` which didn't cover those variants.
+- Changes in `rgx-core/src/parsing.rs::extend_ranges_from_regex`:
+  - `Regex::UnicodeClass { name, negated }` → resolve via `unicode_support::resolve_unicode_property_class(name, negated)` and union the returned ranges. Restores `[\p{Lu}]`, `[\p{Nd}]`, `[\p{Any}]`, `[\P{L&}]`, script names like `[\p{Thai}]`/`[\p{Arabic}]`, etc.
+  - `Regex::Dot` → literal `.`. PGEN lowers `\.` to `Regex::Dot` because the escape token aligns with the dot metaclass at the atom level; inside `[...]` the metaclass interpretation does not apply and PCRE2 reads it as the literal period.
+  - `Regex::Backreference(n)` → PCRE2 rule for `[...\N]`: backrefs are meaningless in a character class, so `\1`..`\7` become octal escapes (codepoint `n`), and `\8`/`\9` become the literal digit (octal requires base-8 digits, 8/9 don't qualify, so PCRE2 falls back to the literal-character rule).
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves 64.8% → **67.7%** (7,274 → **7,600 pass**, 3,944 → 3,618 fail, still 0 panic / 0 skip). Net **+326 passing cases** from one function edit.
+- Notes/impact: Key insight for the user — the 575 failures did NOT map to 575 bugs, nor to a dozen, but to **3 distinct root causes on the RGX adapter side, 0 PGEN bug reports filed**. The `[a-\d]+` class-range endpoint bucket (now 327, up from 195) surfaced as the new top-adapter gap for a follow-up commit: PGEN emits a `class_escape` subtree as a range endpoint and our adapter expects a single character.
+
 ### 2026-04-14 - Conformance harness: every PCRE2 test case now runs end-to-end (0 skip)
 - Scope: Rework `rgx-core/tests/pcre2_conformance.rs` to eliminate all test-case skipping. The previous harness skipped **6,575 of 11,218** PCRE2 10.47 test cases — anything with a modifier outside `{i m s x g}` or a non-UTF-8 subject — leaving the reported pass rate a selective view that hid real divergences. The user wants signoff-quality coverage: every case must exercise RGX and get classified as pass or fail.
 - Changes:
