@@ -1035,17 +1035,13 @@ fn run_full_conformance() {
 fn is_pgen_stack_overflow_pattern(pat: &str) -> bool {
     let leading_parens = pat.bytes().take_while(|&b| b == b'(').count();
     if leading_parens >= 80 {
-        // testinput2:4674 — filed as PGEN-RGX-0054.
+        // testinput2:4674 — PGEN-RGX-0054, still unresolved upstream
+        // as of PGEN 1.1.19 / contract 1.1.20 (commit edd3b59).
         return true;
     }
-    if pat.starts_with("(?=(?<regex>(?#simplesyntax)") {
-        // testinput2:2880 — Python-interpolation grammar with
-        // mutually-recursive named groups. PGEN's recursive-descent
-        // parser exhausts its 8 MiB worker stack on the cross-
-        // references (`\g<regex>` / `\g<complex>` / `\g<segment>`).
-        // Filed as PGEN-RGX-0055.
-        return true;
-    }
+    // PGEN-RGX-0055 (Python-interpolation grammar at testinput2:2880)
+    // was FIXED by PGEN 1.1.19 — the pattern now compiles cleanly.
+    // Skip guard removed.
     false
 }
 

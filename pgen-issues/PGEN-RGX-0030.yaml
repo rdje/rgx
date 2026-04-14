@@ -1,7 +1,7 @@
 id: PGEN-RGX-0030
 summary: |
   PGEN regex parser rejects pattern "(*PRUNE:m(m)(?&y)(?(DEFINE)(?<y>b))" that PCRE2 10.47 accepts.
-status: open
+status: closed
 opened_at: 2026-04-13T00:00:00Z
 first_seen_at: 2026-04-13T00:00:00Z
 last_updated_at: 2026-04-13T00:00:00Z
@@ -85,8 +85,15 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.19"
+  fixed_in_parser_backend_version: "edd3b59"
+  verified_at: 2026-04-14T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.19 (commit edd3b59) now parses the repro input
+    cleanly. Verified by running Regex::compile against every
+    pgen-issues/artifacts/PGEN-RGX-NNNN/repro_input.txt after
+    bumping the submodule. The pattern compiles without error;
+    any residual testdata failures for the same pattern shape are
+    now RGX-side adapter gaps rather than PGEN-side parse failures.

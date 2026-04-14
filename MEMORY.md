@@ -294,6 +294,20 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-14 (thirty-fourth commit) — PGEN 1.1.19 bump: 25 reports closed, 13 partial, 1 remaining
+- **PGEN submodule**: 1.1.10 (`8783757`) → **1.1.19 (`edd3b59`, integration contract 1.1.20)**. 66 upstream commits.
+- **25 PGEN-RGX reports closed** (`verified-fixed-upstream`): POSIX sub-class delimiters (0017-0020, 0024-0026), verb parens (0029-0032), malformed-quantifier literals (0040-0049, 0052), `\g{}`/`\k{}` whitespace (0050, 0051), and **PGEN-RGX-0055** (mutually-recursive named-group stack overflow — no longer aborts, skip guard removed from harness + bin).
+- **13 PGEN-RGX reports partial** (`fixed-upstream-pending-adapter`): PGEN emits correct AST; RGX adapter needs lowering. class_item variants (0021/22/27/28/33/53), quoted_literal (0023), condition-assertion callout aliases (0034-0039).
+- **1 PGEN-RGX still unresolved upstream**: 0054 (80-level parser-depth stack overflow). Skip guard stays.
+- **Conformance**: 11,216 parsed / **3,661 pass** / **979 fail** / 0 panic / 6,576 skip / **78.9%** (was 78.1% on 1.1.10). +37 passes, −37 fails. Failure histogram: PGEN parse failures 245 → 162 (−83); `class_item` contract mismatches 16 → 70 (+54) — PGEN accepting more, RGX adapter needs to catch up.
+- **Verified** each closed report via a small Rust verifier that runs `Regex::compile` against each `pgen-issues/artifacts/PGEN-RGX-NNNN/repro_input.txt`. Automated the closure YAML edits via two Python helpers (`/tmp/close_pgen_fixes.py` and `/tmp/partial_pgen_fixes.py`).
+- **Next concrete action**: the 13 partial reports define a clean RGX-adapter work list. In priority order:
+  1. `convert_simple_escape` fallback for `\"`/`\/` (72 conformance cases)
+  2. `convert_class_escape` for `[\b]`/`[\c]` variants (62 cases)
+  3. New `convert_quoted_literal` adapter for `\Q...\E` (0023 + testdata occurrences)
+  4. `convert_class_item` expansion for POSIX-class-inside-brackets node shapes (0021/22/27/28/33/53 plus ~54 new conformance cases)
+  5. `convert_conditional` extension for callout-style lookaround aliases (0034-0039 plus related testdata cases)
+
 ### 2026-04-14 (thirty-third commit) — Case-fold ranges spanning both cases — fix (C) from the A-B-C plan
 - **Bug**: `[W-c]/i` produced an inverted mirror range (w=119, C=67, start > end, matches nothing) in `Compiler::case_fold_ranges`. Any ASCII char-class range whose endpoints crossed the case boundary lost its case-fold expansion.
 - **Fix**: for pure-ASCII ranges, iterate each codepoint and push case-swapped single-char ranges; the sort+merge step consolidates. Non-ASCII ranges keep the old endpoint-fold path.

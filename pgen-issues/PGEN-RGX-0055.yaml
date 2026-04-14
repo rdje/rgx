@@ -4,7 +4,7 @@ summary: |
   and aborts the process (SIGABRT) when parsing a pattern whose named
   groups mutually recurse through `\g<name>` references (a
   Python-variable-interpolation grammar from PCRE2 testinput2 line 2880).
-status: open
+status: closed
 opened_at: 2026-04-13T00:00:00Z
 first_seen_at: 2026-04-13T00:00:00Z
 last_updated_at: 2026-04-13T00:00:00Z
@@ -117,11 +117,15 @@ impact: |
   underlying parser fragility remains.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.19"
+  fixed_in_parser_backend_version: "edd3b59"
+  verified_at: 2026-04-14T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
-    The fix should ship a grammar-layer guard that returns a
-    structured parse failure (not an abort) for named-group
-    recursion patterns that exceed the parser's depth budget.
+    PGEN 1.1.19 (commit edd3b59) now parses the repro input
+    cleanly. Verified by running Regex::compile against every
+    pgen-issues/artifacts/PGEN-RGX-NNNN/repro_input.txt after
+    bumping the submodule. The pattern compiles without error;
+    any residual testdata failures for the same pattern shape are
+    now RGX-side adapter gaps rather than PGEN-side parse failures.

@@ -85,8 +85,17 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream-pending-adapter
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.19"
+  fixed_in_parser_backend_version: "edd3b59"
+  verified_at: 2026-04-14T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.19 (commit edd3b59) now parses the repro input —
+    the input no longer fails at PGEN. The remaining failure is
+    RGX-side: PGEN emits an AST node of category "class_item variant (POSIX class inside brackets)"
+    that RGX's adapter in rgx-core/src/parsing.rs does not yet
+    lower. Observed RGX-side error:
+      pgen AST contract mismatch: pgen class_item has no known variant under 'class_item'
+    Tracked as RGX-side follow-up in docs/BACKLOG.md C7 under
+    "RGX adapter gaps opened by PGEN 1.1.19 upstream fixes".

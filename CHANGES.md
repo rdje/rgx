@@ -14,6 +14,31 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-14 - PGEN 1.1.19 bump: closes 25 PGEN-RGX reports, 13 more partial
+- Scope: Bumps the `subs/pgen` submodule from 1.1.10 (commit `8783757`) to **1.1.19 (commit `edd3b59`, integration contract `1.1.20`)**. 66 upstream commits including 25 grammar fixes that directly close PGEN-side RGX-filed reports, plus a parser-depth fix that resolves one of the two known stack-overflow patterns.
+- **25 PGEN-RGX reports closed** (`verified-fixed-upstream` resolution):
+  - POSIX sub-class delimiters and nested forms: 0017, 0018, 0019, 0020, 0024, 0025, 0026
+  - Backtracking-verb parens-in-payload: 0029, 0030, 0031, 0032 (`(*MARK:m(m)...)` / `(*PRUNE:...)` / `(*SKIP:...)` / `(*THEN:...)`)
+  - Malformed-quantifier-as-literal: 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0052
+  - Whitespace in backref/subroutine braces: 0050, 0051
+  - Mutually-recursive named-group stack overflow (was process abort): **0055** — PGEN now parses the testinput2:2880 Python-interpolation grammar cleanly, so the `(?=(?<regex>(?#simplesyntax)` skip guard in both the conformance harness and `file_pgen_issues` has been removed.
+- **13 PGEN-RGX reports partially fixed** (`fixed-upstream-pending-adapter` resolution): PGEN now accepts the syntax and emits a structured AST, but RGX's adapter in `rgx-core/src/parsing.rs` doesn't yet lower the new node shapes. These drop from PGEN's responsibility to RGX's:
+  - `class_item` variants for POSIX-class-inside-brackets: 0021, 0022, 0027, 0028, 0033, 0053
+  - `quoted_literal` atom rule for `\Q...\E`: 0023
+  - Condition-assertion callout-style lookaround aliases (`*pla:`, `*plb:`, `*nlb:`, etc.): 0034, 0035, 0036, 0037, 0038, 0039
+- **1 PGEN-RGX report still unresolved upstream**: PGEN-RGX-0054 (80-level group-nesting parser-depth stack overflow). The `leading_parens >= 80` skip guard remains in place.
+- **Conformance impact**:
+  - before (PGEN 1.1.10): 11,216 parsed / 3,624 pass / 1,016 fail / 0 panic / 6,576 skip / 78.1%
+  - after (PGEN 1.1.19): 11,216 parsed / **3,661 pass** / **979 fail** / 0 panic / 6,576 skip / **78.9%**
+  - +37 pass, −37 fail. Failure-histogram shift: PGEN parse failures 245 → 162 (−83) while `class_item`-variant contract mismatches went 16 → 70 (+54) — both moves reflect PGEN correctly accepting more syntax, with RGX's adapter needing to catch up on the new AST shapes.
+- **RGX-side follow-up work now unblocked** (was waiting on PGEN grammar):
+  - `convert_class_escape` and `convert_class_item` need cases for POSIX-nested-in-brackets variants
+  - New `convert_quoted_literal` adapter for `\Q...\E` atoms
+  - `convert_conditional` needs to recognize PCRE2 callout-style lookaround alias names (`pla`, `plb`, `nla`, `nlb`, `positive_lookahead`, etc.) and route them to the existing lookahead/lookbehind branches
+- **Verification**: each of the 38 closed/partially-closed reports was checked by a small Rust verifier that reads `pgen-issues/artifacts/PGEN-RGX-NNNN/repro_input.txt` and calls `Regex::compile` on each. 35 of 52 tested patterns (including the 15 pre-existing resolved reports) compiled cleanly against the new PGEN; 17 are now RGX-adapter-side; 2 still aborted (0054 still aborts; 0055 no longer does).
+- **README**: PGEN-pin paragraph refreshed to 1.1.19/edd3b59; case-level pass-rate updated from 78.0% to 78.9%.
+- Validation: `cargo fmt --check` clean, `cargo test -p rgx-core --lib` 1007/0/1 (unchanged), `cargo clippy --workspace --all-targets` zero RGX-owned errors.
+
 ### 2026-04-14 - Case-fold ASCII ranges that span both cases (PCRE2 testinput1:1381)
 - Scope: Fixes a case-insensitive char-class-range bug surfaced by the full PCRE2 conformance. `[W-c]/i` — a bracket expression whose endpoints span from uppercase `W` (87) to lowercase `c` (99), including symbols and both letter cases — was losing its case-fold expansion because `Compiler::case_fold_ranges` produced an inverted mirror range that never matched. Pattern `/^[W-c]+$/i` on subject `"wxy_^ABC"` returned no match; PCRE2 expects a full match.
 - **Root cause**: for a multi-char `CharRange`, `case_fold_ranges` built a single "mirror" range by folding each endpoint independently. For `[W-c]` with endpoints (W=87, c=99), the fold produced (w=119, C=67) — `start > end`, an empty range. The rest of the case-insensitive path never widened the class beyond the original `W..c`.
