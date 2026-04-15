@@ -765,10 +765,18 @@ impl<'a> PgenAstAdapter<'a> {
             })?;
         let negated = opener.starts_with('P');
 
-        // Walk the prop_name subtree and collect every terminal character.
-        let name_node = self.first_descendant(node, "prop_name").ok_or_else(|| {
-            self.contract_error("pgen property_escape is missing its prop_name child")
-        })?;
+        // Walk the prop_name subtree for the braced form `\p{Name}` or
+        // the `short_prop_letter` subtree for the single-letter short
+        // form `\pX` (PGEN 1.1.22+ grammar). Both yield the same
+        // `UnicodeClass` AST.
+        let name_node = self
+            .first_descendant(node, "prop_name")
+            .or_else(|| self.first_descendant(node, "short_prop_letter"))
+            .ok_or_else(|| {
+                self.contract_error(
+                    "pgen property_escape is missing its prop_name / short_prop_letter child",
+                )
+            })?;
         let mut name = String::new();
         self.collect_all_terminal_chars(name_node, &mut name);
         if name.is_empty() {
@@ -859,6 +867,17 @@ impl<'a> PgenAstAdapter<'a> {
         if let Some(posix_node) = self.find_direct_child(item, "posix_class") {
             return self.convert_posix_class_into(posix_node, ranges);
         }
+        // PGEN 1.1.22+ adds `quoted_class_literal` as a class_item
+        // variant — `\Q…\E` inside `[…]` contributes each body byte
+        // as a literal class member, per pcre2pattern(3). Metacharacters
+        // like `]`, `-`, `^` keep their literal meaning inside the
+        // quoted region, so we append each as its own `CharRange`.
+        if let Some(quoted_node) = self.find_direct_child(item, "quoted_class_literal") {
+            for ch in self.quoted_class_literal_chars(quoted_node) {
+                ranges.push(CharRange::single(ch));
+            }
+            return Ok(());
+        }
         if let Some(literal_node) = self.find_direct_child(item, "class_literal") {
             let ch = self
                 .collect_first_terminal_char(literal_node)
@@ -872,6 +891,30 @@ impl<'a> PgenAstAdapter<'a> {
             "pgen class_item has no known variant under '{}'",
             item.rule_name
         )))
+    }
+
+    /// Walk a `quoted_class_literal` subtree and return the body
+    /// characters in order. PGEN emits the body as a sequence of
+    /// `quoted_class_literal_char` children; each contributes exactly
+    /// one character. Omits the literal `\Q` opener and `\E` closer
+    /// terminals by filtering to the body-character subtree name.
+    fn quoted_class_literal_chars(&self, node: &PgenAstNode) -> Vec<char> {
+        let mut out = Vec::new();
+        self.walk_quoted_class_body(node, &mut out);
+        out
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn walk_quoted_class_body(&self, node: &PgenAstNode, out: &mut Vec<char>) {
+        if node.rule_name == "quoted_class_literal_char" {
+            if let Some(ch) = self.collect_first_terminal_char(node) {
+                out.push(ch);
+            }
+            return;
+        }
+        for child in node.children() {
+            self.walk_quoted_class_body(child, out);
+        }
     }
 
     /// Convert a `posix_class` node (e.g. `[:alpha:]`, `[:^digit:]`)

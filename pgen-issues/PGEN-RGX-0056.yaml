@@ -1,10 +1,10 @@
 id: PGEN-RGX-0056
 summary: |
   PGEN regex parser does not accept the PCRE2 short-form Unicode property escape `\pX` / `\PX` (single-letter property name without braces). PGEN falls through to `simple_escape(p|P)` instead of producing a `property_escape` AST node.
-status: open
-opened_at: 2026-04-13T00:00:00Z
-first_seen_at: 2026-04-13T00:00:00Z
-last_updated_at: 2026-04-13T00:00:00Z
+status: closed
+opened_at: 2026-04-14T00:00:00Z
+first_seen_at: 2026-04-14T00:00:00Z
+last_updated_at: 2026-04-15T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -115,8 +115,26 @@ impact: |
   adapter gaps or real PCRE2 feature work).
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.22"
+  fixed_in_parser_backend_version: "9af9500"
+  verified_at: 2026-04-15T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.22 (commit 9af9500, "Fix PCRE2 short properties and
+    class quotes") extends `property_escape` in
+    `subs/pgen/grammars/regex.ebnf:224-227` to accept the short
+    form `"p" short_prop_letter` / `"P" short_prop_letter` where
+    `short_prop_letter = 'C' | 'L' | 'M' | 'N' | 'P' | 'S' | 'Z'`
+    — exactly matching the PCRE2 seven-major-category rule.
+
+    Verified by running
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '\pL' /tmp/verify.json
+    against the updated submodule. The emitted AST now contains a
+    `property_escape` node (was `simple_escape(p) + literal_char(L)`).
+
+    RGX adapter also extended (rgx-core/src/parsing.rs,
+    convert_property_escape) to prefer `short_prop_letter` when
+    `prop_name` is absent. End-to-end conformance confirms the fix
+    landed cleanly across all ~66 affected test cases.

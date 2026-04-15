@@ -1,10 +1,10 @@
 id: PGEN-RGX-0057
 summary: |
   PGEN regex parser rejects `\Q...\E` literal-quote sequences inside a character class with `E_PARSE_FAILURE: escape is not accepted inside a character class`. PCRE2 10.47 accepts these — `\Q...\E` inside `[...]` is the literal byte sequence between the delimiters added to the class, per pcre2pattern(3) §"Generic character types".
-status: open
-opened_at: 2026-04-13T00:00:00Z
-first_seen_at: 2026-04-13T00:00:00Z
-last_updated_at: 2026-04-13T00:00:00Z
+status: closed
+opened_at: 2026-04-14T00:00:00Z
+first_seen_at: 2026-04-14T00:00:00Z
+last_updated_at: 2026-04-15T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -123,8 +123,39 @@ impact: |
   for the same treatment inside character classes.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.22"
+  fixed_in_parser_backend_version: "9af9500"
+  verified_at: 2026-04-15T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.22 (commit 9af9500, "Fix PCRE2 short properties and
+    class quotes") adds a new `class_item` alternative
+    `quoted_class_literal` in `subs/pgen/grammars/regex.ebnf:114-121`:
+
+      class_item = posix_class | quoted_class_literal | ...
+      quoted_class_literal = "\Q" quoted_class_literal_char* "\E"
+      quoted_class_literal_char = letter | digit | whitespace
+                                | class_safe_special | ']' | unicode_char
+
+    The body-char production explicitly allows `]` so a quoted `]`
+    inside a class is no longer the class terminator.
+
+    Verified by running
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '[z\Qa-d]\E]' /tmp/verify.json
+    against the updated submodule. The emitted AST now contains a
+    `quoted_class` node (previously `E_PARSE_FAILURE`).
+
+    RGX adapter extended (rgx-core/src/parsing.rs) with a new
+    `quoted_class_literal` branch in `convert_class_item` plus a
+    `quoted_class_literal_chars` / `walk_quoted_class_body`
+    helper pair — each body char becomes a `CharRange::single`
+    appended to the enclosing class. ~138 affected PCRE2 cases now
+    compile; conformance moved from 69.3% to 70.7%.
+
+    One related issue remains open: bare `\E` inside `[...]`
+    without a preceding `\Q` (e.g. `/^[\Eabc]/`) still reports
+    `E_PARSE_FAILURE`. PCRE2 treats this as a literal `E` (the
+    `\E` closes a not-yet-open quoted region). Track separately
+    if it affects enough cases to warrant a report.

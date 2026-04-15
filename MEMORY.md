@@ -294,6 +294,18 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-15 (forty-third commit) — PGEN 1.1.22 bump + adapter wiring closes 0056/0057
+- **What**: Submodule bump e617960 → 9af9500 (PGEN 1.1.22, "Fix PCRE2 short properties and class quotes"). PGEN added:
+  1. Short-form `property_escape` variant (`"p" short_prop_letter`) matching PCRE2's 7 major-category letters
+  2. New `class_item` alternative `quoted_class_literal` with a body-char rule that explicitly admits `]`
+- RGX adapter wiring in `parsing.rs`:
+  1. `convert_property_escape` now accepts `short_prop_letter` subtree as an alternative name source
+  2. `convert_class_item` new `quoted_class_literal` branch + `quoted_class_literal_chars`/`walk_quoted_class_body` helpers
+- **Conformance delta**: 7776 → **7933 pass** (+157), 3442 → 3285 fail. 69.3% → **70.7%**. 0 panic / 0 skip. 1007 lib tests still green.
+- **Reports closed**: PGEN-RGX-0056, 0057 both `verified-fixed-upstream` with 9af9500 evidence + ast_dump verification command.
+- **Residual**: `\E` alone inside `[...]` (no preceding `\Q`) still `E_PARSE_FAILURE` — 246 cases in `compile: PGEN parse failure` bucket. PCRE2 treats as literal `E`. Noted in 0057 closing notes; will file follow-up if cluster doesn't collapse during further triage.
+- **Total PGEN-RGX reports filed**: 57 (0001–0057). Closed: 57. Open: 0.
+
 ### 2026-04-14 (forty-second commit) — File PGEN-RGX-0056 + PGEN-RGX-0057
 - **What**: Two cluster-distilled PGEN bug reports, protocol-compliant per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`:
   1. **PGEN-RGX-0056**: short-form `\pX`/`\PX` Unicode property escape — PGEN parses but emits wrong AST shape (`simple_escape(p) + literal_char(L)` instead of `property_escape`). AST dump captured. Affects ~66 cases.

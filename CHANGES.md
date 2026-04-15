@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-15 - PGEN 1.1.22 bump: closes PGEN-RGX-0056/0057 + adapter wiring
+- Scope: Bump the PGEN submodule from `e617960` (1.1.21) to `9af9500` (1.1.22, "Fix PCRE2 short properties and class quotes") and wire the two new AST shapes into `rgx-core/src/parsing.rs`. Closes both PGEN reports filed in the prior commit; 1,007 lib tests still green; conformance moves 69.3% → **70.7%** (+157 passing cases, 7,776 → **7,933 pass**, 3,442 → 3,285 fail, still 0 panic / 0 skip).
+- PGEN-side changes (verified against `subs/pgen/grammars/regex.ebnf`):
+  - PGEN-RGX-0056 — `property_escape` rule extended with a short-form alternative `"p" short_prop_letter` / `"P" short_prop_letter` where `short_prop_letter = 'C' | 'L' | 'M' | 'N' | 'P' | 'S' | 'Z'`. `\pL` now emits `property_escape` instead of `simple_escape(p) + literal_char(L)`.
+  - PGEN-RGX-0057 — new `class_item` alternative `quoted_class_literal = "\Q" quoted_class_literal_char* "\E"`, with `quoted_class_literal_char` explicitly listing `']'` so a quoted `]` is no longer the class terminator. `[z\Qa-d]\E]` now parses to a `quoted_class` AST node (was hard `E_PARSE_FAILURE`).
+- RGX adapter wiring in `rgx-core/src/parsing.rs`:
+  - `convert_property_escape`: prefer `short_prop_letter` subtree when `prop_name` is absent — single-letter property names resolve to the same `Regex::UnicodeClass` shape as their braced counterparts.
+  - `convert_class_item`: new branch for `quoted_class_literal`, delegating to a pair of new helpers `quoted_class_literal_chars` / `walk_quoted_class_body` that collect body characters in document order and append each as a `CharRange::single` to the enclosing class.
+- Validation: `cargo test -p rgx-core --lib` 1007 pass. PCRE2 conformance 11,218 parsed / 7,933 pass / 3,285 fail / 0 panic / 0 skip. `cargo fmt` + `cargo clippy --workspace --all-targets` clean. Both report YAMLs (`pgen-issues/PGEN-RGX-005{6,7}.yaml`) moved to `status: closed` with `verified-fixed-upstream` resolution notes pointing at 9af9500.
+- Notes/impact: Related-but-separate residual issue — bare `\E` inside a character class without a preceding `\Q` (e.g. `/^[\Eabc]/`) still reports `E_PARSE_FAILURE` (246 cases in `compile: PGEN parse failure`). PCRE2 treats `\E` outside a quoted region as a literal `E`. Recorded in the 0057 closing notes; will file a follow-up report if the bucket doesn't collapse during subsequent triage.
+
 ### 2026-04-14 - File PGEN-RGX-0056 + PGEN-RGX-0057 (cluster-distilled, 2 reports for ~204 cases)
 - Scope: File two protocol-compliant PGEN bug reports against PGEN 1.1.21 / commit e617960. Both are minimal repros distilled from larger conformance failure clusters (cluster-first methodology — file ONE report per root cause, never per case).
 - Reports:
