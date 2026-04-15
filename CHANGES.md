@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - Conformance ratchet gate: never regress pass rate
+- Scope: The PCRE2 full-testdata conformance suite now enforces a one-way ratchet. `pcre2_full_testdata_conformance` asserts `pass >= PASS_BASELINE`, `fail <= FAIL_BASELINE`, `panic == 0`, and `skip == 0`. A regression fails CI; a legitimate improvement bumps the baselines in the same commit. This turns the 72.6% → 100% conformance journey into a guaranteed one-way climb — no silent drops possible.
+- Changes: Four new `const`s at the bottom of `pcre2_full_testdata_conformance` — `PASS_BASELINE = 8_141`, `FAIL_BASELINE = 3_077`, `PANIC_BASELINE = 0`, `SKIP_BASELINE = 0` — plus four `assert!` / `assert_eq!` guards with remediation-explicit error messages, and a `🎯 NEW BASELINE ELIGIBLE` hint printed when an improvement is observed so the author is prompted to bump constants in the same commit.
+- Validation: `cargo test -p rgx-core --test pcre2_conformance -- --ignored` passes at the 8141/3077/0/0 baseline. 1,007 lib tests still pass. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: From here, every commit that touches RGX or PGEN is gated against the full 11,218-case PCRE2 oracle. The rule is simple — the number only goes up. This mechanism anchors the stated goal of driving the 3,077 remaining failures to zero and keeping them there.
+
 ### 2026-04-16 - PGEN 1.1.23 bump: closes PGEN-RGX-0058/0059/0060 + adapter wiring for new class_range grammar
 - Scope: Bump PGEN submodule from `9af9500` (1.1.22) to `cd0f8c7` (1.1.23, "Publish regex PCRE2 maintenance release 1.1.23"). All three open PGEN-RGX reports are explicitly cited in PGEN's release notes and land fixes in a single parser bump. Adapter absorbs PGEN's new class-range grammar shape.
 - PGEN-side changes (from `subs/pgen/CHANGES.md` and `regex.ebnf`):

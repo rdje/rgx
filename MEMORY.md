@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (forty-seventh commit) — Conformance ratchet gate locks the journey to 100%
+- **What**: Conformance test now enforces a one-way ratchet via four new baselines: `PASS_BASELINE=8141`, `FAIL_BASELINE=3077`, `PANIC_BASELINE=0`, `SKIP_BASELINE=0`. Any regression fails the test; improvements must bump baselines in the same commit. A `🎯 NEW BASELINE ELIGIBLE` hint is printed when the current pass count exceeds the baseline.
+- **Why**: The stated goal is 3,077 → 0, and never leave it. Without the gate, a silent regression anywhere in RGX or PGEN could drop the number without CI noticing.
+- **Discipline going forward**: every commit on the journey to 100% bumps `PASS_BASELINE` up and `FAIL_BASELINE` down. The ratchet's error messages explicitly tell the author what to do if they're legitimately reclassifying cases (harness tightening etc.).
+- **Next**: with the gate locked, start drilling the 3,077 remaining failures cluster-first. Top buckets: 909 false positive (`(?x)(?-x: \s*#\s*)` extended-scope), 893 span mismatch (`(abc)\223` octal boundary), 627 false negative (`\c[` control-char), 208 PGEN AST contract, 177 PGEN parse failure, 126 RGX too permissive, 91 other compile error, 23 simple_escape residual.
+
 ### 2026-04-16 (forty-sixth commit) — PGEN 1.1.23 bump closes 0058/0059/0060 + adapter wiring
 - **What**: Submodule bump 9af9500 → cd0f8c7 (PGEN 1.1.23 "Publish regex PCRE2 maintenance release"). All three open reports cited explicitly in PGEN's release notes. Grammar additions:
   1. Bounded variable-length lookbehind + control verbs inside lookbehind (for 0058)

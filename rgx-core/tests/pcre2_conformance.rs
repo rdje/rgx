@@ -1488,6 +1488,73 @@ fn run_full_conformance() {
         ran_total >= 200,
         "harness ran too few cases across the full testdata: {ran_total}"
     );
+
+    // -----------------------------------------------------------------
+    // Ratchet gate — never regress pass rate
+    // -----------------------------------------------------------------
+    //
+    // The PCRE2 10.47 corpus is the authoritative oracle. Every commit
+    // MUST pass at least as many cases as the previous green commit and
+    // MUST NOT introduce new panics. When a change legitimately improves
+    // the count (fix lands, PGEN bumps, etc.), update these baselines
+    // in the same commit. That creates a one-way ratchet from 72.6% →
+    // … → 100% over time: each merge can only move the number up.
+    //
+    // Last updated: 2026-04-16 after PGEN 1.1.23 + class-range adapter
+    // wiring (commit 297db4e).
+    const PASS_BASELINE: usize = 8_141;
+    const FAIL_BASELINE: usize = 3_077;
+    const PANIC_BASELINE: usize = 0;
+    const SKIP_BASELINE: usize = 0;
+
+    assert_eq!(
+        aggregate.panic,
+        PANIC_BASELINE,
+        "panic-count regression: baseline={PANIC_BASELINE}, observed={observed}; \
+         every panic is an engine bug that must be fixed before merging",
+        observed = aggregate.panic
+    );
+    assert!(
+        aggregate.pass >= PASS_BASELINE,
+        "pass-count regression: baseline={PASS_BASELINE}, observed={observed}; \
+         fix the regression or — if the drop is intentional and justified \
+         (e.g. a harness tightening that reclassifies previously-passing \
+         cases as failures) — update PASS_BASELINE + FAIL_BASELINE in the \
+         same commit and explain in the commit message",
+        observed = aggregate.pass
+    );
+    assert!(
+        aggregate.fail <= FAIL_BASELINE,
+        "fail-count regression: baseline={FAIL_BASELINE}, observed={observed}; \
+         same remediation as above",
+        observed = aggregate.fail
+    );
+    assert_eq!(
+        aggregate.skip,
+        SKIP_BASELINE,
+        "skip-count regression: baseline={SKIP_BASELINE}, observed={observed}; \
+         every skip hides a real divergence — classify the case as pass or \
+         fail instead, or widen the modifier classifier to `Ignore` so it \
+         runs end-to-end",
+        observed = aggregate.skip
+    );
+    eprintln!(
+        "ratchet OK — pass={pass} >= {PASS_BASELINE}, fail={fail} <= {FAIL_BASELINE}, panic={panic}, skip={skip}",
+        pass = aggregate.pass,
+        fail = aggregate.fail,
+        panic = aggregate.panic,
+        skip = aggregate.skip,
+    );
+    if aggregate.pass > PASS_BASELINE {
+        eprintln!(
+            "🎯 NEW BASELINE ELIGIBLE: pass={pass} (was {PASS_BASELINE}), \
+             fail={fail} (was {FAIL_BASELINE}) — update the baselines in \
+             tests/pcre2_conformance.rs in this commit so the ratchet locks \
+             in the improvement.",
+            pass = aggregate.pass,
+            fail = aggregate.fail,
+        );
+    }
 }
 
 /// Returns true when the pattern is a known process-abort trigger
