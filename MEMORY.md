@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-15 (forty-fourth commit) — Harness: advance output cursor past non-pattern blocks
+- **What**: Pattern input blocks were being paired with the wrong output block whenever testoutput* had extra annotation/separator content (e.g. `---` dividers, PCRE2-maintainer comments) with no testinput counterpart. The old logic advanced output by +1 per input block indiscriminately. Fix: when input is a Pattern block, walk output cursor forward until `out_blocks[oi].lines[0].starts_with("/")`.
+- **Impact**: Patterns like `/[a-[:digit:]]+/` that PCRE2 rejects (`Failed: error 150`) were mispaired with the preceding comment block, so parse_subject_output recorded `Expected::NoMatch`, and RGX's matching compile-error counted as a divergence. With the fix, these now correctly see `Expected::CompileError` and pass.
+- **Conformance delta**: 7933 → **8090 pass** (+157), 3285 → 3128 fail. 70.7% → **72.1%**.
+- **Next**: remaining top buckets unchanged — 930 false positive (`(?x)(?-x: \s*#\s*)` extended-scope), 880 span mismatch, 624 false negative, 250 PGEN parse failure, 202 PGEN AST contract, 126 RGX-too-permissive. The 250 PGEN parse failure bucket still contains the `\E` inside `[...]` residual from 0057 plus others; need to drill.
+
 ### 2026-04-15 (forty-third commit) — PGEN 1.1.22 bump + adapter wiring closes 0056/0057
 - **What**: Submodule bump e617960 → 9af9500 (PGEN 1.1.22, "Fix PCRE2 short properties and class quotes"). PGEN added:
   1. Short-form `property_escape` variant (`"p" short_prop_letter`) matching PCRE2's 7 major-category letters

@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-15 - Conformance harness: advance output cursor past non-pattern blocks to keep pairing in sync
+- Scope: Fix a harness-correctness bug where pattern input blocks were paired with the wrong output blocks when `testoutput*` carried extra annotation/separator content (e.g. `---`-style dividers, PCRE2-maintainer comments) that had no counterpart in `testinput*`. The prior logic advanced the output cursor by +1 per input block regardless of what that output block actually contained, so a single "extra" output block could desync every downstream pattern until the next alignment point. Impact on scoring: PCRE2-rejected patterns (like `/[a-[:digit:]]+/`) were mispaired with the preceding comment block, never reaching the `Failed:` line — so the harness recorded `Expected::NoMatch` instead of `Expected::CompileError`, and RGX's matching compile error counted as a divergence.
+- Changes: In `rgx-core/tests/pcre2_conformance.rs::parse_cases`, when the input block is classified as `Pattern`, walk the output cursor forward until `out_blocks[oi].lines[0]` starts with `/` (i.e. is a pattern echo). Comment and directive input blocks continue to advance the cursor by +1 (their output counterparts are always at the same index).
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves 70.7% → **72.1%** (7,933 → **8,090 pass**, 3,285 → 3,128 fail, still 0 panic / 0 skip). Affected buckets: false positive 1,038 → 930 (−108), span mismatch 941 → 880 (−61), RGX-too-permissive 162 → 126 (−36). False negatives rose 578 → 624 (+46) as previously-mispaired cases shifted into their correct expected-match category.
+- Notes/impact: This was a pre-existing harness bug unrelated to RGX's matching correctness — +157 passes landed without touching the engine. The remaining 3,128 failures are now correctly classified, which is the prerequisite for accurate bucket-by-bucket triage going forward.
+
 ### 2026-04-15 - PGEN 1.1.22 bump: closes PGEN-RGX-0056/0057 + adapter wiring
 - Scope: Bump the PGEN submodule from `e617960` (1.1.21) to `9af9500` (1.1.22, "Fix PCRE2 short properties and class quotes") and wire the two new AST shapes into `rgx-core/src/parsing.rs`. Closes both PGEN reports filed in the prior commit; 1,007 lib tests still green; conformance moves 69.3% → **70.7%** (+157 passing cases, 7,776 → **7,933 pass**, 3,442 → 3,285 fail, still 0 panic / 0 skip).
 - PGEN-side changes (verified against `subs/pgen/grammars/regex.ebnf`):

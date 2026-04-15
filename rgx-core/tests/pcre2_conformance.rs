@@ -84,12 +84,6 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
     // them in lockstep.
     let mut oi = 0;
     for ib in &in_blocks {
-        // Advance the output cursor to the next block that pairs with
-        // this input block. For non-pattern blocks (comments /
-        // directives) both files have matching blocks at the same
-        // positions, so a pure index walk works.
-        let ob = out_blocks.get(oi);
-
         let kind = classify_block(&ib.lines);
         if let BlockKind::Directive(directive) = kind {
             if let Some(cond) = directive.strip_prefix("#if ") {
@@ -109,6 +103,28 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
             continue;
         }
 
+        // For Pattern input blocks, the paired output block MUST also
+        // start with `/pattern/`. testoutput files occasionally carry
+        // extra separator/annotation blocks (e.g. `-----` dividers or
+        // PCRE2 maintainer comments that have no testinput counterpart).
+        // Walk forward until the output block is a pattern echo so the
+        // pairing stays in sync.
+        let ob = loop {
+            match out_blocks.get(oi) {
+                Some(candidate) => {
+                    let ok = candidate
+                        .lines
+                        .first()
+                        .map(|l| l.starts_with(b"/"))
+                        .unwrap_or(false);
+                    if ok {
+                        break Some(candidate);
+                    }
+                    oi += 1;
+                }
+                None => break None,
+            }
+        };
         let Some(ob) = ob else { break };
 
         match kind {
