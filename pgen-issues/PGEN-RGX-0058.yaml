@@ -1,10 +1,10 @@
 id: PGEN-RGX-0058
 summary: |
   PGEN regex parser rejects variable-length lookbehinds that contain PCRE2 control verbs like (*ACCEPT), (*COMMIT), (*FAIL), (*PRUNE), (*SKIP), (*THEN), (*:MARK). PCRE2 10.47 accepts these — the control verb short-circuits match-time backtracking, and pcre2pattern(3) documents lookbehind variable-length support in modern PCRE2.
-status: open
+status: closed
 opened_at: 2026-04-15T00:00:00Z
 first_seen_at: 2026-04-15T00:00:00Z
-last_updated_at: 2026-04-15T00:00:00Z
+last_updated_at: 2026-04-16T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -117,8 +117,22 @@ impact: |
   produced.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.23"
+  fixed_in_parser_backend_version: "cd0f8c7"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.23 (commit cd0f8c7, "Publish regex PCRE2 maintenance
+    release 1.1.23") accepts bounded variable-length lookbehind
+    and PCRE2 control verbs inside lookbehind, while keeping
+    unbounded quantifiers (`+`, `*`, `{n,}`) rejected.
+    Release notes explicitly cite this report.
+
+    Verified against the updated submodule:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '(?<=a(*ACCEPT)b)c' /tmp/verify.json
+    emits `"status": "success"` — PGEN parses the repro cleanly.
+
+    No RGX adapter wiring required; the VM already handles the
+    resulting lookbehind/verb AST shapes.

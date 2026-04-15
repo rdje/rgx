@@ -618,6 +618,14 @@ impl<'a> PgenAstAdapter<'a> {
         if let Some(octal) = self.first_descendant(node, "octal_escape") {
             return self.convert_octal_escape(octal);
         }
+        // PGEN 1.1.23 `class_range_simple_escape` is a restricted
+        // sibling of `simple_escape` that excludes orphan `\E` as a
+        // range endpoint. For every admitted character its semantics
+        // are literal, so route through the shared simple_escape
+        // handler; the 'E'-exclusion is enforced at parse time.
+        if let Some(range_simple) = self.first_descendant(node, "class_range_simple_escape") {
+            return self.convert_simple_escape(range_simple);
+        }
         Err(self.contract_error(&format!(
             "pgen escape node '{}' has no recognized escape_unit child",
             node.rule_name
@@ -878,6 +886,21 @@ impl<'a> PgenAstAdapter<'a> {
             }
             return Ok(());
         }
+        // PGEN 1.1.23 models orphan `\E` (no preceding `\Q`) inside a
+        // character class as a zero-width class item — it contributes
+        // no ranges. Same applies to `empty_quoted_class_literal`
+        // (`\Q\E`). Matching PCRE2's pcre2pattern(3) rule that `\E`
+        // outside a quoted region is ignored (and an empty quoted
+        // region contributes no characters).
+        if self
+            .find_direct_child(item, "stray_class_end_quote")
+            .is_some()
+            || self
+                .find_direct_child(item, "empty_quoted_class_literal")
+                .is_some()
+        {
+            return Ok(());
+        }
         if let Some(literal_node) = self.find_direct_child(item, "class_literal") {
             let ch = self
                 .collect_first_terminal_char(literal_node)
@@ -950,12 +973,23 @@ impl<'a> PgenAstAdapter<'a> {
     /// Convert a `class_range` node — `class_atom "-" class_atom` — into a
     /// single `CharRange`. Escape endpoints must resolve to a single `CharRange`.
     fn convert_class_range(&self, range: &PgenAstNode, ranges: &mut Vec<CharRange>) -> Result<()> {
-        let children = self.sequence_children(range)?;
-        let start_atom = children
+        // PGEN 1.1.23 widened class_range to admit zero-width markers
+        // (`\Q\E`, orphan `\E`) around the range dash:
+        //     class_range = class_atom class_zero_width* "-" class_zero_width* class_atom
+        // Those markers contribute nothing to the range semantics — the
+        // adapter should pick up the first and last `class_atom`
+        // descendants as the range endpoints, regardless of how many
+        // zero-width siblings sit between them and the dash.
+        let atoms: Vec<&PgenAstNode> = range
+            .children()
+            .iter()
+            .filter_map(|child| self.find_direct_child(child, "class_atom"))
+            .collect();
+        let start_atom = atoms
             .first()
             .ok_or_else(|| self.contract_error("pgen class_range is missing its start atom"))?;
-        let end_atom = children
-            .get(2)
+        let end_atom = atoms
+            .last()
             .ok_or_else(|| self.contract_error("pgen class_range is missing its end atom"))?;
         let start = self.class_atom_char(start_atom)?;
         let end = self.class_atom_char(end_atom)?;
@@ -967,7 +1001,14 @@ impl<'a> PgenAstAdapter<'a> {
     /// to the single character it represents, for use as a range endpoint.
     fn class_atom_char(&self, node: &PgenAstNode) -> Result<char> {
         let atom = self.first_descendant(node, "class_atom").unwrap_or(node);
-        if let Some(escape_node) = self.find_direct_child(atom, "class_escape") {
+        // PGEN 1.1.23 split the endpoint-escape production: range atoms
+        // now nest `class_range_escape` (a restricted subset that
+        // excludes orphan `\E`) instead of the general `class_escape`.
+        // Accept either to stay compatible across grammar versions.
+        let escape_node = self
+            .find_direct_child(atom, "class_range_escape")
+            .or_else(|| self.find_direct_child(atom, "class_escape"));
+        if let Some(escape_node) = escape_node {
             // For range endpoints an escape must resolve to a single character
             // (hex/octal/control/metachar literal). Shorthand classes are not
             // allowed as endpoints by the grammar.
@@ -998,10 +1039,23 @@ impl<'a> PgenAstAdapter<'a> {
         class_escape: &PgenAstNode,
         ranges: &mut Vec<CharRange>,
     ) -> Result<()> {
-        let escape_node = self
-            .first_descendant(class_escape, "escape")
-            .ok_or_else(|| self.contract_error("pgen class_escape is missing its escape child"))?;
-        let regex = self.convert_escape(escape_node)?;
+        // PGEN 1.1.22- style: `class_escape = "\\" escape` — find an
+        // `escape` descendant and dispatch.
+        // PGEN 1.1.23+ introduced `class_range_escape = "\\"
+        // class_range_escape_unit` for endpoints; its body has
+        // `hex_escape | octal_escape | ...` children directly (no
+        // `escape` wrapper). `convert_escape` already handles both
+        // shapes because it uses `first_descendant` for each concrete
+        // escape family — so we can bypass the intermediate `escape`
+        // lookup entirely and pass the whole subtree in.
+        let regex = if self.first_descendant(class_escape, "escape").is_some() {
+            self.convert_escape(
+                self.first_descendant(class_escape, "escape")
+                    .expect("just checked"),
+            )?
+        } else {
+            self.convert_escape(class_escape)?
+        };
         extend_ranges_from_regex(regex, ranges, |msg| self.contract_error(msg))?;
         Ok(())
     }

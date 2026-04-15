@@ -1,10 +1,10 @@
 id: PGEN-RGX-0060
 summary: |
   PGEN regex parser rejects bare \E inside a character class (without preceding \Q) with "escape is not accepted inside a character class". PCRE2 10.47 accepts — \E outside a quoted region is read as a literal E per pcre2pattern(3). Residual of PGEN-RGX-0057: the 1.1.22 fix covered \Q...\E but not lone \E.
-status: open
+status: closed
 opened_at: 2026-04-15T00:00:00Z
 first_seen_at: 2026-04-15T00:00:00Z
-last_updated_at: 2026-04-15T00:00:00Z
+last_updated_at: 2026-04-16T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -114,8 +114,36 @@ impact: |
   semantics.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.23"
+  fixed_in_parser_backend_version: "cd0f8c7"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.23 added `stray_class_end_quote = "\E"` as a
+    dedicated class_item alternative, modelled as a zero-width
+    item (it contributes no characters to the class), exactly
+    matching PCRE2's rule that `\E` outside a `\Q` region is
+    ignored. The grammar also added `empty_quoted_class_literal`
+    for the `\Q\E` paired form, and relaxed `class_range` to
+    admit `class_zero_width*` around the range dash so forms
+    like `[a-\Ec]` no longer trip parsing.
+
+    Verified against the updated submodule:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '^[\Eabc]' /tmp/verify.json
+    emits `"status": "success"`.
+
+    RGX adapter updated in `rgx-core/src/parsing.rs`:
+    - `convert_class_item` new branch skipping
+      `stray_class_end_quote` / `empty_quoted_class_literal`
+      (they contribute zero ranges)
+    - `convert_class_range` rewritten to collect first + last
+      class_atom descendants (robust to the new
+      `class_atom class_zero_width* "-" class_zero_width* class_atom`
+      shape)
+    - `convert_class_escape` + `convert_escape` extended to accept
+      `class_range_escape` / `class_range_simple_escape` (the
+      restricted-endpoint variants introduced in 1.1.23)
+
+    Same commit that closes this report also closes 0058 and 0059.

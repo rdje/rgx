@@ -294,6 +294,21 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (forty-sixth commit) — PGEN 1.1.23 bump closes 0058/0059/0060 + adapter wiring
+- **What**: Submodule bump 9af9500 → cd0f8c7 (PGEN 1.1.23 "Publish regex PCRE2 maintenance release"). All three open reports cited explicitly in PGEN's release notes. Grammar additions:
+  1. Bounded variable-length lookbehind + control verbs inside lookbehind (for 0058)
+  2. Unicode capture names with `MAX_NAME_SIZE=128` and non-digit first char (for 0059)
+  3. `stray_class_end_quote = "\E"` zero-width class item + `empty_quoted_class_literal = "\Q\E"` + relaxed `class_range = class_atom class_zero_width* "-" class_zero_width* class_atom` (for 0060)
+  4. New `class_range_escape` restricted-endpoint production (side effect: all class-range atoms now nest `class_range_escape` instead of `class_escape`)
+- **Adapter wiring in parsing.rs**:
+  - `convert_class_range`: rewritten to collect first+last `class_atom` descendants (was `children[0]` and `children[2]`)
+  - `class_atom_char` / `convert_class_escape`: accept `class_range_escape` in addition to `class_escape`
+  - `convert_escape`: new dispatch for `class_range_simple_escape`
+  - `convert_class_item`: new branch for `stray_class_end_quote` / `empty_quoted_class_literal` (skip, contribute zero)
+- **Conformance delta**: 8090 → **8141 pass** (+51), 3128 → 3077 fail. 72.1% → **72.6%**. 0 panic / 0 skip. 1007 lib tests still green.
+- **Reports closed**: PGEN-RGX-0058, 0059, 0060 all `verified-fixed-upstream` with cd0f8c7 evidence. Running ledger: **60 filed, 60 closed, 0 open**.
+- **Methodology snapshot**: The session's two PGEN report batches (0056/0057 and 0058/0059/0060) — 5 reports filed — closed ~261 case-level failures (+326 combined from 0056/0057 bump, +51 from 0058/0059/0060 bump). Cluster-first methodology preserved signal-to-noise throughout: 60 reports for a corpus of 11,218 cases.
+
 ### 2026-04-15 (forty-fifth commit) — File PGEN-RGX-0058 + 0059 + 0060
 - **What**: Three cluster-distilled PGEN bug reports, protocol-compliant:
   1. **0058** — Variable-length lookbehind with control verbs (`(*ACCEPT)` etc.), ~49 cases

@@ -1,10 +1,10 @@
 id: PGEN-RGX-0059
 summary: |
   PGEN regex parser rejects named-group identifiers containing non-ASCII letters at position 0 with "Parser did not consume full input". PCRE2 10.47 accepts non-ASCII Unicode letters in named-group identifiers when UTF mode is enabled (testinput4 is UTF+Unicode-properties).
-status: open
+status: closed
 opened_at: 2026-04-15T00:00:00Z
 first_seen_at: 2026-04-15T00:00:00Z
-last_updated_at: 2026-04-15T00:00:00Z
+last_updated_at: 2026-04-16T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -113,8 +113,22 @@ impact: |
   the grammar relaxation, all should compile and match.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.23"
+  fixed_in_parser_backend_version: "cd0f8c7"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.23 widened capture names so PCRE2 UTF-mode Unicode
+    letters can appear in group names and named references
+    (release notes cite this report). The validator also enforces
+    non-digit first character and `MAX_NAME_SIZE=128`.
+
+    Verified against the updated submodule:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only "(?'ABáC'...)\\g{ABáC}" /tmp/verify.json
+    emits `"status": "success"` — PGEN parses the repro cleanly.
+
+    No RGX adapter wiring required; the adapter already walks the
+    name-node's terminals via `collect_all_terminal_chars`, which
+    accepts arbitrary Unicode codepoints.

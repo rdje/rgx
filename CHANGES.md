@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - PGEN 1.1.23 bump: closes PGEN-RGX-0058/0059/0060 + adapter wiring for new class_range grammar
+- Scope: Bump PGEN submodule from `9af9500` (1.1.22) to `cd0f8c7` (1.1.23, "Publish regex PCRE2 maintenance release 1.1.23"). All three open PGEN-RGX reports are explicitly cited in PGEN's release notes and land fixes in a single parser bump. Adapter absorbs PGEN's new class-range grammar shape.
+- PGEN-side changes (from `subs/pgen/CHANGES.md` and `regex.ebnf`):
+  - **0058** — PGEN now accepts bounded variable-length lookbehind and PCRE2 control verbs (`(*ACCEPT)`, `(*COMMIT)`, `(*FAIL)`, `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*:MARK)`) inside lookbehind bodies, while still rejecting unbounded quantifiers.
+  - **0059** — Capture names widened to accept PCRE2 UTF-mode Unicode letters in group names and references. Validator also enforces non-digit first char and `MAX_NAME_SIZE=128`.
+  - **0060** — New grammar productions: `stray_class_end_quote = "\\E"` (zero-width class item), `empty_quoted_class_literal = "\\Q" "\\E"` (zero-width), and a relaxed `class_range = class_atom class_zero_width* "-" class_zero_width* class_atom` that admits these zero-width markers around the range dash. Endpoints now route through a restricted `class_range_escape` production that excludes orphan `\E` so it cannot be a substantive range endpoint.
+- RGX adapter wiring in `rgx-core/src/parsing.rs`:
+  - `convert_class_range`: rewritten to collect the first and last `class_atom` descendants — robust to arbitrary numbers of `class_zero_width` siblings around the dash.
+  - `class_atom_char`: accepts either `class_range_escape` (1.1.23+) or `class_escape` (pre-1.1.23) as endpoint escape.
+  - `convert_class_escape`: routes `class_range_escape` through `convert_escape` directly (no intermediate `escape` wrapper).
+  - `convert_escape`: new dispatch branch for `class_range_simple_escape` — the restricted sibling of `simple_escape` that omits orphan `\E` — shares the regular simple_escape handler since the 'E'-exclusion is enforced at parse time.
+  - `convert_class_item`: new branch that skips `stray_class_end_quote` / `empty_quoted_class_literal` (zero-width class items contribute no ranges, matching PCRE2's "`\E` outside a quoted region is ignored" rule).
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves 72.1% → **72.6%** (8,090 → **8,141 pass**, 3,128 → 3,077 fail, still 0 panic / 0 skip). Net +51 passing cases from the bump + adapter wiring combined. All three reports individually verified — `parse_grammar_profile_ast_dump_named` returns `status: success` for every repro_input.txt.
+- Report closures: PGEN-RGX-0058, 0059, 0060 all moved to `status: closed` with `verified-fixed-upstream` resolution notes pointing at commit cd0f8c7. Running ledger: **60 reports filed (0001–0060), 60 closed, 0 open**.
+- Notes/impact: The harness briefly regressed (72.1% → 71.3%) when the submodule pointed at 1.1.23 but before the adapter absorbed the new grammar — a 17-test lib failure surfaced immediately, narrowing down which adapter walkers needed the shape fix. Commit includes both the submodule bump and the adapter changes as a single atomic unit so the interim regression is not visible in history.
+
 ### 2026-04-15 - File PGEN-RGX-0058 + 0059 + 0060 (cluster-distilled, ~61 cases)
 - Scope: Three cluster-distilled PGEN bug reports against PGEN 1.1.22 / 9af9500. Cluster analysis of the current 250-case `compile: PGEN parse failure` + 202-case `compile: PGEN AST contract mismatch` buckets identified three distinct root causes where PCRE2 10.47 accepts the pattern but PGEN rejects. Cases where PCRE2 *also* rejects (already handled by the harness's compile-error parity), or where the divergence is actually an RGX-side modifier-wiring gap (`alt_bsux`, `allow_lookaround_bsk`, `alt_extended_class`, `allow_empty_class`, `convert=glob`), are NOT filed as PGEN reports.
 - Reports:
