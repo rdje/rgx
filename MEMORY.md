@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-15 (forty-fifth commit) — File PGEN-RGX-0058 + 0059 + 0060
+- **What**: Three cluster-distilled PGEN bug reports, protocol-compliant:
+  1. **0058** — Variable-length lookbehind with control verbs (`(*ACCEPT)` etc.), ~49 cases
+  2. **0059** — Non-ASCII identifiers in named groups (`(?'ABáC'...)`), ~8 cases
+  3. **0060** — Bare `\E` inside `[...]` without preceding `\Q`, 4 cases (residual of 0057)
+- **Also triaged (not PGEN)**: `\u`/`alt_bsux`, `\K`/`allow_lookaround_bsk`, empty-class/`allow_empty_class`, `alt_extended_class`, `convert=glob`, `scan_substring_group`/`script_run_group` — all RGX-side modifier wiring or feature work. Don't file.
+- **Total PGEN-RGX reports filed**: 0001–0060 (60). Closed: 57. Open: 3 (0058/0059/0060).
+- **Methodology note**: Cluster distinguishes 3 real PGEN bugs from 10+ adapter / modifier-wiring gaps without filing noise reports. Still a cluster-first discipline.
+
 ### 2026-04-15 (forty-fourth commit) — Harness: advance output cursor past non-pattern blocks
 - **What**: Pattern input blocks were being paired with the wrong output block whenever testoutput* had extra annotation/separator content (e.g. `---` dividers, PCRE2-maintainer comments) with no testinput counterpart. The old logic advanced output by +1 per input block indiscriminately. Fix: when input is a Pattern block, walk output cursor forward until `out_blocks[oi].lines[0].starts_with("/")`.
 - **Impact**: Patterns like `/[a-[:digit:]]+/` that PCRE2 rejects (`Failed: error 150`) were mispaired with the preceding comment block, so parse_subject_output recorded `Expected::NoMatch`, and RGX's matching compile-error counted as a divergence. With the fix, these now correctly see `Expected::CompileError` and pass.
