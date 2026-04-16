@@ -1,7 +1,7 @@
 id: PGEN-RGX-0065
 summary: |
   PGEN regex parser rejects the PCRE2 pattern-start verb (*UTF8) with "unrecognized PCRE2 verb or start option". PCRE2 10.47 accepts (*UTF8) as an alias for (*UTF) — testoutput10:754 shows /(*UTF8)\x{1234}/ matching "\x{1234}" in subject "abcd\x{1234}pqr".
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -101,8 +101,23 @@ impact: |
   aliases.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.26"
+  fixed_in_parser_backend_version: "5856f71"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.26 (commit 5856f71, "regex: release RGX 0065 and
+    0066 fixes") adds `(*UTF8)`, `(*UTF16)`, `(*UTF32)` as
+    pattern-start-verb aliases for `(*UTF)` — the commit
+    message cites this report as "accept PCRE2 UTF width start
+    aliases".
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '(*UTF8)\x{1234}' /tmp/v.json
+    → status=success.
+
+    No RGX adapter change required; the atom already flows
+    through the directive-verb path which treats the UTF-family
+    verbs as no-ops for the `&str`-based API.

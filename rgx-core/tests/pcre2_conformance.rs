@@ -1563,15 +1563,15 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after the adapter learned to lower
-    // `scan_substring_group` and `script_run_group` atom types to
-    // their inner pattern only. RGX doesn't model the scan-against-
-    // other-capture / single-Unicode-script verb semantics yet, but
-    // for the subject subset where the verb is a no-op (scan target
-    // equals main subject; subject is single-script) the body-pattern
-    // match coincides with PCRE2's outcome — closing ~90 cases.
-    const PASS_BASELINE: usize = 8_811;
-    const FAIL_BASELINE: usize = 2_407;
+    // Last updated: 2026-04-16 after PGEN 1.1.26 bump (5856f71,
+    // "regex: release RGX 0065 and 0066 fixes") closing PGEN-RGX-0065
+    // + 0066. PGEN now accepts `(*UTF8)`/`(*UTF16)`/`(*UTF32)` as
+    // PCRE2 width-specific aliases for `(*UTF)`, and validates
+    // scan_substring capture-list references against the full capture
+    // inventory (post-parse) so forward refs resolve. No RGX adapter
+    // change needed.
+    const PASS_BASELINE: usize = 8_822;
+    const FAIL_BASELINE: usize = 2_396;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

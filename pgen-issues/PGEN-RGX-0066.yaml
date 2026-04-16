@@ -1,7 +1,7 @@
 id: PGEN-RGX-0066
 summary: |
   PGEN regex parser rejects `(*scs:(1)a)(a)|x` with "scan_substring capture list references an unavailable capture". The scan_substring verb references group 1 which is defined LATER in the same pattern. PCRE2 10.47 accepts forward references — testoutput2:20177 shows the pattern compiling and running (matches "x" on subject "x"; no match on "a"). PGEN should perform capture-list validation AFTER walking the entire pattern so forward references resolve.
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -116,8 +116,24 @@ impact: |
   PGEN parsing so those patterns reach the adapter.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.26"
+  fixed_in_parser_backend_version: "5856f71"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.26 moves the scan_substring capture-list validation
+    from the grammar-time reject path into a post-parse
+    semantic check that sees the full capture-group inventory.
+    Release commit 5856f71 cites this report as "validate scan-
+    substring refs against full capture inventory".
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '(*scs:(1)a)(a)|x' /tmp/v.json
+    → status=success.
+
+    RGX adapter's conservative scan_substring_group pass-
+    through (commit 25db551) already handles the resulting AST
+    shape; the report closing unlocks PGEN parsing for every
+    forward-reference variant in the testinput2 cluster.

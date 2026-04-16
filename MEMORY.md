@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-eighth commit) — PGEN 1.1.26 bump closes 0065/0066
+- **What**: Submodule bump ffd61e9 → 5856f71 (PGEN 1.1.26 "regex: release RGX 0065 and 0066 fixes"). PGEN-side:
+  1. `(*UTF8)` / `(*UTF16)` / `(*UTF32)` added as pattern-start-verb aliases for `(*UTF)` (0065)
+  2. scan_substring capture-list validation moved from grammar-time to post-parse, so forward references resolve (0066)
+- **No adapter change**: UTF-width verbs route through existing directive-verb no-op path; scan_substring forward-ref cases ride the pass-through from commit 25db551.
+- **Conformance delta**: 8811 → **8822 pass** (+11), 2407 → 2396 fail. Ratchet bumped to 8822/2396.
+- **Reports**: 0065, 0066 closed as `verified-fixed-upstream` with 5856f71 evidence.
+- **Total PGEN-RGX reports filed**: 0001–0066 (66). **66 closed. 0 open.** Third consecutive round where every filed report gets fixed upstream.
+
 ### 2026-04-16 (fifty-seventh commit) — File PGEN-RGX-0065 + 0066
 - **What**: Two PGEN bug reports from third-round triage.
   1. **0065** — `(*UTF8)` pattern-start-verb alias rejected; PCRE2 accepts (mirror of `(*UTF16)` / `(*UTF32)`). 1 case.

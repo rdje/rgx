@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - PGEN 1.1.26 bump: closes PGEN-RGX-0065/0066
+- Scope: Bump PGEN submodule from `ffd61e9` (1.1.25) to `5856f71` (1.1.26, "regex: release RGX 0065 and 0066 fixes"). Both open reports filed earlier today close in a single parser commit. No RGX adapter change required — the `(*UTF8)` / `(*UTF16)` / `(*UTF32)` verbs flow through the existing directive-verb path (no-op for `&str` API), and the scan_substring forward-reference cases were already being handled by the conservative `scan_substring_group` pass-through in commit 25db551.
+- PGEN-side changes cited by the release commit:
+  - **0065** — "accept PCRE2 UTF width start aliases": extends pattern-start-verb production with `(*UTF8)` / `(*UTF16)` / `(*UTF32)` alongside the generic `(*UTF)`.
+  - **0066** — "validate scan-substring refs against full capture inventory": moves the scan_substring capture-list validation from the grammar-time reject path into a post-parse semantic check that sees the full capture-group set, so forward references resolve correctly.
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves **8,811 → 8,822 pass** (+11), 2,407 → 2,396 fail. Ratchet baselines bumped to `PASS_BASELINE=8_822` / `FAIL_BASELINE=2_396` per the ratchet-discipline rule.
+- Report closures: PGEN-RGX-0065, 0066 both moved to `status: closed` with `verified-fixed-upstream` resolution notes pointing at 5856f71. Running ledger: **66 reports filed, 66 closed, 0 open**. Every PGEN report ever filed against this codebase is now fixed upstream (third consecutive round).
+
 ### 2026-04-16 - File PGEN-RGX-0065 + 0066 (cluster-distilled)
 - Scope: Two cluster-distilled PGEN bug reports against PGEN 1.1.25 / ffd61e9, from the third round of post-ratchet PGEN triage. The 208-case AST-contract-mismatch + 158-case PGEN-parse-failure buckets fragment into ~15 distinct root causes, of which two are confirmed PGEN-side; the rest are RGX adapter / harness modifier-wiring gaps that will be addressed separately.
 - Reports:
