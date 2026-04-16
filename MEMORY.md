@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fiftieth commit) — Harness: skip /I and /B diagnostic preamble (+305 passes)
+- **What**: Fix pre-existing harness bug. pcre2test emits diagnostic preamble for `/I` and `/B` modifiers between pattern echo and first subject echo (`Capture group count = N`, `First code unit = …`, `------------` dividers, indented opcode dumps). `parse_subject_output` was consuming those as match output, falling through to `Expected::NoMatch`, then counting RGX's real match as a "false positive".
+- **Fix**: `extract_pattern_cases` gains a preamble-skip loop right after `oi = 1`. Advances until it hits a 4-space subject-echo, `\=` annotation, ` 0:` match, `No match`, or `Failed:`.
+- **Conformance delta**: 8142 → **8447 pass** (+305), 3076 → 2771 fail. 72.6% → **75.3%**. Ratchet bumped to 8447/2771.
+- **Key insight**: 305 / 909 false-positive bucket (33.6%) was never a real engine divergence — just harness misreading. Cluster-first methodology catches these RGX-side harness artifacts the same way it distinguishes real PGEN bugs from adapter gaps.
+- **Next top buckets** (2771 total): ~635 false positive (the real residual, top still `(?x)(?-x: \s*#\s*)`), 893 span mismatch (top `(abc)\223` octal), 628 false negative (top `\c[` control-char edge), 210 PGEN AST contract, 168 PGEN parse failure, 126 RGX too permissive.
+
 ### 2026-04-16 (forty-ninth commit) — PGEN 1.1.24 bump closes 0061/0062 + adapter wiring
 - **What**: Submodule bump cd0f8c7 → 9a7d453 ("Regex: add PCRE2 single-byte and callout-condition forms"). Both reports land fixes:
   1. `single_byte_escape = "C"` as new escape_unit alternative head-of-list

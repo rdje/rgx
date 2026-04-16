@@ -254,6 +254,31 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
     let mut expect_no_match = false;
     let mut oi = 1; // ob[0] is the pattern echo; subject echos start at 1
 
+    // Skip any diagnostic preamble that pcre2test emits between the
+    // pattern echo and the first subject echo when the test uses `/I`
+    // (info), `/B` (bytecode), or `/callout_info` modifiers. Those
+    // produce lines like `Capture group count = N`, `Options: …`,
+    // `First code unit = …`, `Subject length lower bound = N`,
+    // `Contains \C`, `May match empty string`, `Starting code units: …`,
+    // `------------` separators, and indented bytecode `        Bra` /
+    // `        End`. None of these alter match semantics — they're
+    // diagnostic output — and our pair-to-subject logic would
+    // otherwise misread the first non-subject line as an error
+    // outcome. Advance until we hit a subject line (4-space prefix),
+    // a `\= Expect` annotation, a `No match`, or the ` 0:` match echo.
+    while oi < ob.len() {
+        let l = ob[oi];
+        if l.starts_with(b"    ") || l.starts_with(b"\\=") {
+            break;
+        }
+        let text = String::from_utf8_lossy(l);
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("0:") || trimmed == "No match" || trimmed.starts_with("Failed:") {
+            break;
+        }
+        oi += 1;
+    }
+
     for iline in ib.lines.iter().skip(1) {
         let trimmed = trim_ws(iline);
         if trimmed.starts_with(b"\\=") {
@@ -1500,12 +1525,13 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after PGEN 1.1.24 bump (9a7d453,
-    // "Regex: add PCRE2 single-byte and callout-condition forms")
-    // closing PGEN-RGX-0061 + 0062 with adapter wiring for
-    // `single_byte_escape` and `condition_callout_assertion`.
-    const PASS_BASELINE: usize = 8_142;
-    const FAIL_BASELINE: usize = 3_076;
+    // Last updated: 2026-04-16 after `extract_pattern_cases` learned
+    // to skip pcre2test `/I` (info) and `/B` (bytecode) diagnostic
+    // preambles between the pattern echo and the first subject echo.
+    // That single harness fix reclassified ~305 previously-"false
+    // positive" cases as the passes they actually were.
+    const PASS_BASELINE: usize = 8_447;
+    const FAIL_BASELINE: usize = 2_771;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
