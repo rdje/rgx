@@ -2200,3 +2200,24 @@ For sparse-match patterns where the prefix byte is rare in the input (e.g., `ERR
 
 ### Next concrete action
 - Continue Tier-2 perf headroom + parity polish: reverse-DFA pipeline, A8 crate publishing prep.
+
+## 2026-04-16 session — continuity doc refresh (post-ratchet-lock snapshot)
+
+### What changed
+- `RUST_CODEBASE_ANALYSIS.md`: refreshed for the actual state of head `5dd85ea`. PGEN pin now 1.1.26 at `5856f71` (was stale at 1.1.10 / `87837570`); source totals updated (vm 7565→8202, lib 7387→7584, parsing 2820→3766, compiler 3371→3547, engine 469→1657, unicode_support 52→197, plus explicit C1 ~7.3K-line and C2 ~6.8K-line subsystem breakdowns); test count 633→1,007 lib tests; new explicit paragraph on the PCRE2 conformance ratchet gate (8,822 / 2,396 / 0 / 0); "High-confidence next actions" section rewritten to reflect the current residual failure buckets (Unicode case-fold edges, forward-relative recursion, non-`\n` newline conventions, pcre2test substitute-mode harness work, compile-error parity, residual adapter shapes).
+- `README.md`: PGEN pin 1.1.19 → 1.1.26 with pointer to the ratchet gate; conformance measurement date 2026-04-14 → 2026-04-16.
+
+### Why it mattered
+Both docs were structurally coherent but factually stale by two weeks of heavy PCRE2 conformance work. The ratchet gate landed on 2026-04-16 and all 66 PGEN-RGX reports closed on the same day. Future sessions need those two facts in the docs they load at bootstrap.
+
+### What did NOT change
+- No engine, compiler, parser, or adapter code touched.
+- No conformance numbers moved — the ratchet stays at 8,822 / 2,396 / 0 / 0.
+- `docs/BACKLOG.md` still lists conformance residuals from 2026-04-14 (78.1% snapshot). That's a separate refresh task — the bucket breakdown there is a useful historical artifact even if the top-line number is now stale.
+
+### Next concrete action
+- One of the remaining high-leverage ratchet-pushing tasks:
+  - pcre2test substitute-mode support in the conformance harness (largest addressable bucket, harness-only, no engine risk)
+  - non-`\n` newline convention support (engine work, medium bucket)
+  - Unicode case-fold residual (engine work, scattered fixes)
+  - forward-relative recursion `(?+1)` / `(?+N)` (engine work, small cluster)
