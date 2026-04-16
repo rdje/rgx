@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (forty-eighth commit) — File PGEN-RGX-0061 + 0062 (post-ratchet PGEN triage)
+- **What**: Two PGEN bug reports after the ratchet locked at 72.6%. Cluster-first methodology applied to remaining PGEN-relevant buckets (208 AST contract + 177 parse failure).
+  1. **0061** — `\C` single-byte escape emits generic simple_escape(C) instead of a dedicated byte atom. PCRE2 accepts by default (verified via testoutput21:82 `Contains \C`). ~2 patterns.
+  2. **0062** — Callout `(?C...)` at conditional-assertion position rejected. PCRE2 accepts (verified via testoutput2:14984 bytecode dump showing `Cond / Callout 25 / Assert`). ~6 patterns.
+- **Drafted-then-deleted**: 0063 for `(*TURKISH_CASING)` turned out to be a harness-side prefix-ordering issue — PGEN accepts the raw pattern; our harness prepends `(?i)` before the start-option verb, violating PGEN's "start options must be first" rule. Cluster-first caught this false positive via an isolated `--single` verification that showed `parse_outcome.status = success`.
+- **Also categorized (NOT PGEN)**: 69 scan_substring_group/script_run_group (adapter feature work), 13 `\u` (alt_bsux modifier), 11 `\K`-in-lookaround (allow_lookaround_bsk), 14 descending range (alt_extended_class), 8 empty-class (allow_empty_class), 13 simple_escape alphanumerics (adapter literal-fallback).
+- **Total PGEN-RGX reports filed**: 0001–0062 (62 total, 60 closed, **2 open**: 0061 + 0062). Projected ceiling remains ~65.
+
 ### 2026-04-16 (forty-seventh commit) — Conformance ratchet gate locks the journey to 100%
 - **What**: Conformance test now enforces a one-way ratchet via four new baselines: `PASS_BASELINE=8141`, `FAIL_BASELINE=3077`, `PANIC_BASELINE=0`, `SKIP_BASELINE=0`. Any regression fails the test; improvements must bump baselines in the same commit. A `🎯 NEW BASELINE ELIGIBLE` hint is printed when the current pass count exceeds the baseline.
 - **Why**: The stated goal is 3,077 → 0, and never leave it. Without the gate, a silent regression anywhere in RGX or PGEN could drop the number without CI noticing.
