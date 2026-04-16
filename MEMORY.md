@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-first commit) — Harness: Latin-1 expected normalization + JIT-suffix strip (+179 passes)
+- **What**: Two more harness-correctness fixes on the span-mismatch bucket.
+  1. Latin-1-decoded subjects re-encode high bytes as 2-byte UTF-8 in `&str`. RGX match output lives in that UTF-8 byte space; expected `overall` bytes from `decode_output` lived in raw-byte space. Normalize: when subject went through Latin-1 fallback, re-encode expected bytes via `char::encode_utf8` too.
+  2. pcre2test appends ` (JIT)` / ` (non-JIT)` suffix to matches under JIT test modes — diagnostic, not part of match. Strip before comparison.
+- **Conformance delta**: 8447 → **8626 pass** (+179), 2771 → 2592 fail. 75.3% → **76.9%**. Ratchet bumped to 8626/2592.
+- **Pattern**: Three consecutive harness-only improvements — preamble skip (+305), Latin-1 norm (+179 combined with JIT suffix). Cluster-first keeps finding harness layers on top of the real engine divergences.
+- **Next**: span-mismatch bucket still has ~600 remaining — genuinely about Unicode case folding (`ẞ→ss`, `ſ→s`, `KkK`, etc.). That's a real RGX engine gap requiring actual case-fold table work. Alternative: false-positive bucket (723) top still `(?x)(?-x: \s*#\s*)` extended-scope; or false-negative (652) `\c[` control-char edge.
+
 ### 2026-04-16 (fiftieth commit) — Harness: skip /I and /B diagnostic preamble (+305 passes)
 - **What**: Fix pre-existing harness bug. pcre2test emits diagnostic preamble for `/I` and `/B` modifiers between pattern echo and first subject echo (`Capture group count = N`, `First code unit = …`, `------------` dividers, indented opcode dumps). `parse_subject_output` was consuming those as match output, falling through to `Expected::NoMatch`, then counting RGX's real match as a "false positive".
 - **Fix**: `extract_pattern_cases` gains a preamble-skip loop right after `oi = 1`. Advances until it hits a 4-space subject-echo, `\=` annotation, ` 0:` match, `No match`, or `Failed:`.

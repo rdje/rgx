@@ -1063,12 +1063,12 @@ fn run_case(case: &TestCase) -> Outcome {
     // Subjects that aren't valid UTF-8 are lossy-decoded as Latin-1
     // (one codepoint per byte). Well-formed UTF-8 subjects unchanged.
     let subject_storage: String;
-    let subject: &str = match std::str::from_utf8(&case.subject) {
-        Ok(s) => s,
-        Err(_) => {
-            subject_storage = case.subject.iter().map(|b| *b as char).collect();
-            &subject_storage
-        }
+    let subject_is_latin1 = std::str::from_utf8(&case.subject).is_err();
+    let subject: &str = if subject_is_latin1 {
+        subject_storage = case.subject.iter().map(|b| *b as char).collect();
+        &subject_storage
+    } else {
+        std::str::from_utf8(&case.subject).unwrap()
     };
 
     // Build the effective pattern: literal-escape → wraps → inline
@@ -1181,12 +1181,41 @@ fn run_case(case: &TestCase) -> Outcome {
             };
             let rgx_match = &subject[m.start..m.end];
             // PCRE2 output prints the match directly, with some escaping
-            // for control chars (e.g. `\x09` for tab). For strict byte
-            // comparison on ASCII text this works; for cases where PCRE2's
-            // output contains `\x..` escapes, `rgx_match == overall` will
-            // be false and we flag it as a miscompare the caller can
-            // classify.
-            if rgx_match.as_bytes() == overall.as_slice() {
+            // for control chars (e.g. `\x09` for tab). The subject-side
+            // may have been Latin-1-decoded (invalid-UTF-8 fallback),
+            // in which case high bytes became their own Unicode
+            // codepoints and re-encode back to 2-byte UTF-8. Normalize
+            // `overall` the same way for the comparison so the two
+            // sides live in the same byte-space.
+            let expected_storage: Vec<u8>;
+            let expected: &[u8] = if subject_is_latin1 {
+                expected_storage = overall
+                    .iter()
+                    .flat_map(|&b| {
+                        let c = b as char;
+                        let mut buf = [0u8; 4];
+                        let s = c.encode_utf8(&mut buf);
+                        s.as_bytes().to_vec()
+                    })
+                    .collect();
+                &expected_storage
+            } else {
+                overall.as_slice()
+            };
+            // pcre2test appends ` (JIT)` / ` (non-JIT)` to match output
+            // when a JIT test mode is active. That's a diagnostic
+            // suffix, not part of the matched text — strip before
+            // comparison.
+            let rgx_bytes = rgx_match.as_bytes();
+            let expected_trimmed: &[u8] =
+                if let Some(p) = expected.windows(6).position(|w| w == b" (JIT)") {
+                    &expected[..p]
+                } else if let Some(p) = expected.windows(10).position(|w| w == b" (non-JIT)") {
+                    &expected[..p]
+                } else {
+                    expected
+                };
+            if rgx_bytes == expected_trimmed {
                 Outcome::Pass
             } else {
                 Outcome::Fail {
@@ -1525,13 +1554,13 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after `extract_pattern_cases` learned
-    // to skip pcre2test `/I` (info) and `/B` (bytecode) diagnostic
-    // preambles between the pattern echo and the first subject echo.
-    // That single harness fix reclassified ~305 previously-"false
-    // positive" cases as the passes they actually were.
-    const PASS_BASELINE: usize = 8_447;
-    const FAIL_BASELINE: usize = 2_771;
+    // Last updated: 2026-04-16 after span-compare normalization —
+    // `overall` now passes through the same Latin-1 fallback as the
+    // subject when the subject was invalid UTF-8, and the ` (JIT)` /
+    // ` (non-JIT)` diagnostic suffix pcre2test appends to matches
+    // under JIT test modes is stripped before byte comparison.
+    const PASS_BASELINE: usize = 8_626;
+    const FAIL_BASELINE: usize = 2_592;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
