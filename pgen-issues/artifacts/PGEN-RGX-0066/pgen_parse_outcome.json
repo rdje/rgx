@@ -1,0 +1,15 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "failure",
+  "diagnostic": {
+    "code": "E_PARSE_FAILURE",
+    "message": "scan_substring capture list references an unavailable capture",
+    "location": {
+      "byte_offset": 7,
+      "line": 1,
+      "column": 8
+    }
+  }
+}

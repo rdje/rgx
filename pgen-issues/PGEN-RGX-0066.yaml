@@ -1,0 +1,123 @@
+id: PGEN-RGX-0066
+summary: |
+  PGEN regex parser rejects `(*scs:(1)a)(a)|x` with "scan_substring capture list references an unavailable capture". The scan_substring verb references group 1 which is defined LATER in the same pattern. PCRE2 10.47 accepts forward references — testoutput2:20177 shows the pattern compiling and running (matches "x" on subject "x"; no match on "a"). PGEN should perform capture-list validation AFTER walking the entire pattern so forward references resolve.
+status: open
+opened_at: 2026-04-16T00:00:00Z
+first_seen_at: 2026-04-16T00:00:00Z
+last_updated_at: 2026-04-16T00:00:00Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "ffd61e9"
+parser_release_version: "1.1.25"
+integration_contract_version: "1.1.27"
+parser_family: regex
+profile: regex_default
+integration_surface: parseability_probe
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: 25db551
+host_os: macos
+host_arch: aarch64
+rust_toolchain: "rustc per workspace rust-version = 1.88"
+cargo_features: "default + pgen-parser"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0066/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0066/pgen_trace.log
+  pattern: "(*scs:(1)a)(a)|x"
+  source: |
+    Discovered by the RGX PCRE2 conformance harness
+    (`rgx-core/tests/pcre2_conformance.rs`) while scanning
+    `subs/pcre2/testdata/testinput2` line 6788 and adjacent lines.
+    Verified PCRE2 accepts forward references via testoutput2:20177
+    where `/(*scs:(1)a)(a)|x/` compiles cleanly and matches "x"
+    on subject "x" (no match on "a"). Affects ~5 testinput2
+    cases, all exercising `(*scs:(N)pattern)` where group N is
+    defined in the remainder of the outer pattern.
+
+# === Bug class (per protocol §4) ===
+bug_class: should_parse_but_fails
+
+expected_behavior: |
+  PGEN's `scan_substring` capture-list validation should be a
+  post-parse pass that runs after the entire pattern AST has
+  been built, so forward references like `(1)` pointing to a
+  capture group defined later in the pattern resolve
+  correctly. pcre2pattern(3) §"Scan-substring assertion"
+  allows the referenced group to appear anywhere in the
+  enclosing regex — PCRE2's compile phase walks the full
+  pattern before checking group-number validity.
+
+  Suggested refactor: move `scan_substring` group-reference
+  validation from the grammar-time reject path into a
+  post-parse semantic check that has visibility into the
+  full capture-group count.
+
+actual_behavior: |
+  PGEN rejects at grammar time, before seeing the full
+  capture-group set:
+        regex compile error: E_PARSE_FAILURE: scan_substring capture list references an unavailable capture
+        (*scs:(1)a)(a)|x
+                        (group 1 defined here, AFTER the scs verb)
+
+  The same behavior triggers on named forward references —
+  testinput2 has `(*scs:(<GOOD_NAME>)a)(?<GOOD_NAME>a)...`
+  which PGEN rejects with the analogous "unknown named
+  capture" diagnostic while PCRE2 accepts.
+
+reproduction: |
+  Reproducer artifacts under pgen-issues/artifacts/PGEN-RGX-0066/:
+    - repro_input.txt — exact failing input (one line, no trailing newline)
+    - pgen_contract.json — captured `parser_embedding_api_contract()` JSON
+    - pgen_parse_outcome.json — captured `parse_grammar_profile_named` JSON
+
+  Reproduction command (from rgx repo root) — captures the trace:
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0066/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0066/pgen_trace.log
+
+  Expected: parseability_probe accepts the input (`parse_full passed`).
+  Actual: PGEN rejects with the diagnostic recorded in
+  `pgen_parse_outcome.json` (or, for contract mismatches, RGX's
+  compile error captured in `actual_behavior`).
+
+impact: |
+  ~5 testinput2 cases directly, all using `(*scs:...)` or
+  `(*scan_substring:...)` with forward group references:
+    (*scs:(1)a)(a)|x
+    (*scs:(1)a)?(a)
+    (*scs:(1)a)??(a)
+    (*scs:(<GOOD_NAME>)a)(?<GOOD_NAME>a)…
+    f(?:(*scs:(+1,+2)(?<=(.)))|()){16}
+  Each is a `should_parse_but_fails` case that would compile
+  cleanly once the capture-reference check moves post-parse.
+  Note: RGX already ships an adapter-side conservative pass-
+  through that drops the scan_substring verb and lowers the
+  inner pattern only (see commit 25db551); this report unlocks
+  PGEN parsing so those patterns reach the adapter.
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

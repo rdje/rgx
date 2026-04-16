@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - File PGEN-RGX-0065 + 0066 (cluster-distilled)
+- Scope: Two cluster-distilled PGEN bug reports against PGEN 1.1.25 / ffd61e9, from the third round of post-ratchet PGEN triage. The 208-case AST-contract-mismatch + 158-case PGEN-parse-failure buckets fragment into ~15 distinct root causes, of which two are confirmed PGEN-side; the rest are RGX adapter / harness modifier-wiring gaps that will be addressed separately.
+- Reports:
+  - **PGEN-RGX-0065** — PGEN rejects the pattern-start verb `(*UTF8)` with "unrecognized PCRE2 verb or start option". PCRE2 10.47 accepts `(*UTF8)` as a PCRE2-1 library alias for the generic `(*UTF)` (mirrored for PCRE2-2 / PCRE2-4 as `(*UTF16)` / `(*UTF32)`). Verified via testoutput10:754 showing `/(*UTF8)\x{1234}/` matching. Suggested grammar amendment: extend the pattern-start-verb alternation with `(*UTF8)`, `(*UTF16)`, `(*UTF32)` alongside `(*UTF)`. Bug class: `should_parse_but_fails`. 1 case.
+  - **PGEN-RGX-0066** — PGEN's `scan_substring` capture-list validator rejects forward references at grammar time with "references an unavailable capture". PCRE2 performs this check after walking the whole pattern, so patterns like `(*scs:(1)a)(a)|x` (where group 1 is defined *after* the scs verb) compile cleanly. Same issue applies to named forward references (`(*scs:(<NAME>)...)` pointing to a `(?<NAME>...)` defined later). Verified testoutput2:20177. Affects ~5 testinput2 cases. Bug class: `should_parse_but_fails`.
+- Cluster triage (not filed):
+  - 17 position-0 failures — glob patterns in testinput24 (`#pattern convert=glob` directive, harness-side glob-to-regex conversion needed).
+  - 14 descending range + 6 class_range endpoint — `alt_extended_class` modifier for `(?[...])` set-algebra syntax (harness modifier-wiring).
+  - 13 `\u` + 1 `\U` — `alt_bsux` modifier (harness).
+  - 11 empty char class (position 5 / 1) — `allow_empty_class` modifier (harness).
+  - 11 `\K` in lookaround — `allow_lookaround_bsk` modifier (harness).
+  - 11 alphanumeric simple_escape characters — adapter literal-fallback.
+  - 1 `[[:a[:digit:]b]` — testinput24 glob-convert output; same as (1) above.
+- Validation: Both report bundles protocol-compliant per the reporting protocol (parser identity at 1.1.25 / ffd61e9, host project at rgx commit 25db551, exact reproducer inputs, expected vs actual with suggested amendments, structured parse-outcome JSON). 1,007 lib tests pass. Ratchet holds at 8,811 / 2,407 / 0 / 0.
+- Notes/impact: Running totals — PGEN-RGX reports filed 0001–0066 (66 total; 64 closed, **2 open**: 0065 + 0066). Combined cluster size for open reports: ~6 cases.
+
 ### 2026-04-16 - Adapter: scan_substring_group / script_run_group lower as body-pattern (conservative pass-through)
 - Scope: Add atom-level dispatch for two PCRE2 verb-group productions that PGEN emits but the adapter was rejecting with "unrecognized PGEN atom rule name". Both have real PCRE2 semantics RGX doesn't yet implement — `(*scan_substring:(group-list)pattern)` scans the text captured by named groups for a sub-pattern, and `(*script_run:pattern)` constrains matched codepoints to a single Unicode script — but for a large subset of tests their semantics reduce to "match the inner pattern against the main subject anyway". A conservative body-only lowering passes those and continues to fail honestly on the rest.
 - Changes in `rgx-core/src/parsing.rs::convert_atom`:

@@ -1,0 +1,15 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "failure",
+  "diagnostic": {
+    "code": "E_PARSE_FAILURE",
+    "message": "unrecognized PCRE2 verb or start option",
+    "location": {
+      "byte_offset": 0,
+      "line": 1,
+      "column": 1
+    }
+  }
+}

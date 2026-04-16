@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-seventh commit) — File PGEN-RGX-0065 + 0066
+- **What**: Two PGEN bug reports from third-round triage.
+  1. **0065** — `(*UTF8)` pattern-start-verb alias rejected; PCRE2 accepts (mirror of `(*UTF16)` / `(*UTF32)`). 1 case.
+  2. **0066** — scan_substring capture-list validator runs at grammar time and rejects forward references to groups defined later; PCRE2 runs this check post-parse. ~5 cases.
+- **Not filed (adapter/harness)**: 17 testinput24 glob patterns (harness glob-convert), 14+6 alt_extended_class, 13+1 alt_bsux (`\u`/`\U`), 11 empty-class, 11 `\K`-in-lookaround, 11 alphanumeric simple_escape.
+- **Total PGEN-RGX reports filed**: 0001–0066 (66). **64 closed. 2 open** (0065 + 0066).
+
 ### 2026-04-16 (fifty-sixth commit) — Adapter: scan_substring_group/script_run_group body-pass-through (+90 passes)
 - **What**: `convert_atom` learns two new dispatch arms:
   1. `scan_substring_group` → lower as inner pattern only. Real PCRE2 semantic: scan-named-group-captures; skipped for now.
