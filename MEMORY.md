@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-fourth commit) — PGEN 1.1.25 bump closes 0063/0064 + adapter wiring
+- **What**: Submodule bump 9a7d453 → ffd61e9 (PGEN 1.1.25 "regex: publish RGX 0063 0064 maintenance release"). Both reports fixed:
+  1. New `posix_word_boundary_alias = "[[:<:]]" | "[[:>:]]"` atom in the grammar
+  2. Compile-contract validator skips `(?(DEFINE)...)` blocks during lookbehind-width scan
+- **Adapter wiring in parsing.rs::convert_atom**: new `posix_word_boundary_alias` dispatch → lowers to `Sequence(WordBoundary, Lookahead(Word))` for `[:<:]` and `Sequence(Lookbehind(Word), WordBoundary)` for `[:>:]`, matching PCRE2 bytecode exactly. No adapter change needed for 0064.
+- **Conformance delta**: 8709 → **8719 pass** (+10), 2509 → 2499 fail. 77.6% → **77.7%**. Ratchet bumped to 8719/2499.
+- **Reports**: 0063, 0064 closed as `verified-fixed-upstream` with ffd61e9 evidence.
+- **Total PGEN-RGX reports filed**: 0001–0064 (64). **64 closed. 0 open.** Every PGEN report ever filed against this codebase is fixed upstream.
+
 ### 2026-04-16 (fifty-third commit) — File PGEN-RGX-0063 + 0064
 - **What**: Two new PGEN bug reports from post-harness-drill PGEN triage.
   1. **0063** — `[:<:]` / `[:>:]` POSIX-alias word-boundary names rejected. PCRE2 accepts (bytecode: `\b Assert \w`). 3 cases.

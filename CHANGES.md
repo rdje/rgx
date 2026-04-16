@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - PGEN 1.1.25 bump: closes PGEN-RGX-0063/0064 + adapter wiring for `posix_word_boundary_alias`
+- Scope: Bump PGEN submodule from `9a7d453` (1.1.24) to `ffd61e9` (1.1.25, "regex: publish RGX 0063 0064 maintenance release"). Both reports filed earlier today land grammar / validator fixes in a single parser commit.
+- PGEN-side changes (verified in `subs/pgen/grammars/regex.ebnf` and PGEN release notes):
+  - **0063** — New `posix_word_boundary_alias = "[[:<:]]" | "[[:>:]]"` atom added as an alternative in the atom production. `[:<:]` and `[:>:]` now emit a dedicated AST node instead of being rejected.
+  - **0064** — Compile-contract validator now skips `(?(DEFINE)...)` conditional blocks during the lookbehind-width scan, matching PCRE2's zero-width-at-match-time semantics for DEFINE subpatterns.
+- RGX adapter wiring in `rgx-core/src/parsing.rs::convert_atom`:
+  - New `posix_word_boundary_alias` dispatch arm that lowers the atom to PCRE2's documented equivalents:
+    - `[[:<:]]` → `Sequence(WordBoundary, Lookahead(Word))`
+    - `[[:>:]]` → `Sequence(Lookbehind(Word), WordBoundary)`
+  - Matches PCRE2 bytecode `\b Assert \w Ket` exactly.
+  - No adapter change needed for 0064 — the lookbehind-body AST already shapes correctly; only PGEN's pre-validation was gating it.
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves **8,709 → 8,719 pass** (**+10**), 2,509 → 2,499 fail, still 0 panic / 0 skip. **77.6% → 77.7%**. Ratchet baselines bumped to `PASS_BASELINE=8_719` / `FAIL_BASELINE=2_499` per the ratchet-discipline rule.
+- Report closures: PGEN-RGX-0063, 0064 both moved to `status: closed` with `verified-fixed-upstream` notes pointing at ffd61e9. Running ledger: **64 reports filed, 64 closed, 0 open**. Every PGEN report ever filed against this codebase is now fixed upstream.
+
 ### 2026-04-16 - File PGEN-RGX-0063 + 0064 (cluster-distilled)
 - Scope: Two cluster-distilled PGEN bug reports against PGEN 1.1.24 / 9a7d453, from the second round of post-ratchet PGEN triage. The remaining PGEN-relevant failure buckets (208 AST contract + 168 parse failure) fragment into ~10 distinct root causes, of which two are confirmed PGEN-side; the rest are RGX-adapter or harness-modifier gaps.
 - Reports:

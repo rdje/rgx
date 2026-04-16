@@ -1563,12 +1563,13 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after `is_subject_echo` discriminator
-    // landed — subject echoes have EXACTLY 4 leading spaces, while
-    // `/B` bytecode dumps use 6+, so the preamble-skip and
-    // new-subject-detection now distinguish them correctly.
-    const PASS_BASELINE: usize = 8_709;
-    const FAIL_BASELINE: usize = 2_509;
+    // Last updated: 2026-04-16 after PGEN 1.1.25 bump (ffd61e9,
+    // "regex: publish RGX 0063 0064 maintenance release") closing
+    // PGEN-RGX-0063 + 0064. RGX adapter gains a
+    // `posix_word_boundary_alias` atom handler that lowers `[:<:]`
+    // and `[:>:]` to their zero-width word-boundary equivalents.
+    const PASS_BASELINE: usize = 8_719;
+    const FAIL_BASELINE: usize = 2_499;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

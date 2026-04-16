@@ -1,7 +1,7 @@
 id: PGEN-RGX-0063
 summary: |
   PGEN regex parser rejects the PCRE2 POSIX-style word-boundary class names [:<:] (word start) and [:>:] (word end) with "unknown POSIX character class name". PCRE2 10.47 accepts these — testoutput2:13793 shows the bytecode compiles to `\b Assert \w Ket` for [:<:] (a zero-width assertion that the next code unit is a word char after a word boundary).
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -110,8 +110,27 @@ impact: |
   amendment.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.25"
+  fixed_in_parser_backend_version: "ffd61e9"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.25 (commit ffd61e9, "regex: publish RGX 0063 0064
+    maintenance release") adds a dedicated
+    `posix_word_boundary_alias = "[[:<:]]" | "[[:>:]]"` atom
+    as a new alternative in the atom production, alongside
+    `escape | char_class | …`.
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '[[:<:]]red[[:>:]]' /tmp/v.json
+    → status=success; AST contains `posix_word_boundary_alias`
+    nodes for both `[:<:]` and `[:>:]`.
+
+    RGX adapter (`rgx-core/src/parsing.rs::convert_atom`)
+    extended with a `posix_word_boundary_alias` dispatch that
+    lowers:
+      [[:<:]] → Sequence(WordBoundary, Lookahead(Word))
+      [[:>:]] → Sequence(Lookbehind(Word), WordBoundary)
+    matching PCRE2 bytecode `\b Assert \w Ket` exactly.

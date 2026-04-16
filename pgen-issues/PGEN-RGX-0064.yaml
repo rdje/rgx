@@ -1,7 +1,7 @@
 id: PGEN-RGX-0064
 summary: |
   PGEN regex parser rejects `(?<=X(?(DEFINE)(.*))Y).` with "unbounded variable-length lookbehind". The `(?(DEFINE)(.*))` construct is a named-subpattern definition block that consumes nothing at match time; the lookbehind body is effectively the fixed-length "XY". PCRE2 10.47 accepts this (testoutput1:10300 matches "Z"). The fix is to treat `(?(DEFINE)...)` as zero-width in the lookbehind length analysis.
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -108,8 +108,25 @@ impact: |
   patterns referenced via `\g<name>` / `(?1)` elsewhere.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.25"
+  fixed_in_parser_backend_version: "ffd61e9"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.25 adjusts the compile-contract validator to skip
+    `(?(DEFINE)...)` conditional blocks during the lookbehind
+    width scan — matching the PCRE2 rule that DEFINE subpatterns
+    are purely declarative and consume nothing at match time.
+    Release commit ffd61e9 cites this report in its commit
+    message ("skip DEFINE conditionals during lookbehind width
+    scan").
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '(?<=X(?(DEFINE)(.*))Y).' /tmp/v.json
+    → status=success.
+
+    No RGX adapter change required — the lookbehind-body AST
+    already shapes correctly; only PGEN's pre-validation was
+    gating it.

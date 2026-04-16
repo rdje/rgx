@@ -523,6 +523,41 @@ impl<'a> PgenAstAdapter<'a> {
             // `\E` is a literal character (including regex metachars).
             // Lower to a Sequence of Char nodes.
             "quoted_literal" => self.convert_quoted_literal(actual),
+            // PGEN 1.1.25 emits `posix_word_boundary_alias` for the
+            // PCRE2 POSIX-alias word-boundary class names `[:<:]` and
+            // `[:>:]`. Semantics per pcre2pattern(3):
+            //   [:<:] = zero-width assertion that the next code unit
+            //           starts a word (equivalent to `\b(?=\w)`).
+            //   [:>:] = zero-width assertion that the previous code
+            //           unit ended a word (equivalent to `(?<=\w)\b`).
+            // Bytecode dump (testoutput2:13793) confirms the
+            // `\b Assert \w` lowering. RGX's AST has dedicated
+            // WordBoundary and Lookahead/Lookbehind nodes, so we
+            // construct the equivalent Sequence inline.
+            "posix_word_boundary_alias" => {
+                let text = self.slice(actual)?;
+                let word_ahead = || Regex::Lookahead {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                };
+                let word_behind = || Regex::Lookbehind {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                };
+                match text {
+                    "[[:<:]]" => Ok(Regex::Sequence(vec![
+                        Regex::WordBoundary { positive: true },
+                        word_ahead(),
+                    ])),
+                    "[[:>:]]" => Ok(Regex::Sequence(vec![
+                        word_behind(),
+                        Regex::WordBoundary { positive: true },
+                    ])),
+                    _ => Err(self.contract_error(&format!(
+                        "unrecognized posix_word_boundary_alias terminal {text:?}"
+                    ))),
+                }
+            }
             other => {
                 Err(self.contract_error(&format!("unrecognized PGEN atom rule name '{other}'")))
             }
