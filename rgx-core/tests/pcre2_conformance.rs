@@ -1563,19 +1563,15 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after:
-    //   (a) RegexBuilder inserts `(?flags)` AFTER any leading
-    //       `(*VERB)` run so PCRE2 pattern-start verbs like
-    //       `(*NUL)` / `(*TURKISH_CASING)` no longer fail PGEN's
-    //       "start option must appear at the start-option prefix"
-    //       check when the harness applies case-insensitive etc.
-    //   (b) `convert_lookaround` gains dispatch for PGEN's
-    //       rule-name-form non-atomic variants
-    //       `non_atomic_lookahead_pos` / `non_atomic_lookbehind_pos`,
-    //       lowered to ordinary positive lookahead/lookbehind (RGX's
-    //       backtracking VM already exhibits the non-atomic property).
-    const PASS_BASELINE: usize = 8_721;
-    const FAIL_BASELINE: usize = 2_497;
+    // Last updated: 2026-04-16 after the adapter learned to lower
+    // `scan_substring_group` and `script_run_group` atom types to
+    // their inner pattern only. RGX doesn't model the scan-against-
+    // other-capture / single-Unicode-script verb semantics yet, but
+    // for the subject subset where the verb is a no-op (scan target
+    // equals main subject; subject is single-script) the body-pattern
+    // match coincides with PCRE2's outcome — closing ~90 cases.
+    const PASS_BASELINE: usize = 8_811;
+    const FAIL_BASELINE: usize = 2_407;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

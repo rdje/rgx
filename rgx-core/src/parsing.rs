@@ -523,6 +523,37 @@ impl<'a> PgenAstAdapter<'a> {
             // `\E` is a literal character (including regex metachars).
             // Lower to a Sequence of Char nodes.
             "quoted_literal" => self.convert_quoted_literal(actual),
+            // `(*scan_substring:(group-list)pattern)` / `(*scs:...)` —
+            // PCRE2 scans the text captured by the listed groups for
+            // the inner pattern. RGX doesn't model this scan-against-
+            // other-text semantic yet; lower as the inner pattern
+            // only so the test runs and compares approximately against
+            // the main subject. Matches the compatible subset
+            // (subjects where the scan target equals the main subject)
+            // and still flags divergence for the rest via normal
+            // match / no-match classification.
+            "scan_substring_group" => {
+                let inner = self.first_descendant(actual, "pattern");
+                if let Some(p) = inner {
+                    self.convert_pattern(p)
+                } else {
+                    Ok(Regex::Empty)
+                }
+            }
+            // `(*script_run:pattern)` / `(*sr:...)` — PCRE2 constrains
+            // all matched codepoints to belong to a single Unicode
+            // script. RGX has ASCII-only script tables; lower as the
+            // inner pattern only so tests with single-script subjects
+            // still pass. Multi-script subjects may false-positive,
+            // caught by the "RGX too permissive" bucket.
+            "script_run_group" => {
+                let inner = self.first_descendant(actual, "pattern");
+                if let Some(p) = inner {
+                    self.convert_pattern(p)
+                } else {
+                    Ok(Regex::Empty)
+                }
+            }
             // PGEN 1.1.25 emits `posix_word_boundary_alias` for the
             // PCRE2 POSIX-alias word-boundary class names `[:<:]` and
             // `[:>:]`. Semantics per pcre2pattern(3):

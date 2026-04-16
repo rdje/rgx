@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - Adapter: scan_substring_group / script_run_group lower as body-pattern (conservative pass-through)
+- Scope: Add atom-level dispatch for two PCRE2 verb-group productions that PGEN emits but the adapter was rejecting with "unrecognized PGEN atom rule name". Both have real PCRE2 semantics RGX doesn't yet implement — `(*scan_substring:(group-list)pattern)` scans the text captured by named groups for a sub-pattern, and `(*script_run:pattern)` constrains matched codepoints to a single Unicode script — but for a large subset of tests their semantics reduce to "match the inner pattern against the main subject anyway". A conservative body-only lowering passes those and continues to fail honestly on the rest.
+- Changes in `rgx-core/src/parsing.rs::convert_atom`:
+  - `scan_substring_group` → recurse into `first_descendant("pattern")`. Ignores the capture-list and scan-target semantics; matches the body against the main subject.
+  - `script_run_group` → same lowering. Ignores the single-script constraint; matches the body against the main subject.
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves **8,721 → 8,811 pass** (**+90**), 2,497 → 2,407 fail, still 0 panic / 0 skip. **77.7% → 78.5%** (+0.8pp). Ratchet baselines bumped to `PASS_BASELINE=8_811` / `FAIL_BASELINE=2_407`.
+- Notes/impact: The 69 cases previously blocked at compile (AST contract mismatch) now all run end-to-end. ~90 net passes came from subjects where the verb-semantics no-op coincides with the correct PCRE2 answer; the remainder now land in the honest false-positive / span-mismatch / false-negative buckets where they can be properly classified. Zero regressions — the conservative pass-through only *adds* compile paths, it doesn't change anything that already matched.
+
 ### 2026-04-16 - RegexBuilder: insert (?flags) after leading (*VERB) runs; adapter: non_atomic_lookahead_pos/lookbehind_pos rule names
 - Scope: Two targeted correctness fixes. One in the public `RegexBuilder` API (affects every downstream user that combines `(*VERB)` start options with flag toggles), one in the PGEN adapter (absorbs PGEN 1.1.22+'s symbol-form non-atomic lookaround rule names).
 - Changes:

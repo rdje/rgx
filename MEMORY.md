@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-sixth commit) — Adapter: scan_substring_group/script_run_group body-pass-through (+90 passes)
+- **What**: `convert_atom` learns two new dispatch arms:
+  1. `scan_substring_group` → lower as inner pattern only. Real PCRE2 semantic: scan-named-group-captures; skipped for now.
+  2. `script_run_group` → lower as inner pattern only. Real PCRE2 semantic: single-Unicode-script constraint; skipped for now.
+- **Why conservative pass-through**: For subjects where the verb-semantics happens to be a no-op (scan target = main subject; subject is single-script), the body-only match coincides with PCRE2's answer. Nets ~90 passes. The remainder moves from "compile error" to honest match/no-match classification.
+- **Conformance delta**: 8721 → **8811 pass** (+90), 2497 → 2407 fail. 77.7% → **78.5%**. Ratchet bumped to 8811/2407.
+
 ### 2026-04-16 (fifty-fifth commit) — RegexBuilder flag-order after (*VERB) + non_atomic_lookahead_pos adapter
 - **What**: Two correctness fixes.
   1. `RegexBuilder::build` now inserts `(?flags)` AFTER any leading `(*VERB)` run (e.g. `(*NUL)`, `(*TURKISH_CASING)`, `(*LIMIT_DEPTH=…)`) rather than unconditionally prepending. New helper `leading_start_verb_end` walks a balanced `(*…)` run respecting backslash escapes and nested parens. PCRE2 requires start-option verbs before everything else.
