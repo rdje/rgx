@@ -2267,3 +2267,23 @@ The 458-case false-positive bucket's first case is `/(?x)(?-x: \s*#\s*)/` on sub
 ### Next concrete action
 - `/(abc)\1/i` — case-insensitive numbered backref. First case in the 824-failure false-negative bucket. VM-level fix: when case-insensitive flag is in scope at the backref site, compare captured bytes with case folding rather than exactly. Might need a new opcode variant or a runtime-flag check in the existing `Backref` handler.
 - Or `/([a]*?)*/` — lazy-quantifier-inside-greedy-quantifier empty-match semantics (first case of 682-failure span-mismatch bucket). PCRE2 returns empty match; RGX returns "a". Known PCRE2 semantic for zero-width lazy matches under outer greedy.
+
+## 2026-04-17 session — ratchet push #4: case-insensitive numbered backref
+
+### What landed
+- New VM opcode `OpCode::BackrefCaseInsensitive = 0x68`. Codegen in `OptimizingCompiler` selects this opcode instead of `OpCode::Backref` for both `Regex::Backreference(N)` and `Regex::NamedBackreference(name)` whenever `self.case_insensitive` is true at the backref site.
+- New `RegexVM::match_backreference_case_insensitive` walks the captured text and the subject char-by-char with per-codepoint `to_lowercase()` comparison via `chars_case_insensitive_eq`. Keeps `match_backreference` (byte-exact `simd_compare`) for the common case.
+- Decoder sites at all three VM execute paths (main, subexpr, async/resume) handle the new opcode. Advance-loop list at the end of the VM updated. C1 JIT exclusion list extended — no JIT eligibility change, `Backref` was already excluded.
+- Three new regression pins in `lib.rs tests`: `case_insensitive_numbered_backref_matches_folded_text` (testinput1:1458 `/(abc)\1/i` on "ABCabc"), `case_insensitive_named_backref_matches_folded_text` (same for `(?i)(?<w>cat)\k<w>`), `case_sensitive_backref_still_byte_exact` (regression pin for the non-`(?i)` path).
+- Conformance ratchet baselines bumped: 8,844 → 8,889 pass, 2,374 → 2,329 fail.
+
+### Scale of win
+**+45 passes** — the biggest single-commit gain of the session. `(?i)` is extremely common in real-world patterns and every `/(abc)\1/i`-shaped test was silently failing. Bucket deltas: FN 824 → 779 (−45), span mismatch 682 → 678 (−4), FP 455 → 459 (+4). The FP ding is reclassification — 4 cases that had been failing multiple ways are now isolating cleanly into false-positive-only once the backref matches right.
+
+### Known limitation (intentional)
+Does not fold across char-count changes: `'ẞ'.to_lowercase()` = `['ß']` (1 char) matches `'ß'`, but `"ẞ"` does NOT match `"ss"` because the captured "ẞ" walks 1 char and expects 1 char from the subject. Full PCRE2 Unicode case folding allows 1-to-many / many-to-1 mappings. Tracked as the Unicode case-fold residual follow-up.
+
+### Next concrete action
+- `/([a]*?)*/` — span-mismatch first case. PCRE2 returns empty match, RGX returns "a". Zero-width lazy under outer greedy quantifier; the outer `*` should recognize that the inner `[a]*?` matched empty and terminate the loop instead of expanding. 678-case bucket.
+- Or `/(?<=(foo))bar\1/` — new first case in 779-case false-neg bucket. Lookbehind with capturing group interacting with backref. Likely a capture-propagation issue under lookbehind.
+- Or `/^[\E\Qa\E-\Qz\E]+/` — new first case in 459-case false-pos bucket. `\Q...\E` literal-quote blocks inside character classes; RGX's class-item handler may not be recognizing them as zero-width.

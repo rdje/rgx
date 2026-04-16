@@ -5871,6 +5871,46 @@ mod tests {
     }
 
     #[test]
+    fn case_insensitive_numbered_backref_matches_folded_text() {
+        // PCRE2 testinput1:1458 — `/(abc)\1/i` on subject "ABCabc"
+        // expects match. Previously RGX emitted `OpCode::Backref` which
+        // does byte-exact comparison, so "abc" (captured by `\1` after
+        // folded matching of "ABC") wouldn't match against "abc" in the
+        // subject — because the captured text preserves "ABC" as-is and
+        // byte-comparison with lowercase "abc" fails. The new
+        // `BackrefCaseInsensitive` opcode walks captured and subject
+        // chars together with per-char Unicode folding.
+        let re = Regex::compile("(?i)(abc)\\1").unwrap();
+        assert!(re.is_match("ABCabc"));
+        assert!(re.is_match("abcABC"));
+        assert!(re.is_match("AbCaBc"));
+        assert!(!re.is_match("abcXYZ"));
+    }
+
+    #[test]
+    fn case_insensitive_named_backref_matches_folded_text() {
+        // Same fix applies to `\k<name>` / `(?P=name)` style named
+        // backreferences inside `(?i)` scope.
+        let re = Regex::compile(r"(?i)(?<w>cat)\k<w>").unwrap();
+        assert!(re.is_match("CATcat"));
+        assert!(re.is_match("catCAT"));
+        assert!(re.is_match("CaTcAt"));
+        assert!(!re.is_match("catdog"));
+    }
+
+    #[test]
+    fn case_sensitive_backref_still_byte_exact() {
+        // Regression pin: without `(?i)`, `\1` must stay byte-exact.
+        // The old `OpCode::Backref` path is still selected when
+        // `case_insensitive` is false, so `(abc)\1` on "ABCabc" must
+        // fail — the capture holds "ABC" and the backref needs "ABC"
+        // byte-for-byte.
+        let re = Regex::compile(r"(abc)\1").unwrap();
+        assert!(re.is_match("abcabc"));
+        assert!(!re.is_match("ABCabc"));
+    }
+
+    #[test]
     fn extended_mode_toggle_then_scoped_disable_preserves_outer() {
         // After `(?-x: ...)` exits, the outer `(?x)` mode should still
         // apply. Verify by putting literal whitespace in the tail that

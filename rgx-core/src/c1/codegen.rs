@@ -356,6 +356,7 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
 
         // === Ineligible: backreferences and inline code ===
         | OpCode::Backref
+        | OpCode::BackrefCaseInsensitive
         | OpCode::CodeBlock
 
         // === Ineligible: conditionals + recursion ===

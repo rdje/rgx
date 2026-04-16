@@ -147,6 +147,13 @@ pub enum OpCode {
     Backref = 0x66,
     /// Execute an embedded code block predicate
     CodeBlock = 0x67,
+    /// Case-insensitive backreference (group ID follows). Emitted in
+    /// place of `Backref` when `(?i)` is active at the backref site.
+    /// Walks the captured text and the subject char-by-char, comparing
+    /// via Unicode per-char case folding (`char::to_lowercase()`). Does
+    /// not yet handle cases where folding changes byte length (e.g.
+    /// `ẞ` → `ss`) — that's the Unicode case-fold residual follow-up.
+    BackrefCaseInsensitive = 0x68,
 
     // === OPTIMIZATION HINTS (0x70-0x7F) ===
     /// Mark hot path for JIT compilation
@@ -2933,6 +2940,22 @@ impl RegexVM {
                     return false;
                 }
 
+                OpCode::BackrefCaseInsensitive => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    if self.match_backreference_case_insensitive(ctx, group_id) {
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
+
                 OpCode::JumpIfMatch | OpCode::JumpIfNoMatch => {
                     let jump_if_match = matches!(op, OpCode::JumpIfMatch);
                     let Some(condition_matches) =
@@ -3300,6 +3323,77 @@ impl RegexVM {
         } else {
             false
         }
+    }
+
+    /// Per-char Unicode case-insensitive comparison used by
+    /// `match_backreference_case_insensitive`. Returns `true` if the
+    /// chars are equal or their `to_lowercase()` iterators are. This
+    /// is full Unicode folding per char: `'a'` and `'A'` match, `'é'`
+    /// and `'É'` match, `'İ'` (U+0130) and `'i'` don't (since
+    /// `'İ'.to_lowercase()` emits `['i', '̇']`). Does not fold
+    /// across char-count changes (`ẞ` ≠ `ss`).
+    fn chars_case_insensitive_eq(a: char, b: char) -> bool {
+        if a == b {
+            return true;
+        }
+        a.to_lowercase().eq(b.to_lowercase())
+    }
+
+    /// Case-insensitive backref match: walk the captured text and the
+    /// subject char-by-char from `ctx.pos` forward, accepting each pair
+    /// whose Unicode lowercase forms are equal. On success, advances
+    /// `ctx.pos` past the consumed bytes of the subject (which may
+    /// differ from the captured length if folding changes byte width —
+    /// but per-char folding usually preserves it for ASCII / BMP). On
+    /// any mismatch or short subject, returns false.
+    ///
+    /// Known limitation: does not yet handle cases where a single
+    /// captured codepoint folds to *multiple* codepoints (e.g. `ẞ` →
+    /// `ss`). That's tracked as the Unicode case-fold residual
+    /// follow-up.
+    fn match_backreference_case_insensitive(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        group_id: usize,
+    ) -> bool {
+        let start_idx = group_id * 2;
+        let end_idx = start_idx + 1;
+        let (Some(capture_start), Some(capture_end)) = (
+            ctx.captures.get(start_idx).and_then(|&x| x),
+            ctx.captures.get(end_idx).and_then(|&x| x),
+        ) else {
+            return false;
+        };
+
+        if capture_start > capture_end || capture_end > ctx.text.len() {
+            return false;
+        }
+
+        let captured_bytes = &ctx.text[capture_start..capture_end];
+        let Ok(captured_str) = std::str::from_utf8(captured_bytes) else {
+            return false;
+        };
+
+        let mut pos = ctx.pos;
+        for cap_ch in captured_str.chars() {
+            if pos >= ctx.end {
+                return false;
+            }
+            let rest = &ctx.text[pos..ctx.end];
+            let Ok(rest_str) = std::str::from_utf8(rest) else {
+                return false;
+            };
+            let Some(sub_ch) = rest_str.chars().next() else {
+                return false;
+            };
+            if !Self::chars_case_insensitive_eq(cap_ch, sub_ch) {
+                return false;
+            }
+            pos += sub_ch.len_utf8();
+        }
+
+        ctx.pos = pos;
+        true
     }
 
     /// Read UTF-8 character from bytecode operands
@@ -4528,6 +4622,19 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::BackrefCaseInsensitive => {
+                    if ip < code.len() {
+                        let group_id = code[ip] as usize;
+                        ip += 1;
+                        if self.match_backreference_case_insensitive(ctx, group_id) {
+                            continue;
+                        }
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
                 OpCode::MatchReset => {
                     ctx.match_start_override = Some(ctx.pos);
                 }
@@ -5036,6 +5143,19 @@ impl RegexVM {
                     ip += 1;
 
                     if self.match_backreference(ctx, group_id) {
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
+
+                OpCode::BackrefCaseInsensitive => {
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let group_id = code[ip] as usize;
+                    ip += 1;
+
+                    if self.match_backreference_case_insensitive(ctx, group_id) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -6463,7 +6583,12 @@ impl OptimizingCompiler {
             }
 
             Regex::Backreference(group_id) => {
-                self.emit_op(OpCode::Backref);
+                let op = if self.case_insensitive {
+                    OpCode::BackrefCaseInsensitive
+                } else {
+                    OpCode::Backref
+                };
+                self.emit_op(op);
                 self.code.push(*group_id as u8);
             }
 
@@ -6473,7 +6598,12 @@ impl OptimizingCompiler {
                     .get(name)
                     .copied()
                     .expect("named backreference should be validated before codegen");
-                self.emit_op(OpCode::Backref);
+                let op = if self.case_insensitive {
+                    OpCode::BackrefCaseInsensitive
+                } else {
+                    OpCode::Backref
+                };
+                self.emit_op(op);
                 self.code.push(group_id as u8);
             }
 
@@ -7083,6 +7213,7 @@ impl OptimizingCompiler {
                 OpCode::SaveStart
                 | OpCode::SaveEnd
                 | OpCode::Backref
+                | OpCode::BackrefCaseInsensitive
                 | OpCode::SetAlternative
                 | OpCode::Call => {
                     ip += 1;
@@ -7376,14 +7507,14 @@ impl TryFrom<u8> for OpCode {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
-            Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, Call, Char, CharClass, CharClassNeg,
-            CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
-            GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
-            LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
-            PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart,
-            SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
-            StartLine, StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg,
-            WordBoundary,
+            Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, BackrefCaseInsensitive, Call, Char,
+            CharClass, CharClassNeg, CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine,
+            EndText, EndTextOrNL, Fail, GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch,
+            Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark, Match, MatchReset,
+            NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy,
+            QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split,
+            SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then, VerbSkip, VerbSkipNamed,
+            WordAscii, WordAsciiNeg, WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -7415,6 +7546,7 @@ impl TryFrom<u8> for OpCode {
             0x65 => Ok(AtomicEnd),
             0x66 => Ok(Backref),
             0x67 => Ok(CodeBlock),
+            0x68 => Ok(BackrefCaseInsensitive),
             0x40 => Ok(Jump),
             0x41 => Ok(Split),
             0x42 => Ok(SplitLazy),

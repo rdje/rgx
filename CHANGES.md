@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - Case-insensitive numbered backref (`\N` inside `(?i)` scope) via new `BackrefCaseInsensitive` opcode
+
+- Scope: Add a new VM opcode `BackrefCaseInsensitive = 0x68` that matches a captured group's text against the subject with per-char Unicode case folding. Previously every `\N` / `\k<name>` backreference compiled to `OpCode::Backref`, which does byte-exact `simd_compare` regardless of whether `(?i)` was in scope at the backref site. The fix wires `case_insensitive` through the codegen to emit the new opcode.
+- Behaviour: `(?i)(abc)\1` on "ABCabc" now matches. `\1` walks the captured text ("ABC") char-by-char and the subject starting at the backref position, accepting each pair whose `to_lowercase()` forms are equal. Byte-exact backrefs (no `(?i)` in scope) keep the existing `Backref` path — byte-level SIMD comparison is preserved for the common case.
+- Implementation surface:
+  - `rgx-core/src/vm.rs`: new `OpCode::BackrefCaseInsensitive` variant + `TryFrom<u8>` entry at `0x68`; codegen branches for both `Regex::Backreference` and `Regex::NamedBackreference` select the opcode based on `self.case_insensitive`; handlers at all three VM execute sites (main, subexpr, async/resume); advance loop extended; new `match_backreference_case_insensitive` + `chars_case_insensitive_eq` helpers on `RegexVM`.
+  - `rgx-core/src/c1/codegen.rs`: new opcode added to the JIT ineligibility list (same reason as `Backref`).
+- Known limitation: does not yet fold across char-count changes (`ẞ` → `ss` etc.). That's the Unicode case-fold residual follow-up — a separate bucket.
+- Validation: 1,016 lib tests pass (1,013 baseline + 3 new — `case_insensitive_numbered_backref_matches_folded_text`, `case_insensitive_named_backref_matches_folded_text`, `case_sensitive_backref_still_byte_exact`). PCRE2 conformance moves **8,844 → 8,889 pass** (+45), 2,374 → 2,329 fail, still 0 panic / 0 skip. Biggest single-commit gain of the session. Ratchet baselines bumped. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The cluster behind this case was large because `(?i)` is extremely common and every pattern like `/(abc)\1/i` or `/(?i)(\w+)\1/` was silently failing to match. Bucket deltas: false negative 824 → 779 (−45), span mismatch 682 → 678 (−4), false positive 455 → 459 (+4, reclassification of some resolved cases into now-visible other divergences). Next candidate targets: `/([a]*?)*/` span-mismatch (678-case bucket's first, empty-match-under-greedy semantics), `/(?<=(foo))bar\1/` false-neg (now the first case — lookbehind + backref interaction), or `/^[\E\Qa\E-\Qz\E]+/` false-positive (first in 459-case bucket, `\Q\E` class-member corner case).
+
 ### 2026-04-17 - Scoped flag-disable `(?-x:...)` now correctly disables x-mode
 
 - Scope: Fix `Compiler::strip_extended_inner` in `rgx-core/src/compiler.rs` so the extended-mode (`x`) whitespace-stripping pass honors the enable/disable split in the `FlagGroup.flags` string. Previously the pass used `flags.contains('x')`, which returns `true` for both `"x"` (enable) and `"-x"` (disable) and silently *enabled* extended mode inside `(?-x:...)` groups. The VM codegen already parses `enable-disable` correctly for `i`/`m`/`s`; now `strip_extended_inner` uses the same parse and the two paths agree.
