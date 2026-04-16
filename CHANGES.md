@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - File PGEN-RGX-0063 + 0064 (cluster-distilled)
+- Scope: Two cluster-distilled PGEN bug reports against PGEN 1.1.24 / 9a7d453, from the second round of post-ratchet PGEN triage. The remaining PGEN-relevant failure buckets (208 AST contract + 168 parse failure) fragment into ~10 distinct root causes, of which two are confirmed PGEN-side; the rest are RGX-adapter or harness-modifier gaps.
+- Reports:
+  - **PGEN-RGX-0063** — PGEN rejects the PCRE2 POSIX-alias word-boundary class names `[:<:]` (word-start) and `[:>:]` (word-end) as "unknown POSIX character class name". PCRE2 10.47 accepts both (verified via testoutput2:13793 bytecode: `\b Assert \w Ket` for `[:<:]`). These are documented PCRE2 aliases for word-boundary assertions inherited from Perl. 3 affected patterns. Bug class: `should_parse_but_fails`.
+  - **PGEN-RGX-0064** — PGEN's variable-length-lookbehind analysis rejects `(?<=X(?(DEFINE)(.*))Y).` as "unbounded". The inner `(?(DEFINE)(.*))` is a named-subpattern definition block that consumes nothing at match time, so the lookbehind body is effectively the fixed-length `"XY"`. PCRE2 10.47 accepts (verified testoutput1:10300 matches `"Z"`). Suggested fix: special-case `Conditional` nodes with `DEFINE` condition as contributing zero length in the body walker. Bug class: `should_parse_but_fails`.
+- Cluster triage (not filed — not PGEN):
+  - 69 `scan_substring_group` / `script_run_group` — PGEN emits atom correctly; RGX adapter feature work.
+  - 13 `\u` + 11 `\K`-in-lookaround + 14 descending range + 8 empty-class — all modifier-wiring gaps in the harness (`alt_bsux`, `allow_lookaround_bsk`, `alt_extended_class`, `allow_empty_class`).
+  - 11 simple_escape alphanumerics — adapter literal-fallback for non-meta chars.
+  - 1 `unsupported pgen lookaround variant 'non_atomic_lookahead_pos'` — PGEN emits correctly; adapter has `napla`/`naplb` but not the raw `non_atomic_lookahead_pos` / `non_atomic_lookbehind_pos` grammar-rule names. Adapter work, not PGEN.
+  - 3 `PCRE2 start option must appear at the start-option prefix` — harness prefix-ordering artifact (we prepend `(?i)` which comes before `(*TURKISH_CASING)`); PGEN accepts the raw pattern.
+- Validation: Both report bundles protocol-compliant per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md` §1–5 (parser identity at 1.1.24 / 9a7d453, host project at rgx commit e6ab26b, exact repro inputs, expected vs actual with suggested grammar amendments, structured parse-outcome JSON). 1,007 lib tests pass. Ratchet holds at 8,709 / 2,509 / 0 / 0.
+- Notes/impact: Running totals — PGEN-RGX reports filed 0001–0064 (64 total; 62 closed, **2 open**: 0063 + 0064). Combined cluster for open reports: ~4 cases.
+
 ### 2026-04-16 - Conformance harness: `is_subject_echo` discriminator (4-space-exact vs indented bytecode)
 - Scope: Patch a precision bug in the preamble-skip loop and the sibling new-subject detector in `parse_subject_output`. Both used `l.starts_with(b"    ")` (any 4+ leading-space line) to recognize subject echoes, which also matched `/B` bytecode-dump lines that use 6+ leading spaces (`        Bra`, `        ^`, `      2 Capture ref`, `        Ket`, `        End`). The preamble-skip stopped prematurely on the first `        Bra` line, causing the whole bytecode dump to be read as match output and the subject's real match to fall through to `Expected::NoMatch`. Any pattern that actually matched then appeared as a false positive.
 - Changes: New `is_subject_echo(line: &[u8]) -> bool` helper — true iff the line starts with EXACTLY 4 spaces followed by a non-space byte. Replaces the three `starts_with(b"    ")` call sites (preamble-skip, `parse_subject_output` first-line consumption, and `parse_subject_output` new-subject detection). No other semantic change.

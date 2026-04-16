@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-third commit) — File PGEN-RGX-0063 + 0064
+- **What**: Two new PGEN bug reports from post-harness-drill PGEN triage.
+  1. **0063** — `[:<:]` / `[:>:]` POSIX-alias word-boundary names rejected. PCRE2 accepts (bytecode: `\b Assert \w`). 3 cases.
+  2. **0064** — Variable-length-lookbehind check fails `(?<=X(?(DEFINE)(.*))Y).` as unbounded; PCRE2 treats DEFINE as zero-width. 1 case.
+- **Not filed (adapter/harness)**: 69 scan_substring_group/script_run_group (adapter), `non_atomic_lookahead_pos` (adapter naming gap), modifier-wiring for `alt_bsux` / `allow_lookaround_bsk` / `alt_extended_class` / `allow_empty_class` (harness), 11 simple_escape alphanumerics (adapter literal-fallback), `(*TURKISH_CASING)` harness-prefix-ordering artifact.
+- **Total PGEN-RGX reports filed**: 0001–0064 (64). Closed: 62. **Open: 2** (0063 + 0064).
+- **Methodology note**: Sequential `file_pgen_issues --single` calls are mandatory — two parallel invocations raced on `next_available_pgen_issue_id` and produced duplicate 0064s. Fixed by deleting the stray 0065 duplicate.
+
 ### 2026-04-16 (fifty-second commit) — Harness: `is_subject_echo` discriminator (+83 passes)
 - **What**: The preamble-skip and new-subject-detection loops used `l.starts_with(b"    ")` (any 4+ leading spaces) to recognize subject echoes. But `/B` bytecode dumps use 6+ leading spaces for opcode lines (`        Bra`, `        Ket`, etc.), which ALSO start with 4 spaces. Preamble-skip stopped early, bytecode got consumed as match output, real match fell through to NoMatch. Fix: new `is_subject_echo` helper requires EXACTLY 4 leading spaces + non-space next byte.
 - **Conformance delta**: 8626 → **8709 pass** (+83), 2592 → 2509 fail. 76.9% → **77.6%**. Ratchet bumped to 8709/2509.

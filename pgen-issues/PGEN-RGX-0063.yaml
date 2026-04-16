@@ -1,0 +1,117 @@
+id: PGEN-RGX-0063
+summary: |
+  PGEN regex parser rejects the PCRE2 POSIX-style word-boundary class names [:<:] (word start) and [:>:] (word end) with "unknown POSIX character class name". PCRE2 10.47 accepts these — testoutput2:13793 shows the bytecode compiles to `\b Assert \w Ket` for [:<:] (a zero-width assertion that the next code unit is a word char after a word boundary).
+status: open
+opened_at: 2026-04-16T00:00:00Z
+first_seen_at: 2026-04-16T00:00:00Z
+last_updated_at: 2026-04-16T00:00:00Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "9a7d453"
+parser_release_version: "1.1.24"
+integration_contract_version: "1.1.26"
+parser_family: regex
+profile: regex_default
+integration_surface: parseability_probe
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: e6ab26b
+host_os: macos
+host_arch: aarch64
+rust_toolchain: "rustc per workspace rust-version = 1.88"
+cargo_features: "default + pgen-parser"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0063/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0063/pgen_trace.log
+  pattern: "[[:<:]]red[[:>:]]"
+  source: |
+    Discovered by the RGX PCRE2 conformance harness
+    (`rgx-core/tests/pcre2_conformance.rs`) while scanning
+    `subs/pcre2/testdata/testinput2` line 4057. PCRE2 10.47
+    accepts the PCRE2 POSIX-alias word-boundary class names
+    `[:<:]` (word-start) and `[:>:]` (word-end). Verified via
+    testoutput2:13793 bytecode dump for `/[[:<:]]red[[:>:]]/B`:
+        Bra / \b / Assert / \w / Ket / red / \b / Assert back
+                            ^^^^                ^^^^^^^^^^^^^
+        / 1 Reverse / \w / Ket / …
+    [:<:] compiles to `\b` followed by a zero-width lookahead
+    assertion of `\w`, and [:>:] compiles to a `\b` preceded by
+    a zero-width lookbehind of `\w`. Affects 3 testinput2
+    patterns.
+
+# === Bug class (per protocol §4) ===
+bug_class: should_parse_but_fails
+
+expected_behavior: |
+  PGEN should accept `[:<:]` and `[:>:]` as valid `posix_class`
+  names in addition to the POSIX-standard names (`alpha`,
+  `digit`, etc.). These two are PCRE2-specific POSIX aliases
+  documented in pcre2pattern(3) §"POSIX character classes" as
+  inherited from Perl's legacy regex syntax:
+    [:<:]  — word-boundary before a word character (==
+              `\b(?=\w)` or equivalently the start-of-word
+              assertion).
+    [:>:]  — word-boundary after a word character (==
+              `(?<=\w)\b` or end-of-word).
+
+  Suggested grammar amendment in `subs/pgen/grammars/regex.ebnf`:
+  extend `posix_name` with the two literal names `<` and `>`,
+  or add a dedicated `pcre2_word_boundary_posix` alternative
+  parallel to `posix_class` with these two entries.
+
+actual_behavior: |
+  PGEN rejects the pattern with:
+        regex compile error: E_PARSE_FAILURE: unknown POSIX character class name
+        [[:<:]]red[[:>:]]
+
+reproduction: |
+  Reproducer artifacts under pgen-issues/artifacts/PGEN-RGX-0063/:
+    - repro_input.txt — exact failing input (one line, no trailing newline)
+    - pgen_contract.json — captured `parser_embedding_api_contract()` JSON
+    - pgen_parse_outcome.json — captured `parse_grammar_profile_named` JSON
+
+  Reproduction command (from rgx repo root) — captures the trace:
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0063/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0063/pgen_trace.log
+
+  Expected: parseability_probe accepts the input (`parse_full passed`).
+  Actual: PGEN rejects with the diagnostic recorded in
+  `pgen_parse_outcome.json` (or, for contract mismatches, RGX's
+  compile error captured in `actual_behavior`).
+
+impact: |
+  3 testinput2 patterns use these POSIX-alias word-boundary
+  names and currently fail RGX `Regex::compile` at PGEN parse:
+    [[:<:]]red[[:>:]]
+    [[:<:]]+red
+    red[[:>:]]+
+  Fix unlocks them via the expected-behavior grammar
+  amendment.
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

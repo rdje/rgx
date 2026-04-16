@@ -1,0 +1,15 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "failure",
+  "diagnostic": {
+    "code": "E_PARSE_FAILURE",
+    "message": "unknown POSIX character class name",
+    "location": {
+      "byte_offset": 1,
+      "line": 1,
+      "column": 2
+    }
+  }
+}
