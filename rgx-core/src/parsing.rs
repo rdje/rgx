@@ -870,8 +870,20 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::UnicodeClass { name, negated })
     }
 
-    /// Convert a `control_escape` node — `\cA` → control character. The letter
-    /// following `c` is taken from the `any_char` subtree.
+    /// Convert a `control_escape` node — `\cX`. PCRE2 10.47 rule
+    /// (pcre2pattern(3) "Non-printing characters"):
+    ///
+    /// > After `\c`, the next character is taken literally, converted
+    /// > to uppercase if it is a lowercase letter, and then bit 0x40
+    /// > in the value is flipped.
+    ///
+    /// So `\cA` / `\ca` → U+0001 (both fold to 'A' = 0x41, XOR 0x40 = 0x01),
+    /// `\c[` → U+001B (0x5B XOR 0x40), `\c:` → 'z' = 0x7A (0x3A XOR 0x40),
+    /// `\c{` → ';' = 0x3B (0x7B XOR 0x40). The previous implementation
+    /// masked with `& 0x1F` after subtracting '@', which correctly
+    /// produces 0x01..0x1A for ASCII letters but quietly wraps to the
+    /// wrong value for any other ASCII character (`\c:` became 0x1A
+    /// instead of 0x7A, `\c{` became 0x1B instead of 0x3B).
     fn convert_control_escape(&self, node: &PgenAstNode) -> Result<Regex> {
         let any_char = self.first_descendant(node, "any_char").ok_or_else(|| {
             self.contract_error("pgen control_escape is missing its any_char child")
@@ -879,7 +891,12 @@ impl<'a> PgenAstAdapter<'a> {
         let ctrl_char = self.collect_first_terminal_char(any_char).ok_or_else(|| {
             self.contract_error("pgen control_escape any_char has no terminal character")
         })?;
-        let code = (ctrl_char.to_ascii_uppercase() as u32).wrapping_sub('@' as u32) & 0x1F;
+        let base = if ctrl_char.is_ascii_lowercase() {
+            ctrl_char.to_ascii_uppercase()
+        } else {
+            ctrl_char
+        };
+        let code = (base as u32) ^ 0x40;
         let ch = char::from_u32(code)
             .ok_or_else(|| self.contract_error("pgen control_escape produced invalid char"))?;
         Ok(Regex::Char(ch))
@@ -3762,5 +3779,29 @@ mod tests {
         let r = crate::Regex::compile(r"(a)\1").expect("compiles");
         assert!(r.is_match("aa"));
         assert!(!r.is_match("ab"));
+    }
+
+    #[test]
+    fn control_escape_letter_variants_produce_c0_controls() {
+        // PCRE2: `\cX` uppercases lowercase letters then XORs bit 0x40.
+        // `\ca` / `\cA` both → U+0001. `\cZ` → U+001A.
+        let r = crate::Regex::compile(r"\ca\cA\cZ").expect("compiles");
+        assert!(r.is_match("\u{01}\u{01}\u{1A}"));
+        assert!(!r.is_match("aAZ"));
+    }
+
+    #[test]
+    fn control_escape_punctuation_uses_xor_not_mask() {
+        // Regression pin for PCRE2 testinput1 line 116: `/^\ca\cA\c[;\c:/`
+        // expects subject "\u{1}\u{1}\u{1b};z". The old formula
+        // `(ctrl.to_ascii_uppercase() - '@') & 0x1F` is only correct
+        // for ASCII letters — it silently wraps for punctuation. `\c:`
+        // must produce 'z' (0x3A XOR 0x40 = 0x7A), `\c[` must produce
+        // U+001B (0x5B XOR 0x40), matching PCRE2's documented rule.
+        let r = crate::Regex::compile(r"^\ca\cA\c[;\c:").expect("compiles");
+        assert!(
+            r.is_match("\u{01}\u{01}\u{1B};z"),
+            "expected subject `\\u{{01}}\\u{{01}}\\u{{1B}};z` to match /^\\ca\\cA\\c[;\\c:/"
+        );
     }
 }

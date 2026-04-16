@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - `\c<char>` control escape: XOR 0x40 rule, correct for non-letter inputs
+
+- Scope: Fix `convert_control_escape` in `rgx-core/src/parsing.rs` to use PCRE2 10.47's documented rule — "after `\c`, the next character is taken literally, converted to uppercase if it is a lowercase letter, and then bit 0x40 in the value is flipped" — instead of the old `(ctrl.to_ascii_uppercase() - '@') & 0x1F` formula. The old formula produces the correct C0 control character for ASCII letters (`\cA` / `\ca` → U+0001, `\cZ` → U+001A) but silently wraps for any other ASCII character: `\c:` became 0x1A instead of 0x7A = 'z', `\c[` became 0x1B (coincidentally correct for `[` specifically because it's in the 0x40–0x5F band), `\c{` became 0x1B instead of 0x3B = ';'.
+- Examples newly correct:
+  - `\c:` → 'z' (0x3A XOR 0x40 = 0x7A)
+  - `\c[` → U+001B (explicitly tested, was implicitly right due to the `& 0x1F` band)
+  - `\c;` → '{' (0x3B XOR 0x40 = 0x7B)
+  - `\c{` → ';' (0x7B XOR 0x40 = 0x3B)
+- Existing behaviour preserved: `\ca` / `\cA` → U+0001, `\cZ` → U+001A, all uppercase/lowercase letter variants unchanged.
+- Validation: 1,011 lib tests pass (1,009 baseline + 2 new regression pins `control_escape_letter_variants_produce_c0_controls` and `control_escape_punctuation_uses_xor_not_mask`). PCRE2 conformance moves **8,834 → 8,836 pass** (+2), 2,384 → 2,382 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_836` / `FAIL_BASELINE=2_382` in the same commit. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Small bucket (+2) because the testinput1:116 failure chain was previously listed as a single first-case; with this fix, the first false-negative case shifts to `/(abc)\1/i` which surfaces a separate engine gap (case-insensitive numbered backreferences don't fold their captured text). That's a larger engine item and will be a separate follow-up.
+
 ### 2026-04-17 - Octal-then-literal fallback for multi-digit numeric backrefs (`\214748364`, `\89`, `\199`)
 - Scope: Extend `Compiler::resolve_octal_backreferences` to cover the multi-digit non-octal fallback case. Previously only uniform-octal digit sequences (`\123`, `\223`, `\323`) reinterpreted as an octal byte; any multi-digit backreference containing an 8 or 9 fell through to a "missing capture group" compile error. PCRE2 10.47 actually reads up to three leading octal digits and treats the remaining decimal digits as literal characters.
 - Rule: when `Backreference(n)` with `n > total_groups`:

@@ -2235,3 +2235,20 @@ Single-digit `\8` / `\9` with no matching group stays a compile error. PCRE2's "
 
 ### Next concrete action
 - Pick another ratchet-pushing task. Top candidates: substitute-mode harness support (largest single bucket), non-`\n` newline conventions (engine work, medium bucket), Unicode case-fold edges (engine work, scattered), forward-relative recursion (engine work, small cluster).
+
+## 2026-04-17 session — ratchet push #2: `\c<char>` control escape XOR rule
+
+### What landed
+- `convert_control_escape` in `rgx-core/src/parsing.rs` now uses PCRE2 10.47's documented "uppercase if lowercase, then XOR 0x40" rule instead of the old `(ctrl.to_ascii_uppercase() - '@') & 0x1F` formula. The old formula was correct for ASCII letters (the band 0x40–0x5F, where uppercase letters live) but silently wrapped for any other ASCII character.
+- Two new regression pins under `parsing::tests`: `control_escape_letter_variants_produce_c0_controls` (preserves the letter case) and `control_escape_punctuation_uses_xor_not_mask` (new case — regression pin for testinput1:116 `/^\ca\cA\c[;\c:/`).
+- Conformance ratchet baselines bumped: 8,834 → 8,836 pass, 2,384 → 2,382 fail.
+
+### Why only +2
+Testinput1:116 was the single failing case with this root cause in the first-listed bucket; after fixing it, the new first case in the false-negative bucket is `/(abc)\1/i` — case-insensitive numbered backreferences, which is a separate engine gap (RGX's backref matching does byte-exact comparison, not case-insensitive when `/i` is in scope). That's a larger follow-up.
+
+### Also noted while triaging
+The 458-case false-positive bucket's first case is `/(?x)(?-x: \s*#\s*)/` on subject "#". PCRE2 expects NO MATCH because `(?-x: ...)` must scope-disable `(?x)` inside the group, making the leading space in the group body significant. RGX's scoped flag-disable isn't doing that correctly — it leaves extended mode on inside the `(?-x: ...)` group. This is a compiler flag-handling fix that could close a larger cluster if the same root cause is shared.
+
+### Next concrete action
+- `/(abc)\1/i` — case-insensitive backref: when `(?i)` is in scope, numbered backref `\N` should match the captured text case-insensitively. Engine-level change in the VM's backref matcher.
+- Or `/(?x)(?-x: ... )/` — scoped flag-disable: compiler-level fix in the flag-toggle lowering pass.
