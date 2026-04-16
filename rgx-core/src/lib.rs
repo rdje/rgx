@@ -4716,12 +4716,14 @@ mod tests {
     }
 
     #[test]
-    fn parser_backreference_to_missing_group_with_non_octal_digits_reports_compile_error() {
-        // PCRE2 semantics: `\N` where N > total_groups AND at least one
-        // digit of N is non-octal (8, 9) cannot be rewritten to an
-        // octal literal, so the compile error is retained. `\9` with
-        // no group 9 falls through the octal-fallback transform and
-        // hits the existing validation.
+    fn parser_single_digit_8_or_9_backref_to_missing_group_reports_compile_error() {
+        // PCRE2 rule: `\N` with N < 10 is **always** a back reference,
+        // and a lone 8 / 9 can't fall back to an octal literal because
+        // 8 and 9 aren't octal digits. Keep this as a compile error so
+        // obvious typos surface cleanly rather than silently becoming
+        // a literal '8' or '9'. (Multi-digit non-octal forms like
+        // `\89` have a well-defined PCRE2 literal interpretation —
+        // see `parser_multi_digit_non_octal_backref_becomes_literal`.)
         let result = Regex::compile(r"(a)\9");
         assert!(
             result.is_err(),
@@ -4745,6 +4747,51 @@ mod tests {
             .expect("single-digit backref with no group should compile as octal");
         // 0x02 is the character matched by `\2` in octal.
         assert!(r.is_match("\x02"));
+    }
+
+    #[test]
+    fn parser_multi_digit_non_octal_backref_becomes_literal() {
+        // PCRE2 rule: a multi-digit `\NN...N` where the whole decimal
+        // number is > total_groups reads up to three leading octal
+        // digits as an octal escape; any remaining decimal digits
+        // stand for themselves as literal characters. First digit 8
+        // or 9 ⇒ zero octal digits consumed ⇒ the whole sequence is
+        // literal.
+        let r =
+            Regex::compile(r"\89").expect("\\89 with no groups should compile as literal \"89\"");
+        assert!(
+            r.is_match("89"),
+            "\\89 should match the literal text \"89\""
+        );
+
+        // Leading 1 is a valid octal digit; 9 is not. So `\199`
+        // consumes one octal digit (0o1 = '\u{1}') then literal "99".
+        let r = Regex::compile(r"\199")
+            .expect("\\199 with no groups should compile as Char(0o1) + literal \"99\"");
+        assert!(
+            r.is_match("\u{01}99"),
+            "\\199 should match U+0001 followed by \"99\""
+        );
+        assert!(
+            !r.is_match("199"),
+            "\\199 must not match literal \"199\" — the leading 1 is octal, not decimal"
+        );
+    }
+
+    #[test]
+    fn parser_nine_digit_backref_becomes_octal_triplet_plus_literal() {
+        // Regression for PCRE2 testinput1:6539 (`/\214748364/`).
+        // With no groups, `\214748364` reads the first three digits
+        // as octal (0o214 = 140 = U+008C) and the remaining six as
+        // literal characters "748364". Before this fix the decimal
+        // 214_748_364 was rejected as a missing-group back reference.
+        let r = Regex::compile(r"\214748364")
+            .expect("\\214748364 with no groups should compile as U+008C + \"748364\"");
+        assert!(
+            r.is_match("\u{8C}748364"),
+            "\\214748364 should match U+008C followed by \"748364\""
+        );
+        assert!(!r.is_match("214748364"));
     }
 
     #[test]

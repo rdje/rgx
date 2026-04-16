@@ -2221,3 +2221,17 @@ Both docs were structurally coherent but factually stale by two weeks of heavy P
   - non-`\n` newline convention support (engine work, medium bucket)
   - Unicode case-fold residual (engine work, scattered fixes)
   - forward-relative recursion `(?+1)` / `(?+N)` (engine work, small cluster)
+
+## 2026-04-17 session — ratchet push #1: multi-digit non-octal backref fallback
+
+### What landed
+- `Compiler::resolve_octal_backreferences` now handles mixed-digit backref fallback: up to three leading octal digits become an octal `Char`; remaining decimal digits become literal `Char`s. Previously only uniform-octal sequences matched the fallback path; mixed sequences like `\214748364` or `\89` errored as "missing capture group".
+- Renamed the existing negative test `parser_backreference_to_missing_group_with_non_octal_digits_reports_compile_error` → `parser_single_digit_8_or_9_backref_to_missing_group_reports_compile_error` to reflect that only single-digit 8 / 9 keeps the error; multi-digit forms take the new fallback path.
+- Two new tests: `parser_multi_digit_non_octal_backref_becomes_literal` (covers `\89` and `\199`), `parser_nine_digit_backref_becomes_octal_triplet_plus_literal` (covers `\214748364`).
+- Conformance ratchet baselines bumped in the same commit: 8,822 → 8,834 pass, 2,396 → 2,384 fail.
+
+### Why the fix is narrow
+Single-digit `\8` / `\9` with no matching group stays a compile error. PCRE2's "N < 10 is always a back reference" rule means those two cases are unambiguously back references that fail because the group doesn't exist — silently reinterpreting them as literal "8" / "9" would hide typos. Multi-digit forms (`\89`, `\99`, `\214...`) have a well-defined PCRE2 octal-or-literal interpretation that never surfaces the back-reference rule, so the fallback is safe there.
+
+### Next concrete action
+- Pick another ratchet-pushing task. Top candidates: substitute-mode harness support (largest single bucket), non-`\n` newline conventions (engine work, medium bucket), Unicode case-fold edges (engine work, scattered), forward-relative recursion (engine work, small cluster).

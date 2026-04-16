@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - Octal-then-literal fallback for multi-digit numeric backrefs (`\214748364`, `\89`, `\199`)
+- Scope: Extend `Compiler::resolve_octal_backreferences` to cover the multi-digit non-octal fallback case. Previously only uniform-octal digit sequences (`\123`, `\223`, `\323`) reinterpreted as an octal byte; any multi-digit backreference containing an 8 or 9 fell through to a "missing capture group" compile error. PCRE2 10.47 actually reads up to three leading octal digits and treats the remaining decimal digits as literal characters.
+- Rule: when `Backreference(n)` with `n > total_groups`:
+  - If the digit string has length 1 and the digit is 8 or 9 → keep as `Backreference(n)` so `backreference_validation_message` reports a clean compile error (single-digit 8 / 9 with no matching group is PCRE2's "< 10 is always a back reference" rule).
+  - Otherwise consume up to three leading octal digits (0..=7) as one octal `Char`, then emit each remaining decimal digit as a literal `Char`. Single-char result flattens to `Char`; multi-char result flattens to `Sequence`.
+- Examples newly supported:
+  - `\214748364` (9 digits, first three octal) → `Char(U+008C) + "748364"`.
+  - `\89` / `\99` (no octal-valid leading digit) → literal `"89"` / `"99"`.
+  - `\199` (one octal-valid leading digit) → `Char(U+0001) + "99"`.
+- Existing behaviour preserved: single-digit `\2` → `Char('\x02')`, `\123` → `Char('S')`, `(a)\9` still compile-errors.
+- Validation: 1,009 lib tests pass (1,007 baseline + 2 new). PCRE2 conformance moves **8,822 → 8,834 pass** (+12), 2,396 → 2,384 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_834` / `FAIL_BASELINE=2_384` in the same commit per the ratchet-discipline rule. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: First RGX-side engine fix after yesterday's PGEN 1.1.26 bump closed all 66 PGEN-RGX reports. Residual conformance work is now engine-side and harness-side only — every PGEN-level grammar gap is fixed upstream. Next candidate moves: substitute-mode harness support (largest bucket), non-`\n` newline conventions, Unicode case-fold edges, forward-relative recursion `(?+1)`.
+
 ### 2026-04-16 - PGEN 1.1.26 bump: closes PGEN-RGX-0065/0066
 - Scope: Bump PGEN submodule from `ffd61e9` (1.1.25) to `5856f71` (1.1.26, "regex: release RGX 0065 and 0066 fixes"). Both open reports filed earlier today close in a single parser commit. No RGX adapter change required — the `(*UTF8)` / `(*UTF16)` / `(*UTF32)` verbs flow through the existing directive-verb path (no-op for `&str` API), and the scan_substring forward-reference cases were already being handled by the conservative `scan_substring_group` pass-through in commit 25db551.
 - PGEN-side changes cited by the release commit:

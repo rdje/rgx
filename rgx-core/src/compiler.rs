@@ -622,57 +622,94 @@ impl Compiler {
         Ok(ast)
     }
 
-    /// PCRE2 octal-fallback for numeric backreferences that don't
-    /// name an existing group. `\NNN` is parsed by PGEN as
-    /// `Backreference(NNN)` because the grammar can't know the
-    /// capture count upfront. If N > total_groups AND the decimal
-    /// digits of N are ALL valid octal digits (0..=7), PCRE2 semantics
-    /// say the escape is an octal byte literal, not a backref.
+    /// PCRE2 octal-or-literal fallback for numeric backreferences
+    /// that don't name an existing group. `\NNN` is parsed by PGEN
+    /// as `Backreference(NNN)` because the grammar can't know the
+    /// capture count upfront.
     ///
-    /// Examples (from PCRE2 testinput1 lines 1471 / 1474 / 1477):
-    /// - `(abc)\123` → `\123` → group 123 doesn't exist, digits 1/2/3
-    ///   are octal → byte 0o123 = 0x53 = 'S'
-    /// - `(abc)\223` → digits 2/2/3 octal → byte 0o223 = 0x93
-    /// - `(abc)\323` → digits 3/2/3 octal → byte 0o323 = 0xD3
+    /// Per pcre2pattern(3) "Non-printing characters" and "Back
+    /// references": if the decimal number N is < 10 **or** there
+    /// are at least N capturing groups before this escape, the
+    /// whole sequence is a back reference. Otherwise the escape
+    /// is **up to three leading octal digits** (0..=7) followed
+    /// by any remaining decimal digits as literal characters.
+    ///
+    /// Examples:
+    /// - `(abc)\123` (group 123 missing, all digits octal) →
+    ///   byte 0o123 = 0x53 = 'S'.
+    /// - `(abc)\223` / `(abc)\323` → 0o223 / 0o323.
+    /// - `\214748364` (no groups, 9 digits, first three octal)
+    ///   → Char(0o214) = U+008C followed by literal "748364".
+    /// - `\89` (no groups, no octal-leading digit) → literal "89".
+    /// - `\199` (no groups, one leading octal digit) → Char(0o1)
+    ///   followed by literal "99".
+    ///
+    /// Single-digit `\8` / `\9` with no matching group stays a
+    /// `Backreference(n)` and errors at
+    /// `backreference_validation_message` — PCRE2's "N < 10 is
+    /// always a back reference" rule fires for lone 8 / 9 (we
+    /// cannot take 0 octal digits and emit literal "8" / "9" the
+    /// way we do for multi-digit forms, because that would
+    /// silently change a likely-invalid pattern into a literal
+    /// and hide the bug).
     ///
     /// `Backreference(0)` is handled upstream by
     /// `convert_simple_escape` (which routes `\0` directly to
     /// `Char('\0')`); it doesn't reach this transform.
-    ///
-    /// Backrefs with at least one non-octal digit (e.g. `\89`,
-    /// `\123` when group 123 exists) fall through unchanged: the
-    /// subsequent `backreference_validation_message` catches any
-    /// remaining truly-invalid references.
     fn resolve_octal_backreferences(ast: RegexAst, total_groups: u32) -> RegexAst {
         match ast {
             RegexAst::Backreference(n) if n > total_groups => {
-                // If every decimal digit of n is a valid octal digit
-                // (0..=7), reinterpret n's decimal digit string as
-                // octal. `Backreference(123)` ⇒ digits "123" ⇒ octal
-                // 0o123 = 83 ⇒ Char('S'). Backrefs with non-octal
-                // digits (e.g. `\89`) keep their Backreference form
-                // and flow into `backreference_validation_message` for
-                // a clean compile error.
                 let s = n.to_string();
-                if !s.bytes().all(|b| b.is_ascii_digit() && b < b'8') {
+                let bytes = s.as_bytes();
+
+                // Single-digit 8 / 9 without a matching group keeps
+                // the Backreference(n) shape so the validator can
+                // surface a clean compile error. Multi-digit cases
+                // fall through to the octal-then-literal rule below.
+                if bytes.len() == 1 && bytes[0] >= b'8' {
                     return RegexAst::Backreference(n);
                 }
-                let Ok(code) = u32::from_str_radix(&s, 8) else {
-                    return RegexAst::Backreference(n);
-                };
-                // PCRE2 accepts octal escapes up to 0o777 = 0xFF (one
-                // byte). For three-digit 0o400..=0o777 (128..=255),
-                // the value is NOT a valid single-byte ASCII char,
-                // but Rust's `char::from_u32` does accept 128..=255
-                // as valid Unicode codepoints. The char encodes to
-                // TWO UTF-8 bytes, which diverges from PCRE2's
-                // single-byte literal semantics. For the initial
-                // octal-fallback we surface the Unicode codepoint;
-                // byte-accurate matching for octal values 128..=255
-                // is follow-up work and is tracked in BACKLOG C7.
-                match char::from_u32(code) {
-                    Some(ch) => RegexAst::Char(ch),
-                    None => RegexAst::Backreference(n),
+
+                // Count leading octal digits (0..=7), at most 3.
+                let mut octal_count = 0;
+                while octal_count < 3 && octal_count < bytes.len() && bytes[octal_count] < b'8' {
+                    octal_count += 1;
+                }
+
+                let mut items: Vec<RegexAst> = Vec::new();
+
+                if octal_count > 0 {
+                    // Safe because every byte in `bytes` is an ASCII
+                    // digit by construction (`n.to_string()`).
+                    let octal_str = std::str::from_utf8(&bytes[..octal_count])
+                        .expect("decimal digits are ASCII");
+                    let Ok(code) = u32::from_str_radix(octal_str, 8) else {
+                        return RegexAst::Backreference(n);
+                    };
+                    // PCRE2 accepts octal escapes up to 0o777 = 0xFF
+                    // (one byte). For three-digit 0o400..=0o777
+                    // (128..=255), Rust's `char::from_u32` accepts
+                    // 128..=255 as a Unicode codepoint which encodes
+                    // to TWO UTF-8 bytes — diverges from PCRE2's
+                    // single-byte literal semantics. For the initial
+                    // fallback we surface the Unicode codepoint;
+                    // byte-accurate matching for 128..=255 is
+                    // follow-up work (BACKLOG C7).
+                    match char::from_u32(code) {
+                        Some(ch) => items.push(RegexAst::Char(ch)),
+                        None => return RegexAst::Backreference(n),
+                    }
+                }
+
+                // Remaining decimal digits are literal characters.
+                for &b in &bytes[octal_count..] {
+                    items.push(RegexAst::Char(b as char));
+                }
+
+                match items.len() {
+                    0 => RegexAst::Backreference(n),
+                    1 => items.into_iter().next().expect("just checked len==1"),
+                    _ => RegexAst::Sequence(items),
                 }
             }
             RegexAst::Sequence(items) => RegexAst::Sequence(
