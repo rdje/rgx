@@ -268,7 +268,7 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
     // a `\= Expect` annotation, a `No match`, or the ` 0:` match echo.
     while oi < ob.len() {
         let l = ob[oi];
-        if l.starts_with(b"    ") || l.starts_with(b"\\=") {
+        if is_subject_echo(l) || l.starts_with(b"\\=") {
             break;
         }
         let text = String::from_utf8_lossy(l);
@@ -362,6 +362,15 @@ fn trim_leading_spaces(line: &[u8]) -> &[u8] {
         i += 1;
     }
     &line[i..]
+}
+
+/// True when `line` looks like a pcre2test subject echo — exactly 4
+/// leading spaces followed by at least one non-space character. This
+/// discriminator separates subject echoes from `/B` bytecode dumps
+/// (which use 6+ leading spaces), so the preamble-skip loop in
+/// `extract_pattern_cases` doesn't stop on an indented opcode line.
+fn is_subject_echo(line: &[u8]) -> bool {
+    line.len() > 4 && &line[0..4] == b"    " && line[4] != b' '
 }
 
 /// pcre2test strips leading and trailing ASCII whitespace from data
@@ -618,7 +627,7 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
     // `parse_cases`, so here we only expect a subject echo.
     if start < out_lines.len() {
         let l = out_lines[start];
-        if l.starts_with(b"    ") {
+        if is_subject_echo(l) {
             consumed += 1;
         }
     }
@@ -633,8 +642,8 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
         if l.is_empty() || l.starts_with(b"/") || l.starts_with(b"#") {
             break;
         }
-        // Lines starting with 4 spaces or `\=` are NEW subjects — stop.
-        if (l.starts_with(b"    ") || l.starts_with(b"\\=")) && consumed > 0 {
+        // Subject echoes and `\=` annotations mark NEW subjects — stop.
+        if (is_subject_echo(l) || l.starts_with(b"\\=")) && consumed > 0 {
             break;
         }
         let text = String::from_utf8_lossy(l);
@@ -1554,13 +1563,12 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after span-compare normalization —
-    // `overall` now passes through the same Latin-1 fallback as the
-    // subject when the subject was invalid UTF-8, and the ` (JIT)` /
-    // ` (non-JIT)` diagnostic suffix pcre2test appends to matches
-    // under JIT test modes is stripped before byte comparison.
-    const PASS_BASELINE: usize = 8_626;
-    const FAIL_BASELINE: usize = 2_592;
+    // Last updated: 2026-04-16 after `is_subject_echo` discriminator
+    // landed — subject echoes have EXACTLY 4 leading spaces, while
+    // `/B` bytecode dumps use 6+, so the preamble-skip and
+    // new-subject-detection now distinguish them correctly.
+    const PASS_BASELINE: usize = 8_709;
+    const FAIL_BASELINE: usize = 2_509;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

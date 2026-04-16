@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - Conformance harness: `is_subject_echo` discriminator (4-space-exact vs indented bytecode)
+- Scope: Patch a precision bug in the preamble-skip loop and the sibling new-subject detector in `parse_subject_output`. Both used `l.starts_with(b"    ")` (any 4+ leading-space line) to recognize subject echoes, which also matched `/B` bytecode-dump lines that use 6+ leading spaces (`        Bra`, `        ^`, `      2 Capture ref`, `        Ket`, `        End`). The preamble-skip stopped prematurely on the first `        Bra` line, causing the whole bytecode dump to be read as match output and the subject's real match to fall through to `Expected::NoMatch`. Any pattern that actually matched then appeared as a false positive.
+- Changes: New `is_subject_echo(line: &[u8]) -> bool` helper — true iff the line starts with EXACTLY 4 spaces followed by a non-space byte. Replaces the three `starts_with(b"    ")` call sites (preamble-skip, `parse_subject_output` first-line consumption, and `parse_subject_output` new-subject detection). No other semantic change.
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves **8,626 → 8,709 pass** (**+83**), 2,592 → 2,509 fail, still 0 panic / 0 skip. **76.9% → 77.6%** (+0.7pp). Ratchet baselines bumped to `PASS_BASELINE=8_709` / `FAIL_BASELINE=2_509`.
+- Notes/impact: Fourth consecutive harness-accuracy commit in this drill (preamble-skip +305, Latin-1 + JIT-suffix +179, `is_subject_echo` +83 = **+567 passes** from pure harness precision, zero engine or adapter change). Cumulative pass rate swing in this drill: 72.6% → 77.6% (+5.0pp). The remaining false-positive residual (~640) concentrates in `/replace=…` / `/substitute*` tests (pcre2test substitute-mode, not ordinary matching), `newline=cr/any/anycrlf` (RGX's multi_line only honors `\n`), and genuine engine-semantics divergences like forward-relative recursion `(?+1)`.
+
 ### 2026-04-16 - Conformance harness: Latin-1 expected-match normalization + JIT-suffix strip
 - Scope: Two more harness-correctness fixes in `rgx-core/tests/pcre2_conformance.rs` that were miscounting honest RGX matches as span mismatches. Together they close another ~179 cases (mostly concentrated in the 893-case span-mismatch bucket's top examples) without touching the engine.
 - Changes:

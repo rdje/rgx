@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-second commit) — Harness: `is_subject_echo` discriminator (+83 passes)
+- **What**: The preamble-skip and new-subject-detection loops used `l.starts_with(b"    ")` (any 4+ leading spaces) to recognize subject echoes. But `/B` bytecode dumps use 6+ leading spaces for opcode lines (`        Bra`, `        Ket`, etc.), which ALSO start with 4 spaces. Preamble-skip stopped early, bytecode got consumed as match output, real match fell through to NoMatch. Fix: new `is_subject_echo` helper requires EXACTLY 4 leading spaces + non-space next byte.
+- **Conformance delta**: 8626 → **8709 pass** (+83), 2592 → 2509 fail. 76.9% → **77.6%**. Ratchet bumped to 8709/2509.
+- **Cumulative drill**: +305 (preamble) + 179 (Latin-1 + JIT) + 83 (is_subject_echo) = **+567 passes** from 4 pure-harness commits. 72.6% → 77.6% (+5.0pp) without touching the engine.
+- **Next**: remaining false-positive residual (~640) concentrates in `/replace=…` / `/substitute*` (not ordinary match tests), `newline=cr/any` (multi_line gap), and `(?+1)` forward recursion. Each needs a different kind of fix.
+
 ### 2026-04-16 (fifty-first commit) — Harness: Latin-1 expected normalization + JIT-suffix strip (+179 passes)
 - **What**: Two more harness-correctness fixes on the span-mismatch bucket.
   1. Latin-1-decoded subjects re-encode high bytes as 2-byte UTF-8 in `&str`. RGX match output lives in that UTF-8 byte space; expected `overall` bytes from `decode_output` lived in raw-byte space. Normalize: when subject went through Latin-1 fallback, re-encode expected bytes via `char::encode_utf8` too.
