@@ -5911,6 +5911,47 @@ mod tests {
     }
 
     #[test]
+    fn positive_lookbehind_captures_propagate_to_outer_scope() {
+        // PCRE2 testinput1:2305 — `/(?<=(foo))bar\1/` on "foobarfoo"
+        // expects match "barfoo". The positive lookbehind captures
+        // group 1 = "foo" *inside* its body, and PCRE2 semantics say
+        // those captures are visible to subsequent parts of the outer
+        // pattern. Before this fix, RGX ran the lookbehind on a clone
+        // of the exec context and dropped the clone, so `\1` at the
+        // outer level saw an unset group and failed to match.
+        let re = Regex::compile(r"(?<=(foo))bar\1").unwrap();
+        let m = re.find_first("foobarfoo").expect("expected match");
+        assert_eq!((m.start, m.end), (3, 9));
+    }
+
+    #[test]
+    fn positive_lookahead_captures_propagate_to_outer_scope() {
+        // Same rule for lookahead: `(?=(foo))...\1` should let the
+        // outer backref see the lookahead's capture. PCRE2:
+        //   /(?=(foo))\1bar/ on "foobar" → match "foobar" (group 1 = "foo").
+        let re = Regex::compile(r"(?=(foo))\1bar").unwrap();
+        let m = re.find_first("foobar").expect("expected match");
+        assert_eq!((m.start, m.end), (0, 6));
+    }
+
+    #[test]
+    fn negative_lookaround_captures_do_not_leak() {
+        // Negative lookarounds must NOT leak captures. Regression pin:
+        // `(?!(foo))abc(\w*)` — the negative lookahead at the start
+        // prevents "foo" from matching group 1 *even transiently*; the
+        // outer match proceeds and group 2 captures "xyz". If we were
+        // propagating captures from negative-lookaround bodies, group 1
+        // could accidentally surface a stale "foo" from an earlier
+        // position; we don't, so it stays unset.
+        let re = Regex::compile(r"(?!(foo))abc(\w*)").unwrap();
+        let caps = re.captures("abcxyz").expect("expected match");
+        let overall = caps.get(0).expect("group 0");
+        assert_eq!((overall.start(), overall.end()), (0, 6));
+        assert!(caps.get(1).is_none(), "group 1 should not be set");
+        assert_eq!(caps.get(2).map(|m| m.as_str()), Some("xyz"));
+    }
+
+    #[test]
     fn extended_mode_toggle_then_scoped_disable_preserves_outer() {
         // After `(?-x: ...)` exits, the outer `(?x)` mode should still
         // apply. Verify by putting literal whitespace in the tail that

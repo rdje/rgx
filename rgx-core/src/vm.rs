@@ -2104,20 +2104,22 @@ impl RegexVM {
                         return false;
                     }
 
+                    let positive = matches!(op, OpCode::Lookahead | OpCode::Lookbehind);
                     let matched = match op {
-                        OpCode::Lookahead | OpCode::LookaheadNeg => {
-                            self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end])
-                        }
-                        OpCode::Lookbehind | OpCode::LookbehindNeg => {
-                            self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end])
-                        }
+                        OpCode::Lookahead | OpCode::LookaheadNeg => self.execute_assertion_subexpr(
+                            ctx,
+                            &code[expr_start..expr_end],
+                            positive,
+                        ),
+                        OpCode::Lookbehind | OpCode::LookbehindNeg => self
+                            .execute_lookbehind_assertion(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                positive,
+                            ),
                         _ => false,
                     };
-                    let assertion_holds = match op {
-                        OpCode::Lookahead | OpCode::Lookbehind => matched,
-                        OpCode::LookaheadNeg | OpCode::LookbehindNeg => !matched,
-                        _ => false,
-                    };
+                    let assertion_holds = if positive { matched } else { !matched };
 
                     if !assertion_holds {
                         if self.try_backtrack(ctx, &mut ip) {
@@ -4686,20 +4688,22 @@ impl RegexVM {
                     if expr_end > code.len() {
                         return false;
                     }
+                    let positive = matches!(op, OpCode::Lookahead | OpCode::Lookbehind);
                     let matched = match op {
-                        OpCode::Lookahead | OpCode::LookaheadNeg => {
-                            self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end])
-                        }
-                        OpCode::Lookbehind | OpCode::LookbehindNeg => {
-                            self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end])
-                        }
+                        OpCode::Lookahead | OpCode::LookaheadNeg => self.execute_assertion_subexpr(
+                            ctx,
+                            &code[expr_start..expr_end],
+                            positive,
+                        ),
+                        OpCode::Lookbehind | OpCode::LookbehindNeg => self
+                            .execute_lookbehind_assertion(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                positive,
+                            ),
                         _ => false,
                     };
-                    let assertion_holds = match op {
-                        OpCode::Lookahead | OpCode::Lookbehind => matched,
-                        OpCode::LookaheadNeg | OpCode::LookbehindNeg => !matched,
-                        _ => false,
-                    };
+                    let assertion_holds = if positive { matched } else { !matched };
                     if !assertion_holds {
                         if self.try_backtrack(ctx, &mut ip) {
                             continue;
@@ -5052,20 +5056,22 @@ impl RegexVM {
                         return false;
                     }
 
+                    let positive = matches!(op, OpCode::Lookahead | OpCode::Lookbehind);
                     let matched = match op {
-                        OpCode::Lookahead | OpCode::LookaheadNeg => {
-                            self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end])
-                        }
-                        OpCode::Lookbehind | OpCode::LookbehindNeg => {
-                            self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end])
-                        }
+                        OpCode::Lookahead | OpCode::LookaheadNeg => self.execute_assertion_subexpr(
+                            ctx,
+                            &code[expr_start..expr_end],
+                            positive,
+                        ),
+                        OpCode::Lookbehind | OpCode::LookbehindNeg => self
+                            .execute_lookbehind_assertion(
+                                ctx,
+                                &code[expr_start..expr_end],
+                                positive,
+                            ),
                         _ => false,
                     };
-                    let assertion_holds = match op {
-                        OpCode::Lookahead | OpCode::Lookbehind => matched,
-                        OpCode::LookaheadNeg | OpCode::LookbehindNeg => !matched,
-                        _ => false,
-                    };
+                    let assertion_holds = if positive { matched } else { !matched };
 
                     if !assertion_holds {
                         local_backtrack_or_return_false!();
@@ -5595,15 +5601,34 @@ impl RegexVM {
 
     /// Execute an assertion sub-expression without consuming input
     /// or mutating the parent execution context.
-    fn execute_assertion_subexpr(&self, ctx: &ExecContext<'_>, code: &[u8]) -> bool {
+    /// Run a lookahead / conditional-lookaround assertion against a
+    /// clone of `ctx` and report whether the body matched. If
+    /// `propagate_captures` is true AND the body matched, the clone's
+    /// capture slots and capture trail are merged back into `ctx` —
+    /// this is how PCRE2 positive lookarounds make their internal
+    /// captures visible to the outer match (e.g. `(?=(foo))\1` on
+    /// "foofoo" captures group 1 = "foo" via the lookahead and lets
+    /// `\1` at the outer level use it). Negative lookarounds call in
+    /// with `propagate_captures: false` so captures set inside a
+    /// failing-for-the-outer body are always discarded.
+    fn execute_assertion_subexpr(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        propagate_captures: bool,
+    ) -> bool {
         let mut assertion_ctx = Self::clone_exec_context(ctx);
-
-        self.execute_subexpr(&mut assertion_ctx, code)
+        let body_matched = self.execute_subexpr(&mut assertion_ctx, code);
+        if body_matched && propagate_captures {
+            ctx.captures = assertion_ctx.captures;
+            ctx.capture_trail = assertion_ctx.capture_trail;
+        }
+        body_matched
     }
 
     fn evaluate_conditional_operand(
         &self,
-        ctx: &ExecContext<'_>,
+        ctx: &mut ExecContext<'_>,
         code: &[u8],
         ip: &mut usize,
     ) -> Option<bool> {
@@ -5647,9 +5672,11 @@ impl RegexVM {
                 if expr_end > code.len() {
                     return None;
                 }
-                let matched = self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end]);
+                let positive = kind == CONDITIONAL_KIND_LOOKAHEAD_POSITIVE;
+                let matched =
+                    self.execute_assertion_subexpr(ctx, &code[expr_start..expr_end], positive);
                 *ip = expr_end;
-                if kind == CONDITIONAL_KIND_LOOKAHEAD_POSITIVE {
+                if positive {
                     Some(matched)
                 } else {
                     Some(!matched)
@@ -5666,9 +5693,11 @@ impl RegexVM {
                 if expr_end > code.len() {
                     return None;
                 }
-                let matched = self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end]);
+                let positive = kind == CONDITIONAL_KIND_LOOKBEHIND_POSITIVE;
+                let matched =
+                    self.execute_lookbehind_assertion(ctx, &code[expr_start..expr_end], positive);
                 *ip = expr_end;
-                if kind == CONDITIONAL_KIND_LOOKBEHIND_POSITIVE {
+                if positive {
                     Some(matched)
                 } else {
                     Some(!matched)
@@ -5697,7 +5726,20 @@ impl RegexVM {
 
     /// Execute a lookbehind assertion by finding a sub-expression match
     /// that ends exactly at the current position.
-    fn execute_lookbehind_assertion(&self, ctx: &ExecContext<'_>, code: &[u8]) -> bool {
+    /// Lookbehind counterpart of `execute_assertion_subexpr`. Scans
+    /// backwards from `ctx.pos` for a length that ends exactly at
+    /// `ctx.pos`. On the first successful body match, merges the
+    /// lookbehind clone's captures + trail back into `ctx` when
+    /// `propagate_captures` is true (positive lookbehind). Negative
+    /// lookbehinds pass `false` so their body-captures are discarded
+    /// even when the body matches (because negative-lookbehind-matches
+    /// means the outer assertion has failed).
+    fn execute_lookbehind_assertion(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        propagate_captures: bool,
+    ) -> bool {
         let assertion_end = ctx.pos;
 
         for start in (0..=assertion_end).rev() {
@@ -5708,6 +5750,10 @@ impl RegexVM {
             if self.execute_subexpr(&mut lookbehind_ctx, code)
                 && lookbehind_ctx.pos == assertion_end
             {
+                if propagate_captures {
+                    ctx.captures = lookbehind_ctx.captures;
+                    ctx.capture_trail = lookbehind_ctx.capture_trail;
+                }
                 return true;
             }
         }

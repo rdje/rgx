@@ -2287,3 +2287,20 @@ Does not fold across char-count changes: `'ẞ'.to_lowercase()` = `['ß']` (1 ch
 - `/([a]*?)*/` — span-mismatch first case. PCRE2 returns empty match, RGX returns "a". Zero-width lazy under outer greedy quantifier; the outer `*` should recognize that the inner `[a]*?` matched empty and terminate the loop instead of expanding. 678-case bucket.
 - Or `/(?<=(foo))bar\1/` — new first case in 779-case false-neg bucket. Lookbehind with capturing group interacting with backref. Likely a capture-propagation issue under lookbehind.
 - Or `/^[\E\Qa\E-\Qz\E]+/` — new first case in 459-case false-pos bucket. `\Q...\E` literal-quote blocks inside character classes; RGX's class-item handler may not be recognizing them as zero-width.
+
+## 2026-04-17 session — ratchet push #5: positive lookaround captures propagate
+
+### What landed
+- `RegexVM::execute_assertion_subexpr` and `::execute_lookbehind_assertion` now take `&mut ExecContext` with a `propagate_captures: bool` flag. On positive match, the assertion's clone `captures` + `capture_trail` are merged back into the outer ctx. Negative lookarounds keep the old isolation.
+- `evaluate_conditional_operand` similarly upgraded so conditional lookarounds `(?(?=X)yes|no)` propagate captures through the positive branch.
+- All 8 call sites (3 main-VM, 3 subexpr, plus 2 conditional-operand arms) switched to the new signature with `positive = matches!(op, Lookahead | Lookbehind)`.
+- Three new regression pins in `lib.rs tests`: `positive_lookbehind_captures_propagate_to_outer_scope`, `positive_lookahead_captures_propagate_to_outer_scope`, `negative_lookaround_captures_do_not_leak`.
+- Conformance ratchet baselines bumped: 8,889 → 8,899 pass, 2,329 → 2,319 fail.
+
+### Semantic summary
+PCRE2 rule: a positive lookaround that matches saves its internal captures; backtracking outside the lookaround (after it has successfully matched) keeps the captures available to subsequent backrefs and expansions. Negative lookarounds either fail (body matched ⇒ outer fails, captures discarded) or succeed by body failure (no captures to propagate). Capture-trail merge ensures outer backtracks unwind lookaround captures correctly.
+
+### Next concrete action
+- `/(a(?i)bc|BB)x/` — new first FN case (770-case bucket). Scoped `(?i)` inside an alternation branch doesn't extend to the branch's literals. RGX either loses the flag on branch entry or applies it at compile-time globally. Compiler-level investigation.
+- Or `/([a]*?)*/` — span-mismatch first case (still 679). Zero-width lazy-under-greedy empty-match semantics.
+- Or `/^[\E\Qa\E-\Qz\E]+/` — false-positive first case (457). `\Q\E` class-member corner case.

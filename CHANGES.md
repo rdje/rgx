@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - Positive lookaround captures now propagate to the outer match scope
+
+- Scope: `RegexVM::execute_assertion_subexpr` and `RegexVM::execute_lookbehind_assertion` both used to take `&ExecContext` (immutable), run the assertion body on a cloned context, and discard the clone — so any capture groups set *inside* a positive lookaround never became visible at the outer level. PCRE2 explicitly specifies that positive-lookaround captures propagate: `(?<=(foo))bar\1` on "foobarfoo" matches "barfoo" because `\1` at the outer level can see the lookbehind's capture of "foo". RGX returned no match.
+- Fix: upgrade both assertion helpers to `&mut ExecContext` plus a `propagate_captures: bool` flag. On positive match, the clone's `captures` and `capture_trail` are merged back into the outer context. Negative lookarounds pass `false` so any bodies that happen to match transiently can't leak captures to the outer scope.
+- Call-site wiring: all three VM dispatch paths (main execute, subexpr execute, async/resume) updated with `let positive = matches!(op, OpCode::Lookahead | OpCode::Lookbehind)`. `evaluate_conditional_operand` similarly extended and upgraded to `&mut ExecContext` — conditional operands that use lookarounds (e.g. `(?(?=X)yes|no)`) also propagate captures on the positive branch.
+- Validation: 1,019 lib tests pass (1,016 baseline + 3 new — `positive_lookbehind_captures_propagate_to_outer_scope`, `positive_lookahead_captures_propagate_to_outer_scope`, `negative_lookaround_captures_do_not_leak`). PCRE2 conformance moves **8,889 → 8,899 pass** (+10), 2,329 → 2,319 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_899` / `FAIL_BASELINE=2_319`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Bucket deltas: FN 779 → 770 (−9), FP 459 → 457 (−2), span mismatch 678 → 679 (+1 — one case reclassified). New first FN case is `/(a(?i)bc|BB)x/` on "bbx" — scoped `(?i)` inside an alternation arm, a different root cause (flag propagation across alternation branches). Capture-trail merge ensures subsequent outer backtracks correctly unwind the lookaround-sourced captures too.
+
 ### 2026-04-17 - Case-insensitive numbered backref (`\N` inside `(?i)` scope) via new `BackrefCaseInsensitive` opcode
 
 - Scope: Add a new VM opcode `BackrefCaseInsensitive = 0x68` that matches a captured group's text against the subject with per-char Unicode case folding. Previously every `\N` / `\k<name>` backreference compiled to `OpCode::Backref`, which does byte-exact `simd_compare` regardless of whether `(?i)` was in scope at the backref site. The fix wires `case_insensitive` through the codegen to emit the new opcode.
