@@ -1,7 +1,7 @@
 id: PGEN-RGX-0062
 summary: |
   PGEN regex parser rejects a PCRE2 callout (?C...) placed in the conditional-assertion position `^(?(?C...)...|...)` at parse time. PCRE2 10.47 accepts this — testoutput2:14984 bytecode dump shows Cond Callout 25 ... Assert abc.
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -110,8 +110,24 @@ impact: |
   atom positions.
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.24"
+  fixed_in_parser_backend_version: "9a7d453"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN commit 9a7d453 widens the `condition` production with
+    a new `condition_callout_assertion = condition_callout "("
+    condition_assertion` alternative, so callouts can occupy
+    the conditional-assertion slot.
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only '^(?(?C25)(?=abc)abcd|xyz)' /tmp/v.json
+    → status=success.
+
+    RGX adapter (`rgx-core/src/parsing.rs::convert_condition`)
+    extended with a `condition_callout_assertion` dispatch:
+    recurse to the inner `condition_assertion` and drop the
+    callout (RGX doesn't execute PCRE2 text-pattern callouts,
+    so it's a no-op for match decisions).

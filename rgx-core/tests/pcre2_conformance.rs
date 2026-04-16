@@ -1500,10 +1500,12 @@ fn run_full_conformance() {
     // in the same commit. That creates a one-way ratchet from 72.6% →
     // … → 100% over time: each merge can only move the number up.
     //
-    // Last updated: 2026-04-16 after PGEN 1.1.23 + class-range adapter
-    // wiring (commit 297db4e).
-    const PASS_BASELINE: usize = 8_141;
-    const FAIL_BASELINE: usize = 3_077;
+    // Last updated: 2026-04-16 after PGEN 1.1.24 bump (9a7d453,
+    // "Regex: add PCRE2 single-byte and callout-condition forms")
+    // closing PGEN-RGX-0061 + 0062 with adapter wiring for
+    // `single_byte_escape` and `condition_callout_assertion`.
+    const PASS_BASELINE: usize = 8_142;
+    const FAIL_BASELINE: usize = 3_076;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

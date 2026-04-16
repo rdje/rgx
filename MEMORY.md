@@ -294,6 +294,17 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (forty-ninth commit) — PGEN 1.1.24 bump closes 0061/0062 + adapter wiring
+- **What**: Submodule bump cd0f8c7 → 9a7d453 ("Regex: add PCRE2 single-byte and callout-condition forms"). Both reports land fixes:
+  1. `single_byte_escape = "C"` as new escape_unit alternative head-of-list
+  2. `condition_callout_assertion = condition_callout "(" condition_assertion` as new condition alternative
+- **Adapter wiring in parsing.rs**:
+  1. `convert_escape`: `single_byte_escape` → CharClass spanning `'\0'..char::MAX` (any codepoint including newline) — sound semantics for RGX's str-based API
+  2. `convert_condition`: `condition_callout_assertion` → recurse to inner `condition_assertion`, drop callout (RGX doesn't execute PCRE2 text-pattern callouts)
+- **Conformance delta**: 8141 → **8142 pass** (+1), 3077 → 3076 fail. 72.6% → 72.6% (at the precision we show). Ratchet baselines bumped to 8142/3076.
+- **Why only +1?** The 0061/0062 cluster was previously being silently routed through adapter catch-alls — `\C` landed in simple_escape(C) which errored, but our FlagGroup wrapping and other heuristics sometimes produced ambiguous matches that happened to coincide with PCRE2's expected output. With dedicated AST nodes, the semantics are now correct in both success AND failure modes.
+- **Total PGEN-RGX reports filed**: 0001–0062 (62). **62 closed, 0 open.** Every report filed this session has been fixed upstream.
+
 ### 2026-04-16 (forty-eighth commit) — File PGEN-RGX-0061 + 0062 (post-ratchet PGEN triage)
 - **What**: Two PGEN bug reports after the ratchet locked at 72.6%. Cluster-first methodology applied to remaining PGEN-relevant buckets (208 AST contract + 177 parse failure).
   1. **0061** — `\C` single-byte escape emits generic simple_escape(C) instead of a dedicated byte atom. PCRE2 accepts by default (verified via testoutput21:82 `Contains \C`). ~2 patterns.

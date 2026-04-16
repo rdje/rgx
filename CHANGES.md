@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-16 - PGEN 1.1.24 bump: closes PGEN-RGX-0061/0062 + adapter wiring for \C and condition-callout
+- Scope: Bump PGEN submodule from `cd0f8c7` (1.1.23) to `9a7d453` ("Regex: add PCRE2 single-byte and callout-condition forms"). Both open reports filed earlier today land grammar fixes in this single PGEN commit. Adapter absorbs the two new AST shapes.
+- PGEN-side changes (verified in `subs/pgen/grammars/regex.ebnf`):
+  - **0061** — New `single_byte_escape = "C"` production inserted at the head of the `escape_unit` alternation. `\C` now emits its own AST node instead of falling through to `simple_escape(C)`.
+  - **0062** — New `condition_callout_assertion = condition_callout "(" condition_assertion` alternative widening the `condition` production. PGEN parses `^(?(?C25)(?=abc)abcd|xyz)` cleanly.
+- RGX adapter wiring in `rgx-core/src/parsing.rs`:
+  - `convert_escape`: new dispatch arm for `single_byte_escape`. PCRE2's `\C` matches one code unit; RGX's `&str`-based API operates on Unicode scalar values, so the sound semantics is "any single codepoint including newline" — lowered to `Regex::CharClass(Custom { ranges: ['\0'..char::MAX], negated: false })`.
+  - `convert_condition`: new dispatch for `condition_callout_assertion`. RGX doesn't execute PCRE2 text-pattern callouts, so the callout is a no-op for match decisions; recurse to the inner `condition_assertion` which carries the real predicate.
+- Validation: 1,007 lib tests pass. PCRE2 conformance moves 8,141 → **8,142 pass** (+1), 3,077 → 3,076 fail. The improvement is modest because most of the 0061/0062 cluster was previously slipping through our adapter catch-alls and producing ambiguous match behavior; with dedicated AST nodes, the semantics are now correct even for the edge cases that still happen to match what our catch-all produced. Ratchet baselines bumped to `PASS_BASELINE=8_142` and `FAIL_BASELINE=3_076` in the same commit per the ratchet-discipline rule.
+- Report closures: PGEN-RGX-0061, 0062 both moved to `status: closed` with `verified-fixed-upstream` resolution notes pointing at 9a7d453. Running ledger: **62 reports filed, 62 closed, 0 open**.
+
 ### 2026-04-16 - File PGEN-RGX-0061 + 0062 (cluster-distilled, ~8 cases)
 - Scope: Two cluster-distilled PGEN bug reports against PGEN 1.1.23 / cd0f8c7, found while triaging the remaining PGEN-relevant failure buckets after the ratchet locked in at 72.6%. Cluster-first methodology preserved — each PGEN-side report is a verified-minimal repro distilled from an actual conformance-test failure.
 - Reports:

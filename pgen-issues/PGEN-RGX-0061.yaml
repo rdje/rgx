@@ -1,7 +1,7 @@
 id: PGEN-RGX-0061
 summary: |
   PGEN regex parser lowers PCRE2 single-byte escape \C to generic simple_escape(C) instead of producing a dedicated byte-atom AST node. PCRE2 10.47 accepts \C by default (PCRE2_NEVER_BACKSLASH_C/never_backslash_c modifier is required to disable it, per testinput21).
-status: open
+status: closed
 opened_at: 2026-04-16T00:00:00Z
 first_seen_at: 2026-04-16T00:00:00Z
 last_updated_at: 2026-04-16T00:00:00Z
@@ -111,8 +111,27 @@ impact: |
   according to subject-encoding mode).
 
 resolution:
-  status: unresolved
+  status: verified-fixed-upstream
   fixed_in_rgx_commit: null
-  verified_at: null
+  fixed_in_parser_release_version: "1.1.24"
+  fixed_in_parser_backend_version: "9a7d453"
+  verified_at: 2026-04-16T00:00:00Z
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN commit 9a7d453 ("Regex: add PCRE2 single-byte and
+    callout-condition forms") adds a dedicated
+    `single_byte_escape = "C"` production ahead of
+    `simple_escape` in the `escape_unit` alternation. The AST
+    dump for `ab\Cde` now contains a `single_byte_escape` node
+    and `simple_escape` no longer fires for `\C`.
+
+    Verified:
+      cargo run -p rgx-core --bin file_pgen_issues --features pgen-parser \
+        -- --ast-dump-only 'ab\Cde' /tmp/v.json
+    → status=success; AST contains `single_byte_escape`.
+
+    RGX adapter (`rgx-core/src/parsing.rs::convert_escape`)
+    extended with a new dispatch arm that lowers
+    `single_byte_escape` to a `CharClass::Custom` covering the
+    full codepoint range — RGX's `&str`-based API operates on
+    Unicode scalar values, so the sound semantics is "any single
+    codepoint including newline".

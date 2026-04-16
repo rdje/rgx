@@ -603,6 +603,17 @@ impl<'a> PgenAstAdapter<'a> {
         // Walk the `escape` Sequence[Terminal("\\"), escape_unit-wrapper]. Find
         // the concrete escape variant (simple_escape, hex_escape, property_escape,
         // control_escape, or octal_escape) and dispatch to the matching handler.
+        // PGEN 1.1.24+ `single_byte_escape = "C"` — PCRE2 `\C` matches
+        // one code unit. RGX's `&str` API operates on Unicode scalar
+        // values rather than raw bytes; the closest sound semantics is
+        // "any single codepoint, including newline". Lower to a
+        // CharClass spanning the full codepoint range.
+        if self.first_descendant(node, "single_byte_escape").is_some() {
+            return Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vec![CharRange::range('\0', char::MAX)],
+                negated: false,
+            }));
+        }
         if let Some(simple) = self.first_descendant(node, "simple_escape") {
             return self.convert_simple_escape(simple);
         }
@@ -1712,6 +1723,19 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn convert_condition(&self, node: &PgenAstNode) -> Result<ConditionalTest> {
+        // PGEN 1.1.24+ `condition_callout_assertion = condition_callout
+        // "(" condition_assertion` — a PCRE2 conditional with a
+        // callout that fires before the assertion is evaluated
+        // (`(?(?C25)(?=abc)...|...)`). RGX's runtime doesn't execute
+        // callouts from PCRE2 text patterns, so the callout is
+        // effectively a no-op for match decisions; fall through to
+        // the inner `condition_assertion` which carries the actual
+        // decision predicate.
+        if let Some(combo) = self.first_descendant(node, "condition_callout_assertion") {
+            if let Some(assertion) = self.first_descendant(combo, "condition_assertion") {
+                return self.convert_condition_assertion(assertion);
+            }
+        }
         // Lookaround assertion (already structurally handled)
         if let Some(assertion) = self.first_descendant(node, "condition_assertion") {
             return self.convert_condition_assertion(assertion);
