@@ -1648,6 +1648,23 @@ impl<'a> PgenAstAdapter<'a> {
                 expr: Box::new(expr),
                 positive: false,
             }),
+            // PGEN 1.1.22+ also admits the symbol-forms
+            // `(?*…)` (non-atomic positive lookahead) and
+            // `(?<*…)` (non-atomic positive lookbehind) via the
+            // dedicated rule names `non_atomic_lookahead_pos` /
+            // `non_atomic_lookbehind_pos`. The behavioral difference
+            // from the ordinary positive forms is that backtracking
+            // across the assertion boundary is permitted — a property
+            // RGX's backtracking VM already exhibits for `(?=...)` and
+            // `(?<=...)`, so we lower to the same AST shape.
+            "non_atomic_lookahead_pos" => Ok(Regex::Lookahead {
+                expr: Box::new(expr),
+                positive: true,
+            }),
+            "non_atomic_lookbehind_pos" => Ok(Regex::Lookbehind {
+                expr: Box::new(expr),
+                positive: true,
+            }),
             // PGEN 1.1.21+ supports PCRE2's callout-style lookaround
             // aliases under `alpha_lookaround = "(*" name ":" pattern? ")"`.
             // Names: pla / positive_lookahead, nla / negative_lookahead,

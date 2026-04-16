@@ -838,7 +838,15 @@ impl RegexBuilder {
         let effective_pattern = if flags.is_empty() {
             self.pattern.clone()
         } else {
-            format!("(?{flags}){}", self.pattern)
+            // PCRE2 requires pattern-start verbs such as `(*NUL)`,
+            // `(*CRLF)`, `(*UTF)`, `(*TURKISH_CASING)`, and
+            // `(*LIMIT_...)` to appear before anything else in the
+            // pattern. Inline-flag groups `(?flags)` must not be
+            // inserted before them. Find the end of any leading
+            // `(*VERB[:name])` run and place `(?flags)` after.
+            let split = leading_start_verb_end(&self.pattern);
+            let (verbs, rest) = self.pattern.split_at(split);
+            format!("{verbs}(?{flags}){rest}")
         };
         if self.mode == ExecutionMode::Pure {
             Regex::compile(&effective_pattern)
@@ -865,6 +873,42 @@ impl RegexBuilder {
         // swap_greed doesn't map to a standard inline flag — we'd need
         // compiler support. For now it's a no-op placeholder.
         flags
+    }
+}
+
+/// Return the byte offset just past any run of leading PCRE2
+/// pattern-start verbs `(*NAME)` or `(*NAME:ARG)` at the beginning of
+/// `pattern`. Returns `0` if the pattern does not begin with such a
+/// verb. Used by `RegexBuilder::build` to insert `(?flags)` after the
+/// verb run rather than before it, preserving PCRE2's requirement
+/// that pattern-start verbs precede every other construct.
+fn leading_start_verb_end(pattern: &str) -> usize {
+    let bytes = pattern.as_bytes();
+    let mut pos = 0;
+    loop {
+        if !bytes[pos..].starts_with(b"(*") {
+            return pos;
+        }
+        let mut depth = 1;
+        let mut i = pos + 2;
+        while i < bytes.len() && depth > 0 {
+            match bytes[i] {
+                b'\\' if i + 1 < bytes.len() => i += 2,
+                b'(' => {
+                    depth += 1;
+                    i += 1;
+                }
+                b')' => {
+                    depth -= 1;
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+        }
+        if depth != 0 {
+            return pos;
+        }
+        pos = i;
     }
 }
 

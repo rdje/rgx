@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 (fifty-fifth commit) — RegexBuilder flag-order after (*VERB) + non_atomic_lookahead_pos adapter
+- **What**: Two correctness fixes.
+  1. `RegexBuilder::build` now inserts `(?flags)` AFTER any leading `(*VERB)` run (e.g. `(*NUL)`, `(*TURKISH_CASING)`, `(*LIMIT_DEPTH=…)`) rather than unconditionally prepending. New helper `leading_start_verb_end` walks a balanced `(*…)` run respecting backslash escapes and nested parens. PCRE2 requires start-option verbs before everything else.
+  2. `convert_lookaround` gains dispatch for PGEN's symbol-form non-atomic rules `non_atomic_lookahead_pos = "(?*" pattern ")"` and `non_atomic_lookbehind_pos = "(?<*" pattern ")"`. Lowered to ordinary positive lookaround (RGX's backtracking VM already permits cross-boundary backtracking on positive lookarounds).
+- **Conformance delta**: 8719 → **8721 pass** (+2), 2499 → 2497 fail. Ratchet bumped to 8721/2497.
+- **Scope beyond harness**: The RegexBuilder fix is a real public-API correctness improvement — benefits any user combining start-option verbs with flag toggles, not just the conformance harness.
+
 ### 2026-04-16 (fifty-fourth commit) — PGEN 1.1.25 bump closes 0063/0064 + adapter wiring
 - **What**: Submodule bump 9a7d453 → ffd61e9 (PGEN 1.1.25 "regex: publish RGX 0063 0064 maintenance release"). Both reports fixed:
   1. New `posix_word_boundary_alias = "[[:<:]]" | "[[:>:]]"` atom in the grammar
