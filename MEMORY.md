@@ -2252,3 +2252,18 @@ The 458-case false-positive bucket's first case is `/(?x)(?-x: \s*#\s*)/` on sub
 ### Next concrete action
 - `/(abc)\1/i` — case-insensitive backref: when `(?i)` is in scope, numbered backref `\N` should match the captured text case-insensitively. Engine-level change in the VM's backref matcher.
 - Or `/(?x)(?-x: ... )/` — scoped flag-disable: compiler-level fix in the flag-toggle lowering pass.
+
+## 2026-04-17 session — ratchet push #3: scoped x-mode disable `(?-x:...)`
+
+### What landed
+- `Compiler::strip_extended_inner` now parses the `FlagGroup.flags` string at the `-` boundary instead of using `flags.contains('x')`. If 'x' is in the disable set → x-mode off inside the body; if in the enable set → on; otherwise inherit. Mirrors the enable/disable parse the VM codegen already does for `i`/`m`/`s`.
+- Two new `lib.rs` regression pins: `extended_mode_scoped_disable_restores_literal_whitespace` (regression for PCRE2 testinput1:3921 `/(?x)(?-x: \s*#\s*)/` on "#") and `extended_mode_toggle_then_scoped_disable_preserves_outer` (verifies outer `(?x)` is restored after the disable group closes).
+- Book update: `book/src/appendices/pattern-syntax.md` — documented `(?-i:...)` disable form and mixed `(?i-s:...)` forms.
+- Conformance ratchet baselines bumped: 8,836 → 8,844 pass, 2,382 → 2,374 fail.
+
+### Cluster impact
++8 passes spread across three failure buckets: false positive 458 → 455 (−3), span mismatch 685 → 682 (−3), false negative 826 → 824 (−2). The shared root cause was RGX leaving x-mode on inside `(?-x:...)` groups, which both accepted too-lenient matches (FP) and mis-anchored match spans (span mismatch).
+
+### Next concrete action
+- `/(abc)\1/i` — case-insensitive numbered backref. First case in the 824-failure false-negative bucket. VM-level fix: when case-insensitive flag is in scope at the backref site, compare captured bytes with case folding rather than exactly. Might need a new opcode variant or a runtime-flag check in the existing `Backref` handler.
+- Or `/([a]*?)*/` — lazy-quantifier-inside-greedy-quantifier empty-match semantics (first case of 682-failure span-mismatch bucket). PCRE2 returns empty match; RGX returns "a". Known PCRE2 semantic for zero-width lazy matches under outer greedy.

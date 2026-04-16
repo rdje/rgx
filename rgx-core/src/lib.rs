@@ -5848,6 +5848,41 @@ mod tests {
         assert!(!re.is_match("abc d")); // space before c is required
     }
 
+    #[test]
+    fn extended_mode_scoped_disable_restores_literal_whitespace() {
+        // PCRE2 testinput1:3921 `/(?x)(?-x: \s*#\s*)/` on subject "#"
+        // expects NO match. `(?x)` sets extended mode globally; inside
+        // `(?-x: ...)` the inverse `-x` disables extended mode for the
+        // group body, which makes the leading LITERAL space significant.
+        // The body ` \s*#\s*` (with a leading real space) therefore
+        // requires at least one whitespace character before the '#'.
+        // Subject "#" has no leading whitespace, so the group shouldn't
+        // match, and the outer pattern shouldn't match.
+        let re = Regex::compile(r"(?x)(?-x: \s*#\s*)").unwrap();
+        assert!(
+            !re.is_match("#"),
+            "`(?x)(?-x: \\s*#\\s*)` must NOT match \"#\" — leading literal space inside the disable group is required"
+        );
+        // Sanity: it DOES match when the subject has a leading space.
+        assert!(
+            re.is_match(" # "),
+            "`(?x)(?-x: \\s*#\\s*)` should match \" # \""
+        );
+    }
+
+    #[test]
+    fn extended_mode_toggle_then_scoped_disable_preserves_outer() {
+        // After `(?-x: ...)` exits, the outer `(?x)` mode should still
+        // apply. Verify by putting literal whitespace in the tail that
+        // only x-mode could possibly strip.
+        let re = Regex::compile(r"(?x) a (?-x: b ) c ").unwrap();
+        // Inside (?x): "a" absorbed, (?-x: b ) requires " b " literal,
+        // then "c" absorbed. Overall: /a b c/ (with exactly those spaces
+        // around 'b' required by the inner disable).
+        assert!(re.is_match("a b c"));
+        assert!(!re.is_match("abc")); // inner disable reinstated the spaces
+    }
+
     // ======================================================================
     // \K (Match Reset) tests
     // ======================================================================

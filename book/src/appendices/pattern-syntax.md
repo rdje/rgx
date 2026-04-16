@@ -155,7 +155,7 @@ Lookbehind requires a fixed-width pattern in most cases.
 | `(?x)` | Extended (ignore whitespace, `#` comments) | `.ignore_whitespace()` |
 | `(?U)` | Swap greed (quantifiers lazy by default) | `.swap_greed()` |
 
-Flags can be scoped: `(?i:text)` applies case-insensitive only within the group.
+Flags can be scoped: `(?i:text)` applies case-insensitive only within the group. Flags can also be **disabled** with a leading `-`: `(?-i:Text)` forces literal-case matching inside the group even when `(?i)` is active outside it. Mixed forms work too — `(?i-s:...)` enables case-insensitive and disables dotall for the group body.
 
 ## Conditional patterns
 

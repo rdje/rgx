@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - Scoped flag-disable `(?-x:...)` now correctly disables x-mode
+
+- Scope: Fix `Compiler::strip_extended_inner` in `rgx-core/src/compiler.rs` so the extended-mode (`x`) whitespace-stripping pass honors the enable/disable split in the `FlagGroup.flags` string. Previously the pass used `flags.contains('x')`, which returns `true` for both `"x"` (enable) and `"-x"` (disable) and silently *enabled* extended mode inside `(?-x:...)` groups. The VM codegen already parses `enable-disable` correctly for `i`/`m`/`s`; now `strip_extended_inner` uses the same parse and the two paths agree.
+- Rule: parse `flags` at the `-` boundary; chars before `-` enable, chars after disable. For x-mode: if 'x' is in the disable set → force off inside the body; else if 'x' is in the enable set → force on; else inherit the outer state.
+- Examples newly correct:
+  - `(?x)(?-x: \s*#\s*)` on "#" → **no match** (PCRE2 testinput1:3921). The leading literal space inside the disable group is now significant and "#" has no leading whitespace. Previously RGX matched because it left x-mode on inside `(?-x: ... )` and stripped the leading space.
+  - `(?x) a (?-x: b ) c ` → requires `"a b c"` (literal spaces around 'b' inside the disable group). Outer `(?x)` still strips the spaces around 'a' and 'c' after the disable group closes.
+- Existing behaviour preserved: `(?x: a b )` still strips inner whitespace; `(?i-s:...)` VM flag handling unchanged (already parsed `-` correctly for `i`/`m`/`s`).
+- Book update: `book/src/appendices/pattern-syntax.md` — added a note on flag disable (`(?-i:...)`) and mixed forms (`(?i-s:...)`).
+- Validation: 1,013 lib tests pass (1,011 baseline + 2 new — `extended_mode_scoped_disable_restores_literal_whitespace` and `extended_mode_toggle_then_scoped_disable_preserves_outer`). PCRE2 conformance moves **8,836 → 8,844 pass** (+8), 2,382 → 2,374 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_844` / `FAIL_BASELINE=2_374`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: +8 close across three buckets — false positive 458 → 455 (−3), span mismatch 685 → 682 (−3), false negative 826 → 824 (−2). The pattern is consistent: the shared root cause was RGX misparsing `(?-x:...)` as "still in x-mode", which both over-matched patterns that should have been literal-space-gated (false positives) and produced wrong match spans (span mismatches).
+
 ### 2026-04-17 - `\c<char>` control escape: XOR 0x40 rule, correct for non-letter inputs
 
 - Scope: Fix `convert_control_escape` in `rgx-core/src/parsing.rs` to use PCRE2 10.47's documented rule — "after `\c`, the next character is taken literally, converted to uppercase if it is a lowercase letter, and then bit 0x40 in the value is flipped" — instead of the old `(ctrl.to_ascii_uppercase() - '@') & 0x1F` formula. The old formula produces the correct C0 control character for ASCII letters (`\cA` / `\ca` → U+0001, `\cZ` → U+001A) but silently wraps for any other ASCII character: `\c:` became 0x1A instead of 0x7A = 'z', `\c[` became 0x1B (coincidentally correct for `[` specifically because it's in the 0x40–0x5F band), `\c{` became 0x1B instead of 0x3B = ';'.

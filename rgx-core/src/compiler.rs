@@ -908,7 +908,29 @@ impl Compiler {
     fn strip_extended_inner(ast: RegexAst, in_x_mode: bool) -> RegexAst {
         match ast {
             RegexAst::FlagGroup { flags, expr } => {
-                let x_active = in_x_mode || flags.contains('x');
+                // Parse the flag string the same way the VM codegen does:
+                // characters before the `-` are enabled, characters after
+                // `-` are disabled. `"x"` / `"ix"` enable x-mode; `"-x"`
+                // / `"i-x"` disable it; omit 'x' altogether → inherit the
+                // outer state. The previous implementation used
+                // `flags.contains('x')`, which fired for both `"x"` and
+                // `"-x"` and silently *enabled* x-mode inside `(?-x:...)`.
+                // PCRE2 testinput1:3921 `/(?x)(?-x: \s*#\s*)/` on subject
+                // "#" was the first case to hit this: the leading literal
+                // space inside the `(?-x: ...)` group must stay
+                // significant, so "#" (no leading space) must NOT match.
+                let (enable, disable) = if let Some(pos) = flags.find('-') {
+                    (&flags[..pos], &flags[pos + 1..])
+                } else {
+                    (flags.as_str(), "")
+                };
+                let x_active = if disable.contains('x') {
+                    false
+                } else if enable.contains('x') {
+                    true
+                } else {
+                    in_x_mode
+                };
                 RegexAst::FlagGroup {
                     flags,
                     expr: Box::new(Self::strip_extended_inner(*expr, x_active)),
