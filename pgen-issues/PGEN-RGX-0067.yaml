@@ -1,7 +1,7 @@
 id: PGEN-RGX-0067
 summary: |
   PGEN accepts `\N` inside `[...]` — PCRE2 10.47 rejects with "\N is not supported in a character class". pcre2pattern(3) §"Generic character types" states: "\N has an identical meaning to . except that it cannot be used in a character class." PGENs grammar should enforce the same restriction so `[...\N...]` becomes a parse error.
-status: open
+status: closed
 opened_at: 2026-04-17T11:47:09Z
 first_seen_at: 2026-04-17T11:47:09Z
 last_updated_at: 2026-04-17T11:47:09Z
@@ -80,8 +80,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.27 (8ed45af) added the grammar restriction; PGEN 1.1.28 (baac0b1) retained it alongside the 0071 fix. RGX submodule pinned at 1.1.28; `\N` inside `[...]` now returns a parse-reject diagnostic matching PCRE2.

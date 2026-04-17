@@ -1,7 +1,7 @@
 id: PGEN-RGX-0071
 summary: |
   Regression in PGEN 1.1.27: `regex_compile_validation.rs` rejects `[z-\x{100}]` with "descending character class range is not accepted by the regex compile contract" — but the range IS ascending (z = U+007A = 122 decimal, \x{100} = U+0100 = 256 decimal). The same bug affects `[z-\x{200}]`, `[Qz-\x{200}]`, `[z-\x{100}]/i` / `/IBi`, and every `class_range` where a braced hex escape `\x{NNN}` is the endpoint and its Unicode codepoint is >= 256. Single-byte hex `\xNN` works — the regression is specific to braced hex `\x{...}`. Did NOT exist in PGEN 1.1.26 (verified by reverting the submodule pin to 5856f71 and re-running the conformance harness).
-status: open
+status: closed
 opened_at: 2026-04-17T18:31:55Z
 first_seen_at: 2026-04-17T18:31:55Z
 last_updated_at: 2026-04-17T18:31:55Z
@@ -80,8 +80,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.28 (baac0b1) fixed `regex_compile_validation.rs` to compare range endpoints by decoded literal escape value instead of the escaped payload's leading byte. `[z-\x{100}]` now parses as an ascending range. Verified by re-running the RGX PCRE2 conformance harness: pass count moves 8,927 -> 8,935, the ~70 regressed cases from 1.1.27 are recovered, and the 0067..0070 fixes are additive on top.

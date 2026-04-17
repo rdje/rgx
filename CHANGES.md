@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - PGEN 1.1.28 bump: closes 0067-0071 (+8 conformance passes)
+
+- Scope: Bump PGEN submodule from `5856f71` (1.1.26) to `baac0b1` (1.1.28, "Fix regex braced hex class range ordering"). Integration contract 1.1.28 → 1.1.30. PGEN 1.1.28 carries 1.1.27's fixes for 0067–0070 PLUS the targeted fix for 0071 — `regex_compile_validation.rs` now compares class_range endpoints by decoded literal escape value instead of the escaped payload's leading byte, so `[z-\x{100}]` correctly parses as ascending (was the 1.1.27 regression that forced the hold in commit `6f82c96`).
+- Verification per report:
+  - **0067** `\N` inside `[...]` → now rejected at PGEN parse time with a PCRE2-aligned diagnostic. Verified: `a[\NB]c` returns `E_PARSE_FAILURE: \N is not accepted inside a character class`.
+  - **0068** `[\Qa\E-\Qz\E]` → now forms `class_range[a-z]` via PGEN's `quoted_class_range_atom` production. RGX adapter wiring from commit `6f82c96` fires for the first time; verified the class lowers to `CharClass(Custom { ranges: [CharRange(a-z)] })` and rejects "-".
+  - **0069** `[\d-x]` → now rejected at PGEN parse with "invalid character class range" (shorthand not admissible as range endpoint). Verified.
+  - **0070** `\Qabc\$xyz\E` → now parses as 8 literal chars `a,b,c,\,$,x,y,z` via the new `quoted_literal_escaped_char` / `quoted_class_literal_escaped_char` productions. Verified.
+  - **0071** `[z-\x{100}]` / `[z-\x{200}]` / `[Qz-\x{200}]/utf` / `[z-\x{100}]/i` → now all accepted as ascending ranges. Descending forms still rejected (`[\x{100}-z]` → parse-reject diagnostic, as expected). Verified.
+- All five YAMLs moved to `status: closed` with `fixed-upstream` resolution notes pinning the responsible PGEN and rgx commits.
+- Validation: 1,021 lib tests pass. PCRE2 conformance **8,927 → 8,935 pass** (+8), 2,291 → 2,283 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_935` / `FAIL_BASELINE=2_283`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Actual cluster sizes for 0067–0071 were much smaller than my initial "~180+70 = ~250 cases" estimate. Real net after absorbing all five: +8. The 0071 regression (~70 cases) was offset by 0067/0068/0070 fixes plus some re-classification churn. The hold-and-revert dance in commit `6f82c96` preserved the ratchet and produced a clean PGEN bug report — upstream-fix discipline working as intended. Running ledger: 69 YAMLs exist (0001–0071 with 0014 unassigned), all in `status: closed` as of this commit.
+
 ### 2026-04-17 - Hold PGEN 1.1.27 absorption; file PGEN-RGX-0071 for braced-hex-range regression
 
 - Scope: PGEN published 1.1.27 (`8ed45af`) with fixes for PGEN-RGX-0067 through 0070 plus a *new* regression in the same release that rejects ~70 previously-passing conformance cases. The submodule pin stays on **1.1.26** (`5856f71`) until PGEN 1.1.28 lands without the regression. Forward-compatible RGX adapter wiring for the new PGEN 1.1.27 AST shapes is landed now so the 1.1.28 absorption will be a clean fast-forward.

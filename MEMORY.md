@@ -2365,3 +2365,23 @@ Per the "parsing issues route to PGEN, not RGX" rule, none of these four pattern
 ### Next concrete action
 - Wait for PGEN 1.1.28 (with the 0071 fix) and re-run the bump.
 - Or in parallel, pick an RGX-side engine gap (recursive-backref capture propagation, zero-width lazy semantics) for the next independent ratchet push.
+
+## 2026-04-17 session — absorb PGEN 1.1.28 (closes 0067-0071)
+
+### What landed
+- Submodule bumped from `5856f71` (1.1.26) to `baac0b1` (1.1.28, "Fix regex braced hex class range ordering"). Integration contract 1.1.28 → 1.1.30.
+- 1.1.28 retains the 0067–0070 fixes from 1.1.27 AND ships the 0071 fix (range-endpoint comparison now decodes literal escape values correctly instead of comparing leading bytes).
+- The forward-compatible RGX adapter wiring from commit `6f82c96` (dead code under 1.1.26) is now LIVE — `class_atom_char` handles `quoted_class_range_atom`, `walk_quoted_class_body` walks every terminal under a `quoted_class_literal_char` so escape-tail characters surface.
+- All five YAMLs flipped to `status: closed` with `fixed-upstream` resolution notes citing both PGEN and rgx commits.
+- Conformance ratchet bumped: 8,927 → 8,935 pass, 2,291 → 2,283 fail. +8 net.
+
+### Lesson on cluster-size estimates
+My initial "~180 cases for 0067–0070 + ~70 for 0071 = ~250 gated" was way too optimistic. Actual net: +8. The 0067 cluster (`\N` in class) was only ~1 real case; 0068/0069/0070 together recovered maybe ~10; 0071 regression cost ~70 which is now recovered but not incremental. The hold-and-revert dance preserved the ratchet through the bad 1.1.27 release — the actual conformance gain came from the clean 1.1.28.
+
+### Running ledger
+- PGEN-RGX reports: 71 filed total. All 71 closed (after this commit). 0 open.
+- Pattern for the future: the cluster-first protocol continues to work. Upstream-fix discipline held even when 1.1.27 shipped with its own regression — we filed 0071, didn't touch RGX adapter, reverted the submodule pin, absorbed 1.1.28.
+
+### Next concrete action
+- Pick an RGX-side engine gap for the next ratchet push — recursive-backref capture propagation for `(a\1?){n}` (744-FN bucket first), zero-width lazy semantics for `([a]*?)*` (675-span-mismatch bucket first), or unicode case-fold edges.
+- Or run a second cluster-distill pass through the 744 FN / 675 span-mismatch / 447 FP residuals for additional PGEN reports.

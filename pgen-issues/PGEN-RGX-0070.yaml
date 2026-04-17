@@ -1,7 +1,7 @@
 id: PGEN-RGX-0070
 summary: |
   PGENs `quoted_literal` atom production fails to match `\Q...\E` sequences whose body contains a backslash-escape. `\Qabc\$xyz\E` should parse as a single `quoted_literal` AST node whose body is the literal string "abc\$xyz" (8 characters: a, b, c, \, $, x, y, z), but PGEN falls through to the generic `simple_escape` production and reports "unrecognized simple_escape character Q" — indicating it never matched `quoted_literal` at all for this input.
-status: open
+status: closed
 opened_at: 2026-04-17T12:01:08Z
 first_seen_at: 2026-04-17T12:01:08Z
 last_updated_at: 2026-04-17T12:01:08Z
@@ -80,8 +80,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.27 (8ed45af) widened `quoted_literal_char` / `quoted_class_literal_char` to include the new `quoted_literal_escaped_char` sub-production; PGEN 1.1.28 (baac0b1) retained it. RGX adapter walker `walk_quoted_class_body` extended in rgx commit 6f82c96 to walk every terminal in document order so escaped-body chars (both the backslash and the letter) surface into the class. Submodule pinned at 1.1.28.

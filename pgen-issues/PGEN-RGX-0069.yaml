@@ -1,7 +1,7 @@
 id: PGEN-RGX-0069
 summary: |
   PGEN emits a `class_range` whose start endpoint is a shorthand class (`\d`) — PCRE2 10.47 rejects such patterns at compile time with "invalid range in character class". pcre2pattern(3) §"Character classes" states that class ranges must be bounded by character literals; `\d`, `\D`, `\h`, `\H`, `\s`, `\S`, `\w`, `\W`, `\p{...}`, `\P{...}` are not valid range endpoints. PGEN currently accepts these and emits a malformed `class_range` AST node.
-status: open
+status: closed
 opened_at: 2026-04-17T11:50:55Z
 first_seen_at: 2026-04-17T11:50:55Z
 last_updated_at: 2026-04-17T11:50:55Z
@@ -80,8 +80,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.27 (8ed45af) removed `property_escape` from `class_range_escape_unit` and tightened `class_range_literal_escape_letter`; PGEN 1.1.28 (baac0b1) retained those changes. RGX submodule pinned at 1.1.28; `[\d-x]` shorthand/property endpoints now rejected at parse.

@@ -1,7 +1,7 @@
 id: PGEN-RGX-0068
 summary: |
   PGEN does not form a `class_range` across `\Q...\E` quoted-literal endpoints — `[\Qa\E-\Qz\E]` is parsed as three independent class items ['a', '-', 'z'] instead of the range [a-z]. PCRE2 10.47 treats the literal characters produced by `\Q...\E` as valid class-range endpoints, so `[\Qa\E-\Qz\E]` is equivalent to `[a-z]` and the dash between them is the range operator, not a literal.
-status: open
+status: closed
 opened_at: 2026-04-17T11:48:37Z
 first_seen_at: 2026-04-17T11:48:37Z
 last_updated_at: 2026-04-17T11:48:37Z
@@ -80,8 +80,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.27 (8ed45af) added the `quoted_class_range_atom` production; PGEN 1.1.28 (baac0b1) retained it alongside the 0071 fix. RGX adapter `class_atom_char` gained a `quoted_class_range_atom` dispatch arm in rgx commit 6f82c96; `[\Qa\E-\Qz\E]` now lowers to `CharClass([a-z])`. Submodule pinned at 1.1.28.
