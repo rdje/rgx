@@ -1,0 +1,87 @@
+id: PGEN-RGX-0070
+summary: |
+  PGENs `quoted_literal` atom production fails to match `\Q...\E` sequences whose body contains a backslash-escape. `\Qabc\$xyz\E` should parse as a single `quoted_literal` AST node whose body is the literal string "abc\$xyz" (8 characters: a, b, c, \, $, x, y, z), but PGEN falls through to the generic `simple_escape` production and reports "unrecognized simple_escape character Q" — indicating it never matched `quoted_literal` at all for this input.
+status: open
+opened_at: 2026-04-17T12:01:08Z
+first_seen_at: 2026-04-17T12:01:08Z
+last_updated_at: 2026-04-17T12:01:08Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "5856f71"
+parser_release_version: "1.1.26"
+integration_contract_version: "1.1.28"
+parser_family: regex
+profile: regex_default
+integration_surface: parseability_probe
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: 736306a
+host_os: macos
+host_arch: aarch64
+rust_toolchain: "rustc per workspace rust-version = 1.88"
+cargo_features: "default + pgen-parser"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0070/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0070/pgen_trace.log
+  pattern: "\\Qabc\\$xyz\\E"
+  source: |
+    Discovered by the RGX PCRE2 conformance harness
+    (`rgx-core/tests/pcre2_conformance.rs`) while scanning
+    `subs/pcre2/testdata/testinput1` block #0 starting
+    near input line 3760. PCRE2 10.47 accepts and matches this pattern in its own pcre2test harness; PGEN's regex grammar diverges as recorded under `actual_behavior`.
+
+# === Bug class (per protocol §4) ===
+bug_class: parses_but_returns_wrong_ast
+
+expected_behavior: |
+  PGEN should match `\Qabc\$xyz\E` as a single `quoted_literal` AST node whose raw body span is `abc\$xyz` (the content between `\Q` and `\E`, including any backslashes literally). Per pcre2pattern(3) §"Generic character types", PCRE2 treats EVERY byte between `\Q` and `\E` as a literal: backslash-escapes are NOT interpreted inside the quoted region. The grammar production should read the body as "any character that is not the literal two-byte sequence `\E`", rather than delegating each backslash to a sub-production that could then bail on unknown escape characters.
+
+actual_behavior: |
+  PGEN reports "unrecognized simple_escape character Q" when parsing `\Qabc\$xyz\E`, indicating that the `quoted_literal` alternative of the atom production was not matched and the parser instead started consuming `\Q` as `simple_escape(Q)`. This suggests the body-matching rule for `quoted_literal` was unable to consume `\$` (or another embedded escape) and so the entire `quoted_literal` alternative backed off, leaving `simple_escape(Q)` as the fallback — which RGXs adapter then rejects with a contract-mismatch error. Affects ~21 cases in the "compile: PGEN rejects simple escape" bucket of the PCRE2 conformance harness.
+
+reproduction: |
+  Reproducer artifacts under pgen-issues/artifacts/PGEN-RGX-0070/:
+    - repro_input.txt — exact failing input (one line, no trailing newline)
+    - pgen_contract.json — captured `parser_embedding_api_contract()` JSON
+    - pgen_parse_outcome.json — captured `parse_grammar_profile_named` JSON
+
+  Reproduction command (from rgx repo root) — captures the trace:
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0070/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0070/pgen_trace.log
+
+  Expected: parseability_probe accepts the input (`parse_full passed`).
+  Actual: PGEN rejects with the diagnostic recorded in `pgen_parse_outcome.json` (or, for contract mismatches, RGX's compile error captured in `actual_behavior`).
+
+impact: |
+  One of many PGEN-related failures uncovered by RGX's
+  PCRE2 10.47 testinput1 conformance harness. Each failing pattern
+  also blocks RGX from passing the corresponding pcre2test case.
+  Aggregate impact is tracked in `docs/BACKLOG.md` C7.
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

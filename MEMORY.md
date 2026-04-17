@@ -2323,3 +2323,25 @@ Simple last-wins combine for carried flags across branches. If branch 1 sets `(?
 - `/^(a\1?){4}$/` — new first FN case (744-case bucket). Recursive backref: `\1` inside a repeating capturing group should reference the CURRENT iteration's capture, and the pattern as a whole needs recursive matching semantics that RGX may not support yet. Engine-level investigation.
 - Or `/([a]*?)*/` — span-mismatch first case (still 677). Zero-width lazy-under-greedy semantics.
 - Or `/^[\E\Qa\E-\Qz\E]+/` — false-positive first case (457). `\Q\E` class-member corner case.
+
+## 2026-04-17 session — file PGEN-RGX-0067..0070 (4 reports)
+
+### What landed
+- Four cluster-distilled PGEN bug reports, each protocol-compliant per `subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md` §1–5 with `repro_input.txt` + `pgen_contract.json` + `pgen_parse_outcome.json` + `pgen_ast_dump.json` + `pgen_trace.log` (at `PGEN_TRACE_VERBOSITY=debug`):
+  - **0067**: `\N` inside `[...]` — PGEN accepts (PCRE2 rejects). ~135 cases.
+  - **0068**: `\Q\E` range endpoints in class (e.g. `[\Qa\E-\Qz\E]`) — PGEN doesn't form `class_range`. Part of 457-case FP bucket.
+  - **0069**: `class_range` with shorthand endpoint (e.g. `[\d-x]`) — PGEN accepts (PCRE2 rejects). ~24 cases.
+  - **0070**: `\Q...\E` body with embedded escape (e.g. `\Qabc\$xyz\E`) — PGEN falls through to `simple_escape(Q)`. ~21 cases.
+- `rgx-core/src/bin/file_pgen_issues.rs` extended with `--bug-class accepts-pcre2-rejects` and `--bug-class wrong-ast` overrides that bypass the "RGX compile must fail" guard (both bug classes have PGEN emitting a wrong-but-parseable AST, so RGX compiles cleanly). New `--expected` / `--actual` CLI flags allow cluster-tailored wording on the YAML's expected/actual blocks. `opened_at` is now dynamic UTC via a Hinnant civil-from-days helper (was hardcoded to 2026-04-13). Source-block + reproduction "Expected/Actual" wording is category-aware.
+
+### Why this matters
+Per the "parsing issues route to PGEN, not RGX" rule, none of these four patterns should be fixed by RGX adapter patches. Once PGEN lands grammar/production fixes and RGX re-syncs the submodule, the ratchet should jump by ~180 cases (sum of cluster sizes) — that's a realistic next ratchet milestone of ~9,100+ pass without any further RGX engine work.
+
+### Running ledger
+- PGEN-RGX reports: 70 filed total (0001–0070). 66 closed, **4 open** (0067–0070). All open reports cite PGEN 1.1.26 / `5856f71` and target PGEN-side grammar or validator changes.
+- Deeper cluster-distillation past the four first-cases (to find additional PGEN-rooted clusters within the 744-FN / 677-span-mismatch / 457-FP residuals) is deferred to a future round — it requires either a custom harness output mode that lists every failure or a manual walk of the failing cases.
+
+### Next concrete action
+- Pick one of the RGX-side engine gaps (recursive-backref capture propagation for `(a\1?){n}`, zero-width lazy semantics for `([a]*?)*`) for the next ratchet push.
+- Or wait on PGEN to land fixes for 0067–0070, then bump the submodule and absorb the gain.
+- Or run a second cluster-distill pass through the bigger buckets to identify additional PGEN reports.

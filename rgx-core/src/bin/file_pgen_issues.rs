@@ -116,6 +116,9 @@ fn main() {
         let mut source_file = "<cluster repro>".to_string();
         let mut source_line: usize = 0;
         let mut summary_override: Option<String> = None;
+        let mut bug_class_override: Option<PgenCategory> = None;
+        let mut actual_override: Option<String> = None;
+        let mut expected_override: Option<String> = None;
         let mut i = 3;
         while i < args.len() {
             match args[i].as_str() {
@@ -131,10 +134,44 @@ fn main() {
                     summary_override = Some(args[i + 1].clone());
                     i += 2;
                 }
+                "--bug-class" if i + 1 < args.len() => {
+                    bug_class_override = match args[i + 1].as_str() {
+                        "parse-failure" => Some(PgenCategory::ParseFailure),
+                        "contract-mismatch" => Some(PgenCategory::ContractMismatch),
+                        "unterminated-class" => Some(PgenCategory::UnterminatedCharClass),
+                        "accepts-pcre2-rejects" => Some(PgenCategory::AcceptsPcre2Rejects),
+                        "wrong-ast" => Some(PgenCategory::WrongAstSemantics),
+                        other => {
+                            eprintln!(
+                                "!! unknown --bug-class value {other:?}; expected one of: \
+                                 parse-failure, contract-mismatch, unterminated-class, \
+                                 accepts-pcre2-rejects, wrong-ast"
+                            );
+                            return;
+                        }
+                    };
+                    i += 2;
+                }
+                "--actual" if i + 1 < args.len() => {
+                    actual_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+                "--expected" if i + 1 < args.len() => {
+                    expected_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
                 _ => i += 1,
             }
         }
-        emit_single_report(pattern, source_file, source_line, summary_override);
+        emit_single_report(
+            pattern,
+            source_file,
+            source_line,
+            summary_override,
+            bug_class_override,
+            actual_override,
+            expected_override,
+        );
         return;
     }
 
@@ -290,6 +327,16 @@ enum PgenCategory {
     ContractMismatch,
     /// PGEN parse error specific to char-class termination.
     UnterminatedCharClass,
+    /// PGEN accepts a pattern PCRE2 10.47 rejects. RGX compiles
+    /// cleanly (often producing a wrong-semantics program) because
+    /// there's no adapter error to trigger. Only reachable via the
+    /// explicit `--bug-class accepts-pcre2-rejects` CLI override.
+    AcceptsPcre2Rejects,
+    /// PGEN parsed successfully but the emitted AST disagrees with
+    /// PCRE2 semantics — RGX compiles (so no adapter error) but the
+    /// program matches differently from PCRE2. Only reachable via
+    /// `--bug-class wrong-ast`.
+    WrongAstSemantics,
 }
 
 struct ReportInput {
@@ -301,24 +348,58 @@ struct ReportInput {
     source_file: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_single_report(
     pattern: &str,
     source_file: String,
     source_line: usize,
     summary_override: Option<String>,
+    bug_class_override: Option<PgenCategory>,
+    actual_override: Option<String>,
+    expected_override: Option<String>,
 ) {
-    // Verify PGEN actually produces a divergent outcome for this
-    // pattern. If RGX::compile succeeds, the report would be
-    // misleading.
-    let compile = Regex::compile(pattern);
-    let err_msg = match compile {
-        Ok(_) => {
-            eprintln!("!! RGX successfully compiled the pattern; nothing to report.");
-            return;
+    // If no bug class is explicitly supplied, fall back to the
+    // historical behaviour: attempt RGX compilation and infer the
+    // category from the error shape. When RGX compiles cleanly AND
+    // no bug class was supplied, the caller almost certainly meant
+    // `--bug-class accepts-pcre2-rejects` or `--bug-class wrong-ast`
+    // — so we bail out with a pointer instead of writing a
+    // misleading report.
+    let (err_msg, category) = if let Some(cat) = bug_class_override {
+        // Try compile to capture any error message for `actual_behavior`,
+        // but don't require it to fail. For AcceptsPcre2Rejects /
+        // WrongAstSemantics the interesting fact is that RGX *did*
+        // compile — record that or the caller-supplied actual text.
+        let err_msg = match Regex::compile(pattern) {
+            Ok(_) => actual_override.clone().unwrap_or_else(|| {
+                "RGX compiled the pattern successfully (no error). \
+                 PGEN accepted it; the divergence from PCRE2 is in the \
+                 emitted AST or the grammar's permissiveness, not in \
+                 whether RGX can turn the pattern into a program."
+                    .to_string()
+            }),
+            Err(e) => e.to_string(),
+        };
+        (err_msg, cat)
+    } else {
+        match Regex::compile(pattern) {
+            Ok(_) => {
+                eprintln!(
+                    "!! RGX successfully compiled the pattern; \
+                     specify `--bug-class accepts-pcre2-rejects` or \
+                     `--bug-class wrong-ast` (plus `--actual <text>` \
+                     if you want a custom actual_behavior line) to \
+                     file a report for this divergence shape."
+                );
+                return;
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                let cat = classify_pgen_error(&err_msg).unwrap_or(PgenCategory::ContractMismatch);
+                (err_msg, cat)
+            }
         }
-        Err(e) => e.to_string(),
     };
-    let category = classify_pgen_error(&err_msg).unwrap_or(PgenCategory::ContractMismatch);
 
     let next_id = next_available_pgen_issue_id();
     let id = format!("PGEN-RGX-{next_id:04}");
@@ -383,17 +464,42 @@ fn emit_single_report(
     if let Some(s) = summary_override {
         // Replace the auto-generated summary line with the override
         // for human-readable cluster-level descriptions.
-        if let Some(start) = yaml.find("summary: |\n") {
-            let after = start + "summary: |\n".len();
-            if let Some(end_rel) = yaml[after..].find("\nstatus:") {
-                let end = after + end_rel;
-                let new_line = format!("  {s}");
-                yaml.replace_range(after..end, &new_line);
-            }
-        }
+        replace_yaml_block(&mut yaml, "summary: |\n", "\nstatus:", &s);
+    }
+    if let Some(s) = expected_override {
+        replace_yaml_block(
+            &mut yaml,
+            "expected_behavior: |\n",
+            "\n\nactual_behavior:",
+            &s,
+        );
+    }
+    if let Some(s) = actual_override {
+        replace_yaml_block(&mut yaml, "actual_behavior: |\n", "\n\nreproduction:", &s);
     }
     std::fs::write(pgen_issues_root.join(format!("{id}.yaml")), &yaml).expect("write yaml report");
     eprintln!("wrote {id} (category={category:?}) for pattern {pattern:?}");
+}
+
+/// Replace a two-space-indented text block within a YAML document
+/// framed by `start_marker` (inclusive) and `end_marker` (exclusive).
+/// Used to swap auto-generated summary / expected / actual blocks
+/// for caller-supplied cluster-tailored wording.
+fn replace_yaml_block(yaml: &mut String, start_marker: &str, end_marker: &str, replacement: &str) {
+    let Some(start) = yaml.find(start_marker) else {
+        return;
+    };
+    let after = start + start_marker.len();
+    let Some(end_rel) = yaml[after..].find(end_marker) else {
+        return;
+    };
+    let end = after + end_rel;
+    let indented = replacement
+        .lines()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    yaml.replace_range(after..end, &indented);
 }
 
 fn scan_single_file(file_name: &str) {
@@ -483,12 +589,23 @@ fn build_yaml_report(
             "PGEN regex parser produces an AST node shape RGX's adapter does not recognize for pattern {pat:?}.",
             pat = report.pattern
         ),
+        PgenCategory::AcceptsPcre2Rejects => format!(
+            "PGEN regex parser accepts pattern {pat:?} that PCRE2 10.47 rejects at compile time. RGX inherits the permissive behaviour and matches against a subject where PCRE2 would refuse to compile.",
+            pat = report.pattern
+        ),
+        PgenCategory::WrongAstSemantics => format!(
+            "PGEN regex parser emits an AST for pattern {pat:?} whose semantics diverge from PCRE2 10.47 — RGX compiles without error but produces a program that matches differently from PCRE2 (override `expected_behavior` / `actual_behavior` fields with the concrete divergence).",
+            pat = report.pattern
+        ),
     };
     let bug_class = match report.category {
         PgenCategory::ParseFailure | PgenCategory::UnterminatedCharClass => {
             "should_parse_but_fails"
         }
-        PgenCategory::ContractMismatch => "parses_but_returns_wrong_ast",
+        PgenCategory::ContractMismatch | PgenCategory::WrongAstSemantics => {
+            "parses_but_returns_wrong_ast"
+        }
+        PgenCategory::AcceptsPcre2Rejects => "should_fail_but_parses",
     };
     let expected = match report.category {
         PgenCategory::ParseFailure | PgenCategory::UnterminatedCharClass => {
@@ -496,6 +613,12 @@ fn build_yaml_report(
         }
         PgenCategory::ContractMismatch => format!(
             "PGEN should emit an AST whose node shapes match the documented `class_item` (or analogous) contract that the RGX adapter walks. The current output triggers RGX's contract guard at compile time."
+        ),
+        PgenCategory::AcceptsPcre2Rejects => format!(
+            "PGEN should reject the pattern at parse time, matching PCRE2 10.47's compile-time rejection. Currently PGEN accepts it and emits an AST; any downstream engine that trusts PGEN's output inherits PCRE2-incompatible permissiveness."
+        ),
+        PgenCategory::WrongAstSemantics => format!(
+            "PGEN should emit an AST whose semantics align with PCRE2 10.47's documented matching behaviour for this construct. See `actual_behavior` for the concrete divergence and `pgen_ast_dump.json` for the node shape PGEN emits."
         ),
     };
     let actual = format!(
@@ -510,7 +633,54 @@ fn build_yaml_report(
     let command = format!(
         "cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \\\n    cargo run --manifest-path rust/Cargo.toml --features generated_parsers \\\n      --bin parseability_probe -- --parse regex \\\n      ../../pgen-issues/artifacts/{id}/repro_input.txt \\\n      --profile regex_default --trace \\\n      --trace-log-file ../../pgen-issues/artifacts/{id}/pgen_trace.log"
     );
-    let date = "2026-04-13T00:00:00Z";
+    // Source-block wording depends on the divergence shape.
+    let source_tail = match report.category {
+        PgenCategory::AcceptsPcre2Rejects => {
+            "PCRE2 10.47 *rejects* this pattern at compile time; PGEN \
+             accepts it. See `expected_behavior` / `actual_behavior` \
+             for the exact rule."
+        }
+        PgenCategory::WrongAstSemantics => {
+            "PCRE2 10.47 parses AND matches this pattern; PGEN parses \
+             but emits an AST whose semantics diverge from PCRE2. See \
+             `actual_behavior` for the divergence and \
+             `pgen_ast_dump.json` for PGEN's emitted shape."
+        }
+        _ => {
+            "PCRE2 10.47 accepts and matches this pattern in its own \
+             pcre2test harness; PGEN's regex grammar diverges as \
+             recorded under `actual_behavior`."
+        }
+    };
+    // Reproduction "Expected/Actual" one-liners also depend on the
+    // divergence shape.
+    let (repro_expected, repro_actual) = match report.category {
+        PgenCategory::AcceptsPcre2Rejects => (
+            "parseability_probe rejects the input with a `\\N is not \
+             allowed in a character class`-style diagnostic (or the \
+             analogous PCRE2 reason for this cluster).",
+            "PGEN accepts the pattern; `pgen_parse_outcome.json` \
+             records `status: success` with no diagnostic. RGX then \
+             compiles the (PCRE2-incompatible) AST and matches \
+             against subjects PCRE2 would refuse.",
+        ),
+        PgenCategory::WrongAstSemantics => (
+            "parseability_probe accepts the input and emits an AST \
+             whose shape matches PCRE2's documented matching \
+             behaviour for this construct.",
+            "PGEN accepts the input but emits an AST whose shape \
+             diverges from PCRE2; see `pgen_ast_dump.json` and \
+             `actual_behavior`.",
+        ),
+        _ => (
+            "parseability_probe accepts the input (`parse_full \
+             passed`).",
+            "PGEN rejects with the diagnostic recorded in \
+             `pgen_parse_outcome.json` (or, for contract mismatches, \
+             RGX's compile error captured in `actual_behavior`).",
+        ),
+    };
+    let date = current_utc_timestamp();
     format!(
         r#"id: {id}
 summary: |
@@ -554,9 +724,7 @@ context:
     Discovered by the RGX PCRE2 conformance harness
     (`rgx-core/tests/pcre2_conformance.rs`) while scanning
     `subs/pcre2/testdata/{source_file}` block #{block_idx} starting
-    near input line {source_line}. PCRE2 10.47 accepts and matches
-    this pattern in its own pcre2test harness; PGEN's regex
-    grammar diverges as recorded under `actual_behavior`.
+    near input line {source_line}. {source_tail}
 
 # === Bug class (per protocol §4) ===
 bug_class: {bug_class}
@@ -576,10 +744,8 @@ reproduction: |
   Reproduction command (from rgx repo root) — captures the trace:
     {command}
 
-  Expected: parseability_probe accepts the input (`parse_full passed`).
-  Actual: PGEN rejects with the diagnostic recorded in
-  `pgen_parse_outcome.json` (or, for contract mismatches, RGX's
-  compile error captured in `actual_behavior`).
+  Expected: {repro_expected}
+  Actual: {repro_actual}
 
 impact: |
   One of {n_failures} PGEN-related failures uncovered by RGX's
@@ -608,11 +774,41 @@ resolution:
         block_idx = report.source_block_index,
         source_line = report.source_line,
         source_file = report.source_file,
+        source_tail = indent(source_tail, 4),
         bug_class = bug_class,
         expected = indent(&expected, 2),
         actual = indent(&actual, 2),
+        repro_expected = indent(repro_expected, 4),
+        repro_actual = indent(repro_actual, 4),
         n_failures = "many", // approximate; harness emits the exact count when run
     )
+}
+
+/// Return the current UTC instant as an ISO-8601 string suitable for
+/// the report's `opened_at` / `first_seen_at` / `last_updated_at`
+/// fields.
+fn current_utc_timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = now / 86_400;
+    let secs_in_day = now % 86_400;
+    // Civil-from-days algorithm (Howard Hinnant), public domain.
+    let z: i64 = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    let hour = secs_in_day / 3600;
+    let minute = (secs_in_day % 3600) / 60;
+    let second = secs_in_day % 60;
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 fn indent(s: &str, n: usize) -> String {
