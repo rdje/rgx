@@ -778,6 +778,15 @@ impl Compiler {
     /// For example, `Sequence([FlagGroup("i", Empty), Char('a'), Char('b')])`
     /// becomes `Sequence([FlagGroup("i", Sequence([Char('a'), Char('b')]))])`,
     /// which collapses to `FlagGroup("i", Sequence([Char('a'), Char('b')]))`.
+    ///
+    /// Unscoped toggles also cross alternation branch boundaries per PCRE2:
+    /// `(a(?i)bc|BB)x` on "bbx" matches because `(?i)` in branch 1 extends to
+    /// the end of the enclosing group and therefore applies to branch 2's
+    /// `BB` as well. We detect per-branch unscoped toggles *pre-recursion*
+    /// (an `FG(_, Empty)` marker emitted by `convert_inline_modifiers` —
+    /// distinguishable from `convert_scoped_inline_modifiers`'s
+    /// `FG(_, pattern)` because scoped forms always carry a body) and wrap
+    /// subsequent branches in the carried `FlagGroup` before recursing.
     fn lower_flag_toggles(ast: RegexAst) -> RegexAst {
         // First, recurse into children.
         let ast = match ast {
@@ -785,7 +794,39 @@ impl Compiler {
                 RegexAst::Sequence(items.into_iter().map(Self::lower_flag_toggles).collect())
             }
             RegexAst::Alternation(items) => {
-                RegexAst::Alternation(items.into_iter().map(Self::lower_flag_toggles).collect())
+                // PCRE2: an unscoped `(?flags)` toggle at branch K's
+                // position extends its effect to branches K+1..N of the
+                // same alternation. Walk branches in order, carrying
+                // the latest trailing unscoped flag forward.
+                let mut carried: Option<String> = None;
+                let mut new_branches: Vec<RegexAst> = Vec::with_capacity(items.len());
+                for branch in items {
+                    // Detect this branch's trailing unscoped toggle
+                    // BEFORE lowering — `FG(_, Empty)` is the raw
+                    // marker; after lowering the FG will have absorbed
+                    // its branch-local siblings and can no longer be
+                    // told apart from `(?flags:body)`.
+                    let next_carry = Self::unscoped_trailing_flag(&branch);
+                    let lowered = Self::lower_flag_toggles(branch);
+                    let wrapped = if let Some(ref flags) = carried {
+                        RegexAst::FlagGroup {
+                            flags: flags.clone(),
+                            expr: Box::new(lowered),
+                        }
+                    } else {
+                        lowered
+                    };
+                    new_branches.push(wrapped);
+                    if let Some(flags) = next_carry {
+                        // Simple last-wins combine. Multi-flag
+                        // interactions across branches (e.g. `(?i)|(?m)`
+                        // where branch 3 should see both) fall through
+                        // this heuristic and can be refined later if
+                        // conformance evidence demands it.
+                        carried = Some(flags);
+                    }
+                }
+                RegexAst::Alternation(new_branches)
             }
             RegexAst::Quantified { expr, quantifier } => RegexAst::Quantified {
                 expr: Box::new(Self::lower_flag_toggles(*expr)),
@@ -869,6 +910,35 @@ impl Compiler {
                 }
             }
             other => other,
+        }
+    }
+
+    /// Scan a branch (pre-lowering) for a top-level unscoped flag toggle —
+    /// `FG(flags, Empty)`, the marker shape `convert_inline_modifiers`
+    /// produces for `(?flags)` (distinct from scoped `(?flags:body)` which
+    /// always emits an FG with a real body). Returns the last such flag
+    /// string in document order, since later toggles in the same branch
+    /// override earlier ones. Only looks at the branch's direct children:
+    /// toggles nested inside a `Group` / `Lookahead` / etc. are PCRE2-scoped
+    /// to that nested context and don't leak out to the enclosing
+    /// alternation.
+    fn unscoped_trailing_flag(branch: &RegexAst) -> Option<String> {
+        match branch {
+            RegexAst::FlagGroup { flags, expr } if matches!(expr.as_ref(), RegexAst::Empty) => {
+                Some(flags.clone())
+            }
+            RegexAst::Sequence(items) => {
+                let mut last: Option<String> = None;
+                for item in items {
+                    if let RegexAst::FlagGroup { flags, expr } = item {
+                        if matches!(expr.as_ref(), RegexAst::Empty) {
+                            last = Some(flags.clone());
+                        }
+                    }
+                }
+                last
+            }
+            _ => None,
         }
     }
 

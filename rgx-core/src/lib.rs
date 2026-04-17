@@ -5849,6 +5849,36 @@ mod tests {
     }
 
     #[test]
+    fn unscoped_flag_toggle_extends_across_alternation_branches() {
+        // PCRE2 testinput1:2321 — `/(a(?i)bc|BB)x/` on "bbx" expects
+        // match. The unscoped `(?i)` in branch 1 extends to the end of
+        // the enclosing group, so branch 2's `BB` should match
+        // case-insensitively against "bb". Before the fix, RGX scoped
+        // `(?i)` to branch 1 only and branch 2's `BB` was byte-exact.
+        let re = Regex::compile("(a(?i)bc|BB)x").unwrap();
+        let m = re.find_first("bbx").expect("expected match for bbx");
+        assert_eq!((m.start, m.end), (0, 3));
+        // Branch 1 is still exercised for "ABCx" (both branches sharing
+        // case-insensitive `bc`).
+        assert!(re.is_match("aBCx"));
+        assert!(re.is_match("abcx"));
+    }
+
+    #[test]
+    fn scoped_flag_toggle_does_not_leak_to_later_alternation_branch() {
+        // Regression pin: `(?i:foo)|bar` — the SCOPED `(?i:foo)`
+        // form should NOT propagate `i` to branch 2. My
+        // unscoped-toggle heuristic checks for `FG(_, Empty)`
+        // pre-lowering; `(?i:foo)` emits `FG("i", Sequence(f,o,o))`
+        // with a non-Empty body, so it is correctly ignored and
+        // branch 2 stays case-sensitive.
+        let re = Regex::compile("(?i:foo)|bar").unwrap();
+        assert!(re.is_match("FOO")); // branch 1 matches case-insensitively
+        assert!(re.is_match("bar")); // branch 2 matches exactly
+        assert!(!re.is_match("BAR")); // branch 2 is NOT case-insensitive
+    }
+
+    #[test]
     fn extended_mode_scoped_disable_restores_literal_whitespace() {
         // PCRE2 testinput1:3921 `/(?x)(?-x: \s*#\s*)/` on subject "#"
         // expects NO match. `(?x)` sets extended mode globally; inside

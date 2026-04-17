@@ -2304,3 +2304,22 @@ PCRE2 rule: a positive lookaround that matches saves its internal captures; back
 - `/(a(?i)bc|BB)x/` — new first FN case (770-case bucket). Scoped `(?i)` inside an alternation branch doesn't extend to the branch's literals. RGX either loses the flag on branch entry or applies it at compile-time globally. Compiler-level investigation.
 - Or `/([a]*?)*/` — span-mismatch first case (still 679). Zero-width lazy-under-greedy empty-match semantics.
 - Or `/^[\E\Qa\E-\Qz\E]+/` — false-positive first case (457). `\Q\E` class-member corner case.
+
+## 2026-04-17 session — ratchet push #6: unscoped `(?flags)` crosses alternation branches
+
+### What landed
+- `convert_alternation` in `rgx-core/src/parsing.rs` now collects each branch's raw piece list PRE-absorption (via a new `convert_alternative_pieces` helper), detects the trailing unscoped toggle (via a new `last_unscoped_flag` free helper), and wraps subsequent branches in `Regex::FlagGroup` carrying the propagated flag. `convert_alternative` now delegates to `convert_alternative_pieces` + `apply_bare_flag_directives` so it's backward-compatible for the places that still want a per-branch absorbed Regex.
+- The earlier compiler-level `lower_flag_toggles` Alternation handling (added in this session before I realized the absorption happens at PARSE time) stays as the equivalent fallback for non-`pgen-parser` builds that use the recursive-descent parser. For PGEN builds, the parser-level fix is load-bearing because PGEN's adapter eagerly absorbs `FG(_, Empty)` markers into non-Empty bodies.
+- Two regression pins: `unscoped_flag_toggle_extends_across_alternation_branches` (positive case for `(a(?i)bc|BB)x` on "bbx") and `scoped_flag_toggle_does_not_leak_to_later_alternation_branch` (negative-control for `(?i:foo)|bar` where branch 2 must stay case-sensitive).
+- Conformance ratchet baselines bumped: 8,899 → 8,927 pass (+28), 2,319 → 2,291 fail.
+
+### Key insight that slowed the fix
+The first implementation targeted `compiler.rs::lower_flag_toggles` and failed at the regression test. PGEN's adapter calls `apply_bare_flag_directives` INSIDE `convert_concatenation` — per-branch absorption runs at parse time, before `lower_flag_toggles` ever sees the AST. So by the time the compiler looks, `FG(_, Empty)` has already been rewritten to `FG(flags, body)` and the "unscoped" marker is gone. The fix had to move to the parse-time alternation handler where the raw piece list is still available.
+
+### Known limitation (intentional for now)
+Simple last-wins combine for carried flags across branches. If branch 1 sets `(?i)` and branch 2 sets `(?m)`, branch 3 sees only `(?m)` — should see both. Multi-flag accumulation can be added if conformance evidence shows real failures from this gap.
+
+### Next concrete action
+- `/^(a\1?){4}$/` — new first FN case (744-case bucket). Recursive backref: `\1` inside a repeating capturing group should reference the CURRENT iteration's capture, and the pattern as a whole needs recursive matching semantics that RGX may not support yet. Engine-level investigation.
+- Or `/([a]*?)*/` — span-mismatch first case (still 677). Zero-width lazy-under-greedy semantics.
+- Or `/^[\E\Qa\E-\Qz\E]+/` — false-positive first case (457). `\Q\E` class-member corner case.

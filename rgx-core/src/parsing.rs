@@ -420,13 +420,22 @@ impl<'a> PgenAstAdapter<'a> {
 
     fn convert_alternation(&self, node: &PgenAstNode) -> Result<Regex> {
         let children = self.sequence_children(node)?;
-        let mut branches = Vec::new();
+
+        // Collect each branch's raw piece list PRE-absorption. An
+        // unscoped `(?flags)` toggle is marked by
+        // `FlagGroup { expr: Empty }` at this stage; after
+        // `apply_bare_flag_directives` absorbs the toggle's trailing
+        // siblings the `Empty` marker is gone and the branch's
+        // trailing unscoped toggle can no longer be distinguished from
+        // a scoped `(?flags:body)` group. We snapshot pieces first so
+        // cross-branch propagation has reliable signal.
+        let mut alternative_pieces: Vec<Vec<Regex>> = Vec::new();
 
         if let Some(first_branch) = children
             .first()
             .and_then(|child| self.first_descendant(child, "alternative"))
         {
-            branches.push(self.convert_alternative(first_branch)?);
+            alternative_pieces.push(self.convert_alternative_pieces(first_branch)?);
         }
 
         if let Some(rest) = children.get(1) {
@@ -444,28 +453,63 @@ impl<'a> PgenAstAdapter<'a> {
                             "pgen alternation repeat entry is missing an alternative node",
                         )
                     })?;
-                branches.push(self.convert_alternative(branch)?);
+                alternative_pieces.push(self.convert_alternative_pieces(branch)?);
+            }
+        }
+
+        // Walk branches in order, applying bare-flag-directive
+        // absorption within each branch and propagating any trailing
+        // unscoped toggle forward to subsequent branches per PCRE2
+        // semantics. For `(a(?i)bc|BB)x`, branch 1's trailing `(?i)`
+        // makes branch 2 case-insensitive too — so `BB` matches "bb".
+        // Simple last-wins combine for carried flags; multi-flag
+        // accumulation across branches is a later refinement if
+        // conformance evidence shows it's needed.
+        let mut carried: Option<String> = None;
+        let mut branches: Vec<Regex> = Vec::with_capacity(alternative_pieces.len());
+        for pieces in alternative_pieces {
+            let trailing = last_unscoped_flag(&pieces);
+            let body = apply_bare_flag_directives(pieces);
+            let wrapped = if let Some(ref flags) = carried {
+                Regex::FlagGroup {
+                    flags: flags.clone(),
+                    expr: Box::new(body),
+                }
+            } else {
+                body
+            };
+            branches.push(wrapped);
+            if let Some(flags) = trailing {
+                carried = Some(flags);
             }
         }
 
         Ok(pack_alternation(branches))
     }
 
-    fn convert_alternative(&self, node: &PgenAstNode) -> Result<Regex> {
+    /// Walk PGEN's `alternative -> concatenation -> piece*` chain and
+    /// return the raw pieces, BEFORE `apply_bare_flag_directives`
+    /// absorbs unscoped flag toggles. The raw-piece view is the only
+    /// way to reliably tell `(?i)` (unscoped — produces
+    /// `FlagGroup { expr: Empty }`) from `(?i:body)` (scoped — produces
+    /// `FlagGroup { expr: body }`) once we need that distinction for
+    /// cross-branch flag propagation.
+    fn convert_alternative_pieces(&self, node: &PgenAstNode) -> Result<Vec<Regex>> {
         let Some(concatenation) = self.first_descendant(node, "concatenation") else {
-            return Ok(Regex::Empty);
+            return Ok(Vec::new());
         };
-        self.convert_concatenation(concatenation)
-    }
-
-    fn convert_concatenation(&self, node: &PgenAstNode) -> Result<Regex> {
         let mut pieces = Vec::new();
-        for repeated in self.quantified_children(node)? {
+        for repeated in self.quantified_children(concatenation)? {
             let piece = self.first_descendant(repeated, "piece").ok_or_else(|| {
                 self.contract_error("pgen concatenation entry is missing a piece")
             })?;
             pieces.push(self.convert_piece(piece)?);
         }
+        Ok(pieces)
+    }
+
+    fn convert_alternative(&self, node: &PgenAstNode) -> Result<Regex> {
+        let pieces = self.convert_alternative_pieces(node)?;
         Ok(apply_bare_flag_directives(pieces))
     }
 
@@ -2765,6 +2809,24 @@ fn pack_sequence(items: Vec<Regex>) -> Regex {
         1 => items.into_iter().next().unwrap(),
         _ => Regex::Sequence(items),
     }
+}
+
+/// Return the flag string of the *last* unscoped flag toggle in
+/// `pieces` — `Regex::FlagGroup { expr: Regex::Empty }` with a
+/// non-empty flag string — or `None` if no such toggle is present.
+///
+/// Used by `convert_alternation` to propagate a branch's trailing
+/// unscoped toggle to subsequent branches per PCRE2 semantics.
+fn last_unscoped_flag(pieces: &[Regex]) -> Option<String> {
+    let mut last = None;
+    for p in pieces {
+        if let Regex::FlagGroup { flags, expr } = p {
+            if matches!(expr.as_ref(), Regex::Empty) && !flags.is_empty() {
+                last = Some(flags.clone());
+            }
+        }
+    }
+    last
 }
 
 /// PCRE2 scoping rule: a bare inline-flag directive such as `(?i)` or
