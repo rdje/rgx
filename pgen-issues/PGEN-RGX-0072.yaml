@@ -1,0 +1,155 @@
+id: PGEN-RGX-0072
+summary: |
+  Regression residual after PGEN 1.1.28: the class_range endpoint-decoder fix applied to braced hex `\x{N}` (which resolved 0071) did NOT extend to the entire *family* of PCRE2 escape forms that can serve as class_range endpoints. Bare `\NNN` (1-3 digit unbraced octal) is still mis-decoded, producing false "descending character class range" rejects on ascending ranges AND at least one false accept of a genuinely descending range. Same class of bug as 0071, broader surface. Asking the PGEN regex family to audit `regex_compile_validation.rs` for every endpoint form listed in pcre2pattern(3) §"Generic character types" as codepoint-producing and apply symmetric decoded-codepoint comparison — rather than point-fix bare octal only, please fix the whole family so no further endpoint-form residuals surface.
+
+status: open
+opened_at: 2026-04-17T21:53:16Z
+first_seen_at: 2026-04-17T21:53:16Z
+last_updated_at: 2026-04-17T21:53:16Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "baac0b1"
+parser_release_version: "1.1.28"
+integration_contract_version: "1.1.30"
+parser_family: regex
+profile: regex_default
+integration_surface: parseability_probe
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: d56f9eb
+host_os: macos
+host_arch: aarch64
+rust_toolchain: "rustc per workspace rust-version = 1.88"
+cargo_features: "default + pgen-parser"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0072/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0072/pgen_trace.log
+  pattern: "[\\000-\\037]"
+  source: |
+    Discovered by the RGX PCRE2 conformance harness
+    (`rgx-core/tests/pcre2_conformance.rs`) while scanning
+    `subs/pcre2/testdata/testinput1` block #0 starting
+    near input line 1285. PCRE2 10.47 accepts and matches this pattern in its own pcre2test harness; PGEN's regex grammar diverges as recorded under `actual_behavior`.
+
+# === Bug class (per protocol §4) ===
+bug_class: parses_but_returns_wrong_ast
+
+expected_behavior: |
+  **Family fix request.** pcre2pattern(3) §"Generic character types" enumerates the escape forms that produce a Unicode codepoint and are therefore valid `class_range` endpoints:
+
+    * `\NNN`   — bare octal, 1 to 3 digits following `\` (no brace)
+    * `\o{N}`  — braced octal, 1+ digits
+    * `\xNN`   — 1-byte hex, exactly 2 digits after `\x`
+    * `\x{N}`  — braced hex, 1+ digits
+    * `\cX`    — control escape, one char after `\c`
+    * `\t \n \r \f \a \e \0` — literal metachar escapes
+    * plain literal codepoints
+
+  PGEN's range-ordering validator must decode EACH of those forms to its Unicode codepoint before comparing the two endpoints. PGEN 1.1.28 (`baac0b1`) did this correctly for `\x{N}` / `\xNN` / `\o{N}` / `\cX` / literals. The bare `\NNN` form is the remaining gap:
+
+    * `[\000-\037]` — octal 0..31 — ASCENDING, should be accepted.
+    * `[\010-\037]` — octal 8..31 — ASCENDING, should be accepted.
+    * `[a-\377]`    — literal 97..octal 255 — ASCENDING, should be accepted.
+    * `[\001-\x1f]` — octal 1..hex 31 — ASCENDING, should be accepted.
+    * `[\001-\x{1f}]` — octal 1..braced-hex 31 — ASCENDING, should be accepted.
+
+  There is also at least one false-accept residual on `\0` specifically:
+
+    * `[\x1f-\0]` — hex 31..octal 0 — DESCENDING, should be REJECTED.
+
+  Please apply the fix SYMMETRICALLY (covers both endpoint positions) and AUDIT the whole family so a future RGX regression against another form (e.g. `\cX`, `\n`, `\N{U+NNNN}`) doesn't recur. Add explicit coverage in PGEN's compile-validation test matrix for every endpoint × endpoint-form combination.
+
+
+actual_behavior: |
+  Probe against PGEN 1.1.28 (`baac0b1`, contract 1.1.30), pattern → outcome:
+
+    BARE-OCTAL START, bare-octal END (FALSE REJECTS on ASCENDING ranges)
+    * `[\000-\037]` → REJ descending  (want OK: 0..31 ascending)
+    * `[\000-\017]` → REJ descending  (want OK: 0..15)
+    * `[\010-\037]` → REJ descending  (want OK: 8..31)
+    * `[\000-\047]` → REJ descending  (want OK: 0..39)
+    * `[\000-\057]` → REJ descending  (want OK: 0..47)
+    * `[\000-\067]` → OK               (0..55; happens to pass)
+    * `[\000-\077]` → OK               (0..63; happens to pass)
+    * `[\000-\377]` → OK               (0..255; happens to pass)
+    * `[\101-\377]` → OK               (65..255; happens to pass)
+
+    LITERAL-START, bare-octal END (FALSE REJECTS on ASCENDING)
+    * `[a-\377]` → REJ descending       (want OK: 97..255)
+    * `[A-\377]` → REJ descending       (want OK: 65..255)
+    * `[4-\377]` → REJ descending       (want OK: 52..255)
+    * `[3-\377]` → OK                    (51..255)
+    * `[ -\377]` → OK                    (32..255)
+
+    BARE-OCTAL START, other-form END (FALSE REJECTS on ASCENDING)
+    * `[\001-\x1f]` → REJ descending    (want OK: 1..31)
+    * `[\001-\x{1f}]` → REJ descending  (want OK: 1..31)
+    * `[\x01-\037]` → OK                 (1..31; opposite direction works)
+    * `[\001-z]` → OK                     (1..122; start bare-octal + literal end OK)
+
+    FALSE-ACCEPT on DESCENDING (end is single-digit `\0`)
+    * `[\x1f-\0]` → OK (WRONG — 31..0 is descending, must reject)
+    * `[\xff-\0]` → REJ descending (correct)
+    * `[z-\0]` → REJ descending (correct)
+    * `[a-\0]` → REJ descending (correct)
+
+    OTHER FORMS — SANITY CHECKS (all currently CORRECT in 1.1.28, confirms the FAMILY scope)
+    * `[\x00-\x1f]`   OK  (single-byte hex ascending)
+    * `[\x{00}-\x{1f}]` OK (braced hex ascending)
+    * `[\o{000}-\o{037}]` OK (braced octal ascending)
+    * `[\cA-\cZ]` OK (control escape ascending)
+    * `[\x1f-\x00]` REJ descending (single-byte hex correctly rejected)
+    * `[\x{FF}-\0]` REJ descending (braced hex vs 1-digit octal correctly rejected)
+    * `[\037-\000]` REJ descending (bare octal both ends correctly rejected)
+
+  **Impact on RGX**: 6 PCRE2 conformance cases affected (3× `/^[\000-\037]/` at testinput1:1285, 3× same pattern at testinput6:1763). The other 18 `descending` rejects in the harness are PCRE2 `alt_extended_class` set-algebra forms (`[A--B]`, `[a&&b]`, etc.) and are a separate issue — not the bare-octal family covered by this report.
+
+  **Verification approach**: reverted the submodule pin to PGEN 1.1.26 locally, confirmed all the "want OK" patterns above parsed cleanly at 1.1.26, then re-absorbed 1.1.27 and 1.1.28 and confirmed the `\NNN` form remained broken across both.
+
+
+reproduction: |
+  Reproducer artifacts under pgen-issues/artifacts/PGEN-RGX-0072/:
+    - repro_input.txt — exact failing input (one line, no trailing newline)
+    - pgen_contract.json — captured `parser_embedding_api_contract()` JSON
+    - pgen_parse_outcome.json — captured `parse_grammar_profile_named` JSON
+
+  Reproduction command (from rgx repo root) — captures the trace:
+    cd subs/pgen && PGEN_TRACE_VERBOSITY=debug \
+        cargo run --manifest-path rust/Cargo.toml --features generated_parsers \
+          --bin parseability_probe -- --parse regex \
+          ../../pgen-issues/artifacts/PGEN-RGX-0072/repro_input.txt \
+          --profile regex_default --trace \
+          --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0072/pgen_trace.log
+
+  Expected: parseability_probe accepts the input (`parse_full passed`).
+  Actual: PGEN rejects with the diagnostic recorded in `pgen_parse_outcome.json` (or, for contract mismatches, RGX's compile error captured in `actual_behavior`).
+
+impact: |
+  One of many PGEN-related failures uncovered by RGX's
+  PCRE2 10.47 testinput1 conformance harness. Each failing pattern
+  also blocks RGX from passing the corresponding pcre2test case.
+  Aggregate impact is tracked in `docs/BACKLOG.md` C7.
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when the issue is resolved.

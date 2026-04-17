@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - File PGEN-RGX-0072 (class_range endpoint-decoder family audit)
+
+- Scope: File a thorough PGEN bug report for a residual regression after 1.1.28's class_range endpoint-decoder fix: the fix applied to braced hex `\x{N}` (resolving 0071) did NOT extend to the FAMILY of other escape forms that can serve as `class_range` endpoints. Bare unbraced `\NNN` (1-3 digit octal) is still mis-decoded. Report asks PGEN to audit every endpoint form enumerated in pcre2pattern(3) §"Generic character types" and apply symmetric decoded-codepoint comparison, rather than point-fixing bare octal only.
+- Cluster characterisation (from the probe in the report):
+  - FALSE REJECT on ascending — bare-octal both ends: `[\000-\037]` (0..31), `[\000-\017]`, `[\010-\037]`, `[\000-\047]`, `[\000-\057]` all rejected as "descending" despite being ascending.
+  - FALSE REJECT — literal start + bare-octal end: `[a-\377]`, `[A-\377]`, `[4-\377]` rejected; `[3-\377]` and `[ -\377]` pass (boundary around ASCII 0x33 = '3').
+  - FALSE REJECT — bare-octal start + hex end: `[\001-\x1f]`, `[\001-\x{1f}]` rejected (1..31); opposite direction `[\x01-\037]` passes.
+  - FALSE ACCEPT on descending — `[\x1f-\0]` accepts (31..0) though it's descending.
+  - SANITY CHECKS — braced hex, single-byte hex, braced octal, control escape, literal endpoints all work correctly — confirming the family boundary is specific to bare `\NNN`.
+- Impact on RGX: 6 conformance cases affected (3× `/^[\000-\037]/` at testinput1:1285, 3× same pattern at testinput6:1763). The other 18 `descending`-rejects in the harness output are PCRE2 `alt_extended_class` set-algebra patterns (`[A--B]`, `[a&&b]`, etc.) — separate issue, not the bare-octal family.
+- Artifact bundle: `pgen-issues/PGEN-RGX-0072.yaml` + `repro_input.txt` + `pgen_contract.json` + `pgen_parse_outcome.json` + `pgen_trace.log` at `PGEN_TRACE_VERBOSITY=debug`. No AST dump (parse fails).
+- Ledger: 72 PGEN-RGX YAMLs total; 71 closed, **1 open** (0072). Ratchet stays at 8,935/2,283/0/0 (report is informational, no code change to ratchet baselines).
+- Forward-looking: report explicitly asks for a test-matrix expansion on PGEN's side covering every `endpoint-form × endpoint-form` combination so future regressions on any form (`\cX`, `\n`, `\N{U+NNNN}`, etc.) surface pre-release.
+
 ### 2026-04-17 - PGEN 1.1.28 bump: closes 0067-0071 (+8 conformance passes)
 
 - Scope: Bump PGEN submodule from `5856f71` (1.1.26) to `baac0b1` (1.1.28, "Fix regex braced hex class range ordering"). Integration contract 1.1.28 → 1.1.30. PGEN 1.1.28 carries 1.1.27's fixes for 0067–0070 PLUS the targeted fix for 0071 — `regex_compile_validation.rs` now compares class_range endpoints by decoded literal escape value instead of the escaped payload's leading byte, so `[z-\x{100}]` correctly parses as ascending (was the 1.1.27 regression that forced the hold in commit `6f82c96`).

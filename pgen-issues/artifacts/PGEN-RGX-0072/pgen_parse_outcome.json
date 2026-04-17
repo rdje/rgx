@@ -1,0 +1,15 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "failure",
+  "diagnostic": {
+    "code": "E_PARSE_FAILURE",
+    "message": "descending character class range is not accepted by the regex compile contract",
+    "location": {
+      "byte_offset": 5,
+      "line": 1,
+      "column": 6
+    }
+  }
+}

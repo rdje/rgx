@@ -2385,3 +2385,25 @@ My initial "~180 cases for 0067–0070 + ~70 for 0071 = ~250 gated" was way too 
 ### Next concrete action
 - Pick an RGX-side engine gap for the next ratchet push — recursive-backref capture propagation for `(a\1?){n}` (744-FN bucket first), zero-width lazy semantics for `([a]*?)*` (675-span-mismatch bucket first), or unicode case-fold edges.
 - Or run a second cluster-distill pass through the 744 FN / 675 span-mismatch / 447 FP residuals for additional PGEN reports.
+
+## 2026-04-18 session — file PGEN-RGX-0072 (class_range endpoint-decoder family audit)
+
+### What landed
+- Filed `PGEN-RGX-0072` against PGEN 1.1.28 with a COMPREHENSIVE family-fix request per the user's direction ("ask PGEN to fix the whole family of similar issues, not just the one you reported"). The report characterises 4 distinct sub-regressions in the class_range endpoint decoder:
+  1. Bare-octal both ends → false reject on ascending.
+  2. Literal start + bare-octal end → false reject; boundary around ASCII 0x33.
+  3. Bare-octal start + hex end → false reject; opposite direction works (asymmetric).
+  4. Single-digit `\0` as end with hex start → false accept on descending.
+- Report asks PGEN to (a) apply the 1.1.28 braced-hex fix symmetrically to every codepoint-producing endpoint form per pcre2pattern(3), and (b) add a test matrix covering every `endpoint-form × endpoint-form` combination so future regressions on any form (`\cX`, `\n`, `\N{U+NNNN}`, ...) can't recur.
+- Report bundle: full §1-5 artifact set. No AST dump (parse fails). Impact: 6 conformance cases directly; 0 ratchet movement pending upstream fix.
+- Separately noted but NOT filed as 0072: 18 `descending` rejects in the harness output that are PCRE2 `alt_extended_class` set-algebra patterns (`[A--B]`, `[a&&b]`, etc.). That's a different cluster — harness-modifier gap on our side, not the bare-octal family.
+
+### Investigation method
+Probed ~30 patterns by varying endpoint form (bare-octal/braced-hex/single-byte-hex/braced-octal/control-escape/literal) × position (start/end) × direction (ascending/descending) to map the bug surface precisely. Used a throw-away `RGX_CONFORMANCE_DUMP_DESCENDING=1` gate on the conformance harness to count the specific descending-rejects against the failing-case set; the diagnostic was reverted before commit.
+
+### Running ledger
+- PGEN-RGX reports: 72 filed total. 71 closed, **1 open** (0072).
+
+### Next concrete action
+- Wait for PGEN 1.1.29 with the family fix, then re-absorb. Expected ratchet delta: +6 cases plus any residuals the family audit catches.
+- Or move to an RGX-side engine target in parallel.
