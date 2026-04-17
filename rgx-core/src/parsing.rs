@@ -1068,13 +1068,40 @@ impl<'a> PgenAstAdapter<'a> {
     #[allow(clippy::only_used_in_recursion)]
     fn walk_quoted_class_body(&self, node: &PgenAstNode, out: &mut Vec<char>) {
         if node.rule_name == "quoted_class_literal_char" {
-            if let Some(ch) = self.collect_first_terminal_char(node) {
-                out.push(ch);
-            }
+            // PGEN 1.1.27 widened `quoted_class_literal_char` to include
+            // `quoted_class_literal_escaped_char = "\\" quoted_literal_escape_tail`,
+            // which contributes TWO characters to the class: the
+            // backslash and the escape-tail character (PCRE2 treats
+            // everything inside `\Q...\E` as literal — escapes are
+            // NOT interpreted). Walk every terminal under this node
+            // in document order so both the old single-char form and
+            // the new escaped-char form surface correctly.
+            self.walk_terminal_chars_in_order(node, out);
             return;
         }
         for child in node.children() {
             self.walk_quoted_class_body(child, out);
+        }
+    }
+
+    /// Walk every terminal character under `node` in document order
+    /// (depth-first, left-to-right) and append each to `out`. Used
+    /// when a subtree may contain one or more literal characters
+    /// whose positions matter — e.g. `\n` inside `\Q\E` contributes
+    /// both `\` and `n`, not just the first terminal.
+    #[allow(clippy::only_used_in_recursion)]
+    fn walk_terminal_chars_in_order(&self, node: &PgenAstNode, out: &mut Vec<char>) {
+        match &node.content {
+            PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
+                for ch in text.chars() {
+                    out.push(ch);
+                }
+            }
+            _ => {
+                for child in node.children() {
+                    self.walk_terminal_chars_in_order(child, out);
+                }
+            }
         }
     }
 
@@ -1139,6 +1166,22 @@ impl<'a> PgenAstAdapter<'a> {
     /// to the single character it represents, for use as a range endpoint.
     fn class_atom_char(&self, node: &PgenAstNode) -> Result<char> {
         let atom = self.first_descendant(node, "class_atom").unwrap_or(node);
+        // PGEN 1.1.27 (released for PGEN-RGX-0068) lets `\Q<single-char>\E`
+        // serve as a class_range endpoint via a dedicated
+        // `quoted_class_range_atom` production. The single literal char
+        // lives in the atom's `quoted_class_literal_char` descendant.
+        // `\Qa\E-\Qz\E` now parses as `class_range[start=quoted(a),
+        // end=quoted(z)]` and must lower to the range a..z, matching
+        // PCRE2 semantics.
+        if let Some(quoted_range) = self.find_direct_child(atom, "quoted_class_range_atom") {
+            let chars = self.quoted_class_literal_chars(quoted_range);
+            if chars.len() == 1 {
+                return Ok(chars[0]);
+            }
+            return Err(self.contract_error(
+                "pgen quoted_class_range_atom endpoint must resolve to exactly one character",
+            ));
+        }
         // PGEN 1.1.23 split the endpoint-escape production: range atoms
         // now nest `class_range_escape` (a restricted subset that
         // excludes orphan `\E`) instead of the general `class_escape`.

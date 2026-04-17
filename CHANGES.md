@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-17 - Hold PGEN 1.1.27 absorption; file PGEN-RGX-0071 for braced-hex-range regression
+
+- Scope: PGEN published 1.1.27 (`8ed45af`) with fixes for PGEN-RGX-0067 through 0070 plus a *new* regression in the same release that rejects ~70 previously-passing conformance cases. The submodule pin stays on **1.1.26** (`5856f71`) until PGEN 1.1.28 lands without the regression. Forward-compatible RGX adapter wiring for the new PGEN 1.1.27 AST shapes is landed now so the 1.1.28 absorption will be a clean fast-forward.
+- Regression characterisation:
+  - **Trigger pattern**: `[z-\x{100}]` (braced-hex codepoint ≥ 256 as a class_range endpoint). Rejected by PGEN 1.1.27's `regex_compile_validation.rs` with `E_PARSE_FAILURE: descending character class range is not accepted by the regex compile contract` — but the range IS ascending (z = U+007A = 122, `\x{100}` = U+0100 = 256). Same shape bug on `[z-\x{200}]`, `[Qz-\x{200}]/utf`, `[z-\x{100}]/i`, and siblings. Single-byte hex `\xNN` works; braced `\x{N}` does not. Likely root cause: the validator is interpreting the literal `{` `1` `0` `0` `}` characters as decimal 100 (which is < 'z' = 122, hence "descending") instead of resolving `\x{100}` to its Unicode codepoint.
+  - **Verification against 1.1.26**: reverting the submodule pin to `5856f71` and re-running the conformance harness restored the 8,927/2,291 baseline exactly. The regression is entirely attributable to PGEN 1.1.27.
+  - **Filed as**: `pgen-issues/PGEN-RGX-0071.yaml` against PGEN 1.1.27 / integration contract 1.1.29 with the full §1–5 protocol bundle (`repro_input.txt`, `pgen_contract.json`, `pgen_parse_outcome.json`, `pgen_trace.log` at `PGEN_TRACE_VERBOSITY=debug`). No AST dump because `parse_full` rejects.
+- RGX adapter wiring landed now (dead code on 1.1.26, live on 1.1.28+):
+  - `convert_class_range` / `class_atom_char` now dispatch on PGEN 1.1.27's new `quoted_class_range_atom` production. For `[\Qa\E-\Qz\E]`, PGEN emits a `class_range` with two `quoted_class_range_atom` endpoints; the adapter pulls the single literal character out of each atom's `quoted_class_literal_char` descendant and builds the range correctly (was emitting three independent class items `[a, -, z]` on 1.1.26 — see 0068).
+  - `walk_quoted_class_body` extended to accept PGEN 1.1.27's `quoted_class_literal_escaped_char` sub-production. `[\Q\n\E]` is now tokenised as a single `quoted_class_literal_char` whose body is the two-character escape sequence `\n`; the old walker returned just the first terminal (`\`) and missed the trailing `n`. The new walker walks every terminal in document order.
+- Validation: ratchet gate green at 8,927 pass / 2,291 fail / 0 panic / 0 skip on PGEN 1.1.26 + the forward-compatible adapter changes (identical to pre-this-commit). 1,021 lib tests pass. `cargo fmt` + `cargo clippy --workspace --all-targets` clean. The adapter changes fire only when PGEN emits the new AST shapes, which it does not on 1.1.26, so the conformance result is byte-identical to pre-bump.
+- Open reports count: 0067 / 0068 / 0069 / 0070 / 0071 (5 total). 0067–0070 each have a *verified* fix in PGEN 1.1.27 but stay in `status: open` until the 0071 regression is fixed and we can absorb the clean 1.1.28 release. Cluster total: ~180 + 70 = ~250 conformance cases gated on the 1.1.28 absorption.
+
 ### 2026-04-17 - File PGEN-RGX-0067..0070 (cluster-distilled, 4 reports)
 
 - Scope: Four protocol-compliant PGEN bug reports against PGEN 1.1.26 / `5856f71`, each a minimal repro distilled from a larger conformance-failure cluster (cluster-first methodology — one report per root cause). Upstream-fix discipline per the "parsing issues fix in PGEN, not RGX" rule: patterns covered here are no longer candidates for RGX adapter patches until PGEN lands the fix.

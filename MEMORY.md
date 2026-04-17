@@ -2345,3 +2345,23 @@ Per the "parsing issues route to PGEN, not RGX" rule, none of these four pattern
 - Pick one of the RGX-side engine gaps (recursive-backref capture propagation for `(a\1?){n}`, zero-width lazy semantics for `([a]*?)*`) for the next ratchet push.
 - Or wait on PGEN to land fixes for 0067–0070, then bump the submodule and absorb the gain.
 - Or run a second cluster-distill pass through the bigger buckets to identify additional PGEN reports.
+
+## 2026-04-17 session — PGEN 1.1.27 absorption blocked; file PGEN-RGX-0071
+
+### What happened
+- PGEN published 1.1.27 (`8ed45af`) with fixes for reports 0067–0070. Tried to absorb it; the 0067/0068/0069/0070 fixes all verified as expected. But the same release regresses **~70 previously-passing conformance cases** by over-rejecting `[z-\x{NNN}]` class_ranges (any braced hex codepoint ≥ 256 as a range endpoint) with a spurious "descending character class range" diagnostic.
+- Reverted the submodule pin to 1.1.26 (`5856f71`) to keep the ratchet at 8,927/2,291. Filed `PGEN-RGX-0071` against 1.1.27 with the full §1–5 bundle (repro `[z-\x{100}]` + `parse_full` rejection trace).
+- Kept RGX-side forward-compatible adapter changes in `rgx-core/src/parsing.rs` so the next bump to 1.1.28 is a clean fast-forward:
+  - `class_atom_char` now recognises PGEN 1.1.27's new `quoted_class_range_atom` production and extracts the single literal character from its `quoted_class_literal_char` descendant.
+  - `walk_quoted_class_body` upgraded to walk EVERY terminal under `quoted_class_literal_char` in document order instead of just the first — fixes a silent data-loss in how `[\Q\n\E]` is lowered (`\n` inside the quoted region contributes *two* literal chars, `\` and `n`, since PCRE2 does not interpret escapes inside `\Q...\E`).
+- Both adapter changes are dead code under 1.1.26 (the new PGEN node shapes don't exist there), so the ratchet result is byte-identical to pre-commit.
+
+### Debugging method
+- Root-cause discovery used a temporary diagnostic in `rgx-core/tests/pcre2_conformance.rs` gated on `RGX_CONFORMANCE_DUMP_ALL_FAILURES=1` that emits every failing case with its bucket classification. Captured the pre- and post-bump failure sets, diffed them with `comm`, and identified 78 newly-failing / 50 newly-passing cases. Net −28 matches the harness regression exactly. The diagnostic was reverted before commit.
+
+### Running ledger
+- PGEN-RGX reports: 71 filed total (0001–0071). 66 closed, **5 open** (0067–0071). Cluster gated on 1.1.28 absorption: ~250 conformance cases.
+
+### Next concrete action
+- Wait for PGEN 1.1.28 (with the 0071 fix) and re-run the bump.
+- Or in parallel, pick an RGX-side engine gap (recursive-backref capture propagation, zero-width lazy semantics) for the next independent ratchet push.
