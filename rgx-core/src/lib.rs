@@ -2353,28 +2353,47 @@ impl Regex {
                         }
                     }
                     d if d.is_ascii_digit() => {
-                        // `\NNN` — in PCRE2 replacement templates, a
-                        // backslash followed by ASCII digits is an
-                        // octal escape (not a back-reference; those use
-                        // `$N`). Consume up to 3 octal digits.
-                        let start = i;
-                        let mut end = i + 1;
-                        while end < len
-                            && end - start < 3
-                            && bytes[end].is_ascii_digit()
-                            && bytes[end] < b'8'
-                        {
-                            end += 1;
-                        }
-                        let oct = &replacement[start..end];
-                        if let Ok(cp) = u32::from_str_radix(oct, 8) {
-                            if let Some(ch) = char::from_u32(cp) {
-                                let mut buf = [0u8; 4];
-                                let s = ch.encode_utf8(&mut buf);
+                        // PCRE2 / Perl replacement-string digit escapes
+                        // are deliberately dual-role:
+                        //   * `\0` (and `\0NN`) — always octal (the
+                        //     leading zero marks the numeric form).
+                        //   * `\N` (N ∈ 1..9) — back-reference to
+                        //     capture group N when that group exists
+                        //     (including `None`-valued groups that
+                        //     participated but didn't match); falls
+                        //     back to octal otherwise. PCRE2's actual
+                        //     rule is slightly more permissive for
+                        //     multi-digit forms but this single-digit
+                        //     check covers the common conformance
+                        //     patterns (`\1`, `\2`, …) without
+                        //     breaking octal literals like `\045`
+                        //     against patterns with no captures.
+                        if d != b'0' && ((d - b'0') as usize) < groups.len() {
+                            let idx = (d - b'0') as usize;
+                            if let Some(Some(s)) = groups.get(idx) {
                                 push_with_case(out, s, &mut case_next, case_region);
                             }
+                            i += 1;
+                        } else {
+                            let start = i;
+                            let mut end = i + 1;
+                            while end < len
+                                && end - start < 3
+                                && bytes[end].is_ascii_digit()
+                                && bytes[end] < b'8'
+                            {
+                                end += 1;
+                            }
+                            let oct = &replacement[start..end];
+                            if let Ok(cp) = u32::from_str_radix(oct, 8) {
+                                if let Some(ch) = char::from_u32(cp) {
+                                    let mut buf = [0u8; 4];
+                                    let s = ch.encode_utf8(&mut buf);
+                                    push_with_case(out, s, &mut case_next, case_region);
+                                }
+                            }
+                            i = end;
                         }
-                        i = end;
                     }
                     _ => {
                         // Unknown escape: emit the character literally,
@@ -6364,6 +6383,21 @@ mod tests {
             re.find_first("c").is_none(),
             "()?(?(1)a|b) must not match 'c'"
         );
+    }
+
+    #[test]
+    fn substitute_template_single_digit_is_backref() {
+        // Regression pin: `\N` (N=1..9) in a replacement template is
+        // a capture-group back-reference (Perl / PCRE2 convention).
+        // Only `\0...` routes to the octal escape — the leading zero
+        // marks the numeric literal form.
+        let re = Regex::compile(r"a(b)(c)").unwrap();
+        assert_eq!(re.replace("abc", r">\1<"), ">b<");
+        assert_eq!(re.replace("abc", r">\2<"), ">c<");
+        // `\0` still decodes as NUL (octal 0).
+        assert_eq!(re.replace("abc", r">\0<"), ">\0<");
+        // `\045` still decodes as octal ('%' — 0x25).
+        assert_eq!(re.replace("abc", r">\045<"), ">%<");
     }
 
     #[test]

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Substitute template: `\N` as back-reference, `\0NN` as octal (+2 passes)
+
+- Scope: `Regex::interpolate_replacement` in `rgx-core/src/lib.rs` treats `\N` (single digit 1-9) as a Perl/PCRE2 back-reference to capture group N when that group exists. `\0`, `\0NN`, and any other digit sequence that doesn't resolve to a live group fall through to the octal-escape path. Previously every `\N+` digit run was parsed as octal, so templates like `>\1<` produced `>\u{01}<` (SOH) instead of the captured text.
+- Heuristic: the implementation favours the common conformance patterns (`\1`, `\2`, …). It picks octal when the digit is `0` or when group N doesn't exist on the current match, so `\045` continues to decode as `%` for patterns with no captures.
+- Validation: 1,040 lib tests pass (1,039 baseline + 1 new regression pin `substitute_template_single_digit_is_backref`). PCRE2 conformance **9,265 → 9,267 pass** (+2), 1,953 → 1,951 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_267` / `FAIL_BASELINE=1_951`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The "other" (substitute-mode) bucket now stands at 41 cases, mostly covering advanced features RGX still doesn't implement — `${*MARK}`, conditional templates `${N:+yes:no}`, and `\Q…\E` quoting inside replacement strings. Those are tracked separately.
+
 ### 2026-04-18 - Unicode property `^` negation, `\p{Cs}` alias, extended callout delimiters (+6 passes)
 
 - Scope: Three small property/callout adapter tweaks.
