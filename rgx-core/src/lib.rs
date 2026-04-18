@@ -6279,6 +6279,33 @@ mod tests {
     }
 
     #[test]
+    fn callouts_compile_as_noops_by_default() {
+        // Regression pin: PCRE2 callouts `(?C)`, `(?Cn)`, `(?C"text")`,
+        // `(?C'text')` compile and behave as no-ops when no callback
+        // handler is registered — matching PCRE2's default
+        // "unregistered callout is a no-op" policy. Previously RGX
+        // rejected string callouts at compile time and lowered numeric
+        // callouts to a native-callback code block that failed at match
+        // time when no handler was wired.
+        assert!(Regex::compile(r"abc(?C)def")
+            .unwrap()
+            .find_first("abcdef")
+            .is_some());
+        assert!(Regex::compile(r"abc(?C1)def")
+            .unwrap()
+            .find_first("abcdef")
+            .is_some());
+        assert!(Regex::compile(r#"(?C"hello")abc"#)
+            .unwrap()
+            .find_first("abc")
+            .is_some());
+        assert!(Regex::compile(r"(?C'mark')\d")
+            .unwrap()
+            .find_first("x42")
+            .is_some());
+    }
+
+    #[test]
     fn optional_empty_capture_is_visible_to_conditional() {
         // Regression pin: `()?(?(1)a|b)` on "a" should match "a" —
         // the `()?` greedy-tries the match branch, capturing group 1

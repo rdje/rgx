@@ -3141,6 +3141,16 @@ impl RegexVM {
         code: &str,
     ) -> CodeBlockOutcome {
         let Some(execution_manager) = &self.execution_manager else {
+            // PCRE2 semantic: an unregistered callout is a no-op. The
+            // adapter lowers `(?C)` / `(?Cn)` / `(?C"text")` to a native
+            // code-block call named `__callout_N`. When no execution
+            // manager exists (Pure mode, no code-block runtime attached)
+            // we can't invoke the callback — treat it as no-op rather
+            // than failing, so patterns like `abc(?C)def` match
+            // normally on trivially-matching subjects.
+            if language == "native" && code.starts_with("__callout_") {
+                return CodeBlockOutcome::Pass;
+            }
             debug_log!(
                 "vm",
                 "CodeBlock execution requested without an attached execution manager"

@@ -1513,21 +1513,31 @@ impl<'a> PgenAstAdapter<'a> {
         String::new()
     }
 
-    /// Convert a `callout` node — `(?C)` or `(?C123)`.
+    /// Convert a `callout` node — `(?C)`, `(?C123)`, or `(?C"text")`.
     ///
     /// Extracts the optional callout number from the span text. The number
-    /// defaults to 0 when absent (bare `(?C)`).
+    /// defaults to 0 when absent (bare `(?C)`) or when the callout uses
+    /// the string form (`(?C"arg")` / `(?C'arg'`)) — those identify the
+    /// callout by argument rather than by number, and RGX treats all
+    /// unregistered callouts as no-ops anyway, so the number is not
+    /// observed at match time.
     fn convert_callout(&self, node: &PgenAstNode) -> Result<Regex> {
         let text = self
             .terminal_text(node)
             .or_else(|_| self.slice(node).map(ToString::to_string))?;
-        // text is the full span, e.g. "(?C)" or "(?C123)". Extract digits after "C".
-        let digits = text.trim_start_matches("(?C").trim_end_matches(')');
-        let number: u32 = if digits.is_empty() {
+        // text is the full span, e.g. "(?C)" or "(?C123)" or "(?C\"xyz\")"
+        // or "(?C'xyz')". Extract the body after "C" and before the
+        // closing ")".
+        let body = text.trim_start_matches("(?C").trim_end_matches(')');
+        let number: u32 = if body.is_empty() {
+            0
+        } else if body.starts_with('"') || body.starts_with('\'') || body.starts_with('{') {
+            // String / brace-delimited callout: keep as numeric 0 — the
+            // match semantic is the same, and the string payload is
+            // recoverable from the source pattern if ever needed.
             0
         } else {
-            digits
-                .parse::<u32>()
+            body.parse::<u32>()
                 .map_err(|_| RgxError::compile(format!("invalid callout number in '{text}'")))?
         };
         Ok(Regex::Callout(number))

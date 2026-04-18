@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — Callouts as no-ops when unregistered + string-form callouts (+20 passes)
+- **What**: Two callout fixes in `rgx-core/src/parsing.rs` + `rgx-core/src/vm.rs`:
+  1. `convert_callout` accepts string-/brace-delimited callouts (`(?C"text")`, `(?C'text')`, `(?C{text})`) as number 0, no longer rejects them at parse time.
+  2. `evaluate_code_block` returns `Pass` (not `Fail`) for unregistered `native` callouts with the `__callout_` prefix when no execution manager is attached (Pure mode).
+- **Why**: PCRE2 treats unregistered callouts as no-ops — they're tracing/diagnostic hooks. RGX was breaking simple patterns like `abc(?C)def` because the native callback path failed when nothing was registered.
+- **Full-mode registered handlers continue to work**: the execution-manager check runs before the no-op short-circuit.
+- **Conformance delta**: 9,239 → 9,259 (+20). Ratchet bumped. One regression pin.
+
 ### 2026-04-18 — QuestionGreedy preserves captures on zero-width body match (+1 pass)
 - **What**: `OpCode::QuestionGreedy` was undoing the capture trail when `ctx.pos == before_pos` (body matched empty). That hid zero-width captures from later references. Now: only undo on `!matched`; matched-with-zero-width keeps the trail and pushes the backtrack frame.
 - **Pattern**: `()?(?(1)a|b)` on "a" now matches because the zero-width `()?` sets group 1 to empty, conditional picks `a`.

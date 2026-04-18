@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Callouts as no-ops when unregistered + string-form callouts (+20 passes)
+
+- Scope: PCRE2 `(?C)`, `(?Cn)`, `(?C"text")`, `(?C'text')` callouts should compile and behave as no-ops when no callback handler is registered (PCRE2 default policy). RGX was:
+  1. Rejecting string/brace-delimited callouts at parse time with `invalid callout number in '(?C"...")'`.
+  2. Compiling numeric callouts to a `__callout_N` native code block that failed at match time (Pure mode / no execution manager) because the callback wasn't registered — breaking simple patterns like `abc(?C)def` on `"abcdef"`.
+- Fix #1 (`rgx-core/src/parsing.rs`): `convert_callout` accepts string- (`"text"`, `'text'`) and brace-delimited (`{text}`) callout bodies, assigning callout number 0 — the string payload would only matter to a user-registered handler, and the match semantics are identical for all un-registered callouts.
+- Fix #2 (`rgx-core/src/vm.rs` `evaluate_code_block`): when there's no execution manager attached (Pure mode) and the code block is a callout-shaped `native` call (`code.starts_with("__callout_")`), return `CodeBlockOutcome::Pass` instead of `Fail`. User-registered callbacks in Full mode are unaffected — the execution-manager path runs first.
+- Validation: 1,036 lib tests pass (1,035 baseline + 1 new regression pin `callouts_compile_as_noops_by_default`). All four existing callout tests (`callout_numbered_is_noop_when_unregistered`, `callout_registered_handler_called`, `callout_numbered_handler_called`, `callout_failure_prevents_match`, `callout_in_find_all`) continue to pass — the no-op behavior only triggers when the execution manager is absent. PCRE2 conformance **9,239 → 9,259 pass** (+20), 1,979 → 1,959 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_259` / `FAIL_BASELINE=1_959`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: `(?C)` is a diagnostic/tracing aid in PCRE2. Most conformance-test patterns that use it are exercising surrounding match behavior, not the callout itself — treating the callout as a no-op (when no handler is registered) closes ~20 cases cleanly.
+
 ### 2026-04-18 - QuestionGreedy zero-width match preserves captures (+1 pass)
 
 - Scope: `OpCode::QuestionGreedy` in `rgx-core/src/vm.rs` (main VM line 2738, subexpr VM line 5267) previously undid the capture trail whenever the body matched zero-width (`ctx.pos == before_pos`). That turned `()?` matching empty into "didn't match", hiding the capture from subsequent references. PCRE2 semantic: a group that matched empty is still "participated" — conditional tests like `(?(1)yes|no)` see it and take the yes branch.
