@@ -2159,28 +2159,47 @@ impl<'a> PgenAstAdapter<'a> {
             let has_comma = self.has_terminal_text(body, ",");
 
             let (min, max) = if has_comma {
-                let min = if digit_groups.is_empty() || digit_groups[0].is_empty() {
-                    0
-                } else {
-                    digit_groups[0].parse::<u32>().map_err(|_| {
+                // PGEN's `counted_quantifier_body` has two alternatives:
+                //   (a) digits ws? ("," ws? digits?)?   — {N} / {N,} / {N,M}
+                //   (b) "," ws? digits                  — {,M}  (min=0, max=digits)
+                // Distinguish by asking whether the body's first leaf
+                // terminal is a comma: if yes, we're in branch (b) and the
+                // single `digits` group holds the maximum.
+                let leading_comma = self
+                    .find_first_terminal_text(body)
+                    .is_some_and(|t| t.trim_start().starts_with(','));
+                if leading_comma && digit_groups.len() == 1 {
+                    let max = digit_groups[0].parse::<u32>().map_err(|_| {
                         self.contract_error(&format!(
-                            "invalid counted quantifier minimum '{}'",
+                            "invalid counted quantifier maximum '{}'",
                             digit_groups[0]
                         ))
-                    })?
-                };
-                let max = digit_groups
-                    .get(1)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| {
-                        s.parse::<u32>().map_err(|_| {
+                    })?;
+                    (0u32, Some(max))
+                } else {
+                    let min = if digit_groups.is_empty() || digit_groups[0].is_empty() {
+                        0
+                    } else {
+                        digit_groups[0].parse::<u32>().map_err(|_| {
                             self.contract_error(&format!(
-                                "invalid counted quantifier maximum '{s}'"
+                                "invalid counted quantifier minimum '{}'",
+                                digit_groups[0]
                             ))
+                        })?
+                    };
+                    let max = digit_groups
+                        .get(1)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| {
+                            s.parse::<u32>().map_err(|_| {
+                                self.contract_error(&format!(
+                                    "invalid counted quantifier maximum '{s}'"
+                                ))
+                            })
                         })
-                    })
-                    .transpose()?;
-                (min, max)
+                        .transpose()?;
+                    (min, max)
+                }
             } else {
                 let count_str = digit_groups.first().map_or("", String::as_str);
                 let count = count_str.parse::<u32>().map_err(|_| {

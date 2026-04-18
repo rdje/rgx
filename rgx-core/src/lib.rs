@@ -6007,6 +6007,36 @@ mod tests {
     }
 
     #[test]
+    fn pcre2_space_includes_vertical_tab() {
+        // Regression pin: PCRE2's `\s` matches vertical tab (U+000B),
+        // which Rust's `char::is_ascii_whitespace()` excludes. RGX's
+        // pcre2_is_space_char helper explicitly includes VT to preserve
+        // parity with PCRE2.
+        let re = Regex::compile(r"\sabc").unwrap();
+        let m = re
+            .find_first("\x0babc")
+            .expect("\\s must match VT (U+000B)");
+        assert_eq!((m.start, m.end), (0, 4));
+    }
+
+    #[test]
+    fn bare_upper_bound_quantifier_parses_as_zero_to_n() {
+        // Regression pin: `{,N}` is PCRE2 shorthand for `{0,N}` (max-only).
+        // Previously RGX's PGEN adapter misread the leading-comma
+        // `counted_quantifier_body` alternative as `{N,}` (min-only),
+        // unbounding `a{,3}B` into an at-least-three match instead of
+        // at-most-three. Fixed by probing the body's first leaf
+        // terminal — if it's a comma, the sole `digits` child holds
+        // the maximum, not the minimum.
+        let re = Regex::compile(r"a{,3}B").unwrap();
+        let m = re.find_first("B").expect("{,3} accepts zero 'a's");
+        assert_eq!((m.start, m.end), (0, 1));
+        let m = re.find_first("aaaaB").expect("{,3} caps at three 'a's");
+        // Cap at 3 a's + B: span is length 4 (positions 1..5).
+        assert_eq!(m.end - m.start, 4);
+    }
+
+    #[test]
     fn nonempty_quantifier_body_still_advances() {
         // Sanity: the fix for empty-body quantifier termination must
         // not break quantifiers whose body actually matches characters.

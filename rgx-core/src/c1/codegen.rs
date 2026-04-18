@@ -646,10 +646,11 @@ enum JitOp {
     /// `\w` / `\W` — consume one byte that is (or is not) an ASCII
     /// word character `[A-Za-z0-9_]`.
     WordAscii { negated: bool },
-    /// `\s` / `\S` — consume one byte that is (or is not) an ASCII
-    /// whitespace character. Whitespace = space, tab, newline,
-    /// carriage return, form feed, vertical tab. Matches the same
-    /// set as `b.is_ascii_whitespace()` in `std`.
+    /// `\s` / `\S` — consume one byte that is (or is not) a PCRE2
+    /// `\s` character. The matched set is the six bytes
+    /// `{space, tab, LF, VT, FF, CR}` (0x20, 0x09, 0x0A, 0x0B, 0x0C,
+    /// 0x0D). Note: this is *broader* than `b.is_ascii_whitespace()`
+    /// in `std`, which excludes VT (0x0B) — PCRE2 includes it.
     SpaceAscii { negated: bool },
     /// `\A` — zero-width assertion: matches iff `pos == 0`.
     StartText,
@@ -1893,10 +1894,11 @@ fn emit_word_byte_test(
     }
 }
 
-/// Helper: emit IR for the ASCII whitespace test against the same
-/// six bytes `b.is_ascii_whitespace()` matches in `std`: space
-/// (0x20), tab (0x09), newline (0x0A), carriage return (0x0D), form
-/// feed (0x0C), vertical tab (0x0B). Returns a Cranelift boolean.
+/// Helper: emit IR for the PCRE2 `\s` byte test against six bytes:
+/// space (0x20), tab (0x09), newline (0x0A), vertical tab (0x0B),
+/// form feed (0x0C), carriage return (0x0D). Note: this is broader
+/// than `b.is_ascii_whitespace()` in `std`, which excludes VT (0x0B).
+/// Returns a Cranelift boolean.
 fn emit_space_byte_test(
     builder: &mut FunctionBuilder,
     byte: cranelift_codegen::ir::Value,

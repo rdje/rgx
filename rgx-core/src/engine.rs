@@ -306,7 +306,7 @@ impl<'a> PrefixScanner<'a> {
             PrefixFilter::Space => {
                 let mut pos = start;
                 while pos < input.len() {
-                    if input[pos].is_ascii_whitespace() {
+                    if crate::vm::pcre2_is_space_byte(input[pos]) {
                         return Some(pos);
                     }
                     pos += 1;

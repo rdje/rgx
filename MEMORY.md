@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — PCRE2 semantic corrections: VT in `\s` + `{,N}` = `{0,N}` (+30 passes)
+- **What #1**: `rgx-core/src/vm.rs` and `rgx-core/src/engine.rs` were relying on Rust's `char::is_ascii_whitespace()` / `u8::is_ascii_whitespace()` for `\s` semantics. The `std` helpers match 5 bytes (space, tab, LF, FF, CR) but **PCRE2's `\s` matches 6** — the 5 above *plus* VT (0x0B). Added helpers `pcre2_is_space_byte` and `pcre2_is_space_char` (six-byte set) and replaced all 7 call sites. C1 JIT was already correct — only its docstring was stale.
+- **What #2**: `rgx-core/src/parsing.rs` `parse_counted_quantifier` was reading `digit_groups[0]` as min for ALL `has_comma` cases, so PGEN's two alternatives for `counted_quantifier_body` (`digits ws? (, ws? digits?)?` and `, ws? digits`) collided — `a{,3}B` was compiling as `a{3,}B` (at least 3) instead of `a{0,3}B`. Fixed by checking the body's first leaf terminal; if it's `,`, the sole digits child is the maximum.
+- **Conformance delta**: **9,149 → 9,175 pass** (+26). 2,069 → 2,043 fail. Ratchet bumped to 9,175 / 2,043. Two new regression pins: `pcre2_space_includes_vertical_tab`, `bare_upper_bound_quantifier_parses_as_zero_to_n`.
+
 ### 2026-04-16 — Unicode simple-fold for case-insensitive matching (+161 passes, new record)
 - **What**: `rgx-core/src/vm.rs` `unicode_case_variants` (called by `Regex::Char` codegen and by both `case_fold_ranges` call sites for class endpoints) now consults `regex_syntax::hir::ClassUnicode::try_case_fold_simple` in addition to `char::to_lowercase` / `char::to_uppercase`. This adds full simple-fold equivalence classes: ſ↔s↔S, K↔k↔K (Kelvin), Σ↔σ↔ς, I↔i↔İ↔ı.
 - **Why `to_lowercase` alone was insufficient**: `char::to_lowercase` implements UCD Default Case Conversion (simple case *mapping*); PCRE2 `/i` implements UCD *simple case folding* (`CaseFolding.txt` `C + S` rows). They diverge on Kelvin sign, long-s, final sigma, etc. `regex-syntax` exposes the public folding table via `ClassUnicode::try_case_fold_simple` — single-char class in, multi-range class out.

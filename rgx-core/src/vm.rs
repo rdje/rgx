@@ -24,6 +24,25 @@ use memchr::memchr;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+/// PCRE2 `\s` byte test: matches space (0x20), tab (0x09), LF (0x0A),
+/// VT (0x0B), FF (0x0C), CR (0x0D). Distinct from Rust's
+/// `u8::is_ascii_whitespace()`, which excludes VT — PCRE2 includes it.
+#[inline]
+#[must_use]
+pub const fn pcre2_is_space_byte(b: u8) -> bool {
+    matches!(b, b' ' | 0x09..=0x0D)
+}
+
+/// PCRE2 `\s` char test (ASCII-only form). Unicode-aware whitespace is
+/// expanded at compile time via `\p{White_Space}` when `/ucp` or `/utf`
+/// semantics are requested; this helper covers the six ASCII bytes
+/// PCRE2's default `\s` matches.
+#[inline]
+#[must_use]
+pub const fn pcre2_is_space_char(ch: char) -> bool {
+    matches!(ch, ' ' | '\u{09}'..='\u{0D}')
+}
+
 /// Outcome of evaluating an inline code-block during VM execution.
 ///
 /// This enriches the simple pass/fail model with steering actions so that host
@@ -543,7 +562,7 @@ impl PrefixFilter {
             Self::Byte(expected) => b == expected,
             Self::Digit => b.is_ascii_digit(),
             Self::Word => b.is_ascii_alphanumeric() || b == b'_',
-            Self::Space => b.is_ascii_whitespace(),
+            Self::Space => pcre2_is_space_byte(b),
             Self::CharClass(id) => {
                 // Non-ASCII bytes might match Unicode ranges — can't reject
                 if b >= 0x80 {
@@ -2196,7 +2215,7 @@ impl RegexVM {
                 }
                 OpCode::SpaceAsciiNeg => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if !ch.is_ascii_whitespace() {
+                        if !pcre2_is_space_char(ch) {
                             Self::advance_char(ctx);
                             continue;
                         }
@@ -2259,7 +2278,7 @@ impl RegexVM {
 
                 OpCode::SpaceAscii => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if ch.is_ascii_whitespace() {
+                        if pcre2_is_space_char(ch) {
                             Self::advance_char(ctx);
                             continue;
                         }
@@ -4405,8 +4424,8 @@ impl RegexVM {
                             OpCode::DigitAsciiNeg => !ch.is_ascii_digit(),
                             OpCode::WordAscii => ch.is_ascii_alphanumeric() || ch == '_',
                             OpCode::WordAsciiNeg => !(ch.is_ascii_alphanumeric() || ch == '_'),
-                            OpCode::SpaceAscii => ch.is_ascii_whitespace(),
-                            OpCode::SpaceAsciiNeg => !ch.is_ascii_whitespace(),
+                            OpCode::SpaceAscii => pcre2_is_space_char(ch),
+                            OpCode::SpaceAsciiNeg => !pcre2_is_space_char(ch),
                             _ => false,
                         };
                         if matched {
@@ -4897,7 +4916,7 @@ impl RegexVM {
                 }
                 OpCode::SpaceAscii => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if ch.is_ascii_whitespace() {
+                        if pcre2_is_space_char(ch) {
                             Self::advance_char(ctx);
                             continue;
                         }
@@ -4906,7 +4925,7 @@ impl RegexVM {
                 }
                 OpCode::SpaceAsciiNeg => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if !ch.is_ascii_whitespace() {
+                        if !pcre2_is_space_char(ch) {
                             Self::advance_char(ctx);
                             continue;
                         }
