@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Substitute template: `${*MARK}` / `$*MARK` last-hit mark name (+5 passes)
+
+- Scope: Thread the last-matched `(*MARK:name)` / `(*:name)` verb name from the VM through to the public match result and replacement-template interpolator so PCRE2 substitute templates `${*MARK}` and `$*MARK` expand to the mark name (or empty string when no mark was hit on the winning match path).
+- Plumbing:
+  - `rgx-core/src/vm.rs`: `vm::Match` grows `last_mark: Option<String>`. Every successful-match `Match { … }` construction now populates it from `ctx.marks.last().map(|(name, _)| name.clone())`.
+  - `rgx-core/src/engine.rs`: `MatchResult` grows `last_mark: Option<String>`. All three converters (`vm_match_to_result`, `pike_match_to_match_result`, `jit_match_to_result`) propagate or default the field.
+  - `rgx-core/src/lib.rs`: `Captures` grows `last_mark: Option<String>` with a new `Captures::mark(&self) -> Option<&str>` accessor. `replace` / `replacen` wire the mark through when constructing `Captures`. `Regex::interpolate_replacement` takes a `last_mark: Option<&str>` parameter and recognises both `${*MARK}` (brace form) and `$*MARK` (bare form), expanding to the mark name or nothing.
+  - `rgx-cli/src/main.rs`: three test-local `MatchResult` constructors default `last_mark` to `None`.
+- Validation: 1,041 `rgx-core` lib tests pass (1,040 baseline + 1 new regression pin `substitute_template_mark_name`). 30 `rgx-cli` tests pass. PCRE2 conformance **9,267 → 9,272 pass** (+5), 1,951 → 1,946 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_272` / `FAIL_BASELINE=1_946`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Also exposes `Captures::mark()` as a first-class API — users writing PCRE2-style alternation with MARKs can introspect which branch was taken without having to design a custom capture group. Closes 5 of the 7 MARK-related substitute-mismatch cases in the "other" conformance bucket (the remaining 2 involve PCRE2's `hex` pattern modifier and `(*SKIP:name)` interactions — separate follow-ups).
+
 ### 2026-04-19 - Substitute template: `\N` as back-reference, `\0NN` as octal (+2 passes)
 
 - Scope: `Regex::interpolate_replacement` in `rgx-core/src/lib.rs` treats `\N` (single digit 1-9) as a Perl/PCRE2 back-reference to capture group N when that group exists. `\0`, `\0NN`, and any other digit sequence that doesn't resolve to a live group fall through to the octal-escape path. Previously every `\N+` digit run was parsed as octal, so templates like `>\1<` produced `>\u{01}<` (SOH) instead of the captured text.

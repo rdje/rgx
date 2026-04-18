@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Substitute template `${*MARK}` / `$*MARK` (+5 passes)
+- **What**: Threaded the last-matched `(*MARK:name)` verb name through `vm::Match` → `MatchResult` → `Captures` so substitute templates can expand `${*MARK}` / `$*MARK` and users can introspect via `Captures::mark() -> Option<&str>`.
+- **Wiring**: New `last_mark: Option<String>` field on all three result structs; VM sites populate from `ctx.marks.last()`; `interpolate_replacement` gained a `last_mark: Option<&str>` parameter and recognises both brace and bare forms.
+- **Conformance delta**: 9,267 → 9,272 (+5). Ratchet bumped to 9,272 / 1,946.
+- **Known pre-existing failure**: `adversarial::deep_recursion_with_captures_restored_correctly` fails on main (recursive `(?&pair)` balanced-parens pattern returns innermost match instead of outermost). Not caused by this change — same behavior on the pre-commit stash. Tracked for later.
+
 ### 2026-04-19 — Substitute template: `\N` backref, `\0NN` octal (+2 passes)
 - **What**: `Regex::interpolate_replacement` now treats single-digit `\N` (1-9) as a Perl/PCRE2 back-reference when group N exists. `\0`, `\0NN`, and digit sequences where N is beyond the pattern's capture count fall through to the octal-escape path. Previously every `\N+` ran through the octal decoder, so `>\1<` produced `>\u{01}<` instead of the capture.
 - **Heuristic**: Favours backref for `\1..\9` when the group exists; falls back to octal otherwise (keeps `\045` → `%` working for no-capture patterns).

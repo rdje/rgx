@@ -72,6 +72,13 @@ pub struct MatchResult {
     /// This is `None` when the winning path produced only predicate-style
     /// success/failure results.
     pub code_result: Option<CodeBlockValue>,
+    /// Name of the last `(*MARK:name)` / `(*:name)` verb encountered on the
+    /// winning match path (PCRE2 "mark" concept). `None` when no mark was hit.
+    ///
+    /// Substitute templates expose this as `${*MARK}` / `$*MARK`, and users
+    /// can read it directly from the match result to understand which
+    /// alternation branch or control-verb region produced the match.
+    pub last_mark: Option<String>,
 }
 
 /// High-performance regex execution engine
@@ -124,6 +131,7 @@ pub(crate) fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
         groups: m.groups,
         matched_branch_number: m.matched_alternative.map(|id| id + 1),
         code_result: m.code_result,
+        last_mark: m.last_mark,
     }
 }
 
@@ -143,6 +151,7 @@ fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
         groups: m.groups,
         matched_branch_number: None,
         code_result: None,
+        last_mark: None,
     }
 }
 
@@ -217,6 +226,7 @@ fn jit_match_to_result(start: usize, end: usize, captures: &[i64], num_groups: u
         groups,
         matched_branch_number: None,
         code_result: None,
+        last_mark: None,
     }
 }
 

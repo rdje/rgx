@@ -253,9 +253,21 @@ pub struct Captures<'t> {
     text: &'t str,
     groups: Vec<Option<(usize, usize)>>,
     named: std::sync::Arc<std::collections::HashMap<String, u32>>,
+    /// Name of the last `(*MARK:name)` / `(*:name)` verb hit on the
+    /// winning match path, if any. Exposed to replacement templates
+    /// as `${*MARK}` / `$*MARK` and to users via [`Captures::mark`].
+    last_mark: Option<String>,
 }
 
 impl<'t> Captures<'t> {
+    /// Name of the last `(*MARK:name)` / `(*:name)` control verb
+    /// encountered on the winning match path, or `None` if no mark
+    /// was hit. Mirrors PCRE2's `*MARK` introspection.
+    #[must_use]
+    pub fn mark(&self) -> Option<&str> {
+        self.last_mark.as_deref()
+    }
+
     /// Get a capture group by index.
     ///
     /// Index 0 is the overall match. Returns `None` if the group did not
@@ -297,7 +309,13 @@ impl<'t> Captures<'t> {
             .iter()
             .map(|slot| slot.map(|(s, e)| &self.text[s..e]))
             .collect();
-        Regex::interpolate_replacement(replacement, &str_groups, &self.named, dst);
+        Regex::interpolate_replacement(
+            replacement,
+            &str_groups,
+            &self.named,
+            self.last_mark.as_deref(),
+            dst,
+        );
     }
 
     /// Iterator over all capture groups.
@@ -597,6 +615,7 @@ impl<'r, 't> Iterator for CaptureIter<'r, 't> {
                 text: self.inner.text,
                 groups: mr.groups,
                 named: self.named.clone(),
+                last_mark: mr.last_mark,
             });
         }
     }
@@ -1588,6 +1607,7 @@ impl Regex {
                 text,
                 groups: mr.groups,
                 named: std::sync::Arc::new(self.engine.named_groups().clone()),
+                last_mark: mr.last_mark,
             };
             rep.replace_append(&caps, &mut result);
         }
@@ -1637,6 +1657,7 @@ impl Regex {
                     text,
                     groups: m.groups.clone(),
                     named: named.clone(),
+                    last_mark: m.last_mark.clone(),
                 };
                 rep.replace_append(&caps, &mut result);
             }
@@ -1668,6 +1689,7 @@ impl Regex {
             text,
             groups: m.groups,
             named: std::sync::Arc::new(self.engine.named_groups().clone()),
+            last_mark: m.last_mark,
         })
     }
 
@@ -2141,10 +2163,15 @@ impl Regex {
 
     /// Interpolate `$0`, `$1`, `$name`, `${name}`, `$$`, `$&` in a
     /// replacement string, appending the result to `out`.
+    ///
+    /// `last_mark` carries the PCRE2 `(*MARK:name)` value threaded
+    /// through from the match result. When present, `${*MARK}` /
+    /// `$*MARK` in the template expand to that name.
     fn interpolate_replacement(
         replacement: &str,
         groups: &[Option<&str>],
         named: &std::collections::HashMap<String, u32>,
+        last_mark: Option<&str>,
         out: &mut String,
     ) {
         #[derive(Clone, Copy)]
@@ -2200,13 +2227,34 @@ impl Regex {
                 } else if bytes[i] == b'{' {
                     if let Some(close) = replacement[i + 1..].find('}') {
                         let inner = &replacement[i + 1..i + 1 + close];
-                        // Scratch buffer so case-change state applies uniformly.
                         let mut scratch = String::new();
-                        Self::push_group_by_ref(inner, groups, named, &mut scratch);
+                        if inner == "*MARK" {
+                            // PCRE2 `${*MARK}` — expand to the last
+                            // `(*MARK:name)` name hit on the match path
+                            // (empty string when no mark was seen).
+                            if let Some(mark) = last_mark {
+                                scratch.push_str(mark);
+                            }
+                        } else {
+                            Self::push_group_by_ref(inner, groups, named, &mut scratch);
+                        }
                         push_with_case(out, &scratch, &mut case_next, case_region);
                         i = i + 2 + close;
                     } else {
                         push_with_case(out, "${", &mut case_next, case_region);
+                        i += 1;
+                    }
+                } else if bytes[i] == b'*' {
+                    // PCRE2 `$*MARK` — bare form (no braces).
+                    if replacement[i..].starts_with("*MARK") {
+                        if let Some(mark) = last_mark {
+                            let mut scratch = String::new();
+                            scratch.push_str(mark);
+                            push_with_case(out, &scratch, &mut case_next, case_region);
+                        }
+                        i += "*MARK".len();
+                    } else {
+                        push_with_case(out, "$*", &mut case_next, case_region);
                         i += 1;
                     }
                 } else if bytes[i].is_ascii_digit() {
@@ -6383,6 +6431,26 @@ mod tests {
             re.find_first("c").is_none(),
             "()?(?(1)a|b) must not match 'c'"
         );
+    }
+
+    #[test]
+    fn substitute_template_mark_name() {
+        // Regression pin: `${*MARK}` / `$*MARK` in a replacement
+        // template expand to the name of the last `(*MARK:name)` or
+        // `(*:name)` verb hit on the winning match path, per PCRE2
+        // substitute semantics. Absent a mark, the expansion is empty.
+        let re = Regex::compile(r"(*:pear)apple|(*:orange)lemon|(*:strawberry)blackberry").unwrap();
+        assert_eq!(
+            re.replace_all("apple lemon blackberry", r"${*MARK}"),
+            "pear orange strawberry"
+        );
+        assert_eq!(re.replace("apple", r"<$*MARK>"), "<pear>");
+        // No mark on the match path → empty expansion.
+        let plain = Regex::compile(r"abc").unwrap();
+        assert_eq!(plain.replace("abc", r"<${*MARK}>"), "<>");
+        // `Captures::mark()` also exposes the mark name.
+        let caps = re.captures("apple").unwrap();
+        assert_eq!(caps.mark(), Some("pear"));
     }
 
     #[test]

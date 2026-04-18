@@ -1353,6 +1353,7 @@ mod tests {
             groups: vec![Some((2, 5))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Numeric(7.0)),
+            last_mark: None,
         };
 
         assert_eq!(format_match_line(&m, false), "2..5");
@@ -1366,6 +1367,7 @@ mod tests {
             groups: vec![Some((2, 5))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Replacement("CAT".to_string())),
+            last_mark: None,
         };
 
         assert_eq!(
@@ -1802,6 +1804,7 @@ mod tests {
             groups: vec![Some((0, 3))],
             matched_branch_number: Some(2),
             code_result: Some(CodeBlockValue::Numeric(7.0)),
+            last_mark: None,
         };
         let jm = json_match_from(&m, "cat", None, None);
         assert_eq!(jm.branch, Some(2));

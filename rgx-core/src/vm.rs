@@ -521,7 +521,7 @@ pub struct BacktrackFrame {
 pub struct Match {
     /// Overall match start position (in bytes)
     pub start: usize,
-    /// Overall match end position (in bytes)  
+    /// Overall match end position (in bytes)
     pub end: usize,
     /// Capture groups (start, end) in bytes - None if group didn't match
     pub groups: Vec<Option<(usize, usize)>>,
@@ -529,6 +529,9 @@ pub struct Match {
     pub matched_alternative: Option<usize>,
     /// Last non-boolean code-block value observed on the winning match path.
     pub code_result: Option<CodeBlockValue>,
+    /// Name of the last `(*MARK:name)` / `(*:name)` verb encountered on
+    /// the winning match path. Populated from `ExecContext::marks.last()`.
+    pub last_mark: Option<String>,
 }
 
 /// Fast position filter extracted from the program prefix.
@@ -895,6 +898,7 @@ impl RegexVM {
                 groups: vec![Some((pos, pos + needle_len))],
                 matched_alternative: None,
                 code_result: None,
+                last_mark: None,
             });
             return result;
         }
@@ -1036,6 +1040,7 @@ impl RegexVM {
                     groups: vec![Some((abs, abs + needle_len))],
                     matched_alternative: None,
                     code_result: None,
+                    last_mark: None,
                 }
             });
         }
@@ -1103,6 +1108,7 @@ impl RegexVM {
                     groups: vec![Some((abs, abs + needle_len))],
                     matched_alternative: None,
                     code_result: None,
+                    last_mark: None,
                 });
                 offset = abs + needle_len.max(1);
             }
@@ -1317,6 +1323,7 @@ impl RegexVM {
                     groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                     code_result: ctx.code_result.clone(),
+                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                 });
                 trace_exit!(
                     "vm",
@@ -1360,6 +1367,7 @@ impl RegexVM {
                 groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                 matched_alternative: ctx.current_alternative,
                 code_result: ctx.code_result.clone(),
+                last_mark: None,
             });
             trace_exit!(
                 "vm",
@@ -1536,6 +1544,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
                 // (*COMMIT): abort entire search on failure
@@ -1578,6 +1587,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
                 // (*COMMIT): abort entire search on failure
@@ -1614,6 +1624,7 @@ impl RegexVM {
                 groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                 matched_alternative: ctx.current_alternative,
                 code_result: ctx.code_result.clone(),
+                last_mark: None,
             });
         }
         trace_exit!("vm", "RegexVM::find_first_scanning", "matched=false");
@@ -1650,6 +1661,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
                 if ctx.committed {
@@ -1686,6 +1698,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
                 if ctx.committed {
@@ -1718,6 +1731,7 @@ impl RegexVM {
                     groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                     matched_alternative: ctx.current_alternative,
                     code_result: ctx.code_result.clone(),
+                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                 });
             }
         }
@@ -1766,6 +1780,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                     ctx.previous_match_end = Some(m_end);
                     offset = m_end.max(candidate + 1);
@@ -1818,6 +1833,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                     ctx.previous_match_end = Some(m_end);
                     start = m_end.max(candidate + 1);
@@ -1852,6 +1868,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
             }
@@ -3673,6 +3690,7 @@ impl RegexVM {
                     groups: vec![Some((abs_pos, abs_pos + needle_len))],
                     matched_alternative: None,
                     code_result: None,
+                    last_mark: None,
                 });
                 start = abs_pos + needle_len.max(1);
             }
@@ -3745,6 +3763,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(&ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     };
                     last_match_end = Some(m_end);
                     ctx.previous_match_end = Some(m_end);
@@ -3798,6 +3817,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(&ctx, m_start, m_end),
                         matched_alternative: ctx.current_alternative,
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     };
                     last_match_end = Some(m_end);
                     ctx.previous_match_end = Some(m_end);
@@ -3942,6 +3962,7 @@ impl RegexVM {
                 groups: vec![Some((pos, pos + needle_len))],
                 matched_branch_number: None,
                 code_result: None,
+                last_mark: None,
             });
             return MatchOutcome::Completed(result);
         }
@@ -4062,6 +4083,7 @@ impl RegexVM {
                     groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                     matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                     code_result: ctx.code_result.clone(),
+                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                 }));
             }
 
@@ -4228,6 +4250,7 @@ impl RegexVM {
                         groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                         matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                         code_result: ctx.code_result.clone(),
+                        last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     }));
                 }
                 self.emit_event(&MatchEvent::MatchAttemptCompleted {
@@ -4254,6 +4277,7 @@ impl RegexVM {
                     groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
                     matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                     code_result: ctx.code_result.clone(),
+                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                 }))
             }
             CodeBlockOutcome::Fail | CodeBlockOutcome::Suspended(_) => {
@@ -4311,6 +4335,7 @@ impl RegexVM {
                             ),
                             matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                             code_result: ctx.code_result.clone(),
+                            last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                         }));
                     }
                 }
