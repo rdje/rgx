@@ -8,6 +8,18 @@ pub(crate) fn resolve_unicode_property_class(
     name: &str,
     negated: bool,
 ) -> Result<Vec<CharRange>, String> {
+    // PCRE2 allows a leading `^` inside `\p{...}` / `\P{...}` as an
+    // in-class negation (e.g. `\p{^Lu}` = same as `\P{Lu}`), with
+    // tolerant whitespace around the marker. Strip the `^` and flip
+    // the `negated` flag so the rest of the resolver sees a clean
+    // property name.
+    let trimmed = name.trim();
+    let (name, negated) = if let Some(rest) = trimmed.strip_prefix('^') {
+        (rest.trim(), !negated)
+    } else {
+        (trimmed, negated)
+    };
+
     // PCRE2 recognises several property names that either are synthetic
     // (no Unicode counterpart) or use short-aliases that `regex_syntax`
     // does not accept verbatim. We intercept those first and route the
@@ -56,6 +68,13 @@ fn resolve_pcre2_alias(name: &str) -> Option<Vec<CharRange>> {
         // PCRE2 `L&` — "cased letter" = Lu | Ll | Lt. Identical to Unicode's
         // `Lc` ("Cased_Letter") but regex_syntax rejects `L&` as a name.
         "L&" | "Lc" | "Cased_Letter" => Some(merge_properties(&["Lu", "Ll", "Lt"])),
+
+        // Unicode `Cs` (Surrogate) — regex_syntax rejects this because
+        // surrogate codepoints (U+D800..U+DFFF) aren't valid Rust
+        // `char` scalar values. For any well-formed Rust `&str` subject
+        // the match can never succeed, so an empty range set is the
+        // correct lowering.
+        "Cs" | "Surrogate" => Some(Vec::new()),
 
         // PCRE2 synthetic: Xan = alphanumeric (letter or decimal digit).
         "Xan" => Some(merge_properties(&["L", "Nd"])),

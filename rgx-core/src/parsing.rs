@@ -1531,10 +1531,15 @@ impl<'a> PgenAstAdapter<'a> {
         let body = text.trim_start_matches("(?C").trim_end_matches(')');
         let number: u32 = if body.is_empty() {
             0
-        } else if body.starts_with('"') || body.starts_with('\'') || body.starts_with('{') {
-            // String / brace-delimited callout: keep as numeric 0 — the
-            // match semantic is the same, and the string payload is
-            // recoverable from the source pattern if ever needed.
+        } else if matches!(
+            body.chars().next(),
+            Some('"' | '\'' | '{' | '`' | '%' | '#' | '$' | '^')
+        ) {
+            // String / brace / backtick / other-delimiter callout.
+            // pcre2test accepts any of `" ' { ` % # $ ^` as the
+            // opening delimiter for the callout's string argument.
+            // Keep as numeric 0 — match semantics are identical for
+            // unregistered callouts regardless of the payload.
             0
         } else {
             body.parse::<u32>()

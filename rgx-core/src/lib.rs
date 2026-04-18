@@ -6279,6 +6279,46 @@ mod tests {
     }
 
     #[test]
+    fn unicode_property_caret_prefix_negates() {
+        // Regression pin: `\p{^Lu}` is PCRE2 in-class negation —
+        // equivalent to `\P{Lu}`. Whitespace around the `^` is
+        // tolerated.
+        let re = Regex::compile(r"^\p{^Lu}+").unwrap();
+        assert!(re
+            .find_first("abcD")
+            .map(|m| m.end - m.start == 3)
+            .unwrap_or(false));
+        // `\p{  ^ Lu }` should also compile (whitespace variant).
+        assert!(Regex::compile(r"^\p{  ^ Lu }+").is_ok());
+    }
+
+    #[test]
+    fn unicode_property_cs_surrogate_matches_nothing() {
+        // Regression pin: `\p{Cs}` (Surrogate) is an empty match set
+        // under Rust's `&str` (surrogates are not valid char scalar
+        // values). The negated form `\P{Cs}` matches any codepoint.
+        let re = Regex::compile(r"\p{Cs}").unwrap();
+        assert!(re.find_first("abc\u{1F600}").is_none());
+        let re_neg = Regex::compile(r"^\P{Cs}+$").unwrap();
+        assert!(re_neg.is_match("abc\u{1F600}"));
+    }
+
+    #[test]
+    fn callout_with_backtick_body_compiles_as_noop() {
+        // Regression pin: pcre2test accepts ` ` ' { % # $ ^ ` as
+        // callout string delimiters. RGX treats the body as opaque
+        // and lowers to a no-op callout regardless of delimiter.
+        assert!(Regex::compile(r"(?C`code`)abc")
+            .unwrap()
+            .find_first("abc")
+            .is_some());
+        assert!(Regex::compile(r"(?C%text%)abc")
+            .unwrap()
+            .find_first("abc")
+            .is_some());
+    }
+
+    #[test]
     fn callouts_compile_as_noops_by_default() {
         // Regression pin: PCRE2 callouts `(?C)`, `(?Cn)`, `(?C"text")`,
         // `(?C'text')` compile and behave as no-ops when no callback

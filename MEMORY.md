@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — Unicode `\p{^X}` negation + `\p{Cs}` alias + extended callout delimiters (+6 passes)
+- **`\p{^Name}`** in-property negation: `resolve_unicode_property_class` strips a leading `^` and flips `negated`. Tolerates whitespace.
+- **`\p{Cs}`**: added alias returning empty ranges (Rust `char` excludes surrogates; `\P{Cs}` correctly complements to all codepoints).
+- **Callout delimiters**: `convert_callout` accepts `" ' { \` % # $ ^` as string-callout openers (was `" ' {` only). All treated as unregistered no-ops (number 0).
+- **Bidi-class properties** (`\p{bidi_class:AL}` etc.) remain blocked on data — regex-syntax doesn't ship a bidi-class table. 39-case cluster tracked for later.
+- **Conformance delta**: 9,259 → 9,265 (+6). Ratchet bumped. Three regression pins.
+
 ### 2026-04-18 — Callouts as no-ops when unregistered + string-form callouts (+20 passes)
 - **What**: Two callout fixes in `rgx-core/src/parsing.rs` + `rgx-core/src/vm.rs`:
   1. `convert_callout` accepts string-/brace-delimited callouts (`(?C"text")`, `(?C'text')`, `(?C{text})`) as number 0, no longer rejects them at parse time.

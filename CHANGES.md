@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Unicode property `^` negation, `\p{Cs}` alias, extended callout delimiters (+6 passes)
+
+- Scope: Three small property/callout adapter tweaks.
+- **`\p{^Name}` in-class negation**: PCRE2 accepts a leading `^` inside `\p{...}` as in-property negation (`\p{^Lu}` ≡ `\P{Lu}`), with optional whitespace around. `resolve_unicode_property_class` in `rgx-core/src/unicode_support.rs` now trims and strips the `^` prefix, flipping the `negated` flag instead of handing the raw name to `regex_syntax`.
+- **`\p{Cs}` alias**: Rust's `char` excludes surrogate codepoints (U+D800..U+DFFF), so `regex_syntax` rejects the `Cs` property name. Since valid `&str` subjects can never contain surrogates, `\p{Cs}` is semantically equivalent to the empty class. Added `"Cs" | "Surrogate"` to the PCRE2 alias table returning `Vec::new()` (the complement path produces "all codepoints" for `\P{Cs}`, matching PCRE2).
+- **Extended callout delimiters**: pcre2test accepts any of `"`, `'`, `{`, `` ` ``, `%`, `#`, `$`, `^` as the opening delimiter for a callout string argument. `convert_callout` in `rgx-core/src/parsing.rs` now detects the full set (not just `"` / `'` / `{`) and treats them all as unregistered no-op callouts (number 0).
+- Validation: 1,039 lib tests pass (1,036 baseline + 3 new regression pins — `unicode_property_caret_prefix_negates`, `unicode_property_cs_surrogate_matches_nothing`, `callout_with_backtick_body_compiles_as_noop`). PCRE2 conformance **9,259 → 9,265 pass** (+6), 1,959 → 1,953 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_265` / `FAIL_BASELINE=1_953`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The bidi class property cluster (39 cases using `\p{bidi_class:AL}` / `\p{bc=AL}` / `\p{bidi class = al}` etc.) remains blocked on a bidi-class Unicode data table — `regex-syntax` doesn't include one. That's tracked for a later follow-up when a maintained data source is identified.
+
 ### 2026-04-18 - Callouts as no-ops when unregistered + string-form callouts (+20 passes)
 
 - Scope: PCRE2 `(?C)`, `(?Cn)`, `(?C"text")`, `(?C'text')` callouts should compile and behave as no-ops when no callback handler is registered (PCRE2 default policy). RGX was:
