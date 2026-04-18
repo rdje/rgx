@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Substitute template: PCRE2 backslash escapes + case-change sequences (+7 passes)
+
+- Scope: `Regex::interpolate_replacement` (`rgx-core/src/lib.rs`) now processes Perl/PCRE2-style backslash escapes in replacement templates, matching `pcre2pattern(3)` §"REPLACEMENT STRINGS". Previously the backslash character was passed through literally, so templates like `\n` (newline), `\045` (octal '%'), `\x{25}` (hex '%'), `\U` / `\L` (uppercase / lowercase regions), and `\u` / `\l` (single-char case change) were copied verbatim instead of interpreted.
+- New escape handling:
+  - `\\` → literal backslash; `\$` → literal `$`.
+  - `\n \r \t \a \e \f` — control characters (LF, CR, TAB, BEL, ESC, FF).
+  - `\NNN` (1–3 octal digits), `\o{N...}` — octal codepoint.
+  - `\x{N...}` and `\xHH` — hex codepoint.
+  - `\u`, `\l` — force next produced character to upper / lower case.
+  - `\U`, `\L`, `\E` — upper / lower case region until the next `\E` (or end of template).
+  - Unknown escapes follow PCRE2's "backslash before non-metacharacter yields the character itself" rule.
+- `Replacer::no_expansion` fast-path update: the three `&str` / `String` / `&String` impls previously returned `Some(literal)` when the template contained no `$`, skipping `interpolate_replacement` entirely. Now also require the template to contain no `\` so backslash escapes actually run through the interpreter.
+- Validation: 1,034 lib tests pass (1,032 baseline + 2 new regression pins — `substitute_template_backslash_escapes`, `substitute_template_case_change`). PCRE2 conformance **9,231 → 9,238 pass** (+7), 1,987 → 1,980 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_238` / `FAIL_BASELINE=1_980`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Small delta but real — the "other" (substitute-mode mismatch) bucket contains ~50 cases, many of which combine these escapes with PCRE2-only features (`${*MARK}`, `${N:+yes:no}`) that RGX still doesn't implement. Landing the common-case escape machinery unblocks future work on the advanced forms.
+
 ### 2026-04-18 - PCRE2_UCP: Unicode-aware `\d`, `\w`, `\s` and POSIX classes under `(*UCP)` (+31 passes)
 
 - Scope: Implement `PCRE2_UCP` semantics so `\d`, `\w`, `\s` and the POSIX bracket classes (`[:alpha:]`, `[:alnum:]`, `[:digit:]`, etc.) match their Unicode-property-backed character sets when requested, matching PCRE2's behavior under `/ucp`. Previously RGX used ASCII-only shorthands regardless of flags, producing span mismatches like `/^\w+/utf,ucp` returning "Az_" instead of PCRE2's "Az_\x{aa}\x{c0}...1\x{660}..." span across Unicode letters, digits, and numbers.

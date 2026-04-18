@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — Substitute template: backslash escapes + case-change (+7 passes)
+- **What**: `Regex::interpolate_replacement` processes `\\`, `\$`, `\n \r \t \a \e \f`, `\NNN` octal, `\o{N}`, `\x{N}`, `\xHH`, `\u`, `\l`, `\U`, `\L`, `\E` per PCRE2 replacement semantics. `Replacer::no_expansion` fast-path now also guards on absence of `\` (previously only checked for `$`).
+- **Why**: The 50-case "other" conformance bucket is dominated by substitute mismatches where PCRE2 honors these template escapes but RGX was emitting the literal backslash sequence. Closing the common core (`\n`, `\$`, octal, hex, case-change) was a self-contained win.
+- **Conformance delta**: 9,231 → 9,238 (+7). Ratchet bumped to 9,238 / 1,980. Two regression pins.
+- **Still not implemented**: `${*MARK}` (requires MARK threading through replace path), `${N:+yes:no}` conditional templates, `${N:-default}` default templates.
+
 ### 2026-04-18 — PCRE2_UCP: Unicode-aware `\d` / `\w` / `\s` and POSIX classes under `(*UCP)` (+31 passes)
 - **What**: Implemented PCRE2_UCP semantics so `\d` → `\p{Nd}`, `\w` → `\p{L}|\p{N}|_`, `\s` → `\p{White_Space}`, and POSIX bracket classes (`[:alpha:]`, `[:digit:]`, etc.) route through Unicode property tables when the `(*UCP)` pragma is in effect.
 - **Wiring**: `PgenAstAdapter` gains `ucp_enabled: bool`, set at construction by scanning pattern text for `(*UCP)`. Conformance harness remaps `/ucp` modifier from `Ignore` to `InlineFlag("(*UCP)")` so declared `/ucp` tests now exercise the path. Unicode property lookups delegate to the existing `unicode_support::resolve_unicode_property_class` machinery.

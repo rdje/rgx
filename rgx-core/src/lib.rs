@@ -426,8 +426,10 @@ impl Replacer for &str {
     }
 
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
-        // Quick check: if there's no '$' at all, it's a literal replacement.
-        if !self.contains('$') {
+        // Fast-path only when the replacement contains neither a `$`
+        // (capture reference / meta) nor a `\` (PCRE2-style backslash
+        // escape — `\n`, `\u`, `\$`, `\045`, `\x{...}`, `\U`, `\L`, ...).
+        if !self.contains('$') && !self.contains('\\') {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -441,7 +443,7 @@ impl Replacer for String {
     }
 
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
-        if !self.contains('$') {
+        if !self.contains('$') && !self.contains('\\') {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -455,7 +457,7 @@ impl Replacer for &String {
     }
 
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
-        if !self.contains('$') {
+        if !self.contains('$') && !self.contains('\\') {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -2145,6 +2147,42 @@ impl Regex {
         named: &std::collections::HashMap<String, u32>,
         out: &mut String,
     ) {
+        #[derive(Clone, Copy)]
+        #[allow(clippy::upper_case_acronyms)]
+        enum CaseChange {
+            None,
+            Upper,
+            Lower,
+        }
+        fn first_upper(ch: char) -> char {
+            ch.to_uppercase().next().unwrap_or(ch)
+        }
+        fn first_lower(ch: char) -> char {
+            ch.to_lowercase().next().unwrap_or(ch)
+        }
+        // Case-change state for `\u`, `\l`, `\U`, `\L`, `\E`.
+        // `next` applies to the very next produced character; `region`
+        // applies to every character produced until `\E`. `next` takes
+        // precedence over `region` for a single character, then clears.
+        let mut case_next = CaseChange::None;
+        let mut case_region = CaseChange::None;
+        let mut push_with_case =
+            |out: &mut String, s: &str, next: &mut CaseChange, region: CaseChange| {
+                for ch in s.chars() {
+                    let applied = match *next {
+                        CaseChange::None => match region {
+                            CaseChange::None => ch,
+                            CaseChange::Upper => first_upper(ch),
+                            CaseChange::Lower => first_lower(ch),
+                        },
+                        CaseChange::Upper => first_upper(ch),
+                        CaseChange::Lower => first_lower(ch),
+                    };
+                    out.push(applied);
+                    *next = CaseChange::None;
+                }
+            };
+
         let bytes = replacement.as_bytes();
         let len = bytes.len();
         let mut i = 0;
@@ -2152,21 +2190,23 @@ impl Regex {
             if bytes[i] == b'$' && i + 1 < len {
                 i += 1;
                 if bytes[i] == b'$' {
-                    out.push('$');
+                    push_with_case(out, "$", &mut case_next, case_region);
                     i += 1;
                 } else if bytes[i] == b'&' {
                     if let Some(Some(s)) = groups.first() {
-                        out.push_str(s);
+                        push_with_case(out, s, &mut case_next, case_region);
                     }
                     i += 1;
                 } else if bytes[i] == b'{' {
                     if let Some(close) = replacement[i + 1..].find('}') {
                         let inner = &replacement[i + 1..i + 1 + close];
-                        Self::push_group_by_ref(inner, groups, named, out);
+                        // Scratch buffer so case-change state applies uniformly.
+                        let mut scratch = String::new();
+                        Self::push_group_by_ref(inner, groups, named, &mut scratch);
+                        push_with_case(out, &scratch, &mut case_next, case_region);
                         i = i + 2 + close;
                     } else {
-                        out.push('$');
-                        out.push('{');
+                        push_with_case(out, "${", &mut case_next, case_region);
                         i += 1;
                     }
                 } else if bytes[i].is_ascii_digit() {
@@ -2176,7 +2216,7 @@ impl Regex {
                     }
                     if let Ok(idx) = replacement[start..i].parse::<usize>() {
                         if let Some(Some(s)) = groups.get(idx) {
-                            out.push_str(s);
+                            push_with_case(out, s, &mut case_next, case_region);
                         }
                     }
                 } else if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
@@ -2185,13 +2225,170 @@ impl Regex {
                         i += 1;
                     }
                     let name = &replacement[start..i];
-                    Self::push_group_by_ref(name, groups, named, out);
+                    let mut scratch = String::new();
+                    Self::push_group_by_ref(name, groups, named, &mut scratch);
+                    push_with_case(out, &scratch, &mut case_next, case_region);
                 } else {
-                    out.push('$');
+                    push_with_case(out, "$", &mut case_next, case_region);
+                }
+            } else if bytes[i] == b'\\' && i + 1 < len {
+                // Perl-style backslash escapes in the replacement string.
+                // Covers `\\`, `\$`, control-char escapes (`\n`, `\r`, ...),
+                // octal / hex numeric escapes, `\NN` group back-references,
+                // and `\u \l \U \L \E` case-change directives per
+                // pcre2pattern(3) §"REPLACEMENT STRINGS" semantics.
+                i += 1;
+                let c = bytes[i];
+                match c {
+                    b'\\' => {
+                        push_with_case(out, "\\", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'$' => {
+                        push_with_case(out, "$", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'n' => {
+                        push_with_case(out, "\n", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'r' => {
+                        push_with_case(out, "\r", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b't' => {
+                        push_with_case(out, "\t", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'a' => {
+                        push_with_case(out, "\u{07}", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'e' => {
+                        push_with_case(out, "\u{1B}", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'f' => {
+                        push_with_case(out, "\u{0C}", &mut case_next, case_region);
+                        i += 1;
+                    }
+                    b'u' => {
+                        case_next = CaseChange::Upper;
+                        i += 1;
+                    }
+                    b'l' => {
+                        case_next = CaseChange::Lower;
+                        i += 1;
+                    }
+                    b'U' => {
+                        case_region = CaseChange::Upper;
+                        i += 1;
+                    }
+                    b'L' => {
+                        case_region = CaseChange::Lower;
+                        i += 1;
+                    }
+                    b'E' => {
+                        case_region = CaseChange::None;
+                        i += 1;
+                    }
+                    b'x' => {
+                        // `\x{N...}` hex escape. Pcre2 also accepts
+                        // `\xHH` (two hex digits, no braces) but the
+                        // replacement forms we encounter in the
+                        // conformance tests are brace-wrapped.
+                        if i + 1 < len && bytes[i + 1] == b'{' {
+                            if let Some(close) = replacement[i + 2..].find('}') {
+                                let hex = &replacement[i + 2..i + 2 + close];
+                                if let Ok(cp) = u32::from_str_radix(hex, 16) {
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        let mut buf = [0u8; 4];
+                                        let s = ch.encode_utf8(&mut buf);
+                                        push_with_case(out, s, &mut case_next, case_region);
+                                    }
+                                }
+                                i = i + 3 + close;
+                            } else {
+                                push_with_case(out, "\\x{", &mut case_next, case_region);
+                                i += 2;
+                            }
+                        } else if i + 2 < len
+                            && bytes[i + 1].is_ascii_hexdigit()
+                            && bytes[i + 2].is_ascii_hexdigit()
+                        {
+                            let hex = &replacement[i + 1..i + 3];
+                            if let Ok(b) = u8::from_str_radix(hex, 16) {
+                                if let Some(ch) = char::from_u32(u32::from(b)) {
+                                    let mut buf = [0u8; 4];
+                                    let s = ch.encode_utf8(&mut buf);
+                                    push_with_case(out, s, &mut case_next, case_region);
+                                }
+                            }
+                            i += 3;
+                        } else {
+                            push_with_case(out, "\\x", &mut case_next, case_region);
+                            i += 1;
+                        }
+                    }
+                    b'o' => {
+                        // `\o{N...}` octal escape.
+                        if i + 1 < len && bytes[i + 1] == b'{' {
+                            if let Some(close) = replacement[i + 2..].find('}') {
+                                let oct = &replacement[i + 2..i + 2 + close];
+                                if let Ok(cp) = u32::from_str_radix(oct, 8) {
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        let mut buf = [0u8; 4];
+                                        let s = ch.encode_utf8(&mut buf);
+                                        push_with_case(out, s, &mut case_next, case_region);
+                                    }
+                                }
+                                i = i + 3 + close;
+                            } else {
+                                push_with_case(out, "\\o{", &mut case_next, case_region);
+                                i += 2;
+                            }
+                        } else {
+                            push_with_case(out, "\\o", &mut case_next, case_region);
+                            i += 1;
+                        }
+                    }
+                    d if d.is_ascii_digit() => {
+                        // `\NNN` — in PCRE2 replacement templates, a
+                        // backslash followed by ASCII digits is an
+                        // octal escape (not a back-reference; those use
+                        // `$N`). Consume up to 3 octal digits.
+                        let start = i;
+                        let mut end = i + 1;
+                        while end < len
+                            && end - start < 3
+                            && bytes[end].is_ascii_digit()
+                            && bytes[end] < b'8'
+                        {
+                            end += 1;
+                        }
+                        let oct = &replacement[start..end];
+                        if let Ok(cp) = u32::from_str_radix(oct, 8) {
+                            if let Some(ch) = char::from_u32(cp) {
+                                let mut buf = [0u8; 4];
+                                let s = ch.encode_utf8(&mut buf);
+                                push_with_case(out, s, &mut case_next, case_region);
+                            }
+                        }
+                        i = end;
+                    }
+                    _ => {
+                        // Unknown escape: emit the character literally,
+                        // preserving PCRE2's "a backslash before any
+                        // non-metacharacter is the character itself"
+                        // convention.
+                        push_with_case(out, &replacement[i..i + 1], &mut case_next, case_region);
+                        i += 1;
+                    }
                 }
             } else {
-                out.push(bytes[i] as char);
+                let start = i;
                 i += 1;
+                push_with_case(out, &replacement[start..i], &mut case_next, case_region);
             }
         }
     }
@@ -6079,6 +6276,40 @@ mod tests {
         let re = Regex::compile(r"(?i)(σάμος) \1").unwrap();
         assert!(re.find_first("ΣΆΜΟΣ σάμος").is_some());
         assert!(re.find_first("σάμος ΣΆΜΟΣ").is_some());
+    }
+
+    #[test]
+    fn substitute_template_backslash_escapes() {
+        // Regression pin: Replacement templates honour Perl-style
+        // backslash escapes — control chars, octal, hex, case change.
+        let re = Regex::compile(r"a").unwrap();
+        let out = re.replace_all("aaa", r"\n");
+        assert_eq!(out, "\n\n\n");
+        let out = re.replace_all("a", r"\045");
+        assert_eq!(out, "%"); // octal 45 = '%'
+        let out = re.replace_all("a", r"\o{45}");
+        assert_eq!(out, "%");
+        let out = re.replace_all("a", r"\x{25}");
+        assert_eq!(out, "%");
+        let out = re.replace_all("a", r"\\");
+        assert_eq!(out, "\\");
+        let out = re.replace_all("a", r"\$");
+        assert_eq!(out, "$");
+    }
+
+    #[test]
+    fn substitute_template_case_change() {
+        // Regression pin: `\u`, `\l`, `\U`, `\L`, `\E` change case of
+        // subsequent template content, matching PCRE2 semantics.
+        let re = Regex::compile(r"(\w+)").unwrap();
+        let out = re.replace("hello", r"\u$1");
+        assert_eq!(out, "Hello");
+        let out = re.replace("HELLO", r"\l$1");
+        assert_eq!(out, "hELLO");
+        let out = re.replace("MixedCase", r"\U$1\E done");
+        assert_eq!(out, "MIXEDCASE done");
+        let out = re.replace("MixedCase", r"\L$1\E done");
+        assert_eq!(out, "mixedcase done");
     }
 
     #[test]
