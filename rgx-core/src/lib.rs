@@ -6279,6 +6279,27 @@ mod tests {
     }
 
     #[test]
+    fn optional_empty_capture_is_visible_to_conditional() {
+        // Regression pin: `()?(?(1)a|b)` on "a" should match "a" —
+        // the `()?` greedy-tries the match branch, capturing group 1
+        // as empty, and the conditional `(?(1)a|b)` sees group 1
+        // participated and takes the `a` branch. Previously RGX
+        // treated zero-width `?` matches as "didn't match" and undid
+        // the capture trail, so the conditional fell through to `b`
+        // and the pattern failed on "a".
+        let re = Regex::compile(r"()?(?(1)a|b)").unwrap();
+        assert!(re.find_first("a").is_some(), "()?(?(1)a|b) must match 'a'");
+        assert!(
+            re.find_first("b").is_some(),
+            "()?(?(1)a|b) must still match 'b'"
+        );
+        assert!(
+            re.find_first("c").is_none(),
+            "()?(?(1)a|b) must not match 'c'"
+        );
+    }
+
+    #[test]
     fn substitute_template_backslash_escapes() {
         // Regression pin: Replacement templates honour Perl-style
         // backslash escapes — control chars, octal, hex, case change.

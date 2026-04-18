@@ -2752,18 +2752,18 @@ impl RegexVM {
                     }
 
                     // Try to match once (greedy), but keep backtrack fallback
-                    // for the zero-occurrence path.
+                    // for the zero-occurrence path. A zero-width body match
+                    // (pos unchanged after execute_subexpr) must still be
+                    // treated as "matched" — it sets any captures inside the
+                    // body and PCRE2 conditionals like `(?(1)yes|no)` rely
+                    // on that visibility (e.g. `()?(?(1)a|b)` on "a" sets
+                    // group 1 to the empty string and picks the 'a' branch).
                     let before_pos = ctx.pos;
                     let trail_mark = ctx.capture_trail.len();
                     let cs_mark = ctx.call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
-                    if !matched || ctx.pos == before_pos {
-                        ctx.pos = before_pos;
-                        Self::undo_trail(ctx, trail_mark);
-                        ctx.call_stack.truncate(cs_mark);
-                        ctx.code_result = saved_code_result;
-                    } else {
+                    if matched {
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
@@ -2772,6 +2772,11 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                         });
+                    } else {
+                        ctx.pos = before_pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.call_stack.truncate(cs_mark);
+                        ctx.code_result = saved_code_result;
                     }
 
                     ip = expr_end;
@@ -5278,17 +5283,16 @@ impl RegexVM {
                         return false;
                     }
 
+                    // Mirror of the main VM's QuestionGreedy zero-width fix:
+                    // a zero-width body match preserves captures so the
+                    // rest of the pattern (conditional tests, backrefs)
+                    // sees the group as having participated.
                     let before_pos = ctx.pos;
                     let trail_mark = ctx.capture_trail.len();
                     let cs_mark = call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
-                    if !matched || ctx.pos == before_pos {
-                        ctx.pos = before_pos;
-                        Self::undo_trail(ctx, trail_mark);
-                        call_stack.truncate(cs_mark);
-                        ctx.code_result = saved_code_result;
-                    } else {
+                    if matched {
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
@@ -5297,6 +5301,11 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                         });
+                    } else {
+                        ctx.pos = before_pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        call_stack.truncate(cs_mark);
+                        ctx.code_result = saved_code_result;
                     }
 
                     ip = expr_end;

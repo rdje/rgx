@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - QuestionGreedy zero-width match preserves captures (+1 pass)
+
+- Scope: `OpCode::QuestionGreedy` in `rgx-core/src/vm.rs` (main VM line 2738, subexpr VM line 5267) previously undid the capture trail whenever the body matched zero-width (`ctx.pos == before_pos`). That turned `()?` matching empty into "didn't match", hiding the capture from subsequent references. PCRE2 semantic: a group that matched empty is still "participated" — conditional tests like `(?(1)yes|no)` see it and take the yes branch.
+- Fix: Only undo the trail when `!matched`. When the body succeeds — even at zero-width — keep the capture trail and push the backtrack frame for the "zero-times" alternative. Mirrors the StarGreedy / PlusGreedy zero-width termination fix from commit `871c8fd`.
+- Validation: 1,035 lib tests pass (1,034 baseline + 1 new regression pin — `optional_empty_capture_is_visible_to_conditional`). PCRE2 conformance **9,238 → 9,239 pass** (+1), 1,980 → 1,979 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_239` / `FAIL_BASELINE=1_979`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Small delta because `()?(?(1)...)` patterns are uncommon, but this closes a clean semantic gap. The fix also unblocks any future conditional-test case that depends on an optional-empty-capture being visible.
+
 ### 2026-04-18 - Substitute template: PCRE2 backslash escapes + case-change sequences (+7 passes)
 
 - Scope: `Regex::interpolate_replacement` (`rgx-core/src/lib.rs`) now processes Perl/PCRE2-style backslash escapes in replacement templates, matching `pcre2pattern(3)` §"REPLACEMENT STRINGS". Previously the backslash character was passed through literally, so templates like `\n` (newline), `\045` (octal '%'), `\x{25}` (hex '%'), `\U` / `\L` (uppercase / lowercase regions), and `\u` / `\l` (single-char case change) were copied verbatim instead of interpreted.

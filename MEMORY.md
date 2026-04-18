@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — QuestionGreedy preserves captures on zero-width body match (+1 pass)
+- **What**: `OpCode::QuestionGreedy` was undoing the capture trail when `ctx.pos == before_pos` (body matched empty). That hid zero-width captures from later references. Now: only undo on `!matched`; matched-with-zero-width keeps the trail and pushes the backtrack frame.
+- **Pattern**: `()?(?(1)a|b)` on "a" now matches because the zero-width `()?` sets group 1 to empty, conditional picks `a`.
+- **Mirrors** the Star/PlusGreedy zero-width loop-termination fix (commit 871c8fd).
+- **Conformance delta**: 9,238 → 9,239. Ratchet bumped. One regression pin.
+
 ### 2026-04-18 — Substitute template: backslash escapes + case-change (+7 passes)
 - **What**: `Regex::interpolate_replacement` processes `\\`, `\$`, `\n \r \t \a \e \f`, `\NNN` octal, `\o{N}`, `\x{N}`, `\xHH`, `\u`, `\l`, `\U`, `\L`, `\E` per PCRE2 replacement semantics. `Replacer::no_expansion` fast-path now also guards on absence of `\` (previously only checked for `$`).
 - **Why**: The 50-case "other" conformance bucket is dominated by substitute mismatches where PCRE2 honors these template escapes but RGX was emitting the literal backslash sequence. Closing the common core (`\n`, `\$`, octal, hex, case-change) was a self-contained win.
