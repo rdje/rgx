@@ -2620,25 +2620,16 @@ impl RegexVM {
                             trace_log!("vm", "  PlusGreedy: stopped after {} matches", match_count);
                             break;
                         }
-                        // If we didn't advance, avoid infinite loop —
-                        // but first retry requiring advancement so that
-                        // alternatives inside the body get a chance.
+                        // PCRE2 semantic: zero-width iteration terminates
+                        // the loop. Match count is already ≥1 here
+                        // (PlusGreedy required one iteration before the
+                        // loop), so simply stop without retrying.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             ctx.call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result.clone();
-                            if !self.execute_subexpr_advancing(
-                                ctx,
-                                &code[expr_start..expr_end],
-                                before_pos,
-                            ) {
-                                ctx.pos = before_pos;
-                                Self::undo_trail(ctx, trail_mark);
-                                ctx.call_stack.truncate(cs_mark);
-                                ctx.code_result = saved_code_result;
-                                trace_log!("vm", "  PlusGreedy: no advance, stopping");
-                                break;
-                            }
+                            ctx.code_result = saved_code_result;
+                            trace_log!("vm", "  PlusGreedy: zero-width iteration, stopping");
+                            break;
                         }
                         // Greedy path consumed one extra repetition; keep a fallback
                         // to continue after this quantifier without this repetition.
@@ -2694,28 +2685,21 @@ impl RegexVM {
                             // Can't match anymore, that's fine for *
                             break;
                         }
-                        // If we didn't advance, the sub-expression matched
-                        // zero width. Before giving up, retry requiring
-                        // advancement so that alternatives inside the body
-                        // (e.g. a recursive subroutine call) get a chance.
+                        // PCRE2 semantic: if the iteration matched zero
+                        // width (no progress from before_pos), the
+                        // outer `*` loop terminates immediately. Previous
+                        // versions of RGX retried with a forced-advance
+                        // variant so recursive-subroutine bodies could
+                        // re-enter, but that over-matched patterns like
+                        // `([a]*?)*` on "a" — PCRE2 returns "" (zero-width
+                        // iteration terminated the loop) while the retry
+                        // produced "a". Keep the zero-width result and
+                        // stop.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             ctx.call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result.clone();
-                            if !self.execute_subexpr_advancing(
-                                ctx,
-                                &code[expr_start..expr_end],
-                                before_pos,
-                            ) {
-                                ctx.pos = before_pos;
-                                Self::undo_trail(ctx, trail_mark);
-                                ctx.call_stack.truncate(cs_mark);
-                                ctx.code_result = saved_code_result;
-                                break;
-                            }
-                            // The advancing retry found a non-zero-width
-                            // match — fall through to push a backtrack
-                            // frame just like a normal advancing iteration.
+                            ctx.code_result = saved_code_result;
+                            break;
                         }
                         // Greedy path consumed one repetition; keep a fallback
                         // to continue after this quantifier without this repetition.
@@ -5338,21 +5322,15 @@ impl RegexVM {
                             ctx.code_result = saved_code_result;
                             break;
                         }
+                        // PCRE2 semantic: zero-width iteration terminates
+                        // the star loop — match count may be zero here,
+                        // which is valid for `*`. See the main-path
+                        // handler at StarGreedy for the commentary.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result.clone();
-                            if !self.execute_subexpr_advancing(
-                                ctx,
-                                &code[expr_start..expr_end],
-                                before_pos,
-                            ) {
-                                ctx.pos = before_pos;
-                                Self::undo_trail(ctx, trail_mark);
-                                call_stack.truncate(cs_mark);
-                                ctx.code_result = saved_code_result;
-                                break;
-                            }
+                            ctx.code_result = saved_code_result;
+                            break;
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
@@ -5419,20 +5397,9 @@ impl RegexVM {
                         ctx.code_result = first_code_result;
                         local_backtrack_or_return_false!();
                     }
-                    if ctx.pos == first_pos {
-                        Self::undo_trail(ctx, first_trail_mark);
-                        ctx.code_result = first_code_result.clone();
-                        if !self.execute_subexpr_advancing(
-                            ctx,
-                            &code[expr_start..expr_end],
-                            first_pos,
-                        ) {
-                            ctx.pos = first_pos;
-                            Self::undo_trail(ctx, first_trail_mark);
-                            ctx.code_result = first_code_result;
-                            local_backtrack_or_return_false!();
-                        }
-                    }
+                    // PCRE2 semantic: a zero-width first iteration of
+                    // `X+` is still one (zero-width) iteration — accept
+                    // it and don't force an advancing retry.
 
                     loop {
                         let before_pos = ctx.pos;
@@ -5446,21 +5413,12 @@ impl RegexVM {
                             ctx.code_result = saved_code_result;
                             break;
                         }
+                        // PCRE2 semantic: zero-width iteration ends the loop.
                         if ctx.pos == before_pos {
                             Self::undo_trail(ctx, trail_mark);
                             call_stack.truncate(cs_mark);
-                            ctx.code_result = saved_code_result.clone();
-                            if !self.execute_subexpr_advancing(
-                                ctx,
-                                &code[expr_start..expr_end],
-                                before_pos,
-                            ) {
-                                ctx.pos = before_pos;
-                                Self::undo_trail(ctx, trail_mark);
-                                call_stack.truncate(cs_mark);
-                                ctx.code_result = saved_code_result;
-                                break;
-                            }
+                            ctx.code_result = saved_code_result;
+                            break;
                         }
                         backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,

@@ -5994,6 +5994,32 @@ mod tests {
         assert!(!re.is_match("abc")); // inner disable reinstated the spaces
     }
 
+    #[test]
+    fn zero_width_plus_iteration_keeps_empty_first_match() {
+        // Regression pin: `X+` with a body that can match empty should
+        // accept the first zero-width iteration and stop. Previously
+        // RGX's PlusGreedy forced the first body match to advance,
+        // producing wrong match spans for patterns like
+        // `([a]*?)+`. Now: same behavior as `*` for empty bodies.
+        let re = Regex::compile(r"([a]*?)+").unwrap();
+        let m = re.find_first("a").expect("zero-width match at 0");
+        assert_eq!((m.start, m.end), (0, 0));
+    }
+
+    #[test]
+    fn nonempty_quantifier_body_still_advances() {
+        // Sanity: the fix for empty-body quantifier termination must
+        // not break quantifiers whose body actually matches characters.
+        // `a*` on "aaab" must still consume the three 'a's greedily.
+        let re = Regex::compile(r"a*").unwrap();
+        let m = re.find_first("aaab").expect("greedy consumes");
+        assert_eq!((m.start, m.end), (0, 3));
+
+        let re = Regex::compile(r"a+").unwrap();
+        let m = re.find_first("aaab").expect("plus consumes");
+        assert_eq!((m.start, m.end), (0, 3));
+    }
+
     // ======================================================================
     // \K (Match Reset) tests
     // ======================================================================

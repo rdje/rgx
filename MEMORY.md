@@ -2427,3 +2427,20 @@ Probed ~30 patterns by varying endpoint form (bare-octal/braced-hex/single-byte-
   - `/([a]*?)*/` on "a" → "" vs "a" — zero-width lazy-under-greedy semantics (675 span-mismatch bucket first).
   - `/(?(?=.*b)b|^)/` on "abc" — lookaround-as-conditional over-matching (447 FP bucket first).
 - Or do another cluster-distill pass to find residual PGEN-rooted clusters (unlikely to yield more — the big buckets now look engine-side).
+
+## 2026-04-18 session — remove greedy-quantifier advancing retry (+6 passes)
+
+### What landed
+- `StarGreedy` and `PlusGreedy` in `rgx-core/src/vm.rs` (main VM and subexpr VM, four sites total) no longer retry with `execute_subexpr_advancing` when the body matches zero-width. PCRE2 semantic: zero-width iteration ends the loop — the engine does NOT force character consumption. The old retry was commented as supporting "recursive subroutine calls", but recursion works via the `Call` opcode independently of the quantifier loop, so the retry was purely over-matching empty-body cases.
+- Two new regression pins in `lib.rs tests`:
+  - `zero_width_plus_iteration_keeps_empty_first_match` — `([a]*?)+` on "a" returns 0..0 (was 0..1 under the retry).
+  - `nonempty_quantifier_body_still_advances` — `a*` / `a+` on "aaab" still consume greedily (sanity: fix didn't break non-empty quantifiers).
+- Conformance ratchet bumped: 8,941 → 8,947 pass (+6), 2,277 → 2,271 fail.
+
+### Known residual
+`([a]*?)*` (outer `*` on *capturing group* wrapping lazy) still returns 0..1 even though `([a]*?)+` is now 0..0. The outer `*`-on-Group must hit a codegen branch that doesn't go through the `StarGreedy` handler I patched. Follow-up: find that branch (probably in the Split-based `*` lowering path) and apply the same zero-width break there.
+
+### Next concrete action
+- Track down the `*`-on-Group alternate path for the `([a]*?)*` residual, OR
+- `/^(a\1?){4}$/` on "aaaaa" — recursive backref capture propagation (747 FN bucket first), OR
+- `/(?(?=.*b)b|^)/` on "abc" — lookaround-as-conditional over-matching (451 FP bucket first).
