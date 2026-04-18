@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — Case-insensitive backref uses UCD simple-fold (+6 passes)
+- **What**: `RegexVM::chars_case_insensitive_eq` in `rgx-core/src/vm.rs` was folding via `char::to_lowercase()` only, missing Σ↔σ↔ς, ſ↔s, K↔k(Kelvin) equivalences that PCRE2 `/i` honors.
+- **Fix**: Added `RegexVM::unicode_simple_fold_contains(a, b)` that queries `regex_syntax::hir::ClassUnicode::try_case_fold_simple` for `a`'s equivalence class and checks whether `b` is in it. Called before the `to_lowercase()` backstop.
+- **Companion to** the earlier `OptimizingCompiler::unicode_case_variants` simple-fold fix — that one handled character literals / class endpoints; this one handles backref comparisons.
+- **Conformance delta**: 9,194 → 9,200 (+6). Ratchet bumped.
+
 ### 2026-04-18 — Class-context escape semantics + runtime-policy verbs as no-ops (+19 passes)
 - **What**: Three adapter-side PCRE2 semantic tweaks, all in `rgx-core/src/parsing.rs`:
   1. `\E` outside `\Q...\E` now compiles as no-op (empty sequence). Previously rejected as "unrecognized simple_escape".

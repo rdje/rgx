@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Case-insensitive backref now uses UCD simple-fold (+6 passes)
+
+- Scope: `rgx-core/src/vm.rs` `chars_case_insensitive_eq` (backref comparator) previously used `char::to_lowercase()` for folding, which misses simple-fold equivalences outside the trivial a-to-A mapping (Σ↔σ↔ς, ſ↔s, K↔k(Kelvin)). Under `/i` matching, `(σάμος) \1` should match `"ΣΆΜΟΣ σάμος"` because all three sigma forms share a simple-fold equivalence class, but RGX's backref comparator rejected ς↔σ.
+- Change: Added `RegexVM::unicode_simple_fold_contains(a, b)` that consults `regex_syntax::hir::ClassUnicode::try_case_fold_simple` for a single-char range and checks whether the equivalence class contains `b`. `chars_case_insensitive_eq` now calls this first, then falls back to `to_lowercase()` for codepoints outside the fold table.
+- Validation: 1,030 lib tests pass (1,029 baseline + 1 new regression pin `case_insensitive_backref_uses_simple_fold`). PCRE2 conformance **9,194 → 9,200 pass** (+6), 2,024 → 2,018 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_200` / `FAIL_BASELINE=2_018`.
+- Notes/impact: Closes the Greek-sigma backref cluster (`(ΣΆΜΟΣ) \1/i`, `(σάμος) \1/i` on mixed-case subjects). Companion to the earlier simple-fold fix for `unicode_case_variants`; the backref comparator lived on a different code path and wasn't covered by that change.
+
 ### 2026-04-18 - Class-context escape semantics + runtime-policy verb no-ops (+19 passes)
 
 - Scope: Three parser-adapter corrections bundled together, all addressing PCRE2 semantics that PGEN parses correctly but the RGX adapter was interpreting too strictly.

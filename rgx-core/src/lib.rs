@@ -6071,6 +6071,17 @@ mod tests {
     }
 
     #[test]
+    fn case_insensitive_backref_uses_simple_fold() {
+        // Regression pin: `(σάμος) \1/i` should match "ΣΆΜΟΣ σάμος"
+        // because Σ↔σ and ς↔σ are simple-fold equivalents under PCRE2
+        // `/i` semantics. Previously the backref matcher used
+        // `char::to_lowercase` which misses ς (final sigma).
+        let re = Regex::compile(r"(?i)(σάμος) \1").unwrap();
+        assert!(re.find_first("ΣΆΜΟΣ σάμος").is_some());
+        assert!(re.find_first("σάμος ΣΆΜΟΣ").is_some());
+    }
+
+    #[test]
     fn runtime_policy_verbs_compile_as_noops() {
         // Regression pin: PCRE2 runtime/policy directives like
         // (*NOTEMPTY), (*NO_JIT), (*LIMIT_HEAP=N) are parsed and

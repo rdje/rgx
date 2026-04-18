@@ -3332,16 +3332,34 @@ impl RegexVM {
 
     /// Per-char Unicode case-insensitive comparison used by
     /// `match_backreference_case_insensitive`. Returns `true` if the
-    /// chars are equal or their `to_lowercase()` iterators are. This
-    /// is full Unicode folding per char: `'a'` and `'A'` match, `'é'`
-    /// and `'É'` match, `'İ'` (U+0130) and `'i'` don't (since
-    /// `'İ'.to_lowercase()` emits `['i', '̇']`). Does not fold
-    /// across char-count changes (`ẞ` ≠ `ss`).
+    /// chars are equal or belong to the same UCD simple-fold
+    /// equivalence class. This picks up PCRE2 `/i` folds that
+    /// `to_lowercase()` misses — e.g. Σ↔σ↔ς, ſ↔s, K↔k(Kelvin).
+    /// Falls back to `to_lowercase()` as a backstop for codepoints
+    /// outside the simple-fold table. Does not fold across char-count
+    /// changes (`ẞ` ≠ `ss`).
     fn chars_case_insensitive_eq(a: char, b: char) -> bool {
         if a == b {
             return true;
         }
+        if Self::unicode_simple_fold_contains(a, b) {
+            return true;
+        }
         a.to_lowercase().eq(b.to_lowercase())
+    }
+
+    /// Ask whether `a` and `b` are in the same UCD simple-fold
+    /// equivalence class. Uses `regex_syntax`'s HIR case-fold table —
+    /// the same source `OptimizingCompiler::unicode_case_variants`
+    /// consults — but lives on `RegexVM` so the backref matcher can
+    /// call it without ceremony.
+    fn unicode_simple_fold_contains(a: char, b: char) -> bool {
+        let range = regex_syntax::hir::ClassUnicodeRange::new(a, a);
+        let mut class = regex_syntax::hir::ClassUnicode::new([range]);
+        if class.try_case_fold_simple().is_err() {
+            return false;
+        }
+        class.iter().any(|r| r.start() <= b && b <= r.end())
     }
 
     /// Case-insensitive backref match: walk the captured text and the
