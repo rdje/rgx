@@ -93,6 +93,42 @@ assert!(re.is_match("Ü"));
 - **Internationalized data**: if your data mixes scripts (logs from multilingual systems, names in different alphabets), `(?i)` makes your patterns script-agnostic.
 - **Configuration parsing**: config values like `TRUE`, `True`, `true` all fold together.
 
+### Simple case folding (not simple case mapping)
+
+rgx implements PCRE2's `/i` semantic, which is **simple case folding** per the Unicode Character Database's `CaseFolding.txt` (`C + S` rows) — *not* the simple case mapping that `char::to_lowercase` / `char::to_uppercase` exposes. The difference is visible on a handful of codepoints whose "fold partner" is neither the upper nor lower form:
+
+```rust,ignore
+# use rgx_core::Regex;
+let re = Regex::compile(r"(?i)s")?;
+
+assert!(re.is_match("s"));   // obviously
+assert!(re.is_match("S"));   // obviously
+assert!(re.is_match("ſ"));   // LATIN SMALL LETTER LONG S (U+017F) folds to s under /i
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+```rust,ignore
+# use rgx_core::Regex;
+let re = Regex::compile(r"(?i)k")?;
+
+assert!(re.is_match("k"));
+assert!(re.is_match("K"));
+assert!(re.is_match("K"));   // KELVIN SIGN (U+212A) folds to k under /i
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+```rust,ignore
+# use rgx_core::Regex;
+let re = Regex::compile(r"(?i)σ")?;
+
+assert!(re.is_match("σ"));   // Greek small sigma
+assert!(re.is_match("Σ"));   // Greek capital sigma
+assert!(re.is_match("ς"));   // Greek small final sigma — all three fold together
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Under the hood, rgx consults `regex-syntax`'s simple-fold table (UCD `CaseFolding.txt`, `C + S` rows) to expand every character literal and character-class endpoint into its full equivalence class at compile time.
+
 ### Edge cases
 
 - **ASCII-only data**: `(?i)` still works correctly on pure ASCII -- `a` folds to `A` as expected. There is no performance penalty for Unicode folding when the input is ASCII.

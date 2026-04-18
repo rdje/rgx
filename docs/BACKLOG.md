@@ -52,12 +52,11 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Add `rgx.steer_*` helper functions to each language's execution context, returning special `ExecResult::Steer` values.
 - **Dependencies**: Layer 3 (shipped).
 
-### A7. Full Unicode case folding for `(?i)`
-- **What**: `(?i:café)` should match `CAFÉ`. Currently only ASCII letters are folded.
+### ~~A7. Full Unicode case folding for `(?i)`~~ ✅ Shipped
+- **What**: `(?i:café)` matches `CAFÉ`. Full simple-fold equivalences (ſ↔s, K↔K(Kelvin), Σ↔σ↔ς) now match under `/i`.
 - **Effort**: `medium`
-- **Rationale**: Internationalized text processing. Currently a `partial` in the compatibility matrix.
-- **How**: Use Unicode case folding tables (from `unicode-case-mapping` or `icu` crate) at compile time when `(?i)` is active. Expand char classes and literals to include all case variants.
-- **Dependencies**: None.
+- **Shipped**: 2026-04-16. `rgx-core/src/vm.rs` `unicode_case_variants` consults `regex_syntax::hir::ClassUnicode::try_case_fold_simple` alongside `char::to_lowercase` / `char::to_uppercase`, giving full UCD simple-fold equivalence classes.
+- **Impact**: PCRE2 conformance +161 passes in one commit (8,988 → 9,149).
 
 ### A8. Crate publishing
 - **What**: Publish `rgx-core` and `rgx-cli` to crates.io.

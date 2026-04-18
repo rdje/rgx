@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Unicode simple-fold for case-insensitive matching (+161 passes, new single-commit record)
+
+- Scope: Repair `/i` Unicode case-folding in `rgx-core/src/vm.rs` so that full simple-fold equivalence classes — ſ↔s↔S (long s / LATIN SMALL LETTER LONG S), K↔k↔K (Kelvin sign), Σ↔σ↔ς (Greek capital / small / final sigma), I↔i↔İ↔ı, and similar — all match each other under `/i`, matching PCRE2 semantics.
+- Root cause: `unicode_case_variants` (called by `Regex::Char` codegen and by `case_fold_ranges` for class endpoints) previously collected variants via `char::to_lowercase()` + `char::to_uppercase()` only. Those give *simple case mapping* (UCD §4.2 Default Case Conversion), which is not the same as *simple case folding* (UCD CaseFolding.txt `C + S` entries): e.g. `'s'.to_lowercase() == ['s']` and `'ſ'.to_lowercase() == ['ſ']`, so neither appears in the other's variant set even though under PCRE2 `/i` they are equivalent.
+- Fix: Extend `unicode_case_variants` to consult `regex_syntax::hir::ClassUnicode::try_case_fold_simple` first (a single-char class, case-folded, then enumerated) to pick up the full simple-fold equivalence class, then augment with `to_lowercase`/`to_uppercase` as a backstop for codepoints outside the fold table. All three callers (`Regex::Char` codegen + two `case_fold_ranges` call sites for class endpoints) inherit the fix transparently.
+- Validation: 1,023 lib tests pass (no new regressions). PCRE2 conformance **8,988 → 9,149 pass** (+161), 2,230 → 2,069 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_149` / `FAIL_BASELINE=2_069`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Bucket deltas (roughly, from the aggregate histogram):
+  - false negative: 738 → 716 (−22) — the 77-case `/i` FN cluster largely collapses.
+  - span mismatch: 675 → 523 (−152) — the biggest contributor, because many `/i` subjects that previously produced a valid-but-wrong span (ASCII-only match that starts later than the Unicode-fold match PCRE2 found) now produce the correct span.
+  - false positive: 369 → 382 (+13) — a few patterns that previously failed to find any match (so were FN) now find one, but the span differs; the harness reclassifies these from FN to FP or span mismatch. Net still massively positive.
+- Notes/impact: This is the single biggest conformance-delta commit landed in this workstream. The `50 other` (substitute) bucket and ASCII-shorthand-in-UTF clusters are the next likely large wins. Also cleans up a pair of temp diagnostic env-gates (`RGX_CONFORMANCE_DUMP_OTHER` / `RGX_CONFORMANCE_DUMP_FN`) that were added to the harness for bucket analysis and are no longer needed.
+
 ### 2026-04-18 - Harness-side substitute-mode support (+41 passes, biggest single-commit win of the day)
 
 - Scope: Teach the PCRE2 conformance harness to recognise `/replace=TEMPLATE` / `substitute*` pattern-level modifiers and run RGX's replace API against the subject, comparing the produced string against pcre2test's emitted ` N: <result>` substitute output. Prior to this commit, substitute-mode test cases misread as `CompileError` / `NoMatch` / `Match` and surfaced as false-positive / false-negative harness noise.

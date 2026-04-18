@@ -7404,8 +7404,27 @@ impl OptimizingCompiler {
     /// Collect all Unicode simple case variants for a character.
     ///
     /// Returns at least the original character. For `é` returns `['é', 'É']`.
+    /// Uses `regex_syntax`'s HIR simple case-fold table to pick up full
+    /// equivalence classes (e.g. `ſ↔s↔S`, `K↔k↔K` (Kelvin), `Σ↔σ↔ς`) that
+    /// `char::to_lowercase` / `char::to_uppercase` miss, then augments with
+    /// those mappings as a backstop for codepoints outside the fold table.
     fn unicode_case_variants(ch: char) -> Vec<char> {
         let mut variants = vec![ch];
+        let range = regex_syntax::hir::ClassUnicodeRange::new(ch, ch);
+        let mut class = regex_syntax::hir::ClassUnicode::new([range]);
+        if class.try_case_fold_simple().is_ok() {
+            for r in class.iter() {
+                let start = u32::from(r.start());
+                let end = u32::from(r.end());
+                for cp in start..=end {
+                    if let Some(c) = char::from_u32(cp) {
+                        if c != ch && !variants.contains(&c) {
+                            variants.push(c);
+                        }
+                    }
+                }
+            }
+        }
         for lower in ch.to_lowercase() {
             if lower != ch && !variants.contains(&lower) {
                 variants.push(lower);

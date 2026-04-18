@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-16 — Unicode simple-fold for case-insensitive matching (+161 passes, new record)
+- **What**: `rgx-core/src/vm.rs` `unicode_case_variants` (called by `Regex::Char` codegen and by both `case_fold_ranges` call sites for class endpoints) now consults `regex_syntax::hir::ClassUnicode::try_case_fold_simple` in addition to `char::to_lowercase` / `char::to_uppercase`. This adds full simple-fold equivalence classes: ſ↔s↔S, K↔k↔K (Kelvin), Σ↔σ↔ς, I↔i↔İ↔ı.
+- **Why `to_lowercase` alone was insufficient**: `char::to_lowercase` implements UCD Default Case Conversion (simple case *mapping*); PCRE2 `/i` implements UCD *simple case folding* (`CaseFolding.txt` `C + S` rows). They diverge on Kelvin sign, long-s, final sigma, etc. `regex-syntax` exposes the public folding table via `ClassUnicode::try_case_fold_simple` — single-char class in, multi-range class out.
+- **Conformance delta**: **8,988 → 9,149 pass** (+161 — new single-commit record). 2,230 → 2,069 fail. 0 panic / 0 skip. Ratchet bumped to 9,149 / 2,069.
+- **Bucket deltas**: span mismatch 675 → 523 (−152, the dominant win — `/i` patterns that previously matched ASCII-only now match through Unicode fold and produce the correct span), false negative 738 → 716 (−22), false positive 369 → 382 (+13, reclassification noise).
+- **Also removed**: temp diagnostic env-gates `RGX_CONFORMANCE_DUMP_OTHER` / `RGX_CONFORMANCE_DUMP_FN` in `rgx-core/tests/pcre2_conformance.rs` — they were added during bucket analysis and are no longer needed.
+
 ### 2026-04-16 (fifty-eighth commit) — PGEN 1.1.26 bump closes 0065/0066
 - **What**: Submodule bump ffd61e9 → 5856f71 (PGEN 1.1.26 "regex: release RGX 0065 and 0066 fixes"). PGEN-side:
   1. `(*UTF8)` / `(*UTF16)` / `(*UTF32)` added as pattern-start-verb aliases for `(*UTF)` (0065)
