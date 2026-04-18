@@ -2444,3 +2444,22 @@ Probed ~30 patterns by varying endpoint form (bare-octal/braced-hex/single-byte-
 - Track down the `*`-on-Group alternate path for the `([a]*?)*` residual, OR
 - `/^(a\1?){4}$/` on "aaaaa" — recursive backref capture propagation (747 FN bucket first), OR
 - `/(?(?=.*b)b|^)/` on "abc" — lookaround-as-conditional over-matching (451 FP bucket first).
+
+## 2026-04-18 session — harness substitute-mode support (+41 passes, biggest single-commit win)
+
+### What landed
+- `rgx-core/tests/pcre2_conformance.rs` grew first-class handling for pcre2test `/replace=TEMPLATE` / `substitute*` patterns:
+  - New `Expected::Substitute { expected_result: Vec<u8> }` variant.
+  - New `extract_substitute_template(&str) -> Option<&str>` helper.
+  - `parse_subject_output` gained a `substitute_mode: bool` param; reads the ` N: <result>` line pcre2test emits per substitute subject.
+  - `run_case` dispatches through `Regex::replace_all` (or `replace` if no `/g`) and compares the produced string against the expected result, with the same Latin-1 normalisation the Match path uses.
+- Conformance moved 8,947 → 8,988 (+41). Bucket: FP 451 → 369 (−82). New "50 other" bucket surfaced — substitute mismatches with real engine-side divergence (follow-up fuel, not harness noise).
+- Ratchet baselines bumped to 8,988 / 2,230.
+
+### Why this mattered for pace
+The user flagged that single-digit ratchet moves were painful — this commit was built specifically to produce the biggest possible single-commit delta by targeting a harness-level misclassification cluster (pcre2test substitute-mode tests) rather than an engine fix. +41 is real conformance progress that also separates the signal of "RGX's replace genuinely diverges from PCRE2" from the noise of "harness can't pair substitute output at all".
+
+### Next concrete action
+- Dig into the new "50 other" bucket: substitute tests where RGX's replace output genuinely differs from PCRE2 (template-syntax edge cases, empty-match replacement-iteration quirks). Each could be a focused engine/replace fix.
+- Or the still-open RGX-side tracks: `([a]*?)*` residual, `(a\1?){4}` recursive backref, `(?(?=.*b)b|^)` lookaround-conditional.
+- The `replace=a$++` / `replace=a$bad` malformed-template cases (testinput2:4205+ area) may need parser-side work for PCRE2's extended substitute syntax too.

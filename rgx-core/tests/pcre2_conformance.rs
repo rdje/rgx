@@ -58,6 +58,18 @@ enum Expected {
     /// For the scope of this harness we only use group 0 (the overall
     /// match span). Capture-group comparison is a natural extension.
     Match { overall: Vec<u8> },
+    /// Subject-level substitute output under a pattern-level
+    /// `/replace=TEMPLATE` modifier. pcre2test emits ` N: <result>`
+    /// where `N` is the substitution count (0 = none, unchanged
+    /// subject; 1+ = successful substitute, substituted result). RGX
+    /// is run through `replace_all(subject, template)` and the
+    /// resulting string compared against `expected_result`. This
+    /// shape exists because many testinput2 patterns exercise PCRE2's
+    /// substitute-mode surface rather than ordinary matching — prior
+    /// to this variant those cases misread as CompileError / NoMatch
+    /// / Match and surfaced as false-positive / false-negative harness
+    /// noise instead of real engine conformance signal.
+    Substitute { expected_result: Vec<u8> },
 }
 
 /// Parse both files into block-level streams, then pair matching
@@ -296,8 +308,13 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
             continue;
         };
 
+        // Detect pattern-level substitute mode so the output parser
+        // knows to expect ` N: <result>` (substitute semantics) rather
+        // than ` N: <capture>` (match semantics).
+        let substitute_mode = extract_substitute_template(&full_modifiers).is_some();
+
         // Read this subject's expected output from ob[oi..].
-        let (expected, consumed) = parse_subject_output(ob, oi);
+        let (expected, consumed) = parse_subject_output(ob, oi, substitute_mode);
         oi += consumed;
 
         cases.push(TestCase {
@@ -311,6 +328,19 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
         });
     }
     cases
+}
+
+/// Extract the TEMPLATE from a pattern-level `replace=TEMPLATE`
+/// modifier in pcre2test syntax. The template continues until the
+/// next comma (or end of modifier string) — pcre2test uses commas
+/// as modifier separators and doesn't escape them inside templates.
+/// Returns `Some(template)` if a substitute mode is active, `None`
+/// for ordinary match-mode tests.
+fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
+    let idx = full_modifiers.find("replace=")?;
+    let rest = &full_modifiers[idx + "replace=".len()..];
+    let end = rest.find(',').unwrap_or(rest.len());
+    Some(&rest[..end])
 }
 
 fn split_lines(bytes: &[u8]) -> Vec<&[u8]> {
@@ -620,7 +650,11 @@ fn decode_subject(line: &[u8]) -> Option<Vec<u8>> {
 /// From testoutput starting at index `start`, read lines that belong to the
 /// current subject (up until the next subject, blank, or pattern line).
 /// Returns the parsed Expected and number of lines consumed.
-fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) {
+fn parse_subject_output(
+    out_lines: &[&[u8]],
+    start: usize,
+    substitute_mode: bool,
+) -> (Expected, usize) {
     let mut consumed = 0;
     // First line is the echoed subject (starts with 4 spaces). Skip it.
     // `\=` annotation lines are consumed by the outer loop in
@@ -630,6 +664,68 @@ fn parse_subject_output(out_lines: &[&[u8]], start: usize) -> (Expected, usize) 
         if is_subject_echo(l) {
             consumed += 1;
         }
+    }
+
+    // In substitute mode pcre2test emits exactly one ` N: <result>`
+    // line per subject: N is the number of substitutions made and
+    // the body is the (possibly mutated) string. Consume that line
+    // and return `Expected::Substitute` — the caller will run RGX's
+    // `replace_all` (or `replace` for single-match mode) and compare.
+    if substitute_mode {
+        let mut idx = start + consumed;
+        while idx < out_lines.len() {
+            let l = out_lines[idx];
+            if l.is_empty() || l.starts_with(b"/") || l.starts_with(b"#") {
+                break;
+            }
+            if (is_subject_echo(l) || l.starts_with(b"\\=")) && consumed > 0 {
+                break;
+            }
+            let text = String::from_utf8_lossy(l);
+            let trimmed = text.trim_start();
+            if trimmed.starts_with("Failed:") {
+                // Substitute-side compile or runtime error — surface
+                // as a CompileError expectation (RGX rejecting the
+                // pattern counts as agreement).
+                consumed += 1;
+                idx += 1;
+                if idx < out_lines.len() {
+                    let nxt = String::from_utf8_lossy(out_lines[idx]);
+                    if nxt.trim_start().starts_with("here:") {
+                        consumed += 1;
+                    }
+                }
+                return (Expected::CompileError, consumed);
+            }
+            if trimmed == "No match" {
+                consumed += 1;
+                return (Expected::NoMatch, consumed);
+            }
+            // ` N: <result>` — one substitute output line per subject.
+            // Accept any leading digit in 0..=9 (pcre2test counts
+            // substitutions; on overflow the count saturates but
+            // testdata patterns don't trigger that).
+            if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+                if let Some(body) = rest.strip_prefix(':') {
+                    let body = body.strip_prefix(' ').unwrap_or(body);
+                    let decoded =
+                        decode_output(body.as_bytes()).unwrap_or_else(|| body.as_bytes().to_vec());
+                    consumed += 1;
+                    return (
+                        Expected::Substitute {
+                            expected_result: decoded,
+                        },
+                        consumed,
+                    );
+                }
+            }
+            // Unfamiliar output — skip and keep looking.
+            consumed += 1;
+            idx += 1;
+        }
+        // No substitute line parsed — fall through to NoMatch so the
+        // ratchet stays honest about cases the harness can't pair up.
+        return (Expected::NoMatch, consumed);
     }
 
     // Next lines are ` 0: ...`, ` 1: ...`, `No match`, or error messages.
@@ -1236,6 +1332,52 @@ fn run_case(case: &TestCase) -> Outcome {
                 }
             }
         }
+        (Expected::Substitute { expected_result }, _) => {
+            // Pattern-level `/replace=TEMPLATE` substitute test. We
+            // already verified the pattern compiled; run RGX's
+            // replace/replace_all against the subject and compare the
+            // produced string against pcre2test's emitted substitute
+            // line. `global` picks replace-all; otherwise replace-
+            // first.
+            let Some(template) = extract_substitute_template(&case.full_modifiers) else {
+                return Outcome::Fail {
+                    detail: "Substitute expected but no replace= modifier found".to_string(),
+                };
+            };
+            let rgx_result = if want_global {
+                re.replace_all(subject, template).into_owned()
+            } else {
+                re.replace(subject, template).into_owned()
+            };
+            let rgx_bytes = rgx_result.as_bytes();
+            // Latin-1 normalisation to mirror Match-mode comparison.
+            let expected_storage: Vec<u8>;
+            let expected: &[u8] = if subject_is_latin1 {
+                expected_storage = expected_result
+                    .iter()
+                    .flat_map(|&b| {
+                        let c = b as char;
+                        let mut buf = [0u8; 4];
+                        let s = c.encode_utf8(&mut buf);
+                        s.as_bytes().to_vec()
+                    })
+                    .collect();
+                &expected_storage
+            } else {
+                expected_result.as_slice()
+            };
+            if rgx_bytes == expected {
+                Outcome::Pass
+            } else {
+                Outcome::Fail {
+                    detail: format!(
+                        "substitute mismatch: PCRE2={:?}, RGX={:?} (template={template:?}, subject={subject:?})",
+                        String::from_utf8_lossy(expected_result),
+                        rgx_result
+                    ),
+                }
+            }
+        }
     }
 }
 
@@ -1570,8 +1712,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 8_947;
-    const FAIL_BASELINE: usize = 2_271;
+    const PASS_BASELINE: usize = 8_988;
+    const FAIL_BASELINE: usize = 2_230;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

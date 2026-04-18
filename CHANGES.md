@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Harness-side substitute-mode support (+41 passes, biggest single-commit win of the day)
+
+- Scope: Teach the PCRE2 conformance harness to recognise `/replace=TEMPLATE` / `substitute*` pattern-level modifiers and run RGX's replace API against the subject, comparing the produced string against pcre2test's emitted ` N: <result>` substitute output. Prior to this commit, substitute-mode test cases misread as `CompileError` / `NoMatch` / `Match` and surfaced as false-positive / false-negative harness noise.
+- Implementation in `rgx-core/tests/pcre2_conformance.rs`:
+  - New `Expected::Substitute { expected_result: Vec<u8> }` variant — distinct from `Match { overall }` because the semantic is "RGX's replace_all output equals this string", not "the overall match span equals this text".
+  - New `extract_substitute_template(&str) -> Option<&str>` helper extracts TEMPLATE from `replace=TEMPLATE` pcre2test modifiers (template ends at next comma — pcre2test uses commas as modifier separators).
+  - `parse_subject_output` grew a `substitute_mode: bool` param; when true, reads the single ` N: <result>` line pcre2test emits per substitute subject (N = substitution count, 0 = unchanged, 1+ = substituted) and returns `Expected::Substitute`. `Failed: ...` still routes to `CompileError`; genuine `No match` still routes to `NoMatch`.
+  - `run_case` dispatches `Expected::Substitute` through `Regex::replace_all` (for `/g`-flagged tests) or `Regex::replace` (single-match) with the extracted template, then compares the produced bytes against the expected result (with the same Latin-1 re-encoding normalisation the match path uses for non-UTF-8 subjects).
+- Validation: 1,023 lib tests pass (unchanged — this commit only touches the test harness). PCRE2 conformance **8,947 → 8,988 pass** (+41), 2,271 → 2,230 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_988` / `FAIL_BASELINE=2_230`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Bucket deltas:
+  - false positive: 451 → 369 (−82) — most of the substitute-mode tests that were spurious FPs now route through replace-and-compare and pass.
+  - false negative: 747 → 738 (−9).
+  - span mismatch: 675 → 675 (unchanged).
+  - New `50 other` bucket — substitute tests where RGX's replace output genuinely diverges from PCRE2 (honest engine/substitute-semantic gaps; not harness noise). Ready for targeted follow-up.
+- Notes/impact: The 118 substitute-mode patterns in testinputs 1–7 + 10 generate roughly 300–500 subject-level cases. About half produce identical results (clean +41 gain); the rest land in the "other" bucket where RGX's `replace_all` behaves slightly differently from PCRE2's substitute semantics (e.g., specific `$N` interpretations, `$&`, `$0`, or empty-match replacement-iteration differences). Those are real conformance-residual follow-ups.
+
 ### 2026-04-18 - Zero-width quantifier iteration terminates the loop (PCRE2 semantic, +6 passes)
 
 - Scope: Remove the "retry with forced advancement" path from `StarGreedy` / `PlusGreedy` in `rgx-core/src/vm.rs`. PCRE2 semantic for `X*` / `X+` where `X` can match empty: the first zero-width iteration ends the loop; the engine does NOT re-execute the body with a must-advance guard to force character consumption. Prior versions of RGX did the retry on both code paths (main VM + subexpr VM), which over-matched patterns like `([a]*?)+` on "a" by producing a "a" span (0..1) instead of the PCRE2-correct zero-width span (0..0) after the lazy inner matched empty.
