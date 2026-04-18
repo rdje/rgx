@@ -6082,6 +6082,52 @@ mod tests {
     }
 
     #[test]
+    fn ucp_pragma_unicodefies_shorthand_classes() {
+        // Regression pin: `(*UCP)` switches \d / \w / \s to
+        // Unicode-property-backed character classes.
+        let re = Regex::compile(r"(*UCP)^\d+").unwrap();
+        // Arabic digit zero (U+0660) and Tamil digit nine (U+0BEF)
+        // are \p{Nd} — they should match under UCP.
+        assert!(re.find_first("1\u{0660}\u{0BEF}").is_some());
+        // Without UCP, \d is ASCII-only.
+        let ascii = Regex::compile(r"^\d+").unwrap();
+        let m = ascii.find_first("1\u{0660}").expect("ASCII 1 matches");
+        assert_eq!(m.end - m.start, 1);
+
+        let re = Regex::compile(r"(*UCP)^\w+").unwrap();
+        // Greek letter ζ (U+03B6) and Arabic digit ٠ (U+0660) are both
+        // in L/N — UCP \w should cover them.
+        let m = re
+            .find_first("Az_\u{03B6}\u{0660}_")
+            .expect("UCP \\w matches Unicode letters and digits");
+        let subj = "Az_\u{03B6}\u{0660}_";
+        assert_eq!(m.end - m.start, subj.len());
+
+        let re = Regex::compile(r"(*UCP)^>\s+").unwrap();
+        // OGHAM SPACE MARK (U+1680) is \p{Zs} / White_Space — UCP \s should match.
+        assert!(re.find_first("> \u{1680}\t").is_some());
+    }
+
+    #[test]
+    fn ucp_pragma_unicodefies_posix_classes() {
+        // Regression pin: `(*UCP)` widens POSIX character classes to
+        // their Unicode-aware counterparts.
+        let re = Regex::compile(r"(*UCP)^[[:alpha:]]+").unwrap();
+        let m = re
+            .find_first("Azζ\u{0660}")
+            .expect("UCP [[:alpha:]] matches Unicode letters");
+        // A=1, z=1, ζ=2 bytes. Arabic zero U+0660 is Nd (not a letter),
+        // so the class should exclude it.
+        assert_eq!(m.end - m.start, "Azζ".len());
+
+        let re = Regex::compile(r"(*UCP)^[[:digit:]]+").unwrap();
+        let m = re
+            .find_first("1\u{0660}abc")
+            .expect("UCP [[:digit:]] matches Arabic digit");
+        assert_eq!(m.end - m.start, "1\u{0660}".len());
+    }
+
+    #[test]
     fn runtime_policy_verbs_compile_as_noops() {
         // Regression pin: PCRE2 runtime/policy directives like
         // (*NOTEMPTY), (*NO_JIT), (*LIMIT_HEAP=N) are parsed and

@@ -380,12 +380,21 @@ enum PgenAstContent {
 #[cfg(feature = "pgen-parser")]
 struct PgenAstAdapter<'a> {
     pattern: &'a str,
+    /// Unicode Character Properties mode (PCRE2_UCP). When set, `\d`,
+    /// `\w`, `\s` compile to Unicode-property-backed character classes
+    /// rather than the ASCII shorthands. Detected by scanning the
+    /// pattern for a leading `(*UCP)` start-verb.
+    ucp_enabled: bool,
 }
 
 #[cfg(feature = "pgen-parser")]
 impl<'a> PgenAstAdapter<'a> {
     fn new(pattern: &'a str) -> Self {
-        Self { pattern }
+        let ucp_enabled = pattern.contains("(*UCP)");
+        Self {
+            pattern,
+            ucp_enabled,
+        }
     }
 
     fn parse_dump(&self, dump_json: &str) -> Result<Regex> {
@@ -776,13 +785,70 @@ impl<'a> PgenAstAdapter<'a> {
             return Ok(Regex::Char('\u{08}'));
         }
         match ch {
-            // Predefined character classes (wrapped in CharClass to match VM expectations)
-            'd' => Ok(Regex::CharClass(CharClass::Digit { negated: false })),
-            'D' => Ok(Regex::CharClass(CharClass::Digit { negated: true })),
-            'w' => Ok(Regex::CharClass(CharClass::Word { negated: false })),
-            'W' => Ok(Regex::CharClass(CharClass::Word { negated: true })),
-            's' => Ok(Regex::CharClass(CharClass::Space { negated: false })),
-            'S' => Ok(Regex::CharClass(CharClass::Space { negated: true })),
+            // Predefined character classes (wrapped in CharClass to match VM expectations).
+            // Under `(*UCP)` (PCRE2_UCP), switch to Unicode-property-backed
+            // ranges so `\d` matches any `\p{Nd}`, `\w` matches any `\p{L}`
+            // or `\p{N}` plus `_`, and `\s` matches any `\p{White_Space}`.
+            'd' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_digit_ranges(),
+                        negated: false,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Digit { negated: false }))
+                }
+            }
+            'D' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_digit_ranges(),
+                        negated: true,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Digit { negated: true }))
+                }
+            }
+            'w' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_word_ranges(),
+                        negated: false,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Word { negated: false }))
+                }
+            }
+            'W' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_word_ranges(),
+                        negated: true,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Word { negated: true }))
+                }
+            }
+            's' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_space_ranges(),
+                        negated: false,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Space { negated: false }))
+                }
+            }
+            'S' => {
+                if self.ucp_enabled {
+                    Ok(Regex::CharClass(CharClass::Custom {
+                        ranges: crate::unicode_support::ucp_space_ranges(),
+                        negated: true,
+                    }))
+                } else {
+                    Ok(Regex::CharClass(CharClass::Space { negated: true }))
+                }
+            }
 
             // Horizontal whitespace
             'h' => Ok(Regex::CharClass(CharClass::Custom {
@@ -1145,9 +1211,17 @@ impl<'a> PgenAstAdapter<'a> {
             .first_descendant(posix, "posix_name")
             .ok_or_else(|| self.contract_error("pgen posix_class is missing its posix_name"))?;
         let name = self.slice(name_node)?.to_string();
-        let class_ranges = posix_class_ranges(&name).ok_or_else(|| {
-            self.contract_error(&format!("unsupported POSIX class name '{name}'"))
-        })?;
+        let class_ranges = if self.ucp_enabled {
+            ucp_posix_class_ranges(&name)
+                .unwrap_or_else(|| posix_class_ranges(&name).unwrap_or_default())
+        } else {
+            posix_class_ranges(&name).ok_or_else(|| {
+                self.contract_error(&format!("unsupported POSIX class name '{name}'"))
+            })?
+        };
+        if class_ranges.is_empty() {
+            return Err(self.contract_error(&format!("unsupported POSIX class name '{name}'")));
+        }
         if negated {
             for r in complement_ranges(&class_ranges) {
                 ranges.push(r);
@@ -2789,6 +2863,54 @@ fn regex_from_alpha_lookaround_name(name: &str, expr: Regex) -> Option<Regex> {
 /// class-internal use only — the adapter always emits these as
 /// disjoint ranges that merge into the surrounding char class.
 #[cfg(feature = "pgen-parser")]
+/// PCRE2 POSIX class ranges under PCRE2_UCP. Returns `None` for names
+/// where PCRE2 keeps the ASCII-only semantic (e.g. `:xdigit:` and
+/// `:ascii:` stay as the ASCII set even in UCP mode); callers fall
+/// back to the ASCII table in that case.
+#[cfg(feature = "pgen-parser")]
+fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
+    use crate::unicode_support::resolve_unicode_property_class as unicode_prop;
+    // Helpers that resolve a single Unicode property, defaulting to an
+    // empty range set on lookup failure. Keep the fallback silent — the
+    // non-UCP path in `posix_class_ranges` is the safety net.
+    let p = |prop: &str| unicode_prop(prop, false).unwrap_or_default();
+    let merge = |props: &[&str]| -> Vec<CharRange> {
+        let mut all: Vec<CharRange> = Vec::new();
+        for prop in props {
+            all.extend(p(prop));
+        }
+        all.sort_by_key(|r| r.start);
+        all
+    };
+    Some(match name {
+        "alpha" => p("L"),
+        "alnum" => merge(&["L", "N"]),
+        "digit" => p("Nd"),
+        "lower" => p("Ll"),
+        "upper" => p("Lu"),
+        "word" => {
+            let mut v = merge(&["L", "N"]);
+            v.push(CharRange::single('_'));
+            v.sort_by_key(|r| r.start);
+            v
+        }
+        "space" => p("White_Space"),
+        "blank" => {
+            let mut v = p("Zs");
+            v.push(CharRange::single('\t'));
+            v.sort_by_key(|r| r.start);
+            v
+        }
+        "cntrl" => p("Cc"),
+        "print" => merge(&["L", "M", "N", "P", "S", "Zs"]),
+        "graph" => merge(&["L", "M", "N", "P", "S"]),
+        "punct" => merge(&["P", "S"]),
+        // `:xdigit:` and `:ascii:` keep their ASCII-only semantics
+        // under PCRE2_UCP (per pcre2pattern(3)).
+        _ => return None,
+    })
+}
+
 fn posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
     let r = match name {
         "alnum" => vec![

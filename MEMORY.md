@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — PCRE2_UCP: Unicode-aware `\d` / `\w` / `\s` and POSIX classes under `(*UCP)` (+31 passes)
+- **What**: Implemented PCRE2_UCP semantics so `\d` → `\p{Nd}`, `\w` → `\p{L}|\p{N}|_`, `\s` → `\p{White_Space}`, and POSIX bracket classes (`[:alpha:]`, `[:digit:]`, etc.) route through Unicode property tables when the `(*UCP)` pragma is in effect.
+- **Wiring**: `PgenAstAdapter` gains `ucp_enabled: bool`, set at construction by scanning pattern text for `(*UCP)`. Conformance harness remaps `/ucp` modifier from `Ignore` to `InlineFlag("(*UCP)")` so declared `/ucp` tests now exercise the path. Unicode property lookups delegate to the existing `unicode_support::resolve_unicode_property_class` machinery.
+- **UCP POSIX mapping** (per pcre2pattern(3)): alpha→L, alnum→L+N, digit→Nd, lower→Ll, upper→Lu, word→L+N+_, space→White_Space, blank→Zs+HT, cntrl→Cc, print→L+M+N+P+S+Zs, graph→L+M+N+P+S, punct→P+S. xdigit and ascii stay ASCII-only.
+- **Conformance delta**: **9,200 → 9,231 pass** (+31). 2,018 → 1,987 fail. Ratchet bumped to 9,231 / 1,987. Two new regression pins.
+- **Implementation notes**: `ucp_digit_ranges`, `ucp_word_ranges`, `ucp_space_ranges` helpers live in `rgx-core/src/unicode_support.rs`. `ucp_posix_class_ranges` is a new free function in `rgx-core/src/parsing.rs` called ahead of the ASCII fallback.
+
 ### 2026-04-18 — Case-insensitive backref uses UCD simple-fold (+6 passes)
 - **What**: `RegexVM::chars_case_insensitive_eq` in `rgx-core/src/vm.rs` was folding via `char::to_lowercase()` only, missing Σ↔σ↔ς, ſ↔s, K↔k(Kelvin) equivalences that PCRE2 `/i` honors.
 - **Fix**: Added `RegexVM::unicode_simple_fold_contains(a, b)` that queries `regex_syntax::hir::ClassUnicode::try_case_fold_simple` for `a`'s equivalence class and checks whether `b` is in it. Called before the `to_lowercase()` backstop.

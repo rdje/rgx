@@ -115,6 +115,27 @@ fn resolve_pcre2_alias(name: &str) -> Option<Vec<CharRange>> {
     }
 }
 
+/// PCRE2 `\d` range set under `PCRE2_UCP` — the Unicode decimal-digit
+/// category (`\p{Nd}`).
+pub(crate) fn ucp_digit_ranges() -> Vec<CharRange> {
+    resolve_unicode_property_class("Nd", false).unwrap_or_default()
+}
+
+/// PCRE2 `\w` range set under `PCRE2_UCP` — any character in `\p{L}` or
+/// `\p{N}`, plus `_`. Per pcre2pattern(3) §"Generic character types".
+pub(crate) fn ucp_word_ranges() -> Vec<CharRange> {
+    let mut ranges = merge_properties(&["L", "N"]);
+    ranges.push(CharRange::single('_'));
+    ranges.sort_by_key(|r| r.start);
+    ranges
+}
+
+/// PCRE2 `\s` range set under `PCRE2_UCP` — any character in the
+/// Unicode `White_Space` property.
+pub(crate) fn ucp_space_ranges() -> Vec<CharRange> {
+    resolve_unicode_property_class("White_Space", false).unwrap_or_default()
+}
+
 /// Merge range-sets for several Unicode property names into a single
 /// sorted-disjoint range vector.
 fn merge_properties(names: &[&str]) -> Vec<CharRange> {

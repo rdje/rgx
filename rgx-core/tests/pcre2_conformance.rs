@@ -1027,7 +1027,11 @@ fn classify_modifier(m: &str) -> ModifierAction {
         // outcome the test will fail, making it an honest part of the
         // conformance gap rather than a hidden asterisk.
         "D" | "dollar_endonly" => ModifierAction::Ignore,
-        "ucp" => ModifierAction::Ignore,
+        // `/ucp` — PCRE2_UCP. Route the pattern through RGX's UCP-mode
+        // detector by prepending the `(*UCP)` start-verb pragma so
+        // `\d`/`\w`/`\s` compile to Unicode-property-backed character
+        // classes rather than the ASCII shorthands.
+        "ucp" => ModifierAction::InlineFlag("(*UCP)"),
         "match_unset_backref" => ModifierAction::Ignore,
         "caseless_restrict" => ModifierAction::Ignore,
         "turkish_casing" => ModifierAction::Ignore,
@@ -1712,8 +1716,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_200;
-    const FAIL_BASELINE: usize = 2_018;
+    const PASS_BASELINE: usize = 9_231;
+    const FAIL_BASELINE: usize = 1_987;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

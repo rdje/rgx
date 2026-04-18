@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - PCRE2_UCP: Unicode-aware `\d`, `\w`, `\s` and POSIX classes under `(*UCP)` (+31 passes)
+
+- Scope: Implement `PCRE2_UCP` semantics so `\d`, `\w`, `\s` and the POSIX bracket classes (`[:alpha:]`, `[:alnum:]`, `[:digit:]`, etc.) match their Unicode-property-backed character sets when requested, matching PCRE2's behavior under `/ucp`. Previously RGX used ASCII-only shorthands regardless of flags, producing span mismatches like `/^\w+/utf,ucp` returning "Az_" instead of PCRE2's "Az_\x{aa}\x{c0}...1\x{660}..." span across Unicode letters, digits, and numbers.
+- Wiring: PCRE2's `/ucp` is exposed as the `(*UCP)` start-verb pragma. `PgenAstAdapter::new(pattern)` now scans the pattern text for `(*UCP)` and caches an `ucp_enabled: bool` flag on the adapter. The harness in `rgx-core/tests/pcre2_conformance.rs` remaps the `ucp` modifier from `Ignore` to `InlineFlag("(*UCP)")` so that tests declaring `/ucp` actually exercise the new semantics.
+- Semantics (under `(*UCP)`):
+  - `\d` → `\p{Nd}` (any decimal digit — Arabic 0x0660, Tamil 0x0BEF, Mathematical digits, etc.).
+  - `\w` → `\p{L} | \p{N} | _` (any letter, any number, plus the ASCII underscore).
+  - `\s` → `\p{White_Space}` (Unicode whitespace: OGHAM SPACE MARK, LINE SEPARATOR, NARROW NO-BREAK SPACE, ...).
+  - `[:alpha:]` → `\p{L}`; `[:alnum:]` → `\p{L} | \p{N}`; `[:digit:]` → `\p{Nd}`; `[:lower:]` → `\p{Ll}`; `[:upper:]` → `\p{Lu}`; `[:word:]` → same as UCP `\w`; `[:space:]` → `\p{White_Space}`; `[:blank:]` → `\p{Zs}` + HT; `[:cntrl:]` → `\p{Cc}`; `[:print:]` → `L|M|N|P|S|Zs`; `[:graph:]` → `L|M|N|P|S`; `[:punct:]` → `\p{P} | \p{S}`.
+  - `[:xdigit:]` and `[:ascii:]` keep their ASCII-only meaning even under UCP, per `pcre2pattern(3)`.
+- Implementation: `rgx-core/src/unicode_support.rs` grows `ucp_digit_ranges`, `ucp_word_ranges`, `ucp_space_ranges` helpers that delegate to the existing `resolve_unicode_property_class` machinery. `rgx-core/src/parsing.rs`: `convert_simple_escape` takes a shortcut-class branch into these helpers when `ucp_enabled`; `convert_posix_class_into` routes through a new `ucp_posix_class_ranges` free function that mirrors PCRE2's UCP POSIX mapping.
+- Negated forms: `\D`, `\W`, `\S`, and negated POSIX classes (`[:^digit:]` etc.) all fall through the same Unicode range source — the `negated` flag on `CharClass::Custom` handles the complement.
+- Validation: 1,032 lib tests pass (1,030 baseline + 2 new regression pins — `ucp_pragma_unicodefies_shorthand_classes`, `ucp_pragma_unicodefies_posix_classes`). PCRE2 conformance **9,200 → 9,231 pass** (+31), 2,018 → 1,987 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_231` / `FAIL_BASELINE=1_987`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The gain splits ~+13 from shorthand class conversions and ~+18 from POSIX class conversions. This is the first large /utf cluster to move significantly since the case-fold work — the bucket composition shifts because the `/^\w+/utf,ucp` family of tests now classifies as passes rather than "span mismatch".
+
 ### 2026-04-18 - Case-insensitive backref now uses UCD simple-fold (+6 passes)
 
 - Scope: `rgx-core/src/vm.rs` `chars_case_insensitive_eq` (backref comparator) previously used `char::to_lowercase()` for folding, which misses simple-fold equivalences outside the trivial a-to-A mapping (Σ↔σ↔ς, ſ↔s, K↔k(Kelvin)). Under `/i` matching, `(σάμος) \1` should match `"ΣΆΜΟΣ σάμος"` because all three sigma forms share a simple-fold equivalence class, but RGX's backref comparator rejected ς↔σ.
