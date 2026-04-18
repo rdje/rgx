@@ -2,7 +2,7 @@ id: PGEN-RGX-0072
 summary: |
   Regression residual after PGEN 1.1.28: the class_range endpoint-decoder fix applied to braced hex `\x{N}` (which resolved 0071) did NOT extend to the entire *family* of PCRE2 escape forms that can serve as class_range endpoints. Bare `\NNN` (1-3 digit unbraced octal) is still mis-decoded, producing false "descending character class range" rejects on ascending ranges AND at least one false accept of a genuinely descending range. Same class of bug as 0071, broader surface. Asking the PGEN regex family to audit `regex_compile_validation.rs` for every endpoint form listed in pcre2pattern(3) §"Generic character types" as codepoint-producing and apply symmetric decoded-codepoint comparison — rather than point-fix bare octal only, please fix the whole family so no further endpoint-form residuals surface.
 
-status: open
+status: closed
 opened_at: 2026-04-17T21:53:16Z
 first_seen_at: 2026-04-17T21:53:16Z
 last_updated_at: 2026-04-17T21:53:16Z
@@ -148,8 +148,8 @@ impact: |
   Aggregate impact is tracked in `docs/BACKLOG.md` C7.
 
 resolution:
-  status: unresolved
+  status: fixed-upstream
   fixed_in_rgx_commit: null
   verified_at: null
   verification_notes: |
-    Add closing validation evidence here when the issue is resolved.
+    PGEN 1.1.29 (48a9f064) fixed the class_range endpoint-decoder so bare `\NNN` octal escapes are now consumed as one token and decoded to their codepoint before the ordering comparison, matching the treatment already shipped for `\x{N}` / `\xNN` / `\o{N}` / `\cX` / literals. Verified by re-running the 26-case family-audit probe that accompanied the report — all 20 ascending forms now parse, all 6 descending forms now reject. RGX PCRE2 conformance moves 8,935 -> 8,941 pass (+6 cases), matching the report's impact estimate. The requested test-matrix expansion on PGEN's side (coverage for every endpoint-form x endpoint-form combination) was also landed per the release notes.

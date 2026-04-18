@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - PGEN 1.1.29 bump: closes 0072 (+6 conformance passes)
+
+- Scope: Bump PGEN submodule from `baac0b1` (1.1.28) to `48a9f064` (1.1.29, "Publish regex 1.1.29 for bare-octal class range ordering"). Integration contract 1.1.30 → 1.1.31. PGEN extended the 1.1.28 class_range endpoint-decoder fix to the FAMILY requested in report 0072: bare `\NNN` octal escapes now tokenise as a single escape unit and decode to their Unicode codepoint before the ordering comparison, matching the treatment already shipped for `\x{N}` / `\xNN` / `\o{N}` / `\cX` / literal chars. Per the PGEN release notes, explicit positive coverage was added for ascending bare-octal/bare-octal, literal/bare-octal, and bare-octal/hex endpoint pairs, plus the false-accept residual `[\x1f-\0]` now correctly rejects.
+- Verification: re-ran the 26-case family-audit probe that accompanied the 0072 report. 20/20 ascending forms now parse; 6/6 descending forms now reject. Every endpoint-form × endpoint-position combination I probed behaves per PCRE2 semantics.
+  - `[\000-\037]` → accepts (was REJ). `[a-\377]` → accepts. `[\001-\x1f]` / `[\001-\x{1f}]` → accept.
+  - `[\x1f-\0]` → rejects (was false-accept). `[\037-\000]` → rejects.
+- 0072 YAML flipped to `status: closed` with `fixed-upstream` resolution notes citing both PGEN and rgx commits.
+- Validation: 1,021 lib tests pass. PCRE2 conformance **8,935 → 8,941 pass** (+6), 2,283 → 2,277 fail, still 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=8_941` / `FAIL_BASELINE=2_277`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Ledger: 72 PGEN-RGX YAMLs total (0001–0072 with 0014 unassigned); **all 72 closed, 0 open** after this commit. Every PGEN report filed this session landed its fix upstream within the same day.
+- Notes/impact: The 0072 family-fix request worked as intended — PGEN applied a symmetric codepoint-decoded comparison to every endpoint form rather than a point-fix for bare octal alone. The other 18 `descending` rejects in the conformance harness (PCRE2 `alt_extended_class` set-algebra patterns like `[A--B]`, `[a&&b]`) are a separate cluster and remain unaffected; they're harness-modifier-gap tracked separately.
+
 ### 2026-04-18 - File PGEN-RGX-0072 (class_range endpoint-decoder family audit)
 
 - Scope: File a thorough PGEN bug report for a residual regression after 1.1.28's class_range endpoint-decoder fix: the fix applied to braced hex `\x{N}` (resolving 0071) did NOT extend to the FAMILY of other escape forms that can serve as `class_range` endpoints. Bare unbraced `\NNN` (1-3 digit octal) is still mis-decoded. Report asks PGEN to audit every endpoint form enumerated in pcre2pattern(3) §"Generic character types" and apply symmetric decoded-codepoint comparison, rather than point-fixing bare octal only.

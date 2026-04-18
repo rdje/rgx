@@ -2407,3 +2407,23 @@ Probed ~30 patterns by varying endpoint form (bare-octal/braced-hex/single-byte-
 ### Next concrete action
 - Wait for PGEN 1.1.29 with the family fix, then re-absorb. Expected ratchet delta: +6 cases plus any residuals the family audit catches.
 - Or move to an RGX-side engine target in parallel.
+
+## 2026-04-18 session — absorb PGEN 1.1.29 (closes 0072)
+
+### What landed
+- Submodule bumped from `baac0b1` (1.1.28) to `48a9f064` (1.1.29, "Publish regex 1.1.29 for bare-octal class range ordering"). Integration contract 1.1.30 → 1.1.31.
+- PGEN applied the family fix that report 0072 asked for: bare `\NNN` octal escapes now tokenise as a single escape unit and decode to their codepoint before the class_range ordering comparison, matching the treatment already shipped for `\x{N}` / `\xNN` / `\o{N}` / `\cX` / literals. Covers symmetric position and direction.
+- Re-ran the 26-case family-audit probe from the 0072 report — 26/26 correct. Matches the predicted +6 impact exactly.
+- 0072 YAML flipped to `status: closed` with `fixed-upstream` resolution note.
+- Ratchet bumped: 8,935 → 8,941 pass, 2,283 → 2,277 fail.
+
+### Running ledger
+- PGEN-RGX reports: 72 filed, **all 72 closed, 0 open** after this commit.
+- Pattern: 0067→0070 filed → 1.1.27 (with regression) → 0071 filed → 1.1.27 held → 1.1.28 → 0072 filed (family audit) → 1.1.29. Four PGEN releases in one day absorbed cleanly, +14 conformance passes (8927 → 8941), upstream-fix discipline maintained throughout.
+
+### Next concrete action
+- Pick an RGX-side engine target. Top candidates from the current histogram:
+  - `/^(a\1?){4}$/` on "aaaaa" — recursive backref capture propagation (744 FN bucket first).
+  - `/([a]*?)*/` on "a" → "" vs "a" — zero-width lazy-under-greedy semantics (675 span-mismatch bucket first).
+  - `/(?(?=.*b)b|^)/` on "abc" — lookaround-as-conditional over-matching (447 FP bucket first).
+- Or do another cluster-distill pass to find residual PGEN-rooted clusters (unlikely to yield more — the big buckets now look engine-side).
