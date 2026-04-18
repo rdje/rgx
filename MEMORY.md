@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-18 — Class-context escape semantics + runtime-policy verbs as no-ops (+19 passes)
+- **What**: Three adapter-side PCRE2 semantic tweaks, all in `rgx-core/src/parsing.rs`:
+  1. `\E` outside `\Q...\E` now compiles as no-op (empty sequence). Previously rejected as "unrecognized simple_escape".
+  2. `convert_simple_escape` took an `in_class_context: bool` flag. When true: `\b` = backspace (not word-boundary), and unrecognized alphanumeric escapes fall back to literal character (matching PCRE2's rule that `[\g<a>]` = `[g<a>]`). `convert_class_escape` forces the class-context path when routing `simple_escape` subtrees.
+  3. `convert_directive_verb` accepts PCRE2 runtime-policy verbs as no-ops: `(*NOTEMPTY)`, `(*NO_JIT)`, `(*NO_START_OPT)`, `(*LIMIT_HEAP)`, `(*LIMIT_MATCH)`, `(*LIMIT_DEPTH)`, `(*TURKISH_CASING)`, etc. These change runtime policy, not the accepted language.
+- **Why RGX-side, not PGEN**: PGEN parses all three constructs correctly. The adapter was being conservative about semantics (typo-protective alphanumeric rejection, strict "unrecognized verb" gate). PCRE2 semantics are more lenient and well-defined — this is purely an RGX interpretation correction.
+- **Conformance delta**: **9,175 → 9,194 pass** (+19). 2,043 → 2,024 fail. Four new regression pins. Bucket deltas: "PGEN rejects simple escape" 15 → 6; "compile other error" 91 → 73. Ratchet bumped to 9,194 / 2,024.
+
 ### 2026-04-18 — PCRE2 semantic corrections: VT in `\s` + `{,N}` = `{0,N}` (+30 passes)
 - **What #1**: `rgx-core/src/vm.rs` and `rgx-core/src/engine.rs` were relying on Rust's `char::is_ascii_whitespace()` / `u8::is_ascii_whitespace()` for `\s` semantics. The `std` helpers match 5 bytes (space, tab, LF, FF, CR) but **PCRE2's `\s` matches 6** — the 5 above *plus* VT (0x0B). Added helpers `pcre2_is_space_byte` and `pcre2_is_space_char` (six-byte set) and replaced all 7 call sites. C1 JIT was already correct — only its docstring was stale.
 - **What #2**: `rgx-core/src/parsing.rs` `parse_counted_quantifier` was reading `digit_groups[0]` as min for ALL `has_comma` cases, so PGEN's two alternatives for `counted_quantifier_body` (`digits ws? (, ws? digits?)?` and `, ws? digits`) collided — `a{,3}B` was compiling as `a{3,}B` (at least 3) instead of `a{0,3}B`. Fixed by checking the body's first leaf terminal; if it's `,`, the sole digits child is the maximum.

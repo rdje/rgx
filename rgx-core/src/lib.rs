@@ -6037,6 +6037,53 @@ mod tests {
     }
 
     #[test]
+    fn class_context_simple_escape_accepts_alphabetic_as_literal() {
+        // Regression pin: `[\g<a>]+` = `[g<a>]+` per PCRE2 semantics —
+        // inside a character class an escaped alphabetic that is not a
+        // shorthand (like `\d`) is treated as the literal character.
+        let re = Regex::compile(r"^[\g<a>]+").unwrap();
+        let m = re
+            .find_first("ggg<<<aaa>>>")
+            .expect("class-context backslash-g is literal g");
+        assert_eq!(m.end - m.start, "ggg<<<aaa>>>".len());
+    }
+
+    #[test]
+    fn bare_end_of_quote_escape_is_noop() {
+        // Regression pin: `\E` without a preceding `\Q` is a no-op per
+        // PCRE2. `\Eabc` should compile and match "abc" exactly.
+        let re = Regex::compile(r"^\Eabc").unwrap();
+        let m = re
+            .find_first("abc")
+            .expect("\\E is a no-op outside \\Q...\\E");
+        assert_eq!((m.start, m.end), (0, 3));
+    }
+
+    #[test]
+    fn class_context_backslash_b_is_backspace() {
+        // Regression pin: inside a character class, `\b` means
+        // backspace (0x08), not a word-boundary assertion.
+        let re = Regex::compile(r"[\b]").unwrap();
+        let m = re
+            .find_first("\u{08}x")
+            .expect("class-context \\b matches backspace 0x08");
+        assert_eq!((m.start, m.end), (0, 1));
+    }
+
+    #[test]
+    fn runtime_policy_verbs_compile_as_noops() {
+        // Regression pin: PCRE2 runtime/policy directives like
+        // (*NOTEMPTY), (*NO_JIT), (*LIMIT_HEAP=N) are parsed and
+        // compiled as no-ops — they set execution hints that don't
+        // affect the match on well-formed subjects.
+        for pattern in &["(*NOTEMPTY)abc", "(*NO_JIT)abc", "(*NO_START_OPT)abc"] {
+            let re = Regex::compile(pattern)
+                .unwrap_or_else(|e| panic!("{pattern:?} should compile: {e}"));
+            assert!(re.find_first("abc").is_some(), "{pattern:?} should match");
+        }
+    }
+
+    #[test]
     fn nonempty_quantifier_body_still_advances() {
         // Sanity: the fix for empty-body quantifier termination must
         // not break quantifiers whose body actually matches characters.

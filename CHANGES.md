@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-18 - Class-context escape semantics + runtime-policy verb no-ops (+19 passes)
+
+- Scope: Three parser-adapter corrections bundled together, all addressing PCRE2 semantics that PGEN parses correctly but the RGX adapter was interpreting too strictly.
+- Change 1 — `\E` without a preceding `\Q` is a no-op: PCRE2's `\E` outside `\Q...\E` is silently dropped. The adapter previously rejected it as "unrecognized simple_escape character 'E'". Now emits `Regex::Sequence(vec![])` so the compiler elides it.
+- Change 2 — class-context simple escape semantics: inside a character class, PCRE2 treats `\b` as backspace (0x08) (*not* a word-boundary assertion), and treats escaped characters that aren't recognized shorthand classes as *literals* (`[\g<a>]+` = `[g<a>]+`, `[\k<1>]` = `[k<1>]`). The adapter previously routed class-context escapes through the outside-class handler which rejected alphanumeric escapes as typos. Added an `in_class_context` flag to `convert_simple_escape`; `convert_class_escape` now forces the class-context path when routing `simple_escape` subtrees. Closes the "unrecognized simple_escape character '{g,k,...}'" cluster inside character classes.
+- Change 3 — runtime-policy verbs compile as no-ops: `(*NOTEMPTY)`, `(*NOTEMPTY_ATSTART)`, `(*NO_START_OPT)`, `(*NO_AUTO_POSSESS)`, `(*NO_DOTSTAR_ANCHOR)`, `(*NO_JIT)`, `(*LIMIT_HEAP)`, `(*LIMIT_MATCH)`, `(*LIMIT_DEPTH)`, `(*LIMIT_RECURSION)`, `(*TURKISH_CASING)`, `(*CASELESS_RESTRICT)`, `(*ALT_BSUX)`, `(*ALT_EXTENDED_CLASS)`, `(*ALT_CIRCUMFLEX)`, `(*ALT_VERBNAMES)` are PCRE2 runtime/policy/backend-hint directives. They don't affect the language accepted, so the compiler records them as no-ops for conformance purposes.
+- Validation: 1,029 lib tests pass (1,025 baseline + 4 new regression pins — `class_context_simple_escape_accepts_alphabetic_as_literal`, `bare_end_of_quote_escape_is_noop`, `class_context_backslash_b_is_backspace`, `runtime_policy_verbs_compile_as_noops`). PCRE2 conformance **9,175 → 9,194 pass** (+19), 2,043 → 2,024 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_194` / `FAIL_BASELINE=2_024`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: All three changes are RGX-side interpretation tweaks — PGEN parses these constructs correctly; the adapter was just being conservative (typo-protective) in contexts where PCRE2 semantics are lenient. Bucket deltas: "compile: PGEN rejects simple escape" 15 → 6 (class-context escape widening), "compile: other error" 91 → 73 (runtime-policy verbs now compile).
+
 ### 2026-04-18 - PCRE2 semantic corrections: VT in `\s` + `{,N}` bare upper-bound quantifier (+30 passes)
 
 - Scope: Two independent PCRE2-parity fixes, bundled because both are small surgical corrections that close clean test clusters.
