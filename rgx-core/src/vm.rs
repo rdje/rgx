@@ -6916,7 +6916,11 @@ impl OptimizingCompiler {
             }
 
             Regex::NewlineSequence => {
-                // Expand \R into (?:\r\n|\r|\n|\x0B|\x0C|\x85|\u{2028}|\u{2029})
+                // Expand \R into (?:\r\n|\r|\n|\x0B|\x0C|\x85|\u{2028}|\u{2029}).
+                // BSR_ANYCRLF mode (CR/LF/CRLF only) is handled at the
+                // adapter by emitting an explicit restricted alternation
+                // instead of the `NewlineSequence` node — so reaching
+                // this branch always means the full Unicode newline set.
                 let expanded = Regex::Group {
                     kind: GroupKind::NonCapturing,
                     expr: Box::new(Regex::Alternation(vec![

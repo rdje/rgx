@@ -994,6 +994,22 @@ fn classify_modifier(m: &str) -> ModifierAction {
         return ModifierAction::Ignore;
     }
     let key = m.split('=').next().unwrap_or(m);
+    // Value-bearing modifiers where the value determines the action.
+    if key == "bsr" {
+        let value = m
+            .split('=')
+            .nth(1)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if value == "anycrlf" {
+            return ModifierAction::InlineFlag("(*BSR_ANYCRLF)");
+        }
+        if value == "unicode" {
+            return ModifierAction::InlineFlag("(*BSR_UNICODE)");
+        }
+        return ModifierAction::Ignore;
+    }
     match key {
         // -- Short flags mapped to RegexBuilder knobs -----------------
         "i" | "caseless" => ModifierAction::CaseInsensitive,
@@ -1820,8 +1836,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_613;
-    const FAIL_BASELINE: usize = 1_605;
+    const PASS_BASELINE: usize = 9_633;
+    const FAIL_BASELINE: usize = 1_585;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` pragmas restrict `\R` expansion (+20 passes)
+
+- Scope: PCRE2 defines two modes for `\R` (Backslash-R / Unicode newline):
+  - `BSR_ANYCRLF` — matches only CR, LF, or CRLF.
+  - `BSR_UNICODE` (default) — additionally matches VT, FF, NEL (U+0085), LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029).
+  Both modes can be set with pattern-start pragmas `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` or via the `bsr=anycrlf` / `bsr=unicode` compile option. The adapter was lowering both pragmas to `Regex::Empty` and always expanding `\R` to the full Unicode set, so tests using `/I,bsr=anycrlf` got FP matches on NEL / VT subjects.
+- Fix: Two pieces.
+  - `rgx-core/src/parsing.rs` `PgenAstAdapter` scans the pattern text for `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` at construction (last-wins) and stores a `bsr_anycrlf: bool` flag. `convert_simple_escape` for `R` (and `"\\R"` in `convert_escape`) emits either the shared `Regex::NewlineSequence` node (default) or a restricted `(?:\r\n|\r|\n)` alternation when the flag is set. Both the VM and C2 codegens see the same tree, no backend changes needed.
+  - `rgx-core/tests/pcre2_conformance.rs` `classify_modifier` parses the `bsr=VALUE` pattern modifier and emits `InlineFlag("(*BSR_ANYCRLF)")` / `InlineFlag("(*BSR_UNICODE)")` so pcre2test's `bsr=anycrlf` / `bsr=unicode` are threaded into the pattern as pragmas.
+- Validation: 1,050 lib tests pass (1,049 baseline + 1 new regression pin `bsr_anycrlf_restricts_backslash_r`). 30 rgx-cli tests pass. PCRE2 conformance **9,613 → 9,633 pass** (+20), 1,605 → 1,585 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_633` / `FAIL_BASELINE=1_585`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/a\Rb/I,bsr=anycrlf` family (testinput2:2372, 2387, 2402, …) and mirror tests in testinput6. The last-wins logic between pragmas matches PCRE2's policy when both appear.
+
 ### 2026-04-19 - `(?U)` / `/ungreedy` swap quantifier greediness (+4 passes)
 
 - Scope: PCRE2's `(?U)` inline flag (and pcre2test's `/ungreedy` pattern-level modifier, which the harness already remaps to `(?U)`) inverts the default greediness of all quantifiers inside the flag's scope — `*` / `+` / `?` / `{n,m}` become lazy, `*?` / `+?` / `??` / `{n,m}?` become greedy. RGX's codegen was ignoring `U` on `FlagGroup` and defaulting every non-lazy quantifier to its greedy opcode.

@@ -385,15 +385,53 @@ struct PgenAstAdapter<'a> {
     /// rather than the ASCII shorthands. Detected by scanning the
     /// pattern for a leading `(*UCP)` start-verb.
     ucp_enabled: bool,
+    /// PCRE2 `BSR_ANYCRLF` mode: when set, `\R` matches only CR, LF,
+    /// and CRLF. The default `BSR_UNICODE` mode (false) also matches
+    /// VT, FF, NEL (U+0085), LINE SEPARATOR, PARAGRAPH SEPARATOR.
+    /// Detected by scanning the pattern for `(*BSR_ANYCRLF)`.
+    bsr_anycrlf: bool,
 }
 
 #[cfg(feature = "pgen-parser")]
 impl<'a> PgenAstAdapter<'a> {
     fn new(pattern: &'a str) -> Self {
         let ucp_enabled = pattern.contains("(*UCP)");
+        // Last-wins between `(*BSR_ANYCRLF)` and `(*BSR_UNICODE)` —
+        // PCRE2 applies the most-recent pragma when both appear.
+        let bsr_anycrlf = match (
+            pattern.rfind("(*BSR_ANYCRLF)"),
+            pattern.rfind("(*BSR_UNICODE)"),
+        ) {
+            (Some(a), Some(u)) => a > u,
+            (Some(_), None) => true,
+            _ => false,
+        };
         Self {
             pattern,
             ucp_enabled,
+            bsr_anycrlf,
+        }
+    }
+
+    /// Build the AST for `\R`. In `BSR_UNICODE` mode (default) the
+    /// sequence is the shared `Regex::NewlineSequence` node that the
+    /// VM and C2 codegens already know how to expand. In
+    /// `BSR_ANYCRLF` mode we emit an explicit alternation restricted
+    /// to CR, LF, and CRLF so both backends see the limited set
+    /// without needing an extra compile-time switch.
+    fn newline_sequence_ast(&self) -> Regex {
+        if !self.bsr_anycrlf {
+            return Regex::NewlineSequence;
+        }
+        Regex::Group {
+            kind: GroupKind::NonCapturing,
+            expr: Box::new(Regex::Alternation(vec![
+                Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')]),
+                Regex::Char('\r'),
+                Regex::Char('\n'),
+            ])),
+            index: None,
+            name: None,
         }
     }
 
@@ -706,7 +744,7 @@ impl<'a> PgenAstAdapter<'a> {
             // (non-newline) through the anchor family in 1.1.21.
             // Route them to the nodes `convert_simple_escape`
             // already produces.
-            "\\R" => Ok(Regex::NewlineSequence),
+            "\\R" => Ok(self.newline_sequence_ast()),
             "\\N" => Ok(Regex::Dot),
             "\\X" => Ok(Regex::GraphemeCluster),
             other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
@@ -886,7 +924,7 @@ impl<'a> PgenAstAdapter<'a> {
             'K' => Ok(Regex::MatchReset),
 
             // PCRE2 newline sequence (\R)
-            'R' => Ok(Regex::NewlineSequence),
+            'R' => Ok(self.newline_sequence_ast()),
 
             // PCRE2 non-newline (\N) — matches any char except newline, same as . in non-dotall
             'N' => Ok(Regex::Dot),

@@ -6483,6 +6483,27 @@ mod tests {
     }
 
     #[test]
+    fn bsr_anycrlf_restricts_backslash_r() {
+        // Regression pin: PCRE2 `(*BSR_ANYCRLF)` limits `\R` to
+        // CR / LF / CRLF. The default `BSR_UNICODE` mode (also
+        // explicitly via `(*BSR_UNICODE)`) matches VT, FF, NEL, LS,
+        // PS in addition. Last-wins between multiple pragmas.
+        let any = Regex::compile(r"(*BSR_ANYCRLF)a\Rb").unwrap();
+        assert!(any.is_match("a\rb"));
+        assert!(any.is_match("a\nb"));
+        assert!(any.is_match("a\r\nb"));
+        assert!(!any.is_match("a\u{85}b"));
+        assert!(!any.is_match("a\u{0B}b"));
+        // Default mode — Unicode newline set.
+        let uni = Regex::compile(r"a\Rb").unwrap();
+        assert!(uni.is_match("a\u{85}b"));
+        assert!(uni.is_match("a\u{2028}b"));
+        // Last-wins when both pragmas appear.
+        let switched = Regex::compile(r"(*BSR_UNICODE)(*BSR_ANYCRLF)a\Rb").unwrap();
+        assert!(!switched.is_match("a\u{85}b"));
+    }
+
+    #[test]
     fn ungreedy_flag_swaps_quantifier_greediness() {
         // Regression pin: PCRE2 `(?U)` (and pcre2test `/ungreedy`)
         // inverts greedy/lazy defaults — `*` becomes lazy, `*?` becomes

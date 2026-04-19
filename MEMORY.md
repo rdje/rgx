@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` restrict `\R` (+20 passes)
+- **What**: `PgenAstAdapter` detects BSR pragmas (last-wins) and emits a restricted `(?:\r\n|\r|\n)` alternation for `\R` under `BSR_ANYCRLF`; otherwise emits the shared `Regex::NewlineSequence` (full Unicode newline set). Harness remaps `bsr=anycrlf` / `bsr=unicode` modifiers to the corresponding `(*BSR_…)` start-verb prepend.
+- **Why**: Tests like `/a\Rb/I,bsr=anycrlf` want `\R` to match only CR/LF/CRLF. RGX was always matching the full set, producing FP on NEL / VT subjects.
+- **Adapter-level emission** means both VM and C2 codegens see the correct tree without backend changes.
+- **Conformance delta**: 9,613 → 9,633 (+20). Ratchet bumped to 9,633 / 1,585. One regression pin.
+
 ### 2026-04-19 — `(?U)` ungreedy flag swaps quantifier greediness (+4 passes)
 - **What**: `OptimizingCompiler` gains `swap_greed: bool`; FlagGroup toggles on `U` / `-U` with save/restore. Quantifier codegen XORs `swap_greed` with the syntactic `lazy` bit — `*` under `(?U)` emits StarLazy, `*?` under `(?U)` emits StarGreedy, etc. Applies to all quantifier shapes.
 - **Harness**: pcre2test `/ungreedy` already remapped to `(?U)` prefix — no harness change needed.

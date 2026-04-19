@@ -539,8 +539,12 @@ impl Compiler {
             "AST is eligible for VM compilation"
         );
 
-        // Compile AST into optimized VM bytecode
-        debug_log!("compiler", "Compiling AST to VM bytecode...");
+        // Compile AST into optimized VM bytecode. `\R` expansion is
+        // handled at AST-build time in the adapter (which inspects
+        // `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` pragmas and emits either
+        // the shared `Regex::NewlineSequence` node or an explicit
+        // CRLF-only alternation) so both VM and C2 codegens see the
+        // same normalised tree here.
         let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
         let mut program = vm_compiler.compile(&ast);
         program.named_groups = named_groups;
