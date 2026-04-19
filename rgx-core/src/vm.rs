@@ -6457,7 +6457,20 @@ impl OptimizingCompiler {
                         self.code.push(class_id as u8);
                     }
                     CharClass::UnicodeClass { name, negated } => {
-                        let ranges = resolve_unicode_property_class(name, *negated)
+                        let resolved_name: &str = if self.case_insensitive
+                            && matches!(name.as_str(), "Lu" | "Ll" | "Lt")
+                        {
+                            // Under /i, PCRE2 expands case-distinguished
+                            // letter properties to match any cased letter
+                            // (L& = Lu|Ll|Lt). `\p{Lu}/i` on "a" should
+                            // match — folding 'a' → 'A' brings it into
+                            // the expanded class. Same for `\P{Lu}/i`
+                            // which becomes `\P{L&}`.
+                            "L&"
+                        } else {
+                            name.as_str()
+                        };
+                        let ranges = resolve_unicode_property_class(resolved_name, *negated)
                             .expect("unicode property class should be validated before codegen");
                         let class_id = self.compile_char_class(&ranges);
                         self.emit_op(OpCode::CharClass);
@@ -6467,7 +6480,16 @@ impl OptimizingCompiler {
             }
 
             Regex::UnicodeClass { name, negated } => {
-                let ranges = resolve_unicode_property_class(name, *negated)
+                let resolved_name: &str =
+                    if self.case_insensitive && matches!(name.as_str(), "Lu" | "Ll" | "Lt") {
+                        // See `CharClass::UnicodeClass` branch: under /i,
+                        // PCRE2 expands Lu/Ll/Lt to L& so case-folded
+                        // letters match regardless of original case.
+                        "L&"
+                    } else {
+                        name.as_str()
+                    };
+                let ranges = resolve_unicode_property_class(resolved_name, *negated)
                     .expect("unicode property class should be validated before codegen");
                 let class_id = self.compile_char_class(&ranges);
                 self.emit_op(OpCode::CharClass);

@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — `\p{Lu}` / `\p{Ll}` / `\p{Lt}` under `/i` expand to `\p{L&}` (+8 passes)
+- **What**: Under /i, case-distinguished letter properties fold — `\p{Lu}/i` matches any cased letter. RGX was resolving to literal Lu only.
+- **Fix**: In VM codegen for `CharClass::UnicodeClass` and `Regex::UnicodeClass`, remap Lu/Ll/Lt → `L&` when `self.case_insensitive` is true. The `L&` alias already exists in `resolve_pcre2_alias` (Lu|Ll|Lt merged). Negation propagates via `CharClass::Custom.negated`.
+- **Conformance delta**: 9,526 → 9,534 (+8). One regression pin.
+
 ### 2026-04-19 — Harness: /g first-match anchor (+120 passes)
 - **What**: `parse_subject_output` was overwriting `overall` on every ` 0:` line, leaving only the LAST match as expected. RGX's comparison path uses `find_all().next()` — the FIRST match. First-vs-last mismatch for every multi-match /g subject.
 - **Fix**: `if overall.is_none()` guard so only the first ` 0:` line sets the anchor; subsequent lines are consumed but don't overwrite.

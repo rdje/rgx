@@ -6483,6 +6483,29 @@ mod tests {
     }
 
     #[test]
+    fn case_distinguished_property_expands_under_i() {
+        // Regression pin: under /i, PCRE2 expands the case-
+        // distinguished letter properties `\p{Lu}` / `\p{Ll}` /
+        // `\p{Lt}` to `\p{L&}` (any cased letter — Lu | Ll | Lt).
+        // `(?i)\p{Lu}` therefore matches 'a' (folded to 'A' is Lu).
+        // The negated forms `\P{Lu}/i` exclude the whole cased-letter
+        // set — so they reject every letter regardless of case.
+        let upper_i = Regex::compile(r"(?i)\p{Lu}").unwrap();
+        assert!(upper_i.is_match("a"));
+        assert!(upper_i.is_match("A"));
+        assert!(upper_i.is_match("ǅ")); // Lt folds into the cased-letter set
+        assert!(!upper_i.is_match("1"));
+        let not_upper_i = Regex::compile(r"(?i)\P{Lu}").unwrap();
+        assert!(!not_upper_i.is_match("a"));
+        assert!(!not_upper_i.is_match("A"));
+        assert!(not_upper_i.is_match("1"));
+        // Without /i the original property semantic is preserved.
+        let upper = Regex::compile(r"\p{Lu}").unwrap();
+        assert!(!upper.is_match("a"));
+        assert!(upper.is_match("A"));
+    }
+
+    #[test]
     fn ucp_graph_includes_format_and_private_use() {
         // Regression pin: PCRE2's `[:graph:]` under UCP matches
         // Cf (format) and Co (private-use) codepoints even though

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Case-distinguished `\p{Lu}` / `\p{Ll}` / `\p{Lt}` under `/i` expand to `\p{L&}` (+8 passes)
+
+- Scope: Under PCRE2's `/i` flag, the case-distinguished letter properties fold together — `\p{Lu}` matches any cased letter (Lu|Ll|Lt) on /i, same for `\p{Ll}` and `\p{Lt}`. The negated forms `\P{Lu}/i` etc. exclude the whole cased-letter set. RGX was resolving each property to its literal range (only Lu, only Ll, only Lt) regardless of the case-insensitive flag, so `(?i)\p{Lu}` on "a" missed the match.
+- Fix: In both codegen paths (`CharClass::UnicodeClass` inside a bracket class, and top-level `Regex::UnicodeClass`), remap the property name to `L&` when `self.case_insensitive` is set and the name is one of `Lu` / `Ll` / `Lt`. The `L&` alias is already recognised by `resolve_pcre2_alias` (Lu|Ll|Lt merged). Negation flows through `CharClass::Custom.negated` so `\P{Lu}/i` correctly becomes `\P{L&}`.
+- Validation: 1,045 lib tests pass (1,044 baseline + 1 new regression pin `case_distinguished_property_expands_under_i`). 30 rgx-cli tests pass. PCRE2 conformance **9,526 → 9,534 pass** (+8), 1,692 → 1,684 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_534` / `FAIL_BASELINE=1_684`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/\p{Lu}\p{Ll}\P{Lu}\P{Ll}/i` conformance cluster in testinput4 (lines 2925, 2933, 2940, 2981). Other non-letter properties (`\p{N}`, `\p{S}`, etc.) are unchanged under /i — case folding is only relevant for letters.
+
 ### 2026-04-19 - Harness: /g first-match anchor for comparison (+120 passes)
 
 - Scope: Under `/g`, pcre2test emits one ` 0: <text>` line per match on the same subject. `parse_subject_output` was overwriting the `overall` binding on every ` 0:` line, leaving only the LAST match as the expected value. But `run_case` compares against RGX's `find_all(subject).into_iter().next()` — the FIRST match. So any subject with more than one match on a `/g` pattern produced a spurious first-vs-last mismatch, e.g. `/\Gabc./g` on `abc1abc2xyzabc3` expected "abc2" (last) vs RGX "abc1" (first).
