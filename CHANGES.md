@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Substitute template: strip leading `[N]` buffer-size hint (+4 passes)
+
+- Scope: PCRE2's `pcre2_substitute` treats a leading `[digits]` in a replacement template as an advisory output-buffer size — the prefix is consumed before interpolation and never appears in the emitted replacement. RGX copied it verbatim (so `[10]XYZ` produced `[10]XYZ` instead of `XYZ`). `Regex::interpolate_replacement` now calls a new `strip_substitute_length_hint` helper up front; `Replacer::no_expansion` fast-paths for `&str` / `String` / `&String` consult `starts_with_length_hint` so hinted templates still route through the interpolator.
+- Validation: 1,042 lib tests pass (1,041 baseline + 1 new regression pin `substitute_template_strips_length_hint_prefix`). 30 rgx-cli tests pass. PCRE2 conformance **9,272 → 9,276 pass** (+4), 1,946 → 1,942 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_276` / `FAIL_BASELINE=1_942`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The guard only strips `[digits]` — `[abc]` or unclosed `[` stay literal so accidentally `[`-prefixed templates round-trip unchanged. Closes the pattern-level `replace=[N]XYZ` cluster in the "other" substitute bucket (testinput2:4253, 4318, 4328, 4346).
+
 ### 2026-04-19 - Substitute template: `${*MARK}` / `$*MARK` last-hit mark name (+5 passes)
 
 - Scope: Thread the last-matched `(*MARK:name)` / `(*:name)` verb name from the VM through to the public match result and replacement-template interpolator so PCRE2 substitute templates `${*MARK}` and `$*MARK` expand to the mark name (or empty string when no mark was hit on the winning match path).

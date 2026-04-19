@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Substitute template: strip `[N]` buffer-size hint (+4 passes)
+- **What**: `Regex::interpolate_replacement` strips a leading `[digits]` PCRE2 advisory buffer-size prefix before processing the template. `Replacer::no_expansion` fast-path gated on `starts_with_length_hint` so hinted templates still route through the interpolator.
+- **Why**: PCRE2's `pcre2_substitute` consumes the prefix silently; RGX was copying it literally.
+- **Conformance delta**: 9,272 → 9,276 (+4). Ratchet bumped to 9,276 / 1,942. One regression pin.
+- **Aborted detour**: briefly tried parsing per-subject `\=replace=TEMPLATE,g` modifiers in the conformance harness. Landed +N but regressed other buckets (368 subjects exposed uncovered PCRE2 substitute sub-features — `\g<N>`, `${1:+yes:no}`, `\Q...\E`, `[N]`-with-PCRE2-error-semantic). Reverted. Would need deeper substitute-feature support to land net-positive.
+
 ### 2026-04-19 — Substitute template `${*MARK}` / `$*MARK` (+5 passes)
 - **What**: Threaded the last-matched `(*MARK:name)` verb name through `vm::Match` → `MatchResult` → `Captures` so substitute templates can expand `${*MARK}` / `$*MARK` and users can introspect via `Captures::mark() -> Option<&str>`.
 - **Wiring**: New `last_mark: Option<String>` field on all three result structs; VM sites populate from `ctx.marks.last()`; `interpolate_replacement` gained a `last_mark: Option<&str>` parameter and recognises both brace and bare forms.

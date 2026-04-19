@@ -446,8 +446,10 @@ impl Replacer for &str {
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
         // Fast-path only when the replacement contains neither a `$`
         // (capture reference / meta) nor a `\` (PCRE2-style backslash
-        // escape — `\n`, `\u`, `\$`, `\045`, `\x{...}`, `\U`, `\L`, ...).
-        if !self.contains('$') && !self.contains('\\') {
+        // escape — `\n`, `\u`, `\$`, `\045`, `\x{...}`, `\U`, `\L`, ...)
+        // nor a leading `[N]` (PCRE2 substitute buffer-size hint — the
+        // interpolator strips the prefix).
+        if !self.contains('$') && !self.contains('\\') && !starts_with_length_hint(self) {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -461,7 +463,7 @@ impl Replacer for String {
     }
 
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
-        if !self.contains('$') && !self.contains('\\') {
+        if !self.contains('$') && !self.contains('\\') && !starts_with_length_hint(self) {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -475,7 +477,7 @@ impl Replacer for &String {
     }
 
     fn no_expansion(&mut self) -> Option<std::borrow::Cow<'_, str>> {
-        if !self.contains('$') && !self.contains('\\') {
+        if !self.contains('$') && !self.contains('\\') && !starts_with_length_hint(self) {
             Some(std::borrow::Cow::Borrowed(self))
         } else {
             None
@@ -903,6 +905,47 @@ impl RegexBuilder {
 /// verb. Used by `RegexBuilder::build` to insert `(?flags)` after the
 /// verb run rather than before it, preserving PCRE2's requirement
 /// that pattern-start verbs precede every other construct.
+/// Return `true` when `template` begins with a `[digits]` PCRE2
+/// buffer-size hint — shape `[` followed by one or more ASCII digits
+/// followed by `]`. Used by the fast-path check on `Replacer::no_expansion`
+/// so hinted templates still route through the interpolator (which
+/// strips the prefix).
+fn starts_with_length_hint(template: &str) -> bool {
+    let bytes = template.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return false;
+    }
+    let mut i = 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    i > 1 && i < bytes.len() && bytes[i] == b']'
+}
+
+/// Strip a leading `[N]` buffer-size hint from a PCRE2 substitute
+/// template, if present. PCRE2's `pcre2_substitute` treats a template
+/// that begins with `[digits]` as carrying an advisory output-buffer
+/// size — the prefix is consumed before interpolation and never
+/// appears in the produced replacement text. RGX has no notion of a
+/// fixed output buffer, so the hint is semantically a no-op, and we
+/// strip it so templates like `[10]XYZ` observe the same emission
+/// behaviour as PCRE2.
+fn strip_substitute_length_hint(template: &str) -> &str {
+    if !template.starts_with('[') {
+        return template;
+    }
+    let bytes = template.as_bytes();
+    let mut i = 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i > 1 && i < bytes.len() && bytes[i] == b']' {
+        &template[i + 1..]
+    } else {
+        template
+    }
+}
+
 fn leading_start_verb_end(pattern: &str) -> usize {
     let bytes = pattern.as_bytes();
     let mut pos = 0;
@@ -2174,6 +2217,12 @@ impl Regex {
         last_mark: Option<&str>,
         out: &mut String,
     ) {
+        // PCRE2 accepts a leading `[N]` in a substitute template as
+        // an advisory buffer-size hint (pcre2_substitute stripped it
+        // from the emitted replacement). RGX has no equivalent buffer
+        // allocation, so we simply strip the prefix to match PCRE2's
+        // observable output for templates like `[10]XYZ`.
+        let replacement = strip_substitute_length_hint(replacement);
         #[derive(Clone, Copy)]
         #[allow(clippy::upper_case_acronyms)]
         enum CaseChange {
@@ -6431,6 +6480,21 @@ mod tests {
             re.find_first("c").is_none(),
             "()?(?(1)a|b) must not match 'c'"
         );
+    }
+
+    #[test]
+    fn substitute_template_strips_length_hint_prefix() {
+        // Regression pin: PCRE2 accepts a leading `[N]` in a
+        // substitute template as an advisory output-buffer size hint.
+        // The prefix is stripped before the actual substitution, so
+        // `[10]XYZ` emits `XYZ` not `[10]XYZ`.
+        let re = Regex::compile(r"abc").unwrap();
+        assert_eq!(re.replace("123abc123", r"[10]XYZ"), "123XYZ123");
+        // Guard: only `[digits]` stripped — `[abc]` or unclosed `[`
+        // stay literal so character-class-looking templates still
+        // round-trip.
+        assert_eq!(re.replace("abc", r"[abc]"), "[abc]");
+        assert_eq!(re.replace("abc", r"[10XYZ"), "[10XYZ");
     }
 
     #[test]
