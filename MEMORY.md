@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — `\h` U+180E + `Xsp`/`Xps`/`Xwd` Unicode expansion (+59 passes)
+- **What**: Three PCRE2-compat whitespace/word fixes.
+  - `\h` / `\H` now include U+180E (MONGOLIAN VOWEL SEPARATOR) — Unicode 6.3 dropped it from White_Space, PCRE2 keeps it for back-compat.
+  - `\p{Xsp}` and `\p{Xps}` now expand to `\p{Z} ∪ {HT, LF, VT, FF, CR}` — was ASCII-only, PCRE2 always treats them as Unicode whitespace regardless of /ucp.
+  - `\p{Xwd}` now expands to `\p{L} ∪ \p{N} ∪ _` — was ASCII `[A-Za-z0-9_]`, PCRE2 treats it as Unicode word (same as `\w` under /ucp).
+- **Conformance delta**: 9,544 → 9,603 (+59). Two regression pins.
+- **Files**: `rgx-core/src/parsing.rs` (horizontal_whitespace_ranges) and `rgx-core/src/unicode_support.rs` (Xsp/Xps/Xwd aliases).
+
 ### 2026-04-19 — Quantifier retargets across transparent atoms (+10 passes)
 - **What**: PCRE2 treats `(?#...)` comments and /x-mode whitespace as transparent for quantifier attachment. PGEN attaches `{N}` to the immediately-preceding atom (the comment/whitespace). RGX's compiler now rewires the quantifier onto the nearest real atom in a post-pass.
 - **Two passes**: `strip_x_mode_sequence` handles /x-mode (Quantified(WhitespaceLiteral, q) transfer). New `retarget_quantifiers_on_transparent` runs universally — drops bare `Empty` nodes from sequences, then transfers `Quantified(Empty, q)` to the nearest real atom. Walks Sequence/Alternation/Quantified/Group/Lookahead/Lookbehind/FlagGroup.

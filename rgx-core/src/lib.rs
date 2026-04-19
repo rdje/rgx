@@ -6483,6 +6483,39 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_whitespace_includes_mongolian_vowel_separator() {
+        // Regression pin: PCRE2's `\h` keeps U+180E (MONGOLIAN VOWEL
+        // SEPARATOR) in the horizontal-whitespace set for backward
+        // compatibility, even though Unicode 6.3 removed it from the
+        // `White_Space` property. testinput5:292 `[\h]{3,}/B` expects
+        // the run starting at U+1680 to include U+180E.
+        let re = Regex::compile(r"\h").unwrap();
+        assert!(re.is_match("\u{180e}"));
+        assert!(re.is_match("\u{1680}"));
+        assert!(re.is_match("\u{2000}"));
+    }
+
+    #[test]
+    fn xsp_xps_expand_to_unicode_whitespace() {
+        // Regression pin: PCRE2's `\p{Xsp}` / `\p{Xps}` (Perl-style
+        // whitespace) include `\p{Z}` (Zs+Zl+Zp) in addition to the
+        // C0 controls HT/LF/VT/FF/CR. testinput5:1054 expects
+        // `/^>\p{Xsp}+/utf` to match NBSP, OGHAM SPACE MARK, LINE
+        // SEPARATOR, etc.
+        let xsp = Regex::compile(r"\p{Xsp}").unwrap();
+        assert!(xsp.is_match("\u{00A0}")); // NBSP — Zs
+        assert!(xsp.is_match("\u{1680}")); // OGHAM SPACE MARK — Zs
+        assert!(xsp.is_match("\u{2028}")); // LINE SEPARATOR — Zl
+        assert!(xsp.is_match("\u{2029}")); // PARAGRAPH SEPARATOR — Zp
+        assert!(xsp.is_match("\t"));
+        // Xwd includes Unicode letters + numbers + underscore.
+        let xwd = Regex::compile(r"\p{Xwd}").unwrap();
+        assert!(xwd.is_match("ζ")); // Greek letter
+        assert!(xwd.is_match("٠")); // Arabic digit
+        assert!(xwd.is_match("_"));
+    }
+
+    #[test]
     fn quantifier_retargets_across_transparent_atoms() {
         // Regression pin: PCRE2 treats `(?#...)` comments and /x-mode
         // whitespace as transparent for quantifier attachment. A

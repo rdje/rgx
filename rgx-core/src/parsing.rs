@@ -3066,11 +3066,19 @@ fn complement_ranges(input: &[CharRange]) -> Vec<CharRange> {
 /// Unicode code points for horizontal whitespace (\h).
 #[cfg(feature = "pgen-parser")]
 fn horizontal_whitespace_ranges() -> Vec<CharRange> {
+    // PCRE2 `\h` set per pcre2pattern(3): HT, SPACE, NBSP, OGHAM SPACE
+    // MARK, MONGOLIAN VOWEL SEPARATOR (kept for pre-Unicode-6.3 back
+    // compat), the en..hair spaces, NARROW NO-BREAK SPACE, MEDIUM
+    // MATHEMATICAL SPACE, IDEOGRAPHIC SPACE. U+180E was removed from
+    // the Unicode `White_Space` property in 6.3.0 but PCRE2 continues
+    // to treat it as `\h` for backward compatibility with existing
+    // patterns.
     vec![
         CharRange::single('\t'),
         CharRange::single(' '),
         CharRange::single('\u{00A0}'),
         CharRange::single('\u{1680}'),
+        CharRange::single('\u{180E}'),
         CharRange::range('\u{2000}', '\u{200A}'),
         CharRange::single('\u{202F}'),
         CharRange::single('\u{205F}'),

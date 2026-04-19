@@ -79,34 +79,46 @@ fn resolve_pcre2_alias(name: &str) -> Option<Vec<CharRange>> {
         // PCRE2 synthetic: Xan = alphanumeric (letter or decimal digit).
         "Xan" => Some(merge_properties(&["L", "Nd"])),
 
-        // PCRE2 synthetic: Xsp = Perl-style whitespace
-        // (HT LF VT FF CR SP). Matches PCRE2's \s in non-UCP mode.
-        "Xsp" => Some(vec![
-            CharRange::single('\u{09}'),
-            CharRange::single('\u{0A}'),
-            CharRange::single('\u{0B}'),
-            CharRange::single('\u{0C}'),
-            CharRange::single('\u{0D}'),
-            CharRange::single(' '),
-        ]),
+        // PCRE2 synthetic: Xsp = Perl-style whitespace — `\p{Z}` plus
+        // the C0 controls HT, LF, VT, FF, CR. Includes SP / NBSP /
+        // OGHAM SPACE MARK / the en..hair spaces / NARROW NO-BREAK SPACE
+        // / MEDIUM MATH SPACE / IDEOGRAPHIC SPACE / LINE and PARAGRAPH
+        // SEPARATORS. Matches PCRE2 testinput5 `\p{Xsp}/utf` fixtures.
+        "Xsp" => {
+            let mut v = merge_properties(&["Z"]);
+            v.extend([
+                CharRange::single('\u{09}'),
+                CharRange::single('\u{0A}'),
+                CharRange::single('\u{0B}'),
+                CharRange::single('\u{0C}'),
+                CharRange::single('\u{0D}'),
+            ]);
+            v.sort_by_key(|r| r.start);
+            Some(v)
+        }
 
         // PCRE2 synthetic: Xps = POSIX space — same characters as Xsp.
-        "Xps" => Some(vec![
-            CharRange::single('\u{09}'),
-            CharRange::single('\u{0A}'),
-            CharRange::single('\u{0B}'),
-            CharRange::single('\u{0C}'),
-            CharRange::single('\u{0D}'),
-            CharRange::single(' '),
-        ]),
+        "Xps" => {
+            let mut v = merge_properties(&["Z"]);
+            v.extend([
+                CharRange::single('\u{09}'),
+                CharRange::single('\u{0A}'),
+                CharRange::single('\u{0B}'),
+                CharRange::single('\u{0C}'),
+                CharRange::single('\u{0D}'),
+            ]);
+            v.sort_by_key(|r| r.start);
+            Some(v)
+        }
 
-        // PCRE2 synthetic: Xwd = Perl word character — [A-Za-z0-9_].
-        "Xwd" => Some(vec![
-            CharRange::range('0', '9'),
-            CharRange::range('A', 'Z'),
-            CharRange::single('_'),
-            CharRange::range('a', 'z'),
-        ]),
+        // PCRE2 synthetic: Xwd = Perl word character — `\p{L}`, `\p{N}`,
+        // plus `_`. Matches PCRE2's `\w` under PCRE2_UCP.
+        "Xwd" => {
+            let mut v = merge_properties(&["L", "N"]);
+            v.push(CharRange::single('_'));
+            v.sort_by_key(|r| r.start);
+            Some(v)
+        }
 
         // PCRE2 synthetic: Xuc = "universal character name" allowed in
         // C++11: `$`, `@`, backtick, plus every codepoint ≥ U+00A0.
