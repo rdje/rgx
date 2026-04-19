@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - `(?U)` / `/ungreedy` swap quantifier greediness (+4 passes)
+
+- Scope: PCRE2's `(?U)` inline flag (and pcre2test's `/ungreedy` pattern-level modifier, which the harness already remaps to `(?U)`) inverts the default greediness of all quantifiers inside the flag's scope — `*` / `+` / `?` / `{n,m}` become lazy, `*?` / `+?` / `??` / `{n,m}?` become greedy. RGX's codegen was ignoring `U` on `FlagGroup` and defaulting every non-lazy quantifier to its greedy opcode.
+- Fix: Added `swap_greed: bool` to `OptimizingCompiler`. `Regex::FlagGroup` now toggles the flag (`U` enables, `-U` disables) with save/restore around the sub-expression. The quantifier codegen branch XORs `swap_greed` with the syntactic `lazy` bit to pick the effective opcode — `*` under `(?U)` emits `StarLazy`, `*?` under `(?U)` emits `StarGreedy`, etc. Applies uniformly to `OneOrMore`, `ZeroOrMore`, `ZeroOrOne`, and the `Range` branches (bounded tail and unbounded tail both).
+- Validation: 1,049 lib tests pass (1,048 baseline + 1 new regression pin `ungreedy_flag_swaps_quantifier_greediness`). 30 rgx-cli tests pass. PCRE2 conformance **9,609 → 9,613 pass** (+4), 1,609 → 1,605 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_613` / `FAIL_BASELINE=1_605`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the testinput2:170/173/176/182/4192 and testinput18:98 `ungreedy` span mismatches. The flag save/restore follows the same pattern as `i`/`m`/`s`, so nested scopes (`(?U)...(?-U)...`) work correctly without leaking into subsequent branches.
+
 ### 2026-04-19 - Harness: `/hex` pattern decoding (+6 passes)
 
 - Scope: pcre2test's `/hex` modifier carries a pattern whose body is a whitespace-separated mix of 2-hex-digit byte groups and single- or double-quoted literal runs — e.g. `/65 00 64/hex` decodes to the three-byte pattern `e\0d`, and `/'(*MARK:>' 00 '<)..'/hex` decodes to `(*MARK:>\x00<)..`. The harness was ignoring the modifier and feeding the raw pattern bytes straight to the compiler, so patterns like `/65 00 64/hex` compiled as the literal string `65 00 64` and failed to match anything.

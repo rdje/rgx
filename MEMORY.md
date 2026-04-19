@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — `(?U)` ungreedy flag swaps quantifier greediness (+4 passes)
+- **What**: `OptimizingCompiler` gains `swap_greed: bool`; FlagGroup toggles on `U` / `-U` with save/restore. Quantifier codegen XORs `swap_greed` with the syntactic `lazy` bit — `*` under `(?U)` emits StarLazy, `*?` under `(?U)` emits StarGreedy, etc. Applies to all quantifier shapes.
+- **Harness**: pcre2test `/ungreedy` already remapped to `(?U)` prefix — no harness change needed.
+- **Conformance delta**: 9,609 → 9,613 (+4). One regression pin.
+
 ### 2026-04-19 — Harness: /hex pattern decoding (+6 passes)
 - **What**: `decode_hex_pattern` helper converts `/hex` pattern bodies (whitespace-separated hex byte groups + single/double-quoted literal runs) to their actual byte representation. `extract_pattern_cases` routes through it when `hex` is in the modifier list.
 - **Example**: `/65 00 64/hex` → bytes "e\0d"; `/'(*MARK:>' 00 '<)..'/hex` → "(*MARK:>\x00<).."

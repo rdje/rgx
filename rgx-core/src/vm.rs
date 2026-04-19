@@ -6212,6 +6212,10 @@ pub struct OptimizingCompiler {
     dotall: bool,
     /// Whether case-insensitive mode is active (ASCII letters match both cases)
     case_insensitive: bool,
+    /// Whether ungreedy / swap-greed mode is active (PCRE2 `(?U)`).
+    /// When true, `*` / `+` / `?` / `{n,m}` default to lazy; `*?` / `+?`
+    /// etc. default to greedy. Toggle-flip semantics.
+    swap_greed: bool,
 }
 
 impl OptimizingCompiler {
@@ -6250,6 +6254,7 @@ impl OptimizingCompiler {
             multiline: false,
             dotall: false,
             case_insensitive: false,
+            swap_greed: false,
         };
         trace_exit!(
             "vm",
@@ -6736,30 +6741,32 @@ impl OptimizingCompiler {
             }
 
             Regex::Quantified { expr, quantifier } => {
+                // `self.swap_greed` (PCRE2 `(?U)` / `/ungreedy`) inverts
+                // greedy / lazy defaults: `*` becomes lazy, `*?` becomes
+                // greedy, `{n,m}` becomes lazy, `{n,m}?` becomes greedy.
+                // XOR the lazy flag on the quantifier to get the
+                // effective-lazy bit.
+                let effective_lazy = |lazy: bool| lazy ^ self.swap_greed;
                 match quantifier {
-                    Quantifier::OneOrMore { lazy: true } => {
+                    Quantifier::OneOrMore { lazy } if effective_lazy(*lazy) => {
                         self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
                     }
-                    Quantifier::OneOrMore { lazy: false } => {
+                    Quantifier::OneOrMore { .. } => {
                         self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
                     }
-                    Quantifier::ZeroOrMore { lazy: true } => {
+                    Quantifier::ZeroOrMore { lazy } if effective_lazy(*lazy) => {
                         self.emit_subexpr_opcode(OpCode::StarLazy, expr);
                     }
-                    Quantifier::ZeroOrMore { lazy: false } => {
+                    Quantifier::ZeroOrMore { .. } => {
                         self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
                     }
-                    Quantifier::ZeroOrOne { lazy: true } => {
+                    Quantifier::ZeroOrOne { lazy } if effective_lazy(*lazy) => {
                         self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
                     }
-                    Quantifier::ZeroOrOne { lazy: false } => {
+                    Quantifier::ZeroOrOne { .. } => {
                         self.emit_subexpr_opcode(OpCode::QuestionGreedy, expr);
                     }
-                    Quantifier::Range {
-                        min,
-                        max,
-                        lazy: true,
-                    } => {
+                    Quantifier::Range { min, max, lazy } if effective_lazy(*lazy) => {
                         let min_count = *min as usize;
                         for _ in 0..min_count {
                             self.codegen_pass(expr, false);
@@ -6776,11 +6783,7 @@ impl OptimizingCompiler {
                             }
                         }
                     }
-                    Quantifier::Range {
-                        min,
-                        max,
-                        lazy: false,
-                    } => {
+                    Quantifier::Range { min, max, .. } => {
                         // For A{n,m}, emit A exactly n times, then up to (m-n) greedy
                         // optional repetitions backed by Split-based backtracking.
                         // For A{n,}, emit A exactly n times then A*.
@@ -6864,6 +6867,7 @@ impl OptimizingCompiler {
                 let saved_multiline = self.multiline;
                 let saved_dotall = self.dotall;
                 let saved_case_insensitive = self.case_insensitive;
+                let saved_swap_greed = self.swap_greed;
                 // Parse flag string: chars before '-' are enabled, after '-' disabled.
                 // Examples: "i" → enable i; "-i" → disable i; "im" → enable both;
                 // "i-m" → enable i, disable m.
@@ -6890,10 +6894,17 @@ impl OptimizingCompiler {
                 if disable.contains('i') {
                     self.case_insensitive = false;
                 }
+                if enable.contains('U') {
+                    self.swap_greed = true;
+                }
+                if disable.contains('U') {
+                    self.swap_greed = false;
+                }
                 self.codegen_pass(expr, false);
                 self.multiline = saved_multiline;
                 self.dotall = saved_dotall;
                 self.case_insensitive = saved_case_insensitive;
+                self.swap_greed = saved_swap_greed;
             }
 
             Regex::MatchReset => {

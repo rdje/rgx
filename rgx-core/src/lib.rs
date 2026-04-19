@@ -6483,6 +6483,44 @@ mod tests {
     }
 
     #[test]
+    fn ungreedy_flag_swaps_quantifier_greediness() {
+        // Regression pin: PCRE2 `(?U)` (and pcre2test `/ungreedy`)
+        // inverts greedy/lazy defaults — `*` becomes lazy, `*?` becomes
+        // greedy, same for `+`, `?`, and `{n,m}`.
+        assert_eq!(
+            Regex::compile(r"(?U)<.*>")
+                .unwrap()
+                .find("abc<def>ghi<klm>nop")
+                .map(|m| m.as_str().to_string()),
+            Some("<def>".to_string())
+        );
+        assert_eq!(
+            Regex::compile(r"(?U)={3,}")
+                .unwrap()
+                .find("abc========def")
+                .map(|m| m.as_str().to_string()),
+            Some("===".to_string())
+        );
+        // `(?U)<.*?>` — inside the U region the `?` becomes greedy so
+        // `<.*?>` matches the longest bracketed run.
+        assert_eq!(
+            Regex::compile(r"(?U)<.*?>")
+                .unwrap()
+                .find("abc<def>ghi<klm>nop")
+                .map(|m| m.as_str().to_string()),
+            Some("<def>ghi<klm>".to_string())
+        );
+        // Without `(?U)`, default greediness is preserved.
+        assert_eq!(
+            Regex::compile(r"<.*>")
+                .unwrap()
+                .find("abc<def>ghi<klm>nop")
+                .map(|m| m.as_str().to_string()),
+            Some("<def>ghi<klm>".to_string())
+        );
+    }
+
+    #[test]
     fn horizontal_whitespace_includes_mongolian_vowel_separator() {
         // Regression pin: PCRE2's `\h` keeps U+180E (MONGOLIAN VOWEL
         // SEPARATOR) in the horizontal-whitespace set for backward
