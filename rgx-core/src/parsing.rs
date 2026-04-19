@@ -2952,8 +2952,16 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
             v
         }
         "cntrl" => p("Cc"),
-        "print" => merge(&["L", "M", "N", "P", "S", "Zs"]),
-        "graph" => merge(&["L", "M", "N", "P", "S"]),
+        // PCRE2 `[:graph:]` under UCP matches any codepoint that is
+        // not one of {Cc, Cs, Cn, Zs, Zl, Zp}. The positive list
+        // (L + M + N + P + S + Cf + Co) matches the implementation
+        // behavior, which includes format (Cf) and private-use (Co)
+        // codepoints — the documentation-only list (L+M+N+P+S) misses
+        // several Unicode testinput4 cases that PCRE2 actually treats
+        // as "graph".
+        "graph" => merge(&["L", "M", "N", "P", "S", "Cf", "Co"]),
+        // `[:print:]` = graph + space-separators (Zs).
+        "print" => merge(&["L", "M", "N", "P", "S", "Cf", "Co", "Zs"]),
         "punct" => merge(&["P", "S"]),
         // `:xdigit:` and `:ascii:` keep their ASCII-only semantics
         // under PCRE2_UCP (per pcre2pattern(3)).

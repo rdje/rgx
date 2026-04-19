@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - UCP POSIX `[:graph:]` / `[:print:]` include format (Cf) + private-use (Co) (+29 passes)
+
+- Scope: `rgx-core/src/parsing.rs` `ucp_posix_class_ranges` for `graph` and `print` was built from `pcre2pattern(3)`'s documented set (L+M+N+P+S / plus Zs for print). PCRE2's actual implementation also matches `\p{Cf}` (format) and `\p{Co}` (private-use) — testinput4:3422 expects `[[:graph:]]+$/utf,ucp` to match subjects like `Cf-property:\x{ad}\x{600}…` (Cf chars) and `\x{e000}` (private-use). The documentation is narrower than the behavior; when the two disagree, match what PCRE2 does.
+- Fix: `graph` = L+M+N+P+S+Cf+Co. `print` = graph + Zs. `cntrl` / `punct` / `space` / etc. are unchanged.
+- Validation: 1,044 lib tests pass (1,043 baseline + 1 new regression pin `ucp_graph_includes_format_and_private_use`). 30 rgx-cli tests pass. PCRE2 conformance **9,297 → 9,326 pass** (+29), 1,921 → 1,892 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_326` / `FAIL_BASELINE=1_892`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `[[:graph:]]+$/utf,ucp` and `[[:^graph:]]+$/utf` conformance clusters in testinput4 (Cf-property lines, format-char subjects, private-use subjects). The positive-graph fix also propagates to the negated form because `CharClass::Custom.negated` computes the complement of the same range set.
+
 ### 2026-04-19 - `\g<...>` / `\g'...'` as subroutine call (PCRE2 parity) (+21 passes)
 
 - Scope: PCRE2's `\g`-form back-reference / subroutine syntax forks on the delimiter (per `pcre2pattern(3)`):

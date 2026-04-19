@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — UCP `[:graph:]` / `[:print:]` include Cf + Co (+29 passes)
+- **What**: `ucp_posix_class_ranges` for `graph` now spans L+M+N+P+S+Cf+Co; `print` spans that plus Zs. Matches PCRE2 implementation (not docs — docs list only L+M+N+P+S).
+- **Why**: testinput4 `[[:graph:]]+$/utf,ucp` matches Cf-property chars (U+200B, U+200C, U+FEFF, ...) and private-use chars per the pcre2test expected output. PCRE2's implementation is the source of truth when docs differ.
+- **Conformance delta**: 9,297 → 9,326 (+29). Ratchet bumped to 9,326 / 1,892. One regression pin.
+- **Negation propagation**: the positive graph fix carries to `[:^graph:]` automatically via `CharClass::Custom.negated` complement.
+
 ### 2026-04-19 — `\g<...>` / `\g'...'` as subroutine call (+21 passes)
 - **What**: Angle-bracketed and single-quoted `\g` forms (`\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`, `\g'...'`) now lower to `Regex::Recursion` — PCRE2 documents these as **always implying a subroutine call**. Brace-delimited (`\g{name}`, `\g{N}`) and plain (`\gN`) forms stay as back-references.
 - **Why**: Self-recursive grammars like `^(?<name>a|b\g<name>c)` match `bbacc` under subroutine semantics and not under back-ref semantics (the group hasn't captured when the reference is reached).

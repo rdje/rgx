@@ -6483,6 +6483,20 @@ mod tests {
     }
 
     #[test]
+    fn ucp_graph_includes_format_and_private_use() {
+        // Regression pin: PCRE2's `[:graph:]` under UCP matches
+        // Cf (format) and Co (private-use) codepoints even though
+        // pcre2pattern(3) describes the set as L+M+N+P+S. The
+        // implementation behavior is the source of truth — testinput4
+        // line 3422 expects `[[:graph:]]+$/utf,ucp` to match
+        // `Cf-property:\x{ad}\x{600}…` (Cf chars).
+        let re = Regex::compile(r"(*UCP)^[[:graph:]]+$").unwrap();
+        assert!(re.is_match("\u{200b}\u{200c}\u{200d}")); // Cf
+        assert!(re.is_match("\u{e000}")); // Co (private-use)
+        assert!(re.is_match("Letter:ABC")); // L + P
+    }
+
+    #[test]
     fn g_bracketed_is_subroutine_call_not_backref() {
         // Regression pin: `\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`,
         // `\g'name'`, `\g'N'` are **subroutine calls** per PCRE2
