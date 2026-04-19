@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - `\g<...>` / `\g'...'` as subroutine call (PCRE2 parity) (+21 passes)
+
+- Scope: PCRE2's `\g`-form back-reference / subroutine syntax forks on the delimiter (per `pcre2pattern(3)`):
+  - `\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`, `\g'name'`, `\g'N'` — **subroutine call** (angle brackets and single quotes always imply *call*; the named / numbered group is re-executed).
+  - `\g{name}`, `\g{N}` — **back-reference** (matches the text captured previously).
+  - `\gN` (no delimiter) — plain back-reference.
+- RGX's adapter was treating every `\g` form as `NamedBackreference` / `Backreference` / `RelativeBackreference`. Patterns like `^(?<name>a|b\g<name>c)` match `bac`, `bbacc`, `bbbaccc` under subroutine semantics (Perl / PCRE2 self-recursive grammar for balanced structures) but degenerate to no-match under back-reference semantics because the group hasn't captured yet when the recursion point is reached.
+- Fix: `rgx-core/src/parsing.rs` `convert_named_backreference` inspects the span text for `\g<` or `\g'` as the "subroutine" delimiter. When present, lowers to `Regex::Recursion { target }` (named group, numbered group, or relative group); otherwise keeps the existing back-reference lowering. Also updates two parse tests (`relative_backreference_forward_parses`, `relative_backreference_backward_parses`) to assert `Recursion(RelativeGroup(±N))` — their execute counterparts continue to pass because single-char groups match the same way under subroutine and back-reference semantics.
+- Validation: 1,043 lib tests pass (1,042 baseline + 1 new regression pin `g_bracketed_is_subroutine_call_not_backref`, 2 existing pins updated for the corrected AST shape). 30 rgx-cli tests pass. PCRE2 conformance **9,276 → 9,297 pass** (+21), 1,942 → 1,921 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_297` / `FAIL_BASELINE=1_921`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `\g<...>` recursive-grammar cluster (testinput2:2831, 2843, 2861, 2867) and several /B-mode variants where the same patterns appear with bytecode-debug modifiers.
+
 ### 2026-04-19 - Substitute template: strip leading `[N]` buffer-size hint (+4 passes)
 
 - Scope: PCRE2's `pcre2_substitute` treats a leading `[digits]` in a replacement template as an advisory output-buffer size — the prefix is consumed before interpolation and never appears in the emitted replacement. RGX copied it verbatim (so `[10]XYZ` produced `[10]XYZ` instead of `XYZ`). `Regex::interpolate_replacement` now calls a new `strip_substitute_length_hint` helper up front; `Replacer::no_expansion` fast-paths for `&str` / `String` / `&String` consult `starts_with_length_hint` so hinted templates still route through the interpolator.

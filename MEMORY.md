@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — `\g<...>` / `\g'...'` as subroutine call (+21 passes)
+- **What**: Angle-bracketed and single-quoted `\g` forms (`\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`, `\g'...'`) now lower to `Regex::Recursion` — PCRE2 documents these as **always implying a subroutine call**. Brace-delimited (`\g{name}`, `\g{N}`) and plain (`\gN`) forms stay as back-references.
+- **Why**: Self-recursive grammars like `^(?<name>a|b\g<name>c)` match `bbacc` under subroutine semantics and not under back-ref semantics (the group hasn't captured when the reference is reached).
+- **Adapter fix**: `rgx-core/src/parsing.rs` `convert_named_backreference` — reads the span text for `\g<` or `\g'` to detect subroutine delimiter and forks the AST shape.
+- **Test updates**: two existing `relative_backreference_*_parses` pins updated to assert `Recursion(RelativeGroup(±N))` (the `_executes` pins are unchanged — single-char groups match identically under subroutine and back-ref semantics).
+- **Conformance delta**: 9,276 → 9,297 (+21). Ratchet bumped to 9,297 / 1,921. One new pin.
+
 ### 2026-04-19 — Substitute template: strip `[N]` buffer-size hint (+4 passes)
 - **What**: `Regex::interpolate_replacement` strips a leading `[digits]` PCRE2 advisory buffer-size prefix before processing the template. `Replacer::no_expansion` fast-path gated on `starts_with_length_hint` so hinted templates still route through the interpolator.
 - **Why**: PCRE2's `pcre2_substitute` consumes the prefix silently; RGX was copying it literally.

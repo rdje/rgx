@@ -1781,14 +1781,29 @@ impl<'a> PgenAstAdapter<'a> {
                 Ok(Regex::NamedBackreference(name))
             }
             "\\g" => {
-                // \g{name}, \g{N}, \g<N>, \g<name>, \g'name', \g<+N>, \g<-N>:
-                // element_1 is a `subroutine_ref` with a `signed_digits_or_name`
-                // payload (either `name` or `signed_digits`).
-                // PGEN 1.1.4+ correctly parses all \g forms including \g<1>.
+                // PCRE2 `\g`-form forks on the delimiter, per pcre2pattern(3):
+                //   * `\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`, `\g'name'`,
+                //     `\g'N'` — **subroutine call** (re-executes the named /
+                //     numbered group, recursing if necessary).
+                //   * `\g{name}`, `\g{N}` — **back-reference** (matches the
+                //     text previously captured by the group).
+                //   * `\gN` (no delimiter) — plain back-reference.
+                // The pcre2test fixture `/^(?<name>a|b\g<name>c)/` on
+                // "bbacc" relies on the subroutine semantic; treating
+                // `\g<name>` as a back-reference produces a no-match
+                // because the group hasn't been captured when the
+                // recursion point is reached.
+                let fragment = self.slice(node).unwrap_or("");
+                let is_subroutine = fragment.contains("\\g<") || fragment.contains("\\g'");
                 if let Some(name_node) = self.first_descendant(node, "name") {
-                    return Ok(Regex::NamedBackreference(
-                        self.slice(name_node)?.to_string(),
-                    ));
+                    let name = self.slice(name_node)?.to_string();
+                    return Ok(if is_subroutine {
+                        Regex::Recursion {
+                            target: RecursionTarget::NamedGroup(name),
+                        }
+                    } else {
+                        Regex::NamedBackreference(name)
+                    });
                 }
                 // Check for signed_digits first (handles +N, -N, and plain N).
                 if let Some(signed_node) = self.first_descendant(node, "signed_digits") {
@@ -1804,6 +1819,21 @@ impl<'a> PgenAstAdapter<'a> {
                                 "invalid numeric backreference '{digits}'"
                             ))
                         })?;
+                        if is_subroutine {
+                            return Ok(match sign_text {
+                                "+" => Regex::Recursion {
+                                    #[allow(clippy::cast_possible_wrap)]
+                                    target: RecursionTarget::RelativeGroup(n as i32),
+                                },
+                                "-" => Regex::Recursion {
+                                    #[allow(clippy::cast_possible_wrap)]
+                                    target: RecursionTarget::RelativeGroup(-(n as i32)),
+                                },
+                                _ => Regex::Recursion {
+                                    target: RecursionTarget::Group(n),
+                                },
+                            });
+                        }
                         return match sign_text {
                             "+" =>
                             {
@@ -1829,10 +1859,15 @@ impl<'a> PgenAstAdapter<'a> {
                                 "invalid numeric backreference '{digits}'"
                             ))
                         })?;
-                        return Ok(Regex::Backreference(n));
+                        return Ok(if is_subroutine {
+                            Regex::Recursion {
+                                target: RecursionTarget::Group(n),
+                            }
+                        } else {
+                            Regex::Backreference(n)
+                        });
                     }
                 }
-                let fragment = self.slice(node)?;
                 Err(self
                     .contract_error(&format!("unrecognized '\\g' backreference in '{fragment}'")))
             }
@@ -3755,12 +3790,22 @@ mod tests {
 
     #[test]
     fn relative_backreference_forward_parses() {
+        // PCRE2 distinguishes `\g<+1>` (subroutine call — angle brackets
+        // always imply *call*) from `\g{+1}` (back-reference). The
+        // execution semantics agree for single-char groups captured
+        // before the reference, so the `_executes` tests below still
+        // pass either way; the AST assertion pins the correct lowering.
         let ast = parse_pattern(r"(a)\g<+1>(b)").expect(r"\g<+1> should parse");
         match &ast {
             Regex::Sequence(items) => {
                 assert!(
-                    matches!(&items[1], Regex::RelativeBackreference(1)),
-                    "expected RelativeBackreference(1), got: {:?}",
+                    matches!(
+                        &items[1],
+                        Regex::Recursion {
+                            target: RecursionTarget::RelativeGroup(1)
+                        }
+                    ),
+                    "expected Recursion(RelativeGroup(1)), got: {:?}",
                     items[1]
                 );
             }
@@ -3774,8 +3819,13 @@ mod tests {
         match &ast {
             Regex::Sequence(items) => {
                 assert!(
-                    matches!(&items[1], Regex::RelativeBackreference(-1)),
-                    "expected RelativeBackreference(-1), got: {:?}",
+                    matches!(
+                        &items[1],
+                        Regex::Recursion {
+                            target: RecursionTarget::RelativeGroup(-1)
+                        }
+                    ),
+                    "expected Recursion(RelativeGroup(-1)), got: {:?}",
                     items[1]
                 );
             }

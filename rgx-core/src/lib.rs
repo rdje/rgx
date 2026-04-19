@@ -6483,6 +6483,33 @@ mod tests {
     }
 
     #[test]
+    fn g_bracketed_is_subroutine_call_not_backref() {
+        // Regression pin: `\g<name>`, `\g<N>`, `\g<+N>`, `\g<-N>`,
+        // `\g'name'`, `\g'N'` are **subroutine calls** per PCRE2
+        // (re-execute the named/numbered group). `\g{name}`, `\g{N}`,
+        // and `\gN` remain back-references.
+        // Previously RGX lowered every `\g` form to NamedBackreference,
+        // which misfired on self-recursive forms like
+        // `^(?<name>a|b\g<name>c)` where the group hasn't captured
+        // when the reference is reached.
+        let recursive = Regex::compile(r"^(?<name>a|b\g<name>c)").unwrap();
+        assert!(recursive.is_match("bac"));
+        assert!(recursive.is_match("bbacc"));
+        assert!(recursive.is_match("bbbaccc"));
+        // Numeric subroutine call.
+        let numeric = Regex::compile(r"^(a|b\g<1>c)").unwrap();
+        assert!(numeric.is_match("bac"));
+        assert!(numeric.is_match("bbacc"));
+        // `\g{N}` stays a back-reference and fails the recursive
+        // pattern because the group hasn't captured yet.
+        let brace = Regex::compile(r"^(a|b\g{1}c)").unwrap();
+        assert!(!brace.is_match("bac"));
+        // Ordinary back-reference usage keeps working.
+        let backref = Regex::compile(r"(\w+) \g{1}").unwrap();
+        assert!(backref.is_match("hello hello"));
+    }
+
+    #[test]
     fn substitute_template_strips_length_hint_prefix() {
         // Regression pin: PCRE2 accepts a leading `[N]` in a
         // substitute template as an advisory output-buffer size hint.
