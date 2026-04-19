@@ -251,12 +251,25 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
     let Some((pattern_bytes, modifiers_bytes)) = split_pattern_line(pattern_line) else {
         return Vec::new();
     };
-    let Ok(pattern) = std::str::from_utf8(pattern_bytes) else {
-        return Vec::new();
-    };
-    let pattern = pattern.to_string();
     let full_modifiers = String::from_utf8_lossy(modifiers_bytes).to_string();
     let modifiers = extract_short_modifiers(&full_modifiers);
+
+    // pcre2test `/hex`: the pattern body is a whitespace-separated mix
+    // of 2-hex-digit byte groups and single- or double-quoted literal
+    // runs. Decode it into the actual UTF-8 pattern before compiling.
+    // e.g. `/65 00 64/hex` becomes the three-byte pattern `e\0d`,
+    // `/'ab(?C1)c'/hex` becomes the literal `ab(?C1)c`.
+    let pattern = if full_modifiers.split(',').any(|m| m.trim() == "hex") {
+        match decode_hex_pattern(pattern_bytes) {
+            Some(decoded) => decoded,
+            None => return Vec::new(),
+        }
+    } else {
+        let Ok(pattern) = std::str::from_utf8(pattern_bytes) else {
+            return Vec::new();
+        };
+        pattern.to_string()
+    };
 
     // Walk input subjects in order, tracking `\=` annotations between
     // them. Output lines are walked forward through `ob` too, with
@@ -414,6 +427,55 @@ fn is_subject_echo(line: &[u8]) -> bool {
 /// lines before interpreting escapes. Subjects that need explicit
 /// trailing whitespace use `\x20`, `\t`, etc. (which survive trimming
 /// because the raw bytes are backslash sequences, not whitespace).
+/// Decode a pcre2test `/hex`-flavoured pattern into its actual byte
+/// sequence. The pattern body is a whitespace-separated mix of:
+///   * `'...'` or `"..."` — literal runs (content between the quotes
+///     is copied verbatim, no escape processing).
+///   * bare hex-digit groups — decoded as consecutive byte values
+///     (each group must contain an even number of hex digits).
+/// Returns `None` on any form we cannot decode (odd-length hex, stray
+/// non-hex, unterminated quote, invalid hex digit, or byte stream that
+/// isn't valid UTF-8 when assembled).
+fn decode_hex_pattern(bytes: &[u8]) -> Option<String> {
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() / 2);
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b' ' | b'\t' => {
+                i += 1;
+            }
+            q @ (b'\'' | b'"') => {
+                i += 1;
+                let start = i;
+                while i < bytes.len() && bytes[i] != q {
+                    i += 1;
+                }
+                if i >= bytes.len() {
+                    return None;
+                }
+                out.extend_from_slice(&bytes[start..i]);
+                i += 1; // consume closing quote
+            }
+            _ => {
+                let start = i;
+                while i < bytes.len() && !matches!(bytes[i], b' ' | b'\t' | b'\'' | b'"') {
+                    i += 1;
+                }
+                let group = &bytes[start..i];
+                if group.len() % 2 != 0 {
+                    return None;
+                }
+                for pair in group.chunks(2) {
+                    let hex = std::str::from_utf8(pair).ok()?;
+                    let b = u8::from_str_radix(hex, 16).ok()?;
+                    out.push(b);
+                }
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 fn trim_ws(line: &[u8]) -> &[u8] {
     let mut lo = 0;
     while lo < line.len() && matches!(line[lo], b' ' | b'\t' | b'\r') {
@@ -1758,8 +1820,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_603;
-    const FAIL_BASELINE: usize = 1_615;
+    const PASS_BASELINE: usize = 9_609;
+    const FAIL_BASELINE: usize = 1_609;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

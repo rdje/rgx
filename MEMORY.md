@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Harness: /hex pattern decoding (+6 passes)
+- **What**: `decode_hex_pattern` helper converts `/hex` pattern bodies (whitespace-separated hex byte groups + single/double-quoted literal runs) to their actual byte representation. `extract_pattern_cases` routes through it when `hex` is in the modifier list.
+- **Example**: `/65 00 64/hex` → bytes "e\0d"; `/'(*MARK:>' 00 '<)..'/hex` → "(*MARK:>\x00<).."
+- **Conformance delta**: 9,603 → 9,609 (+6). Closes testinput1:6831, testinput2:5301, 6376, 6382.
+
 ### 2026-04-19 — `\h` U+180E + `Xsp`/`Xps`/`Xwd` Unicode expansion (+59 passes)
 - **What**: Three PCRE2-compat whitespace/word fixes.
   - `\h` / `\H` now include U+180E (MONGOLIAN VOWEL SEPARATOR) — Unicode 6.3 dropped it from White_Space, PCRE2 keeps it for back-compat.

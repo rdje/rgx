@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Harness: `/hex` pattern decoding (+6 passes)
+
+- Scope: pcre2test's `/hex` modifier carries a pattern whose body is a whitespace-separated mix of 2-hex-digit byte groups and single- or double-quoted literal runs — e.g. `/65 00 64/hex` decodes to the three-byte pattern `e\0d`, and `/'(*MARK:>' 00 '<)..'/hex` decodes to `(*MARK:>\x00<)..`. The harness was ignoring the modifier and feeding the raw pattern bytes straight to the compiler, so patterns like `/65 00 64/hex` compiled as the literal string `65 00 64` and failed to match anything.
+- Fix: New `decode_hex_pattern(bytes)` helper walks the pattern, emitting literal content between matching quotes and hex-decoded bytes otherwise. `extract_pattern_cases` detects `hex` in `full_modifiers` and routes through the decoder before compiling.
+- Validation: 1,048 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **9,603 → 9,609 pass** (+6), 1,615 → 1,609 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_609` / `FAIL_BASELINE=1_609`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/hex` cluster — testinput1:6831, testinput2:5301, 6376, 6382 (hex patterns with embedded NUL, MARK verbs, and callouts). The decoder bails out gracefully (returns `None`) on malformed hex input, so mis-specified `/hex` patterns are simply skipped rather than silently miscompiled.
+
 ### 2026-04-19 - PCRE2 synthetic whitespace aliases: `\h` U+180E + `Xsp`/`Xps`/`Xwd` Unicode expansion (+67 passes)
 
 - Scope: Three PCRE2 property/shorthand fixes rolled into one commit because they all share the same PCRE2-vs-Unicode table-discrepancy root cause.
