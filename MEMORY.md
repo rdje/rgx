@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Quantifier retargets across transparent atoms (+10 passes)
+- **What**: PCRE2 treats `(?#...)` comments and /x-mode whitespace as transparent for quantifier attachment. PGEN attaches `{N}` to the immediately-preceding atom (the comment/whitespace). RGX's compiler now rewires the quantifier onto the nearest real atom in a post-pass.
+- **Two passes**: `strip_x_mode_sequence` handles /x-mode (Quantified(WhitespaceLiteral, q) transfer). New `retarget_quantifiers_on_transparent` runs universally — drops bare `Empty` nodes from sequences, then transfers `Quantified(Empty, q)` to the nearest real atom. Walks Sequence/Alternation/Quantified/Group/Lookahead/Lookbehind/FlagGroup.
+- **Closes**: `(?#xxx){N}c` and `(?x)b *c` clusters.
+- **Conformance delta**: 9,534 → 9,544 (+10). One regression pin.
+
 ### 2026-04-19 — `\p{Lu}` / `\p{Ll}` / `\p{Lt}` under `/i` expand to `\p{L&}` (+8 passes)
 - **What**: Under /i, case-distinguished letter properties fold — `\p{Lu}/i` matches any cased letter. RGX was resolving to literal Lu only.
 - **Fix**: In VM codegen for `CharClass::UnicodeClass` and `Regex::UnicodeClass`, remap Lu/Ll/Lt → `L&` when `self.case_insensitive` is true. The `L&` alias already exists in `resolve_pcre2_alias` (Lu|Ll|Lt merged). Negation propagates via `CharClass::Custom.negated`.

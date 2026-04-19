@@ -6483,6 +6483,24 @@ mod tests {
     }
 
     #[test]
+    fn quantifier_retargets_across_transparent_atoms() {
+        // Regression pin: PCRE2 treats `(?#...)` comments and /x-mode
+        // whitespace as transparent for quantifier attachment. A
+        // quantifier that PGEN parses as applying to the transparent
+        // filler (Empty for comments, WhitespaceLiteral for /x
+        // whitespace) must be transferred to the preceding real
+        // atom at compile time, matching PCRE2's effective pattern.
+        // `^a(?#xxx){3}c` = `^a{3}c` = match "aaac".
+        let re = Regex::compile(r"^a(?#xxx){3}c").unwrap();
+        assert!(re.is_match("aaac"));
+        let re = Regex::compile(r"(?x)b *c").unwrap();
+        assert!(re.is_match("bbbc"));
+        // Multiple comments between atom and quantifier also retarget.
+        let re = Regex::compile(r"^a(?#a)(?#b){3}c").unwrap();
+        assert!(re.is_match("aaac"));
+    }
+
+    #[test]
     fn case_distinguished_property_expands_under_i() {
         // Regression pin: under /i, PCRE2 expands the case-
         // distinguished letter properties `\p{Lu}` / `\p{Ll}` /

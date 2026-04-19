@@ -489,6 +489,7 @@ impl Compiler {
         let ast = Self::assign_capture_indices(ast);
         let ast = Self::lower_flag_toggles(ast);
         let ast = Self::strip_extended_mode(ast);
+        let ast = Self::retarget_quantifiers_on_transparent(ast);
         let ast = Self::lower_extended_char_classes(ast)?;
         debug_log!("compiler", "AST: {:?}", ast);
         if let Some(msg) = Self::parser_boundary_validation_message(&ast) {
@@ -1100,11 +1101,100 @@ impl Compiler {
     /// This operates on the *raw* sequence items (before `WhitespaceLiteral`
     /// is lowered) so that newline whitespace literals can correctly terminate
     /// `#`-comments.
+    /// Post-process the AST so that a `Quantified(Empty, q)` node (e.g.
+    /// the quantifier produced by `(?#comment){3}` where the comment
+    /// lowers to `Empty`) re-attaches its quantifier to the preceding
+    /// real atom in its surrounding sequence. PCRE2 treats comments
+    /// as transparent — the quantifier applies to the nearest atom
+    /// before the comment. Without this pass, `^a(?#xxx){3}c` would
+    /// compile as `^a + empty{3} + c = ^ac` and miss `aaac`.
+    ///
+    /// `strip_x_mode_sequence` already handles the `/x`-mode variant
+    /// (transferring quantifiers from quantified-whitespace atoms);
+    /// this is the universal version for `Empty` wrappers that arise
+    /// from `(?#...)` regardless of `/x` state.
+    fn retarget_quantifiers_on_transparent(ast: RegexAst) -> RegexAst {
+        match ast {
+            RegexAst::Sequence(items) => {
+                // Drop bare `Empty` nodes from the sequence up front —
+                // they come from `(?#comment)` lowerings and confuse the
+                // "previous atom" lookup when more than one comment
+                // sits between an atom and its quantifier.
+                let items: Vec<RegexAst> = items
+                    .into_iter()
+                    .map(Self::retarget_quantifiers_on_transparent)
+                    .filter(|node| !matches!(node, RegexAst::Empty))
+                    .collect();
+                let mut result: Vec<RegexAst> = Vec::with_capacity(items.len());
+                for item in items {
+                    match item {
+                        RegexAst::Quantified { expr, quantifier }
+                            if matches!(expr.as_ref(), RegexAst::Empty) =>
+                        {
+                            if let Some(prev) = result.pop() {
+                                let new_expr = match prev {
+                                    RegexAst::Quantified { .. } => prev,
+                                    other => RegexAst::Quantified {
+                                        expr: Box::new(other),
+                                        quantifier,
+                                    },
+                                };
+                                result.push(new_expr);
+                            } else {
+                                result.push(RegexAst::Quantified { expr, quantifier });
+                            }
+                        }
+                        other => result.push(other),
+                    }
+                }
+                match result.len() {
+                    0 => RegexAst::Empty,
+                    1 => result.into_iter().next().unwrap(),
+                    _ => RegexAst::Sequence(result),
+                }
+            }
+            RegexAst::Alternation(items) => RegexAst::Alternation(
+                items
+                    .into_iter()
+                    .map(Self::retarget_quantifiers_on_transparent)
+                    .collect(),
+            ),
+            RegexAst::Quantified { expr, quantifier } => RegexAst::Quantified {
+                expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
+                quantifier,
+            },
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => RegexAst::Group {
+                expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
+                kind,
+                index,
+                name,
+            },
+            RegexAst::Lookahead { expr, positive } => RegexAst::Lookahead {
+                expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
+                positive,
+            },
+            RegexAst::Lookbehind { expr, positive } => RegexAst::Lookbehind {
+                expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
+                positive,
+            },
+            RegexAst::FlagGroup { flags, expr } => RegexAst::FlagGroup {
+                flags,
+                expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
+            },
+            other => other,
+        }
+    }
+
     fn strip_x_mode_sequence(items: Vec<RegexAst>) -> Vec<RegexAst> {
-        let mut result = Vec::with_capacity(items.len());
+        let mut result: Vec<RegexAst> = Vec::with_capacity(items.len());
         let mut iter = items.into_iter();
         while let Some(item) = iter.next() {
-            match &item {
+            match item {
                 // Drop unescaped whitespace.
                 RegexAst::WhitespaceLiteral(_) | RegexAst::Empty => {}
                 // `#` starts a comment — skip until a newline or end of
@@ -1121,7 +1211,38 @@ impl Compiler {
                         }
                     }
                 }
-                _ => result.push(item),
+                // `Quantified(WhitespaceLiteral | Empty, q)` — PGEN
+                // attached `q` to a transparent atom (intervening
+                // whitespace under /x). Under /x semantics the
+                // whitespace is stripped, so the quantifier should
+                // apply to the previous real atom instead. Transfer it.
+                // e.g. `(?x)b *c` parses as [Char('b'),
+                // Quantified(WhitespaceLiteral(' '), *), Char('c')] and
+                // must become [Quantified(Char('b'), *), Char('c')].
+                RegexAst::Quantified { expr, quantifier }
+                    if matches!(
+                        expr.as_ref(),
+                        RegexAst::WhitespaceLiteral(_) | RegexAst::Empty
+                    ) =>
+                {
+                    if let Some(prev) = result.pop() {
+                        // Don't wrap another Quantified around a Quantified —
+                        // transfer to its body instead. (Rare; e.g. `a** /x`.)
+                        let new_expr = match prev {
+                            RegexAst::Quantified { .. } => prev,
+                            other => RegexAst::Quantified {
+                                expr: Box::new(other),
+                                quantifier,
+                            },
+                        };
+                        result.push(new_expr);
+                    } else {
+                        // No previous atom to attach to — preserve the
+                        // original form so the compiler surfaces it.
+                        result.push(RegexAst::Quantified { expr, quantifier });
+                    }
+                }
+                other => result.push(other),
             }
         }
         result

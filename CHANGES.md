@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Quantifier retargets across transparent atoms (+10 passes)
+
+- Scope: PCRE2 treats `(?#…)` comments and `/x`-mode whitespace as transparent for quantifier attachment. PGEN's grammar attaches a quantifier to the immediately preceding atom, so `^a(?#xxx){3}c` parses as a sequence of `[^, Char('a'), Quantified(Empty, {3}), Char('c')]` where the quantifier wraps the comment (lowered to `Empty`) instead of the `a`. Similarly `(?x)b *c` parses with `*` on the whitespace-literal between `b` and `c`. Both match PCRE2's documented semantics, so the compiler needs a post-pass that re-hosts the quantifier on the nearest real atom.
+- Fix: Two complementary passes in `rgx-core/src/compiler.rs`.
+  - `strip_x_mode_sequence` now detects `Quantified(WhitespaceLiteral | Empty, q)` in an `/x` sequence and pops the preceding result-entry to rebuild it as `Quantified(atom, q)` (with a guard against double-wrapping when the previous entry was itself a `Quantified`).
+  - New `retarget_quantifiers_on_transparent` compiler pass runs before `lower_extended_char_classes` and does the same transfer universally (not just `/x`). It drops bare `Empty` nodes up front so multiple consecutive comments don't block the lookup of the real preceding atom. Walks through `Sequence`, `Alternation`, `Quantified`, `Group`, `Lookahead`, `Lookbehind`, `FlagGroup`.
+- Validation: 1,046 lib tests pass (1,045 baseline + 1 new regression pin `quantifier_retargets_across_transparent_atoms`). 30 rgx-cli tests pass. PCRE2 conformance **9,534 → 9,544 pass** (+10), 1,684 → 1,674 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_544` / `FAIL_BASELINE=1_674`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `(?#xxx){N}c` comment-then-quantifier cluster in testinput1:3410+3413 and the `/x` quantifier-on-whitespace family in testinput1:3957+3964. The pass is self-contained (compiler-only, no runtime impact) so RGX users get the semantics match without any API change.
+
 ### 2026-04-19 - Case-distinguished `\p{Lu}` / `\p{Ll}` / `\p{Lt}` under `/i` expand to `\p{L&}` (+8 passes)
 
 - Scope: Under PCRE2's `/i` flag, the case-distinguished letter properties fold together — `\p{Lu}` matches any cased letter (Lu|Ll|Lt) on /i, same for `\p{Ll}` and `\p{Lt}`. The negated forms `\P{Lu}/i` etc. exclude the whole cased-letter set. RGX was resolving each property to its literal range (only Lu, only Ll, only Lt) regardless of the case-insensitive flag, so `(?i)\p{Lu}` on "a" missed the match.
