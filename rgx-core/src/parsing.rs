@@ -390,6 +390,56 @@ struct PgenAstAdapter<'a> {
     /// VT, FF, NEL (U+0085), LINE SEPARATOR, PARAGRAPH SEPARATOR.
     /// Detected by scanning the pattern for `(*BSR_ANYCRLF)`.
     bsr_anycrlf: bool,
+    /// PCRE2 newline convention: the set of characters treated as
+    /// newlines by `.`, `\N`, and (under `/m`) `^` / `$`. Detected
+    /// from `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
+    /// `(*NUL)` pattern-start pragmas. Default is `Lf` (matches RGX's
+    /// pre-existing behaviour — `.` excludes `\n` only).
+    newline_mode: NewlineMode,
+}
+
+/// Character(s) that PCRE2 treats as a newline for the purposes of
+/// `.` / `\N` exclusion and `^` / `$` line-boundary matching. Derived
+/// from the pattern-start `(*NEWLINE)` pragma family.
+#[cfg(feature = "pgen-parser")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewlineMode {
+    /// Only `\n` (U+000A) is a newline — PCRE2's `(*LF)` and the
+    /// conventional RGX default when no pragma is specified.
+    Lf,
+    /// Only `\r` (U+000D) is a newline — PCRE2's `(*CR)`.
+    Cr,
+    /// Only the two-byte sequence `\r\n` is a newline — PCRE2's
+    /// `(*CRLF)`. For `.`-exclusion purposes both bytes are excluded
+    /// (PCRE2 drops the second byte of the pair implicitly).
+    Crlf,
+    /// `\r`, `\n`, and `\r\n` are all newlines — PCRE2's `(*ANYCRLF)`.
+    Anycrlf,
+    /// Full Unicode newline set: `\r`, `\n`, `\x0B` (VT), `\x0C` (FF),
+    /// `\x85` (NEL), `\u{2028}` (LINE SEPARATOR), `\u{2029}` (PARAGRAPH
+    /// SEPARATOR). PCRE2's `(*ANY)`.
+    Any,
+    /// Only the NUL byte is a newline — PCRE2's `(*NUL)`.
+    Nul,
+}
+
+#[cfg(feature = "pgen-parser")]
+impl NewlineMode {
+    /// Return the set of codepoints that the newline convention
+    /// excludes from `.` / `\N`. Used to rewrite `Regex::Dot` into an
+    /// explicit negated character class when the mode differs from
+    /// the default.
+    fn newline_chars(self) -> Vec<char> {
+        match self {
+            NewlineMode::Lf => vec!['\n'],
+            NewlineMode::Cr => vec!['\r'],
+            NewlineMode::Crlf | NewlineMode::Anycrlf => vec!['\r', '\n'],
+            NewlineMode::Any => vec![
+                '\r', '\n', '\u{0B}', '\u{0C}', '\u{85}', '\u{2028}', '\u{2029}',
+            ],
+            NewlineMode::Nul => vec!['\0'],
+        }
+    }
 }
 
 #[cfg(feature = "pgen-parser")]
@@ -406,11 +456,51 @@ impl<'a> PgenAstAdapter<'a> {
             (Some(_), None) => true,
             _ => false,
         };
+        // Newline-convention pragmas: last-wins. Default `Lf` matches
+        // the pre-existing RGX behaviour (no pragma → `\n`-only
+        // newlines).
+        let newline_mode = [
+            ("(*LF)", NewlineMode::Lf),
+            ("(*CR)", NewlineMode::Cr),
+            ("(*CRLF)", NewlineMode::Crlf),
+            ("(*ANYCRLF)", NewlineMode::Anycrlf),
+            ("(*ANY)", NewlineMode::Any),
+            ("(*NUL)", NewlineMode::Nul),
+        ]
+        .iter()
+        .filter_map(|(pragma, mode)| pattern.rfind(pragma).map(|idx| (idx, *mode)))
+        .max_by_key(|(idx, _)| *idx)
+        .map(|(_, mode)| mode)
+        .unwrap_or(NewlineMode::Lf);
         Self {
             pattern,
             ucp_enabled,
             bsr_anycrlf,
+            newline_mode,
         }
+    }
+
+    /// Build the AST for `.` / `\N`. In the default `Lf` newline mode
+    /// we hand back the shared `Regex::Dot` atom (the compiler emits
+    /// `Any`-excludes-`\n`). Under any other PCRE2 newline convention
+    /// we rewrite to a negated `CharClass::Custom` that excludes the
+    /// mode-specific newline characters so both the VM and C2 codegens
+    /// see the same tree without backend changes.
+    fn dot_ast(&self) -> Regex {
+        if self.newline_mode == NewlineMode::Lf {
+            return Regex::Dot;
+        }
+        let mut ranges: Vec<CharRange> = self
+            .newline_mode
+            .newline_chars()
+            .into_iter()
+            .map(CharRange::single)
+            .collect();
+        ranges.sort_by_key(|r| r.start);
+        Regex::CharClass(CharClass::Custom {
+            ranges,
+            negated: true,
+        })
     }
 
     /// Build the AST for `\R`. In `BSR_UNICODE` mode (default) the
@@ -598,7 +688,7 @@ impl<'a> PgenAstAdapter<'a> {
             "backreference" => self.convert_named_backreference(actual),
             // Native atom handlers — no builtin parser fallback
             "literal" => self.convert_literal(actual),
-            "dot" => Ok(Regex::Dot),
+            "dot" => Ok(self.dot_ast()),
             "anchor" => self.convert_anchor(actual),
             "escape" => self.convert_escape(actual),
             "char_class" => self.convert_char_class(actual),
@@ -745,7 +835,7 @@ impl<'a> PgenAstAdapter<'a> {
             // Route them to the nodes `convert_simple_escape`
             // already produces.
             "\\R" => Ok(self.newline_sequence_ast()),
-            "\\N" => Ok(Regex::Dot),
+            "\\N" => Ok(self.dot_ast()),
             "\\X" => Ok(Regex::GraphemeCluster),
             other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
         }
@@ -927,7 +1017,7 @@ impl<'a> PgenAstAdapter<'a> {
             'R' => Ok(self.newline_sequence_ast()),
 
             // PCRE2 non-newline (\N) — matches any char except newline, same as . in non-dotall
-            'N' => Ok(Regex::Dot),
+            'N' => Ok(self.dot_ast()),
 
             // PCRE2 extended grapheme cluster (\X)
             'X' => Ok(Regex::GraphemeCluster),

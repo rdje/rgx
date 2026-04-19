@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Newline convention pragmas change `.` / `\N` exclusion (+40 passes)
+- **What**: `PgenAstAdapter` detects `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` (last-wins) and emits a negated `CharClass::Custom` for `.` / `\N` when the mode isn't the default Lf. Harness threads `newline=VALUE` through as an `InlineFlag("(*VALUE_UPPER)")`.
+- **Remaining gap**: `^` / `$` under `/m` still uses the hard-coded `\n`-only line boundary. Tracked for a later pass that threads newline_mode into the line-anchor opcodes.
+- **Conformance delta**: 9,633 → 9,673 (+40). Ratchet bumped to 9,673 / 1,545. One regression pin.
+
 ### 2026-04-20 — `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` restrict `\R` (+20 passes)
 - **What**: `PgenAstAdapter` detects BSR pragmas (last-wins) and emits a restricted `(?:\r\n|\r|\n)` alternation for `\R` under `BSR_ANYCRLF`; otherwise emits the shared `Regex::NewlineSequence` (full Unicode newline set). Harness remaps `bsr=anycrlf` / `bsr=unicode` modifiers to the corresponding `(*BSR_…)` start-verb prepend.
 - **Why**: Tests like `/a\Rb/I,bsr=anycrlf` want `\R` to match only CR/LF/CRLF. RGX was always matching the full set, producing FP on NEL / VT subjects.

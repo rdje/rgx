@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` newline pragmas change `.` / `\N` exclusion (+40 passes)
+
+- Scope: PCRE2 lets the pattern select which characters count as "newlines" for the purposes of `.` (and its alias `\N`) exclusion via the `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` pattern-start pragmas and the equivalent `newline=VALUE` compile option. RGX was always treating `\n` as the sole newline, so tests like `/^a.b/newline=cr` falsely matched `a\rb` (`.` shouldn't accept `\r`) and missed `a\nb` (`.` *should* accept `\n` under `(*CR)`).
+- Fix: Two pieces.
+  - `rgx-core/src/parsing.rs` gains a `NewlineMode` enum (`Lf` / `Cr` / `Crlf` / `Anycrlf` / `Any` / `Nul`) on `PgenAstAdapter`. `NewlineMode::new` scans the pattern for every pragma (last-wins, default `Lf` — preserves existing RGX behaviour). `convert_simple_escape` for `.` / `\N` and the `"dot"` / `"\\N"` branches of `convert_escape` delegate to a new `dot_ast()` helper that returns the shared `Regex::Dot` for `Lf` mode or a negated `CharClass::Custom` with the mode-specific newline list otherwise. No VM / C2 backend changes — both codegens see the normalised tree.
+  - `rgx-core/tests/pcre2_conformance.rs` `classify_modifier` parses `newline=VALUE` and returns `InlineFlag("(*VALUE_UPPER)")` so pcre2test's `newline=cr` etc. thread through as pragmas at pattern-compile time.
+- Validation: 1,051 lib tests pass (1,050 baseline + 1 new regression pin `newline_pragmas_change_dot_exclusion_set`). 30 rgx-cli tests pass. PCRE2 conformance **9,633 → 9,673 pass** (+40), 1,585 → 1,545 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_673` / `FAIL_BASELINE=1_545`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/^a.b/newline=XX` and `/^a./newline=XX` FP clusters in testinput2 and testinput6, plus the `/.+foo/newline=XX` FN cases. `^` / `$` line-boundary handling under `/m` with non-default newline convention is still pending — tracked separately because it requires threading the mode into the line-anchor opcodes.
+
 ### 2026-04-20 - `(*BSR_ANYCRLF)` / `(*BSR_UNICODE)` pragmas restrict `\R` expansion (+20 passes)
 
 - Scope: PCRE2 defines two modes for `\R` (Backslash-R / Unicode newline):

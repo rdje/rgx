@@ -1010,6 +1010,23 @@ fn classify_modifier(m: &str) -> ModifierAction {
         }
         return ModifierAction::Ignore;
     }
+    if key == "newline" {
+        let value = m
+            .split('=')
+            .nth(1)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        return match value.as_str() {
+            "cr" => ModifierAction::InlineFlag("(*CR)"),
+            "lf" => ModifierAction::InlineFlag("(*LF)"),
+            "crlf" => ModifierAction::InlineFlag("(*CRLF)"),
+            "anycrlf" => ModifierAction::InlineFlag("(*ANYCRLF)"),
+            "any" => ModifierAction::InlineFlag("(*ANY)"),
+            "nul" => ModifierAction::InlineFlag("(*NUL)"),
+            _ => ModifierAction::Ignore,
+        };
+    }
     match key {
         // -- Short flags mapped to RegexBuilder knobs -----------------
         "i" | "caseless" => ModifierAction::CaseInsensitive,
@@ -1836,8 +1853,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_633;
-    const FAIL_BASELINE: usize = 1_585;
+    const PASS_BASELINE: usize = 9_673;
+    const FAIL_BASELINE: usize = 1_545;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

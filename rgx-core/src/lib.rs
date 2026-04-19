@@ -6483,6 +6483,31 @@ mod tests {
     }
 
     #[test]
+    fn newline_pragmas_change_dot_exclusion_set() {
+        // Regression pin: PCRE2 `(*CR)` / `(*LF)` / `(*CRLF)` /
+        // `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` pragmas change the
+        // newline convention — which characters `.` / `\N` refuse
+        // to match. Default is `(*LF)` (only `\n` excluded).
+        // `(*CR)` mode: only `\r` excluded, so `.` matches `\n`.
+        let cr = Regex::compile(r"(*CR)^a.b").unwrap();
+        assert!(cr.is_match("a\nb"));
+        assert!(!cr.is_match("a\rb"));
+        // `(*ANY)` mode: all Unicode newlines excluded.
+        let any = Regex::compile(r"(*ANY)^a.b").unwrap();
+        assert!(!any.is_match("a\nb"));
+        assert!(!any.is_match("a\u{85}b"));
+        assert!(any.is_match("aXb"));
+        // `(*NUL)` mode: only `\0` excluded.
+        let nul = Regex::compile(r"(*NUL)^a.b").unwrap();
+        assert!(!nul.is_match("a\0b"));
+        assert!(nul.is_match("a\nb"));
+        // `\N` mirrors `.`: same exclusion set.
+        let cr_n = Regex::compile(r"(*CR)a\Nb").unwrap();
+        assert!(cr_n.is_match("a\nb"));
+        assert!(!cr_n.is_match("a\rb"));
+    }
+
+    #[test]
     fn bsr_anycrlf_restricts_backslash_r() {
         // Regression pin: PCRE2 `(*BSR_ANYCRLF)` limits `\R` to
         // CR / LF / CRLF. The default `BSR_UNICODE` mode (also
