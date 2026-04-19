@@ -304,7 +304,14 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
             }
             continue;
         }
-        let Some(subject) = decode_subject(trimmed) else {
+        // Detect /utf at the pattern level so subject `\x{NN}`
+        // escapes decode as UTF-8 codepoints rather than raw bytes
+        // (pcre2test's PCRE2_UTF convention).
+        let utf_mode = full_modifiers.split(',').any(|m| {
+            let m = m.trim();
+            m == "utf" || m == "utf8" || m == "utf16" || m == "utf32"
+        });
+        let Some(subject) = decode_subject_mode(trimmed, utf_mode) else {
             continue;
         };
 
@@ -314,7 +321,7 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
         let substitute_mode = extract_substitute_template(&full_modifiers).is_some();
 
         // Read this subject's expected output from ob[oi..].
-        let (expected, consumed) = parse_subject_output(ob, oi, substitute_mode);
+        let (expected, consumed) = parse_subject_output(ob, oi, substitute_mode, utf_mode);
         oi += consumed;
 
         cases.push(TestCase {
@@ -484,6 +491,15 @@ fn extract_short_modifiers(full: &str) -> String {
 /// else — including `\?`, `\=`, `\$` — appears in the output as
 /// literal text (a backslash byte followed by the character).
 fn decode_output(line: &[u8]) -> Option<Vec<u8>> {
+    decode_output_mode(line, false)
+}
+
+/// Output-line decoder with explicit UTF-8 encoding selection. Mirrors
+/// `decode_subject_mode`: under /utf, `\x{NN}` in pcre2test's output
+/// encodes the UTF-8 byte sequence for U+00NN rather than the raw
+/// byte, matching how PCRE2 actually emits matched substrings in UTF
+/// mode. Under non-/utf tests, low-byte `\x{NN}` stays raw.
+fn decode_output_mode(line: &[u8], utf_mode: bool) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(line.len());
     let mut i = 0;
     while i < line.len() {
@@ -513,7 +529,7 @@ fn decode_output(line: &[u8]) -> Option<Vec<u8>> {
                     }
                     let hex = std::str::from_utf8(&line[i + 3..j]).ok()?;
                     let cp = u32::from_str_radix(hex, 16).ok()?;
-                    if cp <= 0xFF {
+                    if cp <= 0xFF && !utf_mode {
                         out.push(cp as u8);
                     } else {
                         let c = char::from_u32(cp)?;
@@ -549,6 +565,18 @@ fn decode_output(line: &[u8]) -> Option<Vec<u8>> {
 /// Returns the raw subject bytes; returns None if the escape form is one
 /// we don't handle.
 fn decode_subject(line: &[u8]) -> Option<Vec<u8>> {
+    decode_subject_mode(line, false)
+}
+
+/// Subject-line decoder with explicit UTF-8 encoding selection. When
+/// `utf_mode` is `true` (pattern carried the `utf` / `utf8` / `utf16`
+/// / `utf32` modifier), every `\x{N}` escape is UTF-8 encoded —
+/// matching pcre2test's behaviour under PCRE2_UTF. When `false`,
+/// low-byte `\x{NN}` escapes (cp ≤ 0xFF) stay as raw bytes so
+/// non-UTF tests preserve their byte-level semantics (the harness's
+/// Latin-1 fallback in `run_case` then maps them back to codepoint
+/// U+00NN for RGX's str-based matching).
+fn decode_subject_mode(line: &[u8], utf_mode: bool) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(line.len());
     let mut i = 0;
     while i < line.len() {
@@ -597,8 +625,11 @@ fn decode_subject(line: &[u8]) -> Option<Vec<u8>> {
                     }
                     let hex = std::str::from_utf8(&line[i + 3..j]).ok()?;
                     let cp = u32::from_str_radix(hex, 16).ok()?;
-                    // Encode as UTF-8 if > 0xFF; else push raw byte.
-                    if cp <= 0xFF {
+                    // Under /utf, `\x{NN}` is the UTF-8 encoding of
+                    // U+00NN (pcre2test convention). Outside /utf, low
+                    // codepoints stay as raw bytes for byte-level
+                    // semantics.
+                    if cp <= 0xFF && !utf_mode {
                         out.push(cp as u8);
                     } else {
                         let c = char::from_u32(cp)?;
@@ -654,6 +685,7 @@ fn parse_subject_output(
     out_lines: &[&[u8]],
     start: usize,
     substitute_mode: bool,
+    utf_mode: bool,
 ) -> (Expected, usize) {
     let mut consumed = 0;
     // First line is the echoed subject (starts with 4 spaces). Skip it.
@@ -708,8 +740,8 @@ fn parse_subject_output(
             if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
                 if let Some(body) = rest.strip_prefix(':') {
                     let body = body.strip_prefix(' ').unwrap_or(body);
-                    let decoded =
-                        decode_output(body.as_bytes()).unwrap_or_else(|| body.as_bytes().to_vec());
+                    let decoded = decode_output_mode(body.as_bytes(), utf_mode)
+                        .unwrap_or_else(|| body.as_bytes().to_vec());
                     consumed += 1;
                     return (
                         Expected::Substitute {
@@ -782,7 +814,7 @@ fn parse_subject_output(
             // leading whitespace (e.g. ` 0:  ` means matched text = " ").
             let body = trimmed.trim_start_matches("0:");
             let body = body.strip_prefix(' ').unwrap_or(body);
-            overall = decode_output(body.as_bytes());
+            overall = decode_output_mode(body.as_bytes(), utf_mode);
             consumed += 1;
             idx += 1;
             continue;
@@ -1716,8 +1748,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_326;
-    const FAIL_BASELINE: usize = 1_892;
+    const PASS_BASELINE: usize = 9_406;
+    const FAIL_BASELINE: usize = 1_812;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

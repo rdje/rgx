@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Harness: UTF-8 encode `\x{NN}` under `/utf` (+80 passes)
+- **What**: `decode_subject_mode` + `decode_output_mode` helpers now UTF-8-encode every `\x{N}` when `/utf` is set (pcre2test convention). Non-/utf tests keep raw-byte decoding for low codepoints.
+- **Why**: Mixed-width subjects like `\x{a0}\x{1680}` produced invalid UTF-8 byte streams, triggering the Latin-1 fallback which mangled multi-byte chars. The big UCP category tests (`\w+`, `\s+`, POSIX classes under /utf,ucp) were silently failing because the subject RGX matched against wasn't the subject PCRE2 matched against.
+- **Wiring**: `parse_cases` computes `utf_mode` from `full_modifiers`, threads into both `decode_subject_mode` and `parse_subject_output` (new parameter). Both decoders share the same cp-≤-0xFF branching.
+- **Conformance delta**: 9,326 → 9,406 (+80). Ratchet bumped to 9,406 / 1,812. No regression pins (harness-only change).
+- **Revisits the earlier aborted detour**: the first try (global UTF-8 for all tests) regressed because byte-mode tests rely on raw-byte semantics. The /utf-gated version preserves that invariant while fixing the UTF-mode stream.
+
 ### 2026-04-19 — UCP `[:graph:]` / `[:print:]` include Cf + Co (+29 passes)
 - **What**: `ucp_posix_class_ranges` for `graph` now spans L+M+N+P+S+Cf+Co; `print` spans that plus Zs. Matches PCRE2 implementation (not docs — docs list only L+M+N+P+S).
 - **Why**: testinput4 `[[:graph:]]+$/utf,ucp` matches Cf-property chars (U+200B, U+200C, U+FEFF, ...) and private-use chars per the pcre2test expected output. PCRE2's implementation is the source of truth when docs differ.
