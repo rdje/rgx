@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-19 - Harness: /g first-match anchor for comparison (+120 passes)
+
+- Scope: Under `/g`, pcre2test emits one ` 0: <text>` line per match on the same subject. `parse_subject_output` was overwriting the `overall` binding on every ` 0:` line, leaving only the LAST match as the expected value. But `run_case` compares against RGX's `find_all(subject).into_iter().next()` — the FIRST match. So any subject with more than one match on a `/g` pattern produced a spurious first-vs-last mismatch, e.g. `/\Gabc./g` on `abc1abc2xyzabc3` expected "abc2" (last) vs RGX "abc1" (first).
+- Fix: Record `overall` on the first ` 0:` line only; subsequent ` 0:` lines are consumed (to advance `idx`) but do not overwrite the anchor. Keeps the two sides in the same "first-match" frame of reference.
+- Validation: 1,044 rgx-core lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **9,406 → 9,526 pass** (+120), 1,812 → 1,692 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_526` / `FAIL_BASELINE=1_692`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Single largest harness-correctness fix of the session. The /g bucket shrinks from 73 → single digits in span mismatch. Closes the /g `\G`-anchored, lookbehind, and multi-match span clusters across testinput1, testinput2, and testinput5.
+
 ### 2026-04-19 - Harness subject / output: UTF-8 encode `\x{NN}` under `/utf` (+80 passes)
 
 - Scope: pcre2test's `/utf` mode interprets `\x{N}` in subjects and emitted output as the UTF-8 encoding of U+00N — *not* as a raw byte. The harness was always pushing cp ≤ 0xFF as a raw byte, which produced invalid UTF-8 byte streams for subjects that mixed `\x{NN}` and `\x{NNNN}` escapes (e.g. `\x{a0}\x{1680}` → bytes `A0 E1 9A 80`). The `std::str::from_utf8` check in `run_case` then failed, the Latin-1 fallback kicked in, and multi-byte UTF-8 sequences like `E1 9A 80` got mangled into three separate Latin-1 codepoints. RGX saw the wrong subject and emitted spans that disagreed with PCRE2's output.

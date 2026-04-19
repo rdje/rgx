@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-19 — Harness: /g first-match anchor (+120 passes)
+- **What**: `parse_subject_output` was overwriting `overall` on every ` 0:` line, leaving only the LAST match as expected. RGX's comparison path uses `find_all().next()` — the FIRST match. First-vs-last mismatch for every multi-match /g subject.
+- **Fix**: `if overall.is_none()` guard so only the first ` 0:` line sets the anchor; subsequent lines are consumed but don't overwrite.
+- **Conformance delta**: 9,406 → 9,526 (+120). Ratchet bumped to 9,526 / 1,692.
+- **Largest harness-correctness fix of the session.** Single biggest /g cluster closure (`\G`-anchored, lookbehind, multi-match span across testinput1/2/5).
+
 ### 2026-04-19 — Harness: UTF-8 encode `\x{NN}` under `/utf` (+80 passes)
 - **What**: `decode_subject_mode` + `decode_output_mode` helpers now UTF-8-encode every `\x{N}` when `/utf` is set (pcre2test convention). Non-/utf tests keep raw-byte decoding for low codepoints.
 - **Why**: Mixed-width subjects like `\x{a0}\x{1680}` produced invalid UTF-8 byte streams, triggering the Latin-1 fallback which mangled multi-byte chars. The big UCP category tests (`\w+`, `\s+`, POSIX classes under /utf,ucp) were silently failing because the subject RGX matched against wasn't the subject PCRE2 matched against.

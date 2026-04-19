@@ -812,9 +812,19 @@ fn parse_subject_output(
             // Strip the `0:` label plus exactly one separator space —
             // not `trim_start`, because the matched text itself may be
             // leading whitespace (e.g. ` 0:  ` means matched text = " ").
-            let body = trimmed.trim_start_matches("0:");
-            let body = body.strip_prefix(' ').unwrap_or(body);
-            overall = decode_output_mode(body.as_bytes(), utf_mode);
+            //
+            // Under /g pcre2test emits one ` 0: <text>` line per match
+            // on the same subject. RGX's single-match comparison uses
+            // `find_all(...).into_iter().next()` — the first match — so
+            // we record only the first ` 0:` body here. Subsequent
+            // lines are consumed but do not overwrite the anchor,
+            // keeping the two sides in the same "first-match" frame of
+            // reference.
+            if overall.is_none() {
+                let body = trimmed.trim_start_matches("0:");
+                let body = body.strip_prefix(' ').unwrap_or(body);
+                overall = decode_output_mode(body.as_bytes(), utf_mode);
+            }
             consumed += 1;
             idx += 1;
             continue;
@@ -1748,8 +1758,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_406;
-    const FAIL_BASELINE: usize = 1_812;
+    const PASS_BASELINE: usize = 9_526;
+    const FAIL_BASELINE: usize = 1_692;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
