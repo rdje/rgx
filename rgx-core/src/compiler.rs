@@ -576,8 +576,10 @@ impl Compiler {
         // forward it to the VM compiler; stored on `Program` so the
         // opcodes can read it in both the main VM and the subexpr VM.
         let newline_mode = newline_mode_from_pattern(raw_label);
+        let ucp_enabled = raw_label.contains("(*UCP)");
         let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
         vm_compiler.set_newline_mode(newline_mode);
+        vm_compiler.set_ucp_enabled(ucp_enabled);
         let mut program = vm_compiler.compile(&ast);
         program.named_groups = named_groups;
 

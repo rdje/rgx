@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — VM: `\b` / `\B` honour PCRE2_UCP (+13 passes)
+- **What**: `(*UCP)` switched `\d`/`\w`/`\s` to Unicode ranges but `\b`/`\B` stayed ASCII-only. Added `Program.ucp_enabled` (propagated from `(*UCP)` pragma via compiler.rs) and routed all 5 WordBoundary call sites through unified `is_at_word_boundary(ctx, ucp)` — Rust's `is_alphanumeric` covers PCRE2's UCP word set `L|N|_` exactly. Also folded the `execute_at_continuation` byte-level fast path into the same helper.
+- **Delta**: 11,598 → 11,611 (+13 pass), 1,212 → 1,199 fail. Closes `/\b...\B/utf,ucp` and `/\b...\B/ucp` clusters in testinput5/7. Baselines 11,611 / 1,199.
+
 ### 2026-04-21 — VM: `OpCode::GraphemeCluster` in `execute_subexpr_inner` (+35 passes, first engine fix of session)
 - **What**: Quantified `\X` (`\X+`, `\X*`, `\X?`, `\X{m,n}`) was broken at the VM level. PlusGreedy/StarGreedy/QuestionGreedy dispatch their inner sub-program through `execute_subexpr_inner`, which had no `OpCode::GraphemeCluster` arm — so every inner-`\X` execution dropped to the unreachable path and returned false. Added the arm mirroring the main-loop handler (unicode_segmentation grapheme iteration, advance by cluster byte length, local-backtrack on EOF). Atomic `\X` kept working because it went through the main loop.
 - **Delta**: 11,563 → 11,598 (+35 pass), 1,247 → 1,212 fail. FN dropped ~25 across the testinput4/5/7 `\X` cluster. Baselines 11,598 / 1,212.

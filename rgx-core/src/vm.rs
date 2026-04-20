@@ -460,6 +460,11 @@ pub struct Program {
     /// the previous / current byte is one of the newlines in this
     /// set rather than hard-coding `\n`.
     pub newline_mode: VmNewlineMode,
+    /// PCRE2_UCP flag: controls whether `\b` / `\B` use Unicode
+    /// General_Category L|N plus `_` as word characters (true) or the
+    /// ASCII subset `[A-Za-z0-9_]` (false, default). Set at compile
+    /// time from the pattern's `(*UCP)` start-verb.
+    pub ucp_enabled: bool,
     /// C2 engine classification — decides whether this pattern can dispatch
     /// to the NFA/DFA hybrid engine or must use the backtracking VM.
     ///
@@ -2605,7 +2610,7 @@ impl RegexVM {
 
                 OpCode::WordBoundary => {
                     // Check if we're at a word boundary
-                    if Self::is_at_word_boundary(ctx) {
+                    if Self::is_at_word_boundary(ctx, self.program.ucp_enabled) {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -2616,7 +2621,7 @@ impl RegexVM {
 
                 OpCode::NonWordBoundary => {
                     // Check if we're NOT at a word boundary
-                    if !Self::is_at_word_boundary(ctx) {
+                    if !Self::is_at_word_boundary(ctx, self.program.ucp_enabled) {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -3703,8 +3708,19 @@ impl RegexVM {
     }
 
     /// Check if we're at a word boundary (\b)
-    fn is_at_word_boundary(ctx: &ExecContext<'_>) -> bool {
-        let is_word_char = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+    fn is_at_word_boundary(ctx: &ExecContext<'_>, ucp: bool) -> bool {
+        // Under PCRE2_UCP `\b` / `\B` classify word characters using
+        // Unicode General_Category L|N plus `_` (see
+        // `unicode_support::ucp_word_ranges`). Rust's `is_alphanumeric`
+        // tests `L | Nd | Nl | No` which matches `L|N` exactly. Without
+        // UCP, fall back to ASCII `[A-Za-z0-9_]`.
+        let is_word_char = |ch: char| {
+            if ucp {
+                ch == '_' || ch.is_alphanumeric()
+            } else {
+                ch.is_ascii_alphanumeric() || ch == '_'
+            }
+        };
 
         let prev_is_word = if ctx.pos == 0 {
             false
@@ -4769,19 +4785,7 @@ impl RegexVM {
                     return false;
                 }
                 OpCode::WordBoundary | OpCode::NonWordBoundary => {
-                    let before_is_word = if ctx.pos > 0 {
-                        let b = ctx.text[ctx.pos - 1];
-                        b.is_ascii_alphanumeric() || b == b'_'
-                    } else {
-                        false
-                    };
-                    let after_is_word = if ctx.pos < ctx.text.len() {
-                        let b = ctx.text[ctx.pos];
-                        b.is_ascii_alphanumeric() || b == b'_'
-                    } else {
-                        false
-                    };
-                    let is_boundary = before_is_word != after_is_word;
+                    let is_boundary = Self::is_at_word_boundary(ctx, self.program.ucp_enabled);
                     let ok = if op == OpCode::WordBoundary {
                         is_boundary
                     } else {
@@ -5191,13 +5195,13 @@ impl RegexVM {
                     local_backtrack_or_return_false!();
                 }
                 OpCode::WordBoundary => {
-                    if Self::is_at_word_boundary(ctx) {
+                    if Self::is_at_word_boundary(ctx, self.program.ucp_enabled) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
                 }
                 OpCode::NonWordBoundary => {
-                    if !Self::is_at_word_boundary(ctx) {
+                    if !Self::is_at_word_boundary(ctx, self.program.ucp_enabled) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -6369,6 +6373,11 @@ pub struct OptimizingCompiler {
     /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
     /// `(*NUL)` pragma (default `Lf`).
     newline_mode: VmNewlineMode,
+    /// PCRE2_UCP: when set, `\b` / `\B` classify word characters
+    /// using Unicode General_Category L|N plus `_` (matching PCRE2's
+    /// PCRE2_EXTRA_MATCH_WORD + PCRE2_UCP behaviour). Default false →
+    /// ASCII-only `[A-Za-z0-9_]`. Detected from `(*UCP)` start-verb.
+    ucp_enabled: bool,
 }
 
 impl OptimizingCompiler {
@@ -6409,6 +6418,7 @@ impl OptimizingCompiler {
             case_insensitive: false,
             swap_greed: false,
             newline_mode: VmNewlineMode::Lf,
+            ucp_enabled: false,
         };
         trace_exit!(
             "vm",
@@ -6427,6 +6437,15 @@ impl OptimizingCompiler {
     /// under `/m`. Defaults to `Lf` (original RGX behaviour).
     pub fn set_newline_mode(&mut self, mode: VmNewlineMode) {
         self.newline_mode = mode;
+    }
+
+    /// Configure PCRE2_UCP for this compilation. Controls whether `\b`
+    /// / `\B` classify word characters using Unicode General_Category
+    /// L|N plus `_` (UCP=true) or the ASCII subset `[A-Za-z0-9_]`
+    /// (UCP=false, default). Set by the outer compiler after scanning
+    /// the pattern text for the `(*UCP)` start-verb.
+    pub fn set_ucp_enabled(&mut self, ucp: bool) {
+        self.ucp_enabled = ucp;
     }
 
     /// Compile AST to optimized program with multiple passes
@@ -6477,6 +6496,7 @@ impl OptimizingCompiler {
             flags: self.flags,
             stats: self.stats,
             newline_mode: self.newline_mode,
+            ucp_enabled: self.ucp_enabled,
             classification: Classification::default(),
             c2_program: None,
         };
