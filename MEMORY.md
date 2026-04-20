@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: `is_subject_echo` accepts 3–7 space indents (+35 passes)
+- **What**: Previous `is_subject_echo` was pinned to exactly 4 spaces + non-space, which missed testinput4 / testinput7 / partial-match blocks that use 3 / 5 / 6 space indent. Now accepts 3–7 leading spaces, rejects 8+ (bytecode + `/x` pattern continuation).
+- **Delta**: 11,368 → 11,403 (+35 pass). Fails 1,442 → 1,407. FP −38, FN −2, SM +7 (those cases now reach real comparison instead of being mis-paired as "no match expected"). Baselines 11,403 / 1,407.
+
 ### 2026-04-20 — Harness: widen untestable set to cover ovector/callout/diagnostic modifiers (+60 passes)
 - **What**: Extended `subject_carries_untestable_modifier` with the diagnostic/runtime modifier family: `ovector`, `copy`, `get`, `mark`, `callout_*`, `find_limits*`, `startchar` / `startoffset`, `aftertext` / `allaftertext` / `allusedtext` / `allcaptures`, `null_subject` / `null_context`, `zero_terminate`, `offset_limit` / `match_limit` / `heap_limit` / `depth_limit` / `recursion_limit`, `posix_nosub` / `posix_startend`, `anchored` / `endanchored`, `use_length`, `no_utf_check` / `no_jit` / `jitstack` / `jitverify` / `jit_invalid_utf`, `convert`. All add diagnostic output or change match-time semantics the harness can't pair against RGX.
 - **Delta**: 11,308 → 11,368 (+60 pass). Fails 1,502 → 1,442. Baselines 11,368 / 1,442. FP −55, FN −3, SM −6.

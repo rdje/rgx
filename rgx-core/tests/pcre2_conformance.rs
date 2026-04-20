@@ -587,7 +587,34 @@ fn trim_leading_spaces(line: &[u8]) -> &[u8] {
 /// (which use 6+ leading spaces), so the preamble-skip loop in
 /// `extract_pattern_cases` doesn't stop on an indented opcode line.
 fn is_subject_echo(line: &[u8]) -> bool {
-    line.len() > 4 && &line[0..4] == b"    " && line[4] != b' '
+    // Default pcre2test indent is 4 spaces, but some testinput files
+    // mix in 3-, 5-, or 6-space runs (testinput4 / testinput7 for the
+    // `/[\x{NNN}]/utf` families, testinput2:2774 for `/abc/` with
+    // `\=ps` / `\=ph`). Accept 3-7 leading spaces so those pair up
+    // correctly while still rejecting:
+    //
+    //   * narrower lines: ` N:` capture / substitute output, 0- to
+    //     2-space diagnostic prefixes (`Options:`, `Starting code
+    //     units: …` plus its 2-space continuation rows), `Capture
+    //     group count = …`, `Last code unit = …`, `Failed:`, `here:`.
+    //
+    //   * 8-space bytecode (`        Bra` / `        Ket` / `        End`
+    //     in `/B` output), plus the 8-space multi-line pattern
+    //     continuation lines that testinput1 uses inside `/x` patterns
+    //     (line 6714 onwards) — those aren't subjects either.
+    //
+    //   * purely blank lines.
+    if line.len() < 3 || &line[0..3] != b"   " {
+        return false;
+    }
+    if line.len() >= 8 && &line[0..8] == b"        " {
+        return false;
+    }
+    let first_non_space = line.iter().position(|&b| b != b' ').unwrap_or(line.len());
+    if first_non_space >= line.len() {
+        return false;
+    }
+    true
 }
 
 /// pcre2test strips leading and trailing ASCII whitespace from data
@@ -2096,8 +2123,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_368;
-    const FAIL_BASELINE: usize = 1_442;
+    const PASS_BASELINE: usize = 11_403;
+    const FAIL_BASELINE: usize = 1_407;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: `is_subject_echo` accepts 3–7 space indents (+35 passes)
+
+- Scope: pcre2test's default subject indent is 4 spaces, but testinput4 / testinput7 / testinput2 sprinkle 3-, 5-, 6-space runs (testinput7's `/[\x{100}\x{200}]/utf` family with `   ab\x{100}cd`, testinput4 / testinput2 partial-match blocks, etc.). The previous `is_subject_echo` was pinned to exactly 4 spaces + non-space, so those subjects walked off the preamble skip and every downstream subject in the same block paired against the wrong ` 0:` line.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::is_subject_echo` now accepts 3–7 leading spaces and rejects the 8-space range (bytecode in `/B` output, multi-line `/x` pattern continuations in testinput1). 2-space `Starting code units:` continuation lines stay filtered out because they carry only 2 leading spaces, and 0–1-space diagnostic prefixes (`Options:`, ` 0:`, `Failed:`) remain unaffected.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,368 → 11,403 pass** (+35), 1,442 → 1,407 fail. FP 353 → 315 (−38), FN 480 → 478 (−2), SM 296 → 303 (+7 — a handful of cases now pair against a real match line and surface as genuine span mismatches instead of generic FPs). Ratchet baselines bumped to `PASS_BASELINE=11_403` / `FAIL_BASELINE=1_407`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Clears most of the `testinput7:381` `/[\x{NNN}]/utf` family (~30 cases) and similar 3-space-indented subjects. SM bucket growing slightly is fine — these are now reaching the actual comparison path instead of being mis-paired as "no match expected".
+
 ### 2026-04-20 - Harness: widen untestable set to cover ovector/callout/diagnostic modifiers (+60 passes)
 
 - Scope: After the earlier untestable-modifier gate landed, a long tail of subjects with `\=ovector=N`, `\=copy=N`, `\=get=N`, `\=mark`, `\=callout_*`, `\=find_limits`, `\=startchar`, `\=startoffset`, `\=aftertext`, `\=allaftertext`, `\=allusedtext`, `\=allcaptures`, `\=null_subject`, `\=null_context`, `\=zero_terminate`, `\=offset_limit`, `\=match_limit`, `\=heap_limit`, `\=depth_limit`, `\=recursion_limit`, `\=posix_nosub`, `\=posix_startend`, `\=anchored`, `\=endanchored`, `\=use_length`, `\=no_utf_check`, `\=no_jit`, `\=jitstack`, `\=jitverify`, `\=jit_invalid_utf`, `\=convert` continued to surface as FPs. Each of those modifiers bolts additional diagnostic lines onto pcre2test's output or changes PCRE2 match-time semantics in a way RGX doesn't expose — so the harness's output-pairing logic gets confused and registers the extra diagnostic lines as "no match" when RGX matches happily.
