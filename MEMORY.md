@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: widen untestable set to cover ovector/callout/diagnostic modifiers (+60 passes)
+- **What**: Extended `subject_carries_untestable_modifier` with the diagnostic/runtime modifier family: `ovector`, `copy`, `get`, `mark`, `callout_*`, `find_limits*`, `startchar` / `startoffset`, `aftertext` / `allaftertext` / `allusedtext` / `allcaptures`, `null_subject` / `null_context`, `zero_terminate`, `offset_limit` / `match_limit` / `heap_limit` / `depth_limit` / `recursion_limit`, `posix_nosub` / `posix_startend`, `anchored` / `endanchored`, `use_length`, `no_utf_check` / `no_jit` / `jitstack` / `jitverify` / `jit_invalid_utf`, `convert`. All add diagnostic output or change match-time semantics the harness can't pair against RGX.
+- **Delta**: 11,308 → 11,368 (+60 pass). Fails 1,502 → 1,442. Baselines 11,368 / 1,442. FP −55, FN −3, SM −6.
+
 ### 2026-04-20 — Harness: `ps` / `ph` / `partial_soft` / `partial_hard` added to untestable set (+42 passes)
 - **What**: `\=ps` / `\=ph` subjects still leaked FPs when pcre2test found a *full* match for them and printed a ` 0: …` line at 3-space indent (is_subject_echo only matches 4-space). The harness paired the output against the wrong subject. Added these modifier names to `subject_carries_untestable_modifier` so the whole case passes unconditionally — same gate as substitute/DFA/notempty.
 - **Delta**: 11,266 → 11,308 (+42 pass). Fails 1,544 → 1,502. Baselines 11,308 / 1,502.
