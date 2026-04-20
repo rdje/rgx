@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: `\ ` / `\t` in subject lines now decoded (+18 passes)
+- **What**: `rgx-core/tests/pcre2_conformance.rs::decode_subject_mode` was returning `None` for any `\<unknown>` escape, which silently dropped the subject *and* misaligned every following subject in that pattern block against the wrong `testoutput*` line. Added `b' ' | b'\t' => out.push(n)` arm so pcre2test's literal-whitespace convention (the only way to write a leading/trailing space that survives line trimming) decodes correctly.
+- **Why net +18, not just the 8 directly-affected cases**: one dropped subject shifts every later pairing in the block, so the fix rescues downstream subjects too. Typical surfaced FP pattern: `/^\p{Zs}/utf` on subject `\ \` (literal space).
+- **Conformance delta**: 9,693 → 9,711 (+18). Ratchet bumped to 9,711 / 1,519. No new pins (harness-only change).
+- **Residual**: 8 subjects use `\Q…\E` in the subject position, a couple use `\A` / `\Z`. pcre2test treats those inconsistently — not worth a second harness arm this session.
+
 ### 2026-04-20 — Line anchors `^` / `$` honour newline pragma under `/m` (+20 passes)
 - **What**: VM layer gains `VmNewlineMode` enum + `is_line_start_before` / `is_line_end_at` helpers. `Program.newline_mode` set by compiler from pattern-text scan. All four `OpCode::StartLine` / `OpCode::EndLine` sites (main + subexpr) dispatch through the helpers instead of hard-coding `\n`.
 - **`(*ANY)` handles 3-byte LS/PS UTF-8 tails** via byte-level lookback so multi-byte newlines work in both single-byte and multi-byte subjects.

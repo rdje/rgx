@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: decode `\ ` / `\t` in subject lines (+18 passes)
+
+- Scope: `decode_subject_mode` in `rgx-core/tests/pcre2_conformance.rs` dropped any subject line containing `\<unknown>` (returned `None` on the unknown-escape fallthrough). That bucketed the subject as "unparseable" and *also* left the corresponding output-echo/match lines in `testoutput*` unclaimed, so every later subject in the same pattern block paired against the wrong expected output. Concrete failing case: `/^\p{Zs}/utf` with subject `\ \` — pcre2test's convention for a literal space — was dropped, and the second subject `\x{a0}` then claimed the first subject's ` 0: <space>` output, producing a "PCRE2=\" \", RGX=\"\u{a0}\"" span-mismatch that wasn't really a divergence.
+- Fix: `decode_subject_mode` now recognises `\ ` (backslash + space) and `\<tab>` as literal-whitespace escapes, matching pcre2test's documented convention that a leading/trailing space can only survive line trimming via `\ `. Two new arms in the escape-byte match: `b' ' | b'\t' => out.push(n)`.
+- Validation: 1,052 lib tests pass. PCRE2 conformance **9,693 → 9,711 pass** (+18), 1,525 → 1,519 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_711` / `FAIL_BASELINE=1_519`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The +18 includes cases where the *subsequent* subject pairing was wrong, so the harness fix rescues more than just the literal-space tests. Residual cluster: a handful of subjects use `\Q…\E` (8 across testinput1/2) and `\A` / `\Z` anchors as "subject escapes" — pcre2test treats those inconsistently and the clean fix is upstream.
+
 ### 2026-04-20 - Newline pragmas also govern `^` / `$` line anchors under `/m` (+20 passes)
 
 - Scope: The previous commit taught the adapter to honour `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` for `.` / `\N` by rewriting the AST atom. Under `/m`, `^` and `$` also have to respect the same convention — `(*CR)(?m)^b` on `"a\rb"` should match because CR is the active newline, even though RGX's hard-coded `OpCode::StartLine` checked only for `\n`.

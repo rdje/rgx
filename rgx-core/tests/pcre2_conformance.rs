@@ -674,6 +674,11 @@ fn decode_subject_mode(line: &[u8], utf_mode: bool) -> Option<Vec<u8>> {
             b'\'' => out.push(b'\''),
             b'$' => out.push(b'$'),
             b'/' => out.push(b'/'),
+            // pcre2test: backslash-space is the only way to write a
+            // literal space inside a subject line (surrounding whitespace
+            // is normally trimmed). Apply the same convention to other
+            // whitespace escapes pcre2test preserves verbatim.
+            b' ' | b'\t' => out.push(n),
             b'x' => {
                 // \xHH or \x{H..H}
                 if i + 2 < line.len() && line[i + 2] == b'{' {
@@ -1853,8 +1858,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_693;
-    const FAIL_BASELINE: usize = 1_525;
+    const PASS_BASELINE: usize = 9_711;
+    const FAIL_BASELINE: usize = 1_519;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
