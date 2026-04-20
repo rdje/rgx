@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: 2-space subject echoes close the prior subject block (+24 passes)
+- **What**: `/IB` tests emit subject echoes at 2-space indent (testoutput2:2943, :1302, :1318); `is_subject_echo` rejected those and the parser kept consuming past the first `0:` into later subjects' output. Added a narrower in-loop check in `parse_subject_output`: once `consumed > 0`, any line with exactly 2 leading spaces followed by a non-digit/non-dash char closes the current subject. Digits stay (potential ` N:` capture), dashes stay (potential `--->` callout trace).
+- **Delta**: 11,539 → 11,563 (+24 pass), 1,271 → 1,247 fail. FP −35, SM −18, FN −8 (those cases now reach real comparison). Baselines 11,563 / 1,247.
+
 ### 2026-04-20 — Harness: Turkish/ASCII-restricted modifier families untestable (+76 passes)
 - **What**: Extended `pattern_carries_untestable_modifier` with long-name arms `turkish_casing`, `caseless_restrict`, `ascii_all`/`_bsd`/`_bss`/`_bsw`/`_digit`/`_posix`, plus short-bundle detection: any `/a`, `/ai`, `/aiJ` (comma piece made entirely of single-letter PCRE2 short flags that includes `a`) is pcre2test's shorthand for PCRE2_EXTRA_ASCII_* which RGX doesn't implement. All marked untestable.
 - **Delta**: 11,463 → 11,539 (+76 pass), 1,347 → 1,271 fail. FP dropped sharply (Turkish I/ı/İ matrix + fullwidth-digit `(?-a)` family). Baselines 11,539 / 1,271.

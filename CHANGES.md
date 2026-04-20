@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: 2-space subject echoes close the prior subject block (+24 passes)
+
+- Scope: `/IB` (info + bytecode) patterns in testoutput2 emit subject echoes at 2-space indent — e.g. `/a\Q\E/IB` prints `  abc` / `  bca` / `  bac` rather than the default 4-space `    abc`. The harness's `is_subject_echo` requires 3+ leading spaces (to avoid aliasing with diagnostic lines and ` N:` capture continuations), so inside `parse_subject_output`'s match-line loop the 2-space echoes slid through silently; the parser kept consuming lines past the first subject's ` 0:` match and swallowed the remaining subjects' output, then reported NoMatch for every subsequent subject in the block — false positives against RGX's correct matches.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::parse_subject_output` gains a narrower 2-space echo check inside the main loop only: once `consumed > 0` (a match/no-match/partial line has been recorded), a line starting with exactly 2 spaces followed by a non-digit, non-dash character closes the current subject block. Digits/dashes (which would indicate a ` N:` capture or `--->` callout trace) stay in the loop.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,539 → 11,563 pass** (+24), 1,271 → 1,247 fail. FP 236 → 201 (−35), SM 300 → 282 (−18), FN 480 → 472 (−8). Ratchet baselines bumped to `PASS_BASELINE=11_563` / `FAIL_BASELINE=1_247`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/IB` 2-space-echo family (testinput2:816, :1301, :1306, :1317, :1323 plus their `auto_callout` mirrors). The `is_subject_echo` preamble-skip guard stays at 3+ spaces — only the match-line loop relaxes, because by then we're past the diagnostic preamble (Capture group count, First code unit, Starting code units continuations) where 2-space lines would alias.
+
 ### 2026-04-20 - Harness: Turkish/ASCII-restricted modifier families untestable (+76 passes)
 
 - Scope: Patterns tagged with `turkish_casing` (Turkish dotless-I case rules), `caseless_restrict` (restricts PCRE2_CASELESS scope), or any of the `ascii_*` family (`ascii_all`, `ascii_bsd`, `ascii_bss`, `ascii_bsw`, `ascii_digit`, `ascii_posix`) — plus the short-flag `/a` bundle (and any short bundle that includes `a`, e.g. `/ai`, `/aiJ`) which is pcre2test's shorthand for the ASCII-restricted POSIX/class semantics. RGX doesn't implement PCRE2_EXTRA_ASCII_* or PCRE2_EXTRA_TURKISH_CASING. Those patterns were running through the normal harness path and firing as FPs (e.g. `/i/i,utf,turkish_casing` on subject `I`, `/[[:digit:]]/a` on fullwidth digit `１`).

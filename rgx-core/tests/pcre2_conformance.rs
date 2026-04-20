@@ -1140,6 +1140,20 @@ fn parse_subject_output(
         if (is_subject_echo(l) || l.starts_with(b"\\=")) && consumed > 0 {
             break;
         }
+        // Narrower 2-space subject-echo detection: `/IB` and `/I` output
+        // without `/B` emit subjects at 2-space indent (testoutput2:2943
+        // for `/a\Q\E/IB`, :1301 for `/a*b/IB,auto_callout`). Once we've
+        // already consumed a match line for the prior subject, any line
+        // with exactly 2 leading spaces followed by a non-digit marks
+        // the next subject echo. Digits would indicate a ` N:` capture
+        // continuation (which uses 1-space indent in pcre2test but
+        // tolerate 2-space for safety) — those stay in the loop.
+        if consumed > 0 && l.len() >= 3 && &l[0..2] == b"  " && l[2] != b' ' {
+            let c = l[2];
+            if !c.is_ascii_digit() && c != b'-' {
+                break;
+            }
+        }
         let text = String::from_utf8_lossy(l);
         let trimmed = text.trim_start();
         // pcre2test emits `Failed: error NNN ...` in two places:
@@ -2216,8 +2230,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_539;
-    const FAIL_BASELINE: usize = 1_271;
+    const PASS_BASELINE: usize = 11_563;
+    const FAIL_BASELINE: usize = 1_247;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
