@@ -659,6 +659,17 @@ fn decode_subject_mode(line: &[u8], utf_mode: bool) -> Option<Vec<u8>> {
             i += 1;
             continue;
         }
+        // pcre2test's `\=` is the per-subject modifier separator —
+        // everything after it (e.g. `\=ps`, `\=jitstack=1024`,
+        // `\= Expect no match`) is metadata, not part of the subject.
+        // Truncate at the first `\=` and stop decoding. The harness
+        // itself doesn't honour most per-subject modifiers, but
+        // recognising the terminator keeps ~1.8k subjects from being
+        // silently dropped by the unknown-escape fallthrough and
+        // preserves correct output-line pairing.
+        if line[i + 1] == b'=' {
+            break;
+        }
         let n = line[i + 1];
         match n {
             b'a' => out.push(0x07),
@@ -1885,8 +1896,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_798;
-    const FAIL_BASELINE: usize = 1_432;
+    const PASS_BASELINE: usize = 10_759;
+    const FAIL_BASELINE: usize = 2_051;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

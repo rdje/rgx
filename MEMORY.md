@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: truncate subjects at `\=` modifier separator (+961 passes)
+- **What**: `decode_subject_mode` used to fall through to `return None` on `\=`, silently dropping every `\=ps` / `\=jitstack=…` / `\= Expect …` subject (~1.8k lines across the testdata). Dropped subjects misaligned every subsequent pairing inside the same pattern block. Now `\=` is recognised as the pcre2test per-subject modifier terminator and `break`s out of the escape loop, returning just the subject prefix.
+- **Conformance delta**: 9,798 → 10,759 (+961 pass). Parsed-case total 11,230 → 12,810 (+1,580). Fail count also went up (1,432 → 2,051, +619) — almost all of that is `\=ps` (Partial match) subjects that now run but get bucketed as FP because RGX has no partial-match API. Clean-fix follow-up: teach `parse_subject_output` to recognise `Partial match: N` as a pcre2test diagnostic so those cases stop showing up as real divergences.
+- **Why it wasn't caught before**: the dropped-subject behaviour was silent — no diagnostic, no accounting. The ratchet only counted the cases that *did* parse, so losing 1.8k subjects looked like a quiet harness success until you grepped for `\=` in testinputs.
+
 ### 2026-04-20 — Harness: subject-level `Failed:` → `NoMatch` (+84 passes)
 - **What**: `parse_subject_output` used to set `Expected::CompileError` on *any* `Failed:` line, including PCRE2's match-time UTF-8 errors inside a subject block (`/badutf/utf` family, etc.). That made RGX count as "too permissive" for cases where the pattern compiled fine and only the subject was malformed UTF-8 — but RGX's `&str` + `decode_subject_mode` auto-repairs stray `\xNN` runs, so it correctly returns no-match.
 - **Fix**: `Failed:` after a subject echo (`consumed > 0`) now lowers to `Expected::NoMatch`. Pre-subject `Failed:` (genuine compile error) still lowers to `CompileError`.
