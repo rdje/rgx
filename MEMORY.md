@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Line anchors `^` / `$` honour newline pragma under `/m` (+20 passes)
+- **What**: VM layer gains `VmNewlineMode` enum + `is_line_start_before` / `is_line_end_at` helpers. `Program.newline_mode` set by compiler from pattern-text scan. All four `OpCode::StartLine` / `OpCode::EndLine` sites (main + subexpr) dispatch through the helpers instead of hard-coding `\n`.
+- **`(*ANY)` handles 3-byte LS/PS UTF-8 tails** via byte-level lookback so multi-byte newlines work in both single-byte and multi-byte subjects.
+- **C2 Pike-VM caveat**: its own anchor routine still uses `\n` — `/m,newline=XX` patterns that dispatch through C2 are a small residual, tracked for later. Multi-line + custom newline mostly lands on the backtracking VM anyway.
+- **Conformance delta**: 9,673 → 9,693 (+20). Ratchet bumped to 9,693 / 1,525. One regression pin.
+
 ### 2026-04-20 — Newline convention pragmas change `.` / `\N` exclusion (+40 passes)
 - **What**: `PgenAstAdapter` detects `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` (last-wins) and emits a negated `CharClass::Custom` for `.` / `\N` when the mode isn't the default Lf. Harness threads `newline=VALUE` through as an `InlineFlag("(*VALUE_UPPER)")`.
 - **Remaining gap**: `^` / `$` under `/m` still uses the hard-coded `\n`-only line boundary. Tracked for a later pass that threads newline_mode into the line-anchor opcodes.

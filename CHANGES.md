@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Newline pragmas also govern `^` / `$` line anchors under `/m` (+20 passes)
+
+- Scope: The previous commit taught the adapter to honour `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` for `.` / `\N` by rewriting the AST atom. Under `/m`, `^` and `$` also have to respect the same convention — `(*CR)(?m)^b` on `"a\rb"` should match because CR is the active newline, even though RGX's hard-coded `OpCode::StartLine` checked only for `\n`.
+- Fix: Threaded the newline convention into the VM layer.
+  - `rgx-core/src/vm.rs` gains a `VmNewlineMode` enum (Lf / Cr / Crlf / Anycrlf / Any / Nul) with `is_line_start_before` and `is_line_end_at` helpers that handle single-byte newlines (`\r`, `\n`, VT, FF, NEL, NUL) plus the 3-byte UTF-8 sequences for LINE SEPARATOR / PARAGRAPH SEPARATOR under `(*ANY)`.
+  - `Program` grows a `newline_mode: VmNewlineMode` field; `OptimizingCompiler::set_newline_mode` forwards a caller-supplied mode into the compiled program.
+  - `OpCode::StartLine` and `OpCode::EndLine` — all four execution sites across the main VM and the subexpression VM — now dispatch through `self.program.newline_mode.is_line_start_before` / `is_line_end_at` instead of the inline `byte == b'\n'` check.
+  - `rgx-core/src/compiler.rs` adds `newline_mode_from_pattern` (last-wins pragma scan, mirrors the adapter's `NewlineMode::new`) and forwards the result to the VM compiler right before `compile`.
+- Validation: 1,052 lib tests pass (1,051 baseline + 1 new regression pin `line_anchors_honour_newline_pragma_under_m`). 30 rgx-cli tests pass. PCRE2 conformance **9,673 → 9,693 pass** (+20), 1,545 → 1,525 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_693` / `FAIL_BASELINE=1_525`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the testinput2:1577 / 1977 / 1992 / 2360 and testinput6:4058 `^` / `$` + non-default-newline FN clusters. The C2 Pike-VM path still uses its own anchor routine which hard-codes `\n`; patterns that dispatch through C2 under `/m,newline=cr` are tracked for a later follow-up but those are a small residual — multi-line patterns + non-default newline mostly land on the backtracking VM anyway.
+
 ### 2026-04-20 - `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` newline pragmas change `.` / `\N` exclusion (+40 passes)
 
 - Scope: PCRE2 lets the pattern select which characters count as "newlines" for the purposes of `.` (and its alias `\N`) exclusion via the `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` pattern-start pragmas and the equivalent `newline=VALUE` compile option. RGX was always treating `\n` as the sole newline, so tests like `/^a.b/newline=cr` falsely matched `a\rb` (`.` shouldn't accept `\r`) and missed `a\nb` (`.` *should* accept `\n` under `(*CR)`).

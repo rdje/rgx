@@ -347,6 +347,93 @@ pub struct CompiledCharClass {
     pub unicode_ranges: Vec<(u32, u32)>,
 }
 
+/// PCRE2 newline convention used by the `^` / `$` line-anchor opcodes
+/// under `/m`. Mirrors `parsing::NewlineMode` but lives in the VM so
+/// both backends (the backtracking VM here and the C2 Pike-VM) can
+/// share the set lookup without reaching into the adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VmNewlineMode {
+    /// Only `\n` (U+000A) is a newline — PCRE2 `(*LF)` and the
+    /// conventional RGX default.
+    #[default]
+    Lf,
+    /// Only `\r` (U+000D) — PCRE2 `(*CR)`.
+    Cr,
+    /// Only the two-byte sequence `\r\n` — PCRE2 `(*CRLF)`. For
+    /// anchor-before-position checks we treat both bytes as line
+    /// terminators so `^` matches after either half of the pair.
+    Crlf,
+    /// `\r`, `\n`, or `\r\n` — PCRE2 `(*ANYCRLF)`.
+    Anycrlf,
+    /// Full Unicode set — PCRE2 `(*ANY)`. Single-byte newlines: `\r`,
+    /// `\n`, VT, FF, NEL (U+0085); multi-byte: LS (U+2028), PS
+    /// (U+2029). The anchor checks look at the preceding byte and
+    /// the trailing UTF-8 bytes of the previous codepoint, so both
+    /// single-byte and multi-byte newlines are honoured.
+    Any,
+    /// Only the NUL byte — PCRE2 `(*NUL)`.
+    Nul,
+}
+
+impl VmNewlineMode {
+    /// Returns `true` when the subject byte at `pos - 1` (or any
+    /// well-formed UTF-8 codepoint ending just before `pos`) is a
+    /// newline under this convention. Used by `OpCode::StartLine` to
+    /// decide whether `^` is legal at `pos`.
+    #[inline]
+    pub fn is_line_start_before(self, text: &[u8], pos: usize) -> bool {
+        if pos == 0 {
+            return true;
+        }
+        let prev = text[pos - 1];
+        match self {
+            VmNewlineMode::Lf => prev == b'\n',
+            VmNewlineMode::Cr => prev == b'\r',
+            VmNewlineMode::Crlf | VmNewlineMode::Anycrlf => prev == b'\r' || prev == b'\n',
+            VmNewlineMode::Any => {
+                if matches!(prev, b'\r' | b'\n' | 0x0B | 0x0C | 0x85) {
+                    return true;
+                }
+                // LINE SEPARATOR / PARAGRAPH SEPARATOR are 3-byte
+                // UTF-8 sequences — check the tail.
+                if pos >= 3 {
+                    let tail = &text[pos - 3..pos];
+                    return tail == [0xE2, 0x80, 0xA8] || tail == [0xE2, 0x80, 0xA9];
+                }
+                false
+            }
+            VmNewlineMode::Nul => prev == 0,
+        }
+    }
+
+    /// Returns `true` when the subject byte(s) at `pos..` begin a
+    /// newline under this convention. Used by `OpCode::EndLine` to
+    /// decide whether `$` is legal at `pos`.
+    #[inline]
+    pub fn is_line_end_at(self, text: &[u8], pos: usize) -> bool {
+        if pos >= text.len() {
+            return true;
+        }
+        let cur = text[pos];
+        match self {
+            VmNewlineMode::Lf => cur == b'\n',
+            VmNewlineMode::Cr => cur == b'\r',
+            VmNewlineMode::Crlf | VmNewlineMode::Anycrlf => cur == b'\r' || cur == b'\n',
+            VmNewlineMode::Any => {
+                if matches!(cur, b'\r' | b'\n' | 0x0B | 0x0C | 0x85) {
+                    return true;
+                }
+                if pos + 3 <= text.len() {
+                    let head = &text[pos..pos + 3];
+                    return head == [0xE2, 0x80, 0xA8] || head == [0xE2, 0x80, 0xA9];
+                }
+                false
+            }
+            VmNewlineMode::Nul => cur == 0,
+        }
+    }
+}
+
 /// High-performance compiled regex program
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -366,6 +453,13 @@ pub struct Program {
     pub flags: ProgramFlags,
     /// Performance statistics from compilation
     pub stats: CompilationStats,
+    /// PCRE2 newline convention selected by the pattern's
+    /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
+    /// `(*NUL)` pragma (default `Lf`). Affects the `^` and `$`
+    /// line-anchor opcodes under `/m`: each anchor checks whether
+    /// the previous / current byte is one of the newlines in this
+    /// set rather than hard-coding `\n`.
+    pub newline_mode: VmNewlineMode,
     /// C2 engine classification — decides whether this pattern can dispatch
     /// to the NFA/DFA hybrid engine or must use the backtracking VM.
     ///
@@ -2307,7 +2401,11 @@ impl RegexVM {
                 }
 
                 OpCode::StartLine => {
-                    if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
+                    if self
+                        .program
+                        .newline_mode
+                        .is_line_start_before(ctx.text, ctx.pos)
+                    {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -2326,7 +2424,7 @@ impl RegexVM {
                 }
 
                 OpCode::EndLine => {
-                    if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                    if self.program.newline_mode.is_line_end_at(ctx.text, ctx.pos) {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -4595,10 +4693,11 @@ impl RegexVM {
                     }
                 }
                 OpCode::StartLine => {
-                    if ctx.pos == 0
-                        || (ctx.pos > 0
-                            && ctx.pos <= ctx.text.len()
-                            && ctx.text[ctx.pos - 1] == b'\n')
+                    if ctx.pos <= ctx.text.len()
+                        && self
+                            .program
+                            .newline_mode
+                            .is_line_start_before(ctx.text, ctx.pos)
                     {
                         continue;
                     }
@@ -4608,7 +4707,7 @@ impl RegexVM {
                     return false;
                 }
                 OpCode::EndLine => {
-                    if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                    if self.program.newline_mode.is_line_end_at(ctx.text, ctx.pos) {
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -5021,7 +5120,11 @@ impl RegexVM {
                     local_backtrack_or_return_false!();
                 }
                 OpCode::StartLine => {
-                    if ctx.pos == 0 || (ctx.pos > 0 && ctx.text[ctx.pos - 1] == b'\n') {
+                    if self
+                        .program
+                        .newline_mode
+                        .is_line_start_before(ctx.text, ctx.pos)
+                    {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -5033,7 +5136,7 @@ impl RegexVM {
                     local_backtrack_or_return_false!();
                 }
                 OpCode::EndLine => {
-                    if ctx.pos >= ctx.text.len() || ctx.text[ctx.pos] == b'\n' {
+                    if self.program.newline_mode.is_line_end_at(ctx.text, ctx.pos) {
                         continue;
                     }
                     local_backtrack_or_return_false!();
@@ -6216,6 +6319,11 @@ pub struct OptimizingCompiler {
     /// When true, `*` / `+` / `?` / `{n,m}` default to lazy; `*?` / `+?`
     /// etc. default to greedy. Toggle-flip semantics.
     swap_greed: bool,
+    /// Newline convention for the `^` / `$` line-anchor opcodes
+    /// under `/m`. Set at the compiler boundary from the pattern's
+    /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
+    /// `(*NUL)` pragma (default `Lf`).
+    newline_mode: VmNewlineMode,
 }
 
 impl OptimizingCompiler {
@@ -6255,6 +6363,7 @@ impl OptimizingCompiler {
             dotall: false,
             case_insensitive: false,
             swap_greed: false,
+            newline_mode: VmNewlineMode::Lf,
         };
         trace_exit!(
             "vm",
@@ -6264,6 +6373,15 @@ impl OptimizingCompiler {
             compiler.stats.jit_worthy
         );
         compiler
+    }
+
+    /// Configure the PCRE2 newline convention for this compilation.
+    /// Set by the outer compiler after scanning the pattern text for
+    /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
+    /// `(*NUL)` pragmas. Controls the `^` / `$` line-anchor checks
+    /// under `/m`. Defaults to `Lf` (original RGX behaviour).
+    pub fn set_newline_mode(&mut self, mode: VmNewlineMode) {
+        self.newline_mode = mode;
     }
 
     /// Compile AST to optimized program with multiple passes
@@ -6313,6 +6431,7 @@ impl OptimizingCompiler {
             num_groups: self.group_counter,
             flags: self.flags,
             stats: self.stats,
+            newline_mode: self.newline_mode,
             classification: Classification::default(),
             c2_program: None,
         };

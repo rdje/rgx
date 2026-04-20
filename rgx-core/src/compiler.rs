@@ -7,6 +7,30 @@ use crate::parsing;
 use crate::pattern::CompiledPattern;
 use crate::unicode_support::resolve_unicode_property_class;
 use crate::vm::OptimizingCompiler as VMCompiler;
+use crate::vm::VmNewlineMode;
+
+/// Scan the raw pattern text for the `(*CR)` / `(*LF)` / `(*CRLF)` /
+/// `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` PCRE2 newline-convention
+/// pragmas and return the last-wins selection, defaulting to `Lf`
+/// when no pragma is present. Mirrors `PgenAstAdapter::new`'s
+/// `NewlineMode` detection; kept here so the compiler can forward
+/// the value onto the VM program even though the adapter already
+/// rewrote the `.` / `\N` atoms.
+fn newline_mode_from_pattern(pattern: &str) -> VmNewlineMode {
+    [
+        ("(*LF)", VmNewlineMode::Lf),
+        ("(*CR)", VmNewlineMode::Cr),
+        ("(*CRLF)", VmNewlineMode::Crlf),
+        ("(*ANYCRLF)", VmNewlineMode::Anycrlf),
+        ("(*ANY)", VmNewlineMode::Any),
+        ("(*NUL)", VmNewlineMode::Nul),
+    ]
+    .iter()
+    .filter_map(|(tag, mode)| pattern.rfind(tag).map(|idx| (idx, *mode)))
+    .max_by_key(|(idx, _)| *idx)
+    .map(|(_, mode)| mode)
+    .unwrap_or(VmNewlineMode::Lf)
+}
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 
 /// Compiler that transforms regex patterns into optimized execution programs
@@ -545,7 +569,15 @@ impl Compiler {
         // the shared `Regex::NewlineSequence` node or an explicit
         // CRLF-only alternation) so both VM and C2 codegens see the
         // same normalised tree here.
+        //
+        // `^` / `$` line anchors under `/m` need the PCRE2 newline
+        // convention at runtime. Detect the pragma from the raw
+        // pattern text (the adapter lowers them to `Regex::Empty`) and
+        // forward it to the VM compiler; stored on `Program` so the
+        // opcodes can read it in both the main VM and the subexpr VM.
+        let newline_mode = newline_mode_from_pattern(raw_label);
         let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
+        vm_compiler.set_newline_mode(newline_mode);
         let mut program = vm_compiler.compile(&ast);
         program.named_groups = named_groups;
 

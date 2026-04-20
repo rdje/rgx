@@ -6483,6 +6483,25 @@ mod tests {
     }
 
     #[test]
+    fn line_anchors_honour_newline_pragma_under_m() {
+        // Regression pin: under `/m`, `^` and `$` treat as line
+        // boundaries the newline set selected by the PCRE2 pragma.
+        // `(*CR)(?m)^b` on "a\rb" matches because CR is the newline;
+        // on "a\nb" it doesn't because `\n` isn't a newline under CR.
+        let cr = Regex::compile(r"(*CR)(?m)^b").unwrap();
+        assert!(cr.is_match("a\rb"));
+        assert!(!cr.is_match("a\nb"));
+        // `(*ANYCRLF)` accepts either CR or LF at line boundaries.
+        let any_crlf = Regex::compile(r"(*ANYCRLF)(?m)^b").unwrap();
+        assert!(any_crlf.is_match("a\rb"));
+        assert!(any_crlf.is_match("a\nb"));
+        // Default `Lf` mode is preserved when no pragma is given.
+        let default = Regex::compile(r"(?m)^b").unwrap();
+        assert!(default.is_match("a\nb"));
+        assert!(!default.is_match("a\rb"));
+    }
+
+    #[test]
     fn newline_pragmas_change_dot_exclusion_set() {
         // Regression pin: PCRE2 `(*CR)` / `(*LF)` / `(*CRLF)` /
         // `(*ANYCRLF)` / `(*ANY)` / `(*NUL)` pragmas change the
