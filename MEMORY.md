@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — VM: `OpCode::GraphemeCluster` in `execute_subexpr_inner` (+35 passes, first engine fix of session)
+- **What**: Quantified `\X` (`\X+`, `\X*`, `\X?`, `\X{m,n}`) was broken at the VM level. PlusGreedy/StarGreedy/QuestionGreedy dispatch their inner sub-program through `execute_subexpr_inner`, which had no `OpCode::GraphemeCluster` arm — so every inner-`\X` execution dropped to the unreachable path and returned false. Added the arm mirroring the main-loop handler (unicode_segmentation grapheme iteration, advance by cluster byte length, local-backtrack on EOF). Atomic `\X` kept working because it went through the main loop.
+- **Delta**: 11,563 → 11,598 (+35 pass), 1,247 → 1,212 fail. FN dropped ~25 across the testinput4/5/7 `\X` cluster. Baselines 11,598 / 1,212.
+
 ### 2026-04-21 — Harness: 2-space subject echoes close the prior subject block (+24 passes)
 - **What**: `/IB` tests emit subject echoes at 2-space indent (testoutput2:2943, :1302, :1318); `is_subject_echo` rejected those and the parser kept consuming past the first `0:` into later subjects' output. Added a narrower in-loop check in `parse_subject_output`: once `consumed > 0`, any line with exactly 2 leading spaces followed by a non-digit/non-dash char closes the current subject. Digits stay (potential ` N:` capture), dashes stay (potential `--->` callout trace).
 - **Delta**: 11,539 → 11,563 (+24 pass), 1,271 → 1,247 fail. FP −35, SM −18, FN −8 (those cases now reach real comparison). Baselines 11,563 / 1,247.

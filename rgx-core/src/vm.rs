@@ -5143,6 +5143,19 @@ impl RegexVM {
                     }
                     local_backtrack_or_return_false!();
                 }
+                OpCode::GraphemeCluster => {
+                    use unicode_segmentation::UnicodeSegmentation;
+                    if ctx.pos < ctx.text.len() {
+                        // SAFETY: ctx.text is guaranteed valid UTF-8 on the &str path.
+                        let remaining =
+                            unsafe { std::str::from_utf8_unchecked(&ctx.text[ctx.pos..]) };
+                        if let Some(cluster) = remaining.graphemes(true).next() {
+                            ctx.pos += cluster.len();
+                            continue;
+                        }
+                    }
+                    local_backtrack_or_return_false!();
+                }
                 OpCode::StartLine => {
                     if self
                         .program
