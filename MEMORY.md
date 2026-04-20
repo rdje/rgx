@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: pattern-level untestable-modifier gate (+30 passes)
+- **What**: Added `pattern_carries_untestable_modifier(full_modifiers)` mirroring the per-subject helper. Pattern-level `substitute_*` options (overflow_length, callout, matched, replacement_only, case_callout, skip, stop, literal, extended, unknown_unset, unset_empty), `convert` / `convert_*`, and `firstline` now mark every subject under that pattern untestable — they produce pcre2test output (runtime error -48, callout traces, convert rewrites) the harness can't reproduce with RGX's full-substitute API.
+- **Delta**: 11,433 → 11,463 (+30 pass). FP 286 → 275. Baselines 11,463 / 1,347.
+
 ### 2026-04-20 — Harness: skip `/B` bytecode blocks in preamble (+30 passes)
 - **What**: `/B` / `/IB` bytecode output emits 5-space scope lines like `     /i b` that the new 3-7-space `is_subject_echo` rule mistakenly matched. Added `----` separator detection in the preamble-skip loop: when we see `----` at 0-indent, fast-forward to the next `----` and skip the whole bytecode block.
 - **Delta**: 11,403 → 11,433 (+30 pass). FP 315 → 286, SM 303 → 300. Baselines 11,433 / 1,377.

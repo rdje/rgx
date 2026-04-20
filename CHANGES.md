@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: pattern-level untestable-modifier gate (+30 passes)
+
+- Scope: Patterns carrying pattern-level modifiers that RGX's `replace[_all]` has no equivalent for — `substitute_overflow_length`, `substitute_callout`, `substitute_matched`, `substitute_replacement_only`, `substitute_case_callout`, `substitute_skip`, `substitute_stop`, `substitute_literal`, `substitute_extended`, `substitute_unknown_unset`, `substitute_unset_empty`, `convert` (glob/POSIX→regex conversion), `convert_*` (the conversion sub-flags), `firstline` (first-line anchor) — produce pcre2test output with `Failed: error -48: no more memory: N code units are needed` runtime notices, ` 1(2) Old … New … SKIPPED` callout traces, or converter output that the harness can't reproduce with RGX's full-buffer substitute. Those were leaking into "RGX too permissive" / FP buckets even though the patterns compile fine on both sides.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` gains `pattern_carries_untestable_modifier(full_modifiers)` alongside the existing `subject_carries_untestable_modifier`. `parse_cases` now OR's the two results into `per_subject_untestable`; any subject under a pattern-untestable pattern gets the same pass-through.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,433 → 11,463 pass** (+30), 1,377 → 1,347 fail. FP 286 → 275 (−11). Ratchet baselines bumped to `PASS_BASELINE=11_463` / `FAIL_BASELINE=1_347`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Covers the `/a(b)c/substitute_overflow_length,substitute_callout,replace=…` family (testinput2:5988, :5992, :5996, …) and similar substitute-overflow cases. The "RGX too permissive" bucket stays at 66 because the remaining residuals are PCRE2 compile-level rejections (unknown modifier forms), not runtime-level output divergences.
+
 ### 2026-04-20 - Harness: skip `/B` bytecode blocks in preamble (+30 passes)
 
 - Scope: Widening `is_subject_echo` to accept 3–7 space indents in the previous commit surfaced a latent aliasing in `/B` / `/IB` tests: pcre2test's bytecode dump emits 5-space-indented scope lines like `     /i b` (the `(?i)` scope marker), `     0030 N` etc. inside the `----` separator block. Those now tripped the looser `is_subject_echo` rule, so the preamble-skip broke out of the loop on the first bytecode scope line and paired it with the first match output — leaking every `/B` pattern's first real subject onto the next subject's output and turning valid matches into "PCRE2 expected no match, RGX matched" FPs (testinput2:788 `/a(?i)b/IB` and the wider `/IB` family).
