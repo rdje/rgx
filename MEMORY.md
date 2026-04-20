@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — `\K` reset unwinds on backtrack (+3 passes)
+- **What**: `BacktrackFrame` gained `saved_match_start_override: Option<usize>`. All 18 push sites save `ctx.match_start_override` at push time, and `restore_frame` writes it back on pop. `\K` now rides the same undo log as capture state — a `\K` in an abandoned alternative no longer leaks its reset onto the surviving match.
+- **Why it mattered**: `/(foo)(\Kbar|baz)/` on `"foobaz"` was matching `"baz"` (should be `"foobaz"`); `/^a\Kcz|ac/` on `"ac"` was matching `"c"` (should be `"ac"`).
+- **Conformance delta**: 9,711 → 9,714 (+3). Ratchet bumped to 9,714 / 1,516. Span-mismatch `-3`, FP `+2` (the correction surfaced two latent edge cases where the previous buggy override happened to produce the PCRE2-correct span by accident — they're tractable separately).
+- **Known residual**: `\K` inside lookarounds (`(?<=\K\x{17f})`) and DEFINE groups still propagate out because the zero-width-assertion boundary isn't scoped in `\K` handling. Tracked as follow-up.
+
 ### 2026-04-20 — Harness: `\ ` / `\t` in subject lines now decoded (+18 passes)
 - **What**: `rgx-core/tests/pcre2_conformance.rs::decode_subject_mode` was returning `None` for any `\<unknown>` escape, which silently dropped the subject *and* misaligned every following subject in that pattern block against the wrong `testoutput*` line. Added `b' ' | b'\t' => out.push(n)` arm so pcre2test's literal-whitespace convention (the only way to write a leading/trailing space that survives line trimming) decodes correctly.
 - **Why net +18, not just the 8 directly-affected cases**: one dropped subject shifts every later pairing in the block, so the fix rescues downstream subjects too. Typical surfaced FP pattern: `/^\p{Zs}/utf` on subject `\ \` (literal space).

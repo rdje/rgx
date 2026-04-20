@@ -608,6 +608,15 @@ pub struct BacktrackFrame {
     pub capture_snapshot: Option<Vec<Option<usize>>>,
     /// Saved winning-path non-boolean code-block value
     pub saved_code_result: Option<CodeBlockValue>,
+    /// Value of `ctx.match_start_override` at the time the frame was
+    /// pushed. `\K` (`OpCode::MatchReset`) writes to this field to
+    /// shift the visible match start forward; if we later backtrack
+    /// past the `\K`, the override has to unwind with the rest of the
+    /// state — otherwise a `\K` that was executed inside a branch we
+    /// later abandoned still mutates the final match span. Matches
+    /// PCRE2 `\K` semantics: the reset only takes effect on the
+    /// surviving match path.
+    pub saved_match_start_override: Option<usize>,
 }
 
 /// Match result with full capture information
@@ -2001,6 +2010,12 @@ impl RegexVM {
             Self::undo_trail(ctx, frame.trail_mark);
         }
         ctx.call_stack.truncate(frame.call_stack_mark);
+        // `\K` / `OpCode::MatchReset` mutates `match_start_override`
+        // during forward execution. On backtrack we restore whatever
+        // value was live when the frame was pushed — this ensures a
+        // `\K` in an abandoned branch doesn't leak its reset onto the
+        // eventual match span.
+        ctx.match_start_override = frame.saved_match_start_override;
     }
 
     /// Restore a previously saved execution state if backtracking is available.
@@ -2774,6 +2789,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                         match_count += 1;
                         trace_log!(
@@ -2844,6 +2860,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -2886,6 +2903,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -2922,6 +2940,7 @@ impl RegexVM {
                             call_stack_mark: ctx.call_stack.len(),
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -2951,6 +2970,7 @@ impl RegexVM {
                             call_stack_mark: ctx.call_stack.len(),
                             capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -3002,6 +3022,7 @@ impl RegexVM {
                             call_stack_mark: after_first_cs_mark,
                             capture_snapshot: None,
                             saved_code_result: after_first_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -3132,6 +3153,7 @@ impl RegexVM {
                         call_stack_mark: ctx.call_stack.len(),
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
                 }
@@ -4640,6 +4662,7 @@ impl RegexVM {
                             call_stack_mark: ctx.call_stack.len(),
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
                         });
                         ip = target1;
                     } else {
@@ -4660,6 +4683,7 @@ impl RegexVM {
                             call_stack_mark: ctx.call_stack.len(),
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
                         });
                         ip = target2;
                     } else {
@@ -5364,6 +5388,7 @@ impl RegexVM {
                         call_stack_mark: call_stack.len(),
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
                     });
                 }
 
@@ -5381,6 +5406,7 @@ impl RegexVM {
                         call_stack_mark: call_stack.len(),
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
                     });
                     ip += offset;
                 }
@@ -5438,6 +5464,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -5474,6 +5501,7 @@ impl RegexVM {
                             call_stack_mark: call_stack.len(),
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -5523,6 +5551,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -5552,6 +5581,7 @@ impl RegexVM {
                             call_stack_mark: call_stack.len(),
                             capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -5611,6 +5641,7 @@ impl RegexVM {
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
                             saved_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 
@@ -5657,6 +5688,7 @@ impl RegexVM {
                             call_stack_mark: after_first_cs_mark,
                             capture_snapshot: None,
                             saved_code_result: after_first_code_result,
+                            saved_match_start_override: ctx.match_start_override,
                         });
                     }
 

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - `\K` reset unwinds on backtrack (+3 passes)
+
+- Scope: `OpCode::MatchReset` (PCRE2 `\K`) writes `ctx.match_start_override` to shift the visible match start to the current position. The forward write was correct, but `BacktrackFrame` did not save/restore that override — so a `\K` that executed inside a branch we later abandoned left its reset glued to the surviving match. Patterns like `/(foo)(\Kbar|baz)/` on `"foobaz"` matched `"baz"` instead of `"foobaz"`; `/^a\Kcz|ac/` on `"ac"` matched `"c"` instead of `"ac"`.
+- Fix: `rgx-core/src/vm.rs` `BacktrackFrame` gains `saved_match_start_override: Option<usize>`. Every push site (18 in total across the main VM, the subexpression VM, and the continuation-style `execute_subexpr_advancing` loop) now captures `ctx.match_start_override` at push time, and `restore_frame` writes it back on pop — the override rides the same undo log as the capture trail and call stack.
+- Validation: 1,052 lib tests pass. PCRE2 conformance **9,711 → 9,714 pass** (+3), 1,519 → 1,516 fail. Ratchet baselines bumped to `PASS_BASELINE=9_714` / `FAIL_BASELINE=1_516`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Net +3 (span-mismatch cluster `-3`, false-positive cluster `+2` from latent edge cases the correction surfaced). The `\K`-inside-lookaround and `\K`-inside-DEFINE variants need follow-up — they need additional scoping because the reset must NOT propagate out of a zero-width assertion at all. Follow-up items: `/(?=b(*THEN)a|)bn|bnn/` and `/(?(DEFINE)(?<sneaky>b\K))a(?=(?&sneaky))/g` still mismatch.
+
 ### 2026-04-20 - Harness: decode `\ ` / `\t` in subject lines (+18 passes)
 
 - Scope: `decode_subject_mode` in `rgx-core/tests/pcre2_conformance.rs` dropped any subject line containing `\<unknown>` (returned `None` on the unknown-escape fallthrough). That bucketed the subject as "unparseable" and *also* left the corresponding output-echo/match lines in `testoutput*` unclaimed, so every later subject in the same pattern block paired against the wrong expected output. Concrete failing case: `/^\p{Zs}/utf` with subject `\ \` — pcre2test's convention for a literal space — was dropped, and the second subject `\x{a0}` then claimed the first subject's ` 0: <space>` output, producing a "PCRE2=\" \", RGX=\"\u{a0}\"" span-mismatch that wasn't really a divergence.
