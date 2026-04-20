@@ -313,6 +313,23 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
     // a `\= Expect` annotation, a `No match`, or the ` 0:` match echo.
     while oi < ob.len() {
         let l = ob[oi];
+        // `/B` / `/IB` bytecode block. pcre2test wraps the bytecode
+        // dump in a pair of `----` separator lines (64 hyphens, 0
+        // indent). Inside that block the 3-7-space-indented scope
+        // lines (e.g. `     /i b`, `     0030 N`) would otherwise
+        // trip `is_subject_echo`'s new 3-7-space rule. Fast-forward
+        // past the whole block to the trailing separator so the
+        // first real subject echo falls out of the outer loop.
+        if l.starts_with(b"----") {
+            oi += 1;
+            while oi < ob.len() && !ob[oi].starts_with(b"----") {
+                oi += 1;
+            }
+            if oi < ob.len() {
+                oi += 1;
+            }
+            continue;
+        }
         if is_subject_echo(l) || l.starts_with(b"\\=") {
             break;
         }
@@ -2123,8 +2140,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_403;
-    const FAIL_BASELINE: usize = 1_407;
+    const PASS_BASELINE: usize = 11_433;
+    const FAIL_BASELINE: usize = 1_377;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

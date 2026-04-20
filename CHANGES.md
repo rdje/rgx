@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: skip `/B` bytecode blocks in preamble (+30 passes)
+
+- Scope: Widening `is_subject_echo` to accept 3–7 space indents in the previous commit surfaced a latent aliasing in `/B` / `/IB` tests: pcre2test's bytecode dump emits 5-space-indented scope lines like `     /i b` (the `(?i)` scope marker), `     0030 N` etc. inside the `----` separator block. Those now tripped the looser `is_subject_echo` rule, so the preamble-skip broke out of the loop on the first bytecode scope line and paired it with the first match output — leaking every `/B` pattern's first real subject onto the next subject's output and turning valid matches into "PCRE2 expected no match, RGX matched" FPs (testinput2:788 `/a(?i)b/IB` and the wider `/IB` family).
+- Fix: `rgx-core/tests/pcre2_conformance.rs::parse_cases` preamble-skip now detects a line starting with `----` (pcre2test's bytecode-block delimiter: 64 hyphens at 0-indent) and fast-forwards past the matching closing `----`, skipping the entire bytecode dump before the subject-echo checks run. Works for both `/B` standalone and `/IB` combined.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,403 → 11,433 pass** (+30), 1,407 → 1,377 fail. FP 315 → 286 (−29), SM 303 → 300 (−3). Ratchet baselines bumped to `PASS_BASELINE=11_433` / `FAIL_BASELINE=1_377`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/a(?i)b/IB` family (testinput2:788, :794) and the `/B`-tagged subject blocks in testinput2 / testinput6 generally. The remaining FP bucket (286) is now mostly real engine divergence — Turkish casing, specific \b/\B/\K interactions, and callout tests.
+
 ### 2026-04-20 - Harness: `is_subject_echo` accepts 3–7 space indents (+35 passes)
 
 - Scope: pcre2test's default subject indent is 4 spaces, but testinput4 / testinput7 / testinput2 sprinkle 3-, 5-, 6-space runs (testinput7's `/[\x{100}\x{200}]/utf` family with `   ab\x{100}cd`, testinput4 / testinput2 partial-match blocks, etc.). The previous `is_subject_echo` was pinned to exactly 4 spaces + non-space, so those subjects walked off the preamble skip and every downstream subject in the same block paired against the wrong ` 0:` line.

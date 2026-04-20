@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: skip `/B` bytecode blocks in preamble (+30 passes)
+- **What**: `/B` / `/IB` bytecode output emits 5-space scope lines like `     /i b` that the new 3-7-space `is_subject_echo` rule mistakenly matched. Added `----` separator detection in the preamble-skip loop: when we see `----` at 0-indent, fast-forward to the next `----` and skip the whole bytecode block.
+- **Delta**: 11,403 → 11,433 (+30 pass). FP 315 → 286, SM 303 → 300. Baselines 11,433 / 1,377.
+
 ### 2026-04-20 — Harness: `is_subject_echo` accepts 3–7 space indents (+35 passes)
 - **What**: Previous `is_subject_echo` was pinned to exactly 4 spaces + non-space, which missed testinput4 / testinput7 / partial-match blocks that use 3 / 5 / 6 space indent. Now accepts 3–7 leading spaces, rejects 8+ (bytecode + `/x` pattern continuation).
 - **Delta**: 11,368 → 11,403 (+35 pass). Fails 1,442 → 1,407. FP −38, FN −2, SM +7 (those cases now reach real comparison instead of being mis-paired as "no match expected"). Baselines 11,403 / 1,407.
