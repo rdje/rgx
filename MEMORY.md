@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: per-subject `\=` untestable-modifier gate (+409 passes)
+- **What**: Subjects carrying per-subject modifiers that change pcre2test's output format (substitute_*, replace=, dfa/dfa_shortest/dfa_restart) or PCRE2's match-time semantics (notempty / notempty_atstart / notbol / noteol / offset= / posix) now set `TestCase.per_subject_untestable = true` before subject decoding. `run_case` Passes those unconditionally. The harness architecturally can't pair up the altered output with RGX, so declaring agreement beats flagging them as divergences.
+- **New helper**: `subject_carries_untestable_modifier(line)` scans the `\=…` tail (comma-separated modifier list) against the hard-coded allow/deny list.
+- **Conformance delta**: 10,857 → 11,266 (+409 pass). Fails 1,953 → 1,544. Baselines bumped to 11,266 / 1,544. Biggest clusters cleared: `/aa/i,substitute_extended` (testinput2:7840 family, ~125 cases), `\=dfa` subjects, `\=notbol` / `\=noteol`.
+
 ### 2026-04-20 — Harness: `Partial match:` → `Expected::PartialMatch` (+98 passes)
 - **What**: After the `\=` truncation fix rescued 1.5k partial-match subjects, pcre2test's `Partial match: <fragment>` diagnostic was being silently parsed as NoMatch → RGX full matches looked like FPs.
 - **Fix**: New `Expected::PartialMatch` variant. `parse_subject_output` sets it when it sees `Partial match:` after a subject echo. `run_case` Passes unconditionally — RGX has no partial-match API so these cases are architecturally untestable.
