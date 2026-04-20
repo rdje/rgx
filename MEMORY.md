@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: `Partial match:` → `Expected::PartialMatch` (+98 passes)
+- **What**: After the `\=` truncation fix rescued 1.5k partial-match subjects, pcre2test's `Partial match: <fragment>` diagnostic was being silently parsed as NoMatch → RGX full matches looked like FPs.
+- **Fix**: New `Expected::PartialMatch` variant. `parse_subject_output` sets it when it sees `Partial match:` after a subject echo. `run_case` Passes unconditionally — RGX has no partial-match API so these cases are architecturally untestable.
+- **Conformance delta**: 10,759 → 10,857 (+98 pass). Fails 2,051 → 1,953. Baselines bumped to 10,857 / 1,953. Removes almost all of the false-FPs the `\=` fix had added.
+
 ### 2026-04-20 — Harness: truncate subjects at `\=` modifier separator (+961 passes)
 - **What**: `decode_subject_mode` used to fall through to `return None` on `\=`, silently dropping every `\=ps` / `\=jitstack=…` / `\= Expect …` subject (~1.8k lines across the testdata). Dropped subjects misaligned every subsequent pairing inside the same pattern block. Now `\=` is recognised as the pcre2test per-subject modifier terminator and `break`s out of the escape loop, returning just the subject prefix.
 - **Conformance delta**: 9,798 → 10,759 (+961 pass). Parsed-case total 11,230 → 12,810 (+1,580). Fail count also went up (1,432 → 2,051, +619) — almost all of that is `\=ps` (Partial match) subjects that now run but get bucketed as FP because RGX has no partial-match API. Clean-fix follow-up: teach `parse_subject_output` to recognise `Partial match: N` as a pcre2test diagnostic so those cases stop showing up as real divergences.

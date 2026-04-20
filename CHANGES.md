@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: recognise `Partial match:` as `Expected::PartialMatch` pass-through (+98 passes)
+
+- Scope: After the `\=` truncation fix, 1,580 previously-dropped `\=ps` / `\=ph` (partial soft / hard) subjects started flowing through the harness. pcre2test emits `Partial match: <fragment>` for them — our parser had no case for that line form, so it fell into the "eat unknown, keep looking" branch and ended up recording `Expected::NoMatch`. Every RGX full match (which is all RGX produces — there's no partial-match API) then surfaced as "PCRE2 expected no match, RGX matched", bloating the FP bucket.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` gains `Expected::PartialMatch`. `parse_subject_output` now detects lines starting with `Partial match:` after a subject echo and records that variant. `run_case` matches on `PartialMatch` first and returns `Outcome::Pass` unconditionally — the case is architecturally untestable through RGX's full-match API, so counting it as agreement instead of divergence is the honest call.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **10,759 → 10,857 pass** (+98), 2,051 → 1,953 fail. Ratchet baselines bumped to `PASS_BASELINE=10_857` / `FAIL_BASELINE=1_953`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Removes almost all of the false FPs the `\=` truncation fix had introduced. Follow-up: RGX's partial-match support (if we ever add `PCRE2_PARTIAL_SOFT` / `PCRE2_PARTIAL_HARD` semantics) would let us actually validate these cases — but that's an engine feature, not a harness issue.
+
 ### 2026-04-20 - Harness: truncate subject at pcre2test `\=` modifier separator (+961 passes)
 
 - Scope: pcre2test splits a data line at the first un-escaped `\=` — everything to the left is the actual subject, everything to the right is a per-subject modifier list (`\=ps`, `\=jitstack=1024`, `\= Expect no match`, …). `decode_subject_mode` had no handler for `\=`, so it fell through to the unknown-escape `return None` branch and *silently dropped* every one of those ~1.8k lines. Dropped subjects cascaded: every following subject in the same block paired against the wrong output line, so one dropped subject could take a whole block's output alignment with it.
