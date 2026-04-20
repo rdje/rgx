@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: Turkish/ASCII-restricted modifier families untestable (+76 passes)
+- **What**: Extended `pattern_carries_untestable_modifier` with long-name arms `turkish_casing`, `caseless_restrict`, `ascii_all`/`_bsd`/`_bss`/`_bsw`/`_digit`/`_posix`, plus short-bundle detection: any `/a`, `/ai`, `/aiJ` (comma piece made entirely of single-letter PCRE2 short flags that includes `a`) is pcre2test's shorthand for PCRE2_EXTRA_ASCII_* which RGX doesn't implement. All marked untestable.
+- **Delta**: 11,463 → 11,539 (+76 pass), 1,347 → 1,271 fail. FP dropped sharply (Turkish I/ı/İ matrix + fullwidth-digit `(?-a)` family). Baselines 11,539 / 1,271.
+
 ### 2026-04-20 — Harness: pattern-level untestable-modifier gate (+30 passes)
 - **What**: Added `pattern_carries_untestable_modifier(full_modifiers)` mirroring the per-subject helper. Pattern-level `substitute_*` options (overflow_length, callout, matched, replacement_only, case_callout, skip, stop, literal, extended, unknown_unset, unset_empty), `convert` / `convert_*`, and `firstline` now mark every subject under that pattern untestable — they produce pcre2test output (runtime error -48, callout traces, convert rewrites) the harness can't reproduce with RGX's full-substitute API.
 - **Delta**: 11,433 → 11,463 (+30 pass). FP 286 → 275. Baselines 11,463 / 1,347.

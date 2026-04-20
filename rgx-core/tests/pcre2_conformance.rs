@@ -437,9 +437,21 @@ fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
 /// All of these are stable flags on the pattern line itself, so the
 /// check runs once per pattern-block and applies to every subject.
 fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
+    // Short-flag bundle: a single comma piece made entirely of
+    // short-flag chars. The `a` bundle char enables PCRE2_EXTRA_ASCII_*
+    // which RGX does not implement; any `/a`, `/ai`, `/aiJ`, etc.
+    // changes POSIX/shorthand class scope in a way RGX cannot honour.
+    const SHORT_FLAGS: &[char] = &[
+        'i', 'm', 's', 'x', 'g', 'B', 'I', 'A', 'U', 'J', 'D', 'n', 'a', 'r',
+    ];
     for piece in full_modifiers.split(',') {
-        let name = piece.trim();
-        let name = name.split('=').next().unwrap_or(name).trim();
+        let trimmed = piece.trim();
+        let is_short_bundle =
+            !trimmed.is_empty() && trimmed.chars().all(|c| SHORT_FLAGS.contains(&c));
+        if is_short_bundle && trimmed.contains('a') {
+            return true;
+        }
+        let name = trimmed.split('=').next().unwrap_or(trimmed).trim();
         match name {
             "substitute_overflow_length"
             | "substitute_callout"
@@ -458,7 +470,15 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             | "convert_length"
             | "convert_glob_escape"
             | "convert_glob_separator"
-            | "firstline" => return true,
+            | "firstline"
+            | "turkish_casing"
+            | "caseless_restrict"
+            | "ascii_all"
+            | "ascii_bsd"
+            | "ascii_bss"
+            | "ascii_bsw"
+            | "ascii_digit"
+            | "ascii_posix" => return true,
             _ => {}
         }
     }
@@ -2196,8 +2216,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_463;
-    const FAIL_BASELINE: usize = 1_347;
+    const PASS_BASELINE: usize = 11_539;
+    const FAIL_BASELINE: usize = 1_271;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
