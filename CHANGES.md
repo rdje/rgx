@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-20 - Harness: subject-level `Failed:` maps to `NoMatch`, not compile error (+84 passes)
+
+- Scope: `parse_subject_output` treated every `Failed:` diagnostic as evidence that PCRE2 rejected the *pattern* at compile — i.e. `Expected::CompileError`. That logic was right when the `Failed:` line sits directly after the pattern echo, but pcre2test also emits `Failed: error N: UTF-8 error: …` inside a subject block when PCRE2 compiled the pattern fine and then rejected the *subject* at match time under `/utf` (the `/badutf/utf` test family, plus a handful of similar match-time failures). The harness then tagged RGX as "too permissive" because RGX's `&str` entry point had already auto-repaired the malformed `\xNN` runs into well-formed UTF-8 codepoints and the pattern compiled successfully.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` `parse_subject_output` now discriminates on whether a subject echo was consumed before the `Failed:` line. Pre-subject `Failed:` (compile error) still lowers to `Expected::CompileError`; post-subject `Failed:` (match-time error) now lowers to `Expected::NoMatch`, which is what RGX observably produces when its sanitised subject doesn't match the literal pattern.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **9,714 → 9,798 pass** (+84), 1,516 → 1,432 fail, 0 panic / 0 skip. Ratchet baselines bumped to `PASS_BASELINE=9_798` / `FAIL_BASELINE=1_432`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Clears the `/badutf/utf` + `/anything/utf` test clusters (testinput10:20, :62, :86) and a scattering of PCRE2 `match_invalid_utf` and runtime-limit failures that pcre2test emits as `Failed: error … at offset N`. The "too permissive" bucket goes from 139 → 0; a small FP regression (+12) came with the change because a handful of cases that were previously classified as "too permissive" now expect `NoMatch` and RGX does find an incidental match on its cleaned-up subject — those are real engine divergences worth chasing separately.
+
 ### 2026-04-20 - `\K` reset unwinds on backtrack (+3 passes)
 
 - Scope: `OpCode::MatchReset` (PCRE2 `\K`) writes `ctx.match_start_override` to shift the visible match start to the current position. The forward write was correct, but `BacktrackFrame` did not save/restore that override — so a `\K` that executed inside a branch we later abandoned left its reset glued to the surviving match. Patterns like `/(foo)(\Kbar|baz)/` on `"foobaz"` matched `"baz"` instead of `"foobaz"`; `/^a\Kcz|ac/` on `"ac"` matched `"c"` instead of `"ac"`.

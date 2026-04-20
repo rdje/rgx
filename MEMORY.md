@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-20 — Harness: subject-level `Failed:` → `NoMatch` (+84 passes)
+- **What**: `parse_subject_output` used to set `Expected::CompileError` on *any* `Failed:` line, including PCRE2's match-time UTF-8 errors inside a subject block (`/badutf/utf` family, etc.). That made RGX count as "too permissive" for cases where the pattern compiled fine and only the subject was malformed UTF-8 — but RGX's `&str` + `decode_subject_mode` auto-repairs stray `\xNN` runs, so it correctly returns no-match.
+- **Fix**: `Failed:` after a subject echo (`consumed > 0`) now lowers to `Expected::NoMatch`. Pre-subject `Failed:` (genuine compile error) still lowers to `CompileError`.
+- **Conformance delta**: 9,714 → 9,798 (+84). Ratchet bumped to 9,798 / 1,432. "Too permissive" bucket: 139 → 0. Small FP bump (+12) where post-repair RGX finds an incidental match where PCRE2 rejected the subject outright — those are real divergences, tractable separately.
+
 ### 2026-04-20 — `\K` reset unwinds on backtrack (+3 passes)
 - **What**: `BacktrackFrame` gained `saved_match_start_override: Option<usize>`. All 18 push sites save `ctx.match_start_override` at push time, and `restore_frame` writes it back on pop. `\K` now rides the same undo log as capture state — a `\K` in an abandoned alternative no longer leaks its reset onto the surviving match.
 - **Why it mattered**: `/(foo)(\Kbar|baz)/` on `"foobaz"` was matching `"baz"` (should be `"foobaz"`); `/^a\Kcz|ac/` on `"ac"` was matching `"c"` (should be `"ac"`).

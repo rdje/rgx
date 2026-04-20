@@ -843,12 +843,29 @@ fn parse_subject_output(
         }
         let text = String::from_utf8_lossy(l);
         let trimmed = text.trim_start();
-        // pcre2test emits `Failed: error NNN ...` when PCRE2 itself
-        // refuses to compile the pattern. The current subject line was
-        // written but never tested — record `Expected::CompileError`
-        // so RGX's compile-error response counts as a Pass.
+        // pcre2test emits `Failed: error NNN ...` in two places:
+        //
+        //   * Directly after the pattern echo (no subject echo yet) —
+        //     the pattern itself failed to compile. Record
+        //     `Expected::CompileError` so RGX returning a compile error
+        //     counts as a pass.
+        //
+        //   * Inside a subject block (after the subject echo) — PCRE2
+        //     compiled fine but rejected the subject at match time
+        //     (almost always a `UTF-8 error: …` under `/utf` against
+        //     malformed input our harness pre-decoded). RGX's `&str`
+        //     entry point only accepts valid UTF-8 and `decode_subject_mode`
+        //     auto-repairs stray `\xNN` runs into well-formed codepoints,
+        //     so RGX simply returns "no match" here — record
+        //     `Expected::NoMatch` rather than `CompileError`, which kept
+        //     dozens of `/badutf/utf` cases falsely flagged as "RGX too
+        //     permissive".
         if trimmed.starts_with("Failed:") {
-            compile_error = true;
+            if consumed > 0 {
+                no_match = true;
+            } else {
+                compile_error = true;
+            }
             consumed += 1;
             idx += 1;
             // The subsequent `        here:` line, if present, is part
@@ -1693,6 +1710,16 @@ fn run_full_conformance() {
                 Outcome::Fail { detail } => {
                     stats.fail += 1;
                     let cat = classify_failure(&detail);
+                    if let Ok(filter) = std::env::var("RGX_CONFORMANCE_DUMP_CAT") {
+                        if cat.contains(filter.as_str()) {
+                            eprintln!(
+                                "{cat} {file_name}:{ln}: /{pat}/{mods} :: {detail}",
+                                ln = case.line_number,
+                                pat = case.pattern,
+                                mods = case.modifiers,
+                            );
+                        }
+                    }
                     let entry = aggregate_categories
                         .entry(cat)
                         .or_insert_with(|| (0, String::new()));
@@ -1858,8 +1885,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 9_714;
-    const FAIL_BASELINE: usize = 1_516;
+    const PASS_BASELINE: usize = 9_798;
+    const FAIL_BASELINE: usize = 1_432;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
