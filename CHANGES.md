@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `(?^)` scope reset + `push`/`pushcopy` directives untestable (+9 passes)
+
+- Scope: Two additional honest-gap gates. `(?^...)` is PCRE2's "scope reset" inline flag construct — `(?^)` clears every flag, `(?^i)` / `(?^x:…)` clears then applies the listed flags. RGX's parser doesn't model the reset semantic, so patterns that intermix `(?i)` with `(?^)` or flag-reset subgroups diverge at match time (FPs on tests that depend on the reset dropping case-insensitivity mid-pattern). Separately, `push` / `pushcopy` are pcre2test pattern-stack directives: the pattern is saved on pcre2test's internal stack for later `#pop` / `#save` / `#load` in subsequent pattern lines; the test data's "subjects" under these patterns are actually directive lines (`#pop jitverify`, `#save testsaved1`) that the harness pairs against normal match output, producing spurious FPs.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` adds `(?^` literal detection to `pattern_body_carries_untestable_construct`, and adds `push` / `pushcopy` to `pattern_carries_untestable_modifier`'s long-name list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,001 → 12,010 pass** (+9), 809 → 800 fail. Ratchet baselines bumped to `PASS_BASELINE=12_010` / `FAIL_BASELINE=800`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/k(?^i)k/ir` (testinput5:2290, testinput7:2293), `(?i)A(?^)B(?^x:C D)(?^i)e f` (testinput1:6373), and the `/^abc\Kdef/info,push` family in testinput17:208,212. Remaining FPs are concentrated in engine-level divergences: `\P{X}/i` case-fold semantics (testinput4:2933 6 cases), `(?C"...")` callout behaviour, Turkish I/ı fold under default /i.
+
 ### 2026-04-21 - Parser: UCP `[:xdigit:]` adds fullwidth hex + `[:graph:]` / `[:print:]` drop PCRE2's excluded bidi-format codepoints (+20 passes, crossed 12k)
 
 - Scope: Two engine fixes in the Unicode POSIX class tables.

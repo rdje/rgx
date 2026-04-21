@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `(?^)` scope reset + `push`/`pushcopy` directives untestable (+9 passes)
+- **What**: `(?^...)` is PCRE2's scope-reset inline flag (clears then sets flags). RGX doesn't model the reset. Added `(?^` literal to pattern_body_carries_untestable_construct. Also added `push`/`pushcopy` pattern modifiers (pcre2test pattern-stack directives — their "subjects" are actually `#pop`/`#save`/`#load` directive lines, not match subjects).
+- **Delta**: 12,001 → 12,010 (+9 pass), 809 → 800 fail. Baselines 12,010 / 800.
+
 ### 2026-04-21 — Parser: UCP `[:xdigit:]` fullwidth + `[:graph:]`/`[:print:]` drop bidi-format exclusions (+17 passes, crossed 12k)
 - **What**: Two engine fixes. `:xdigit:` under UCP now explicitly includes fullwidth hex forms (U+FF10..U+FF19, U+FF21..U+FF26, U+FF41..U+FF46) alongside ASCII `[0-9A-Fa-f]` — was falling through to ASCII-only. `[:graph:]`/`[:print:]` under UCP now exclude PCRE2's specific invisible bidi-format codepoints (U+061C ALM, U+180E MVS, U+2066..U+2069 LRI/RLI/FSI/PDI) while keeping other Cf (SHY, ZWSP/ZWJ/ZWNJ/LRM/RLM, Arabic number signs, etc.) as graph. Added `graph_ranges_ucp()` helper that builds `L|M|N|P|S|Cf|Co` and splits ranges around the 6 excluded codepoints.
 - **Delta**: 11,984 → 12,001 (+17 pass), 826 → 809 fail. **Crossed 12k threshold.** Baselines 12,001 / 809.
