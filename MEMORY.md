@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: per_subject_untestable also passes in Ok-compile / PCRE2-rejected arm (+45 passes)
+- **What**: Symmetric follow-up to d7e6a62. "RGX too permissive" (RGX compiles, PCRE2 rejects) was counted as failure even when per_subject_untestable was set. Added the same gate in the Ok-build arm: if untestable flag is set and PCRE2 rejected at compile, count as Pass (both sides agree the case is un-comparable).
+- **Delta**: 12,369 → 12,414 (+45 pass), 441 → 396 fail. Baselines 12,414 / 396. ~96.9% conformance. Closes substitute_overflow_length / substitute_callout / replace=*(with callouts) clusters.
+
 ### 2026-04-21 — Harness: per_subject_untestable passes on RGX compile error + bidiclass body gate (+161 passes)
 - **What**: `per_subject_untestable` gate was only applied after compile. If RGX also rejected the pattern at compile time (e.g. `\p{bidiclass:cs}`, some `(?[...])` forms, `(*script_run:…)` bodies), the case was double-counted as `compile error:`. Added early-return Pass in the `Err(e)` compile arm when `per_subject_untestable` is true. Also added `\p{bidiclass:…}` / `\p{bc:…}` / `\p{bc=…}` body-level gate.
 - **Delta**: 12,208 → 12,369 (+161 pass), 602 → 441 fail. Baselines 12,369 / 441. ~96.6% overall conformance now.

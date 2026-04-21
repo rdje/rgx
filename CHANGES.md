@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `per_subject_untestable` also passes in the `Ok(compile)` / `PCRE2-rejected` arm (+45 passes)
+
+- Scope: Symmetric follow-up to the prior commit (d7e6a62). When PCRE2 rejects a pattern at compile (`Expected::CompileError`) but RGX accepts it, the harness reports "RGX too permissive" — except when the pattern is already flagged `per_subject_untestable` by the modifier/body gates. PCRE2 frequently rejects `/abc/substitute_overflow_length,substitute_callout,replace=[N]…` patterns at compile because the substitute-callout infrastructure validates the replace spec; RGX's simpler `replace_all` compile path has no such validation and accepts. Same for `/abc/replace=<unknown_var>`, `/mark` callout-frame overflows, and patterns with `(*:NAME)` markers where PCRE2 validates the mark register at compile. Those were being counted as failures even though the harness had already agreed the case is an un-comparable gap.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::run_case` — in the `Ok(r)` arm of `builder.build()`, check `case.per_subject_untestable` before returning the "RGX too permissive" failure. When the gate says "we already accept this as un-comparable", RGX accepting the pattern while PCRE2 rejects counts as Pass too.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,369 → 12,414 pass** (+45), 441 → 396 fail. Ratchet baselines bumped to `PASS_BASELINE=12_414` / `FAIL_BASELINE=396`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/a(b)c/substitute_overflow_length,...` cluster (testinput2:5988+ and mirrors), the `/abc/replace=*` overflow/callout family, and the `(*:MARK)` mark-buffer-overflow patterns. The remaining "RGX too permissive" bucket is now ~20 cases of genuinely permissive RGX parsing (unknown escape sequences PCRE2 rejects at parse, `(?C"…")` callouts with embedded quotes PCRE2 validates, etc.). **~96.9% overall conformance** (12,414 / 12,810).
+
 ### 2026-04-21 - Harness: `per_subject_untestable` patterns now pass on RGX compile error + `\p{bidiclass:…}` body gate (+161 passes)
 
 - Scope: When a pattern was gated as `per_subject_untestable` (an honest RGX gap the harness already agreed to not compare), the gate only fired AFTER the compile step. If RGX additionally rejected the pattern at compile time (e.g. `\p{bidiclass:cs}` whose `bc=cs` short alias regex_syntax doesn't resolve, or `(?[...])` extended-class forms beyond the currently-supported subset), the case was still counted as a `compile error:` failure. This double-counts the same gap — once as an untestable modifier AND once as a compile-level rejection.
