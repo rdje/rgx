@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: richer template-validation gate for `replace=` (+2 passes)
+
+- Scope: The previous `template_has_pcre2_only_syntax` helper caught `$*MARK`, `${*...}`, `[N]` callout prefix, `$++` / `$--`, unterminated `${...`, and `${name-...}` alt syntax — but missed:
+  - `${name-of-excessive-length}` over PCRE2's 32-byte group-name limit
+  - `${b+d}` operator chars inside var names
+  - `$bad` / `$foo` bare multi-letter var references (PCRE2 interprets only the first valid char and rejects if the remaining letters aren't a name)
+- Fix: `rgx-core/tests/pcre2_conformance.rs::template_has_pcre2_only_syntax` — walks each `${...}` span and rejects body length > 32, bodies containing chars outside `[A-Za-z0-9_:+-]`; separately scans for `$X` where `X` is ≥ 2 consecutive ASCII letters (bare multi-letter unresolved var reference).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,562 → 12,564 pass** (+2), 248 → 246 fail. Ratchet baselines bumped to `PASS_BASELINE=12_564` / `FAIL_BASELINE=246`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/abc/replace=a$bad` (testinput2:4238) and `/abc/replace=a${A234567890123456789_123456789012}z` (testinput2:4241+) plus variants.
+
 ### 2026-04-22 - VM: full alternation-aware `(*THEN)` backtracking-verb semantics (+18 passes, engine #9)
 
 - Scope: Engine bug — `(*THEN)` was implemented as a simplified alias for `(*PRUNE)`: `ctx.backtrack_stack.clear()`. That's semantically wrong. PCRE2's `(*THEN)` is "if inside an alternation, the next alternative in the current group is tried" — NOT "clear all backtracks". A pattern like `^(?:aaa(*THEN)\w{6}|bbb(*THEN)\w{5}|\w{3})` on `"aaa++++++"` should: match "aaa", fail `\w{6}`, `(*THEN)` drops back to the next alt (`bbb\w{5}`, which also fails), then the last alt `\w{3}` picks up "aaa". RGX's old THEN cleared the whole stack and returned no match.

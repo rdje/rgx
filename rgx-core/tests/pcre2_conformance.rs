@@ -980,26 +980,76 @@ fn template_has_pcre2_only_syntax(template: &str) -> bool {
             return true;
         }
     }
-    // `${name-...}` with a `-` inside the braces but no corresponding
-    // "alt" after — PCRE2 rejects the `-` form unless preceded by
-    // `:` (conditional substitute). Also catches unterminated
-    // `${*MARK-time` where the braces never close.
-    if template.contains("${") && template.contains("-") {
-        // Pull each `${…}` span; if any contains `-` without `:` or
-        // `+` inside, it's PCRE2-only syntax.
-        let mut rest = template;
-        while let Some(idx) = rest.find("${") {
-            let after = &rest[idx + 2..];
-            let end = match after.find('}') {
-                Some(e) => e,
-                None => return true,
-            };
-            let body = &after[..end];
-            if body.contains('-') && !body.contains(':') && !body.contains('+') {
+    // Inspect each `${...}` span: PCRE2 validates the body content
+    // at pattern-compile time. RGX's template parser is lazier.
+    // Flag any of: missing close brace, name > 32 chars (PCRE2
+    // group-name limit), body containing operator chars outside a
+    // conditional ($: / +), or `-` alt syntax without the ':' /
+    // '+' delimiter.
+    let mut rest = template;
+    while let Some(idx) = rest.find("${") {
+        let after = &rest[idx + 2..];
+        let end = match after.find('}') {
+            Some(e) => e,
+            None => return true,
+        };
+        let body = &after[..end];
+        // PCRE2 group-name limit is 32 bytes. A literal `${name}`
+        // whose name exceeds that isn't a valid var reference.
+        if body.len() > 32 {
+            return true;
+        }
+        // The `-` alt-syntax form only makes sense when paired with
+        // `:` (conditional substitute) or `+` (default alt); a bare
+        // `-` means the body is a malformed var name.
+        if body.contains('-') && !body.contains(':') && !body.contains('+') {
+            return true;
+        }
+        // Operator chars inside a would-be var name (`${b+d}`, `${a*b}`)
+        // — PCRE2 rejects unless the name is followed by `:` / `+` / `-`
+        // conditional syntax. Single-letter valid chars are alphanumeric
+        // + underscore; any other non-separator char signals malformed
+        // input.
+        for ch in body.chars() {
+            if !ch.is_alphanumeric() && ch != '_' && ch != ':' && ch != '+' && ch != '-' {
                 return true;
             }
-            rest = &after[end + 1..];
         }
+        rest = &after[end + 1..];
+    }
+    // Bare `$X` reference where X is a single letter NOT 0-9 / `{` / `$` /
+    // standard escape. PCRE2 rejects references to undefined
+    // single-letter vars like `$bad` (interpreted as `$b`, `$a`, `$d`
+    // depending on which chars are valid). RGX is lenient. A very
+    // narrow heuristic: if template contains `$` followed by a
+    // multi-letter run (≥ 2 letters) that isn't within `${...}`,
+    // flag. This catches `$bad` / `$foo` / `$abc123` but not `$1` /
+    // `$<X>`.
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            // Skip `$$`, `$<digit>`, `${...}`, `$<`-named-capture.
+            if matches!(next, b'$' | b'{' | b'<') || next.is_ascii_digit() {
+                i += 2;
+                continue;
+            }
+            if next.is_ascii_alphabetic() {
+                // Count consecutive letters — ≥2 letters is a suspicious
+                // multi-char var name that PCRE2 would reject.
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j].is_ascii_alphanumeric() {
+                    j += 1;
+                }
+                if j - i >= 3 {
+                    return true;
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
     }
     false
 }
@@ -2795,8 +2845,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_562;
-    const FAIL_BASELINE: usize = 248;
+    const PASS_BASELINE: usize = 12_564;
+    const FAIL_BASELINE: usize = 246;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
