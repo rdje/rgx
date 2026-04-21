@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Parser: `extend_ranges_from_regex` honours `Custom { negated: true }` (UCP `\W`/`\D`/`\S` inside char class) (+17 passes)
+
+- Scope: Engine bug — when `\W` / `\D` / `\S` is used inside a character class under `(*UCP)`, the parser's UCP path produces `Regex::CharClass(CharClass::Custom { ranges: ucp_word_ranges, negated: true })` (i.e. the POSITIVE range set with a `negated` flag). But `extend_ranges_from_regex`, which unions class escapes into the surrounding `[...]`, matched `Custom { ranges: custom, .. }` with `..` (ignoring `negated`), so `\W` inside `[...]` effectively contributed the WORD character set instead of its complement. Symptoms: `(*UCP)[^\W]` accepted `;` (a non-word) and rejected `Ā`/`a`/`A`/`1` (all word chars) — exactly inverted. The non-UCP path was unaffected because `\W` there compiles to `CharClass::Word { negated: true }`, which has a dedicated arm.
+- Fix: `rgx-core/src/parsing.rs::extend_ranges_from_regex` — the `Custom { ranges, negated }` arm now inspects `negated` and unions `complement_ranges(&ranges)` when true. Single-arm change; the `complement_ranges` helper was already in scope via the POSIX-class path above.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,418 → 12,435 pass** (+17), 392 → 375 fail. Ratchet baselines bumped to `PASS_BASELINE=12_435` / `FAIL_BASELINE=375`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `[^[:ascii:]\W]/utf,ucp` cluster (testinput4:2336, testinput5:1694) plus every other pattern that unions a UCP `\W` / `\D` / `\S` inside a bracket. `(*UCP)[^\W]` now correctly matches `Ā`/`a`/`1` and rejects `;`. **Seventh real RGX engine fix of the session.**
+
 ### 2026-04-21 - Harness: `/xx` + `(?xx` + unique-char short-bundle (+4 passes)
 
 - Scope: Three tiny fixes around PCRE2's `xx` (PCRE2_EXTRA_EXTENDED_MORE) flag. `/xx` lets whitespace INSIDE a character class be ignored, in addition to `/x`'s outside-class handling. RGX only implements `/x`.

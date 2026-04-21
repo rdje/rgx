@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Parser: extend_ranges_from_regex honours Custom{negated:true} for UCP \W/\D/\S in class (+17 passes, engine fix #7)
+- **What**: Engine bug. Under UCP, `\W` inside `[...]` compiles to `Custom{ranges:ucp_word_ranges, negated:true}` (positive set + negation flag). `extend_ranges_from_regex` matched Custom with `..` (ignored `negated`), unioning the word set instead of its complement. `(*UCP)[^\W]` was inverted: matched `;` rejected `Ā`. Added negated branch using `complement_ranges(&custom)`.
+- **Delta**: 12,418 → 12,435 (+17 pass), 392 → 375 fail. Baselines 12,435 / 375. **Seventh real engine fix this session.**
+
 ### 2026-04-21 — Harness: /xx + (?xx + unique-char short-bundle (+4 passes)
 - **What**: `/xx` (PCRE2_EXTRA_EXTENDED_MORE) was being parsed as short-bundle `x` twice. Added uniqueness check to short-bundle detection; repeated chars fall to named-modifier path. Added `xx`/`extended_more` to pattern_carries_untestable_modifier and `(?xx` literal to pattern_body gate.
 - **Delta**: 12,414 → 12,418 (+4 pass), 396 → 392 fail. Baselines 12,418 / 392.

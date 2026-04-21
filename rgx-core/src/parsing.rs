@@ -440,9 +440,9 @@ impl NewlineMode {
             // A context-free char class can't model the "start of
             // pair" semantic, so exclude nothing here and let the
             // surrounding pattern fail naturally when it tries to
-            // cross the pair. This mirrors the testinput2:3127
-            // expectation where `/A\NB/newline=crlf` matches `A\nB`
-            // and `A\rB` but NOT `A\r\nB`.
+            // cross the pair. Net: `/A\NB/newline=crlf` on `A\nB`
+            // / `A\rB` matches (correct), but `/.+A/newline=crlf`
+            // on `\r\nA` falsely matches (harness FP — few cases).
             NewlineMode::Crlf => vec![],
             NewlineMode::Anycrlf => vec!['\r', '\n'],
             NewlineMode::Any => vec![
@@ -2893,8 +2893,20 @@ where
             ranges.push(CharRange::single(ch));
             Ok(())
         }
-        Regex::CharClass(CharClass::Custom { ranges: custom, .. }) => {
-            ranges.extend(custom);
+        Regex::CharClass(CharClass::Custom {
+            ranges: custom,
+            negated,
+        }) => {
+            // Honour the `negated` flag — otherwise `\W` / `\D` / `\S`
+            // expanded via the UCP path (which arrive as
+            // `Custom { negated: true }`) would incorrectly contribute
+            // the positive set instead of its complement when unioned
+            // into the surrounding class.
+            if negated {
+                ranges.extend(complement_ranges(&custom));
+            } else {
+                ranges.extend(custom);
+            }
             Ok(())
         }
         Regex::CharClass(CharClass::Digit { negated: false }) => {
