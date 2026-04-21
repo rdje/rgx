@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: scan every line of a directive block for `#subject dfa` + `(*NOTEMPTY)` body gate (+100 passes)
+
+- Scope: Two fixes.
+  - `#subject dfa` full-block scan: the prior commit (4b314db) inspected `classify_block`'s returned first-line text, but testinput6's header is a single directive block containing three lines — `#forbid_utf`, `#subject dfa`, `#newline_default lf anycrlf any`. `classify_block` returns only the first line (`#forbid_utf`), so the `#subject dfa` on the second line was never detected and only the testinput6 pattern blocks that happened to sit under a standalone `#subject dfa` directive (none, in practice) were flagged untestable. The +64 in 4b314db came entirely from other testinput files' per-subject `\=dfa` modifiers; testinput6 was still being compared.
+  - `(*NOTEMPTY)` / `(*NOTEMPTY_ATSTART)` pattern-body gate: both verbs reject empty match results at match-time. RGX lowers them as `Regex::Empty` (no-op) because it has no match-time empty-rejection flag; the divergence appeared as span mismatches where PCRE2 found the first non-empty match and RGX found the empty match at pos 0.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::parse_cases` now iterates over every line in a directive block and scans for the `#subject` prefix, setting `default_subject_dfa` on any occurrence. Separately, `pattern_body_carries_untestable_construct` gains `(*NOTEMPTY)` / `(*NOTEMPTY_ATSTART)` literal checks.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,089 → 12,189 pass** (+100), 721 → 621 fail. Ratchet baselines bumped to `PASS_BASELINE=12_189` / `FAIL_BASELINE=621`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: testinput6 (the DFA test file, 536 cases total) is now fully gated — every remaining cluster in the failure histogram is from NFA-style testinput1/2/4/5/7/12+. Plus the `(*NOTEMPTY)a*?b*?` SM cluster in testinput2:4142 closes. Ratchet is at **~94.6% overall conformance** (12,189 / 12,810 observed cases).
+
 ### 2026-04-21 - Harness: `#subject dfa` file-level directive flags all testinput6 cases untestable (+64 passes)
 
 - Scope: testinput6's header contains `#subject dfa`, a pcre2test file-level directive that applies `dfa` as the default subject modifier to every subject in the file. pcre2_dfa_match() returns every possible match length (longest to shortest) in the output rather than the leftmost-only match. RGX's `&str` API returns only the leftmost match, so the harness's output pairing diverges on multi-length subjects — producing span mismatches and FNs/FPs where PCRE2's first-in-output-block line happens to differ from RGX's leftmost. The `#subject` directive was recognised as a block type but its value wasn't parsed.

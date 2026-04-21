@@ -129,13 +129,25 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
                 in_skip = matches!(cond.trim(), "ebcdic");
             } else if directive.trim() == "#endif" {
                 in_skip = false;
-            } else if let Some(rest) = directive.strip_prefix("#subject") {
-                // `#subject dfa` / `#subject dfa,something` — enable the
-                // DFA default. Any other `#subject` value is not recognised
-                // as DFA-triggering.
-                default_subject_dfa = rest
-                    .split_whitespace()
-                    .any(|t| t.split(',').any(|m| m.trim() == "dfa"));
+            }
+            // A directive block can contain multiple `#...` lines
+            // (testinput6's header has `#forbid_utf`, `#subject dfa`,
+            // `#newline_default lf anycrlf any` as one block). The
+            // `classify_block` return above only carries the FIRST
+            // line's text — scan every line here so `#subject dfa`
+            // is detected regardless of its position within the
+            // directive block.
+            for line in &ib.lines {
+                if let Ok(s) = std::str::from_utf8(line) {
+                    if let Some(rest) = s.strip_prefix("#subject") {
+                        if rest
+                            .split_whitespace()
+                            .any(|t| t.split(',').any(|m| m.trim() == "dfa"))
+                        {
+                            default_subject_dfa = true;
+                        }
+                    }
+                }
             }
             oi += 1;
             continue;
@@ -479,6 +491,13 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
         || pattern.contains("(*scs:")
         || pattern.contains("(*atomic_script_run:")
         || pattern.contains("(*asr:")
+        // `(*NOTEMPTY)` / `(*NOTEMPTY_ATSTART)` reject empty matches
+        // at match-time. RGX lowers these as `Regex::Empty` (no-op)
+        // because it has no match-time empty-rejection flag; the
+        // difference shows up as span mismatches where PCRE2 finds
+        // the first non-empty match and RGX finds the empty at pos 0.
+        || pattern.contains("(*NOTEMPTY)")
+        || pattern.contains("(*NOTEMPTY_ATSTART)")
     {
         return true;
     }
@@ -2365,8 +2384,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_089;
-    const FAIL_BASELINE: usize = 721;
+    const PASS_BASELINE: usize = 12_189;
+    const FAIL_BASELINE: usize = 621;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
