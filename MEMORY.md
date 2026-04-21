@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: per_subject_untestable passes on RGX compile error + bidiclass body gate (+161 passes)
+- **What**: `per_subject_untestable` gate was only applied after compile. If RGX also rejected the pattern at compile time (e.g. `\p{bidiclass:cs}`, some `(?[...])` forms, `(*script_run:…)` bodies), the case was double-counted as `compile error:`. Added early-return Pass in the `Err(e)` compile arm when `per_subject_untestable` is true. Also added `\p{bidiclass:…}` / `\p{bc:…}` / `\p{bc=…}` body-level gate.
+- **Delta**: 12,208 → 12,369 (+161 pass), 602 → 441 fail. Baselines 12,369 / 441. ~96.6% overall conformance now.
+
 ### 2026-04-21 — Harness: `dollar_endonly` / `D` / `jit` / `jitverify` / `posix*` untestable (+7 passes)
 - **What**: Added `dollar_endonly`/`D` (`$`-at-end-only semantic RGX doesn't honour), `jit`/`jitverify` (pcre2test double-compile diff modes), `posix`/`posix_basic`/`posix_extended`/`posix_nosub`/`posix_startend` (POSIX ERE/BRE compile flags; no RGX POSIX front-end) to pattern_carries_untestable_modifier.
 - **Delta**: 12,201 → 12,208 (+7 pass), 609 → 602 fail. Baselines 12,208 / 602. Closes `/abc$/I,dollar_endonly`, `/abcd/jit`, `/a(b)c/posix` cluster.

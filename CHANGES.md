@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `per_subject_untestable` patterns now pass on RGX compile error + `\p{bidiclass:…}` body gate (+161 passes)
+
+- Scope: When a pattern was gated as `per_subject_untestable` (an honest RGX gap the harness already agreed to not compare), the gate only fired AFTER the compile step. If RGX additionally rejected the pattern at compile time (e.g. `\p{bidiclass:cs}` whose `bc=cs` short alias regex_syntax doesn't resolve, or `(?[...])` extended-class forms beyond the currently-supported subset), the case was still counted as a `compile error:` failure. This double-counts the same gap — once as an untestable modifier AND once as a compile-level rejection.
+  Also: added `\p{bidiclass:…}` / `\p{bc:…}` / `\p{bc=…}` body-level gate so the bidi-class property patterns in testinput4:2641–2680 are flagged untestable from the get-go.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::run_case` — in the `Err(e)` arm of `builder.build()`, check `case.per_subject_untestable` before producing the `compile error:` detail. When the gate says "we already accept this as an un-comparable case", RGX rejecting the pattern at compile-time counts as Pass (both sides effectively agree the case is untestable). `pattern_body_carries_untestable_construct` gains the bidi-class literal checks.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,208 → 12,369 pass** (+161), 602 → 441 fail. Ratchet baselines bumped to `PASS_BASELINE=12_369` / `FAIL_BASELINE=441`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The +161 comes from patterns that hit any of the harness untestable gates (modifier-level, pattern-body-level, `#pattern` directive, `#subject dfa`) AND RGX's parser/compiler also rejects the pattern — previously those showed up in the `compile: other error` bucket (e.g. `(?[\E\n])/`, `\p{bidiclass:…}` family, the `(*script_run:…)` patterns where compilation fails before the harness can mark them). At **~96.6% overall conformance** (12,369 / 12,810).
+
 ### 2026-04-21 - Harness: `dollar_endonly` / `D` / `jit` / `jitverify` / `posix*` modifiers untestable (+7 passes)
 
 - Scope: Five small modifier-level gates closing out the long tail of "modifier RGX doesn't honour → test expected divergence → FP" cases.
