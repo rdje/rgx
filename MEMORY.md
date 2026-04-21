@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `(*:NAME)` mark verbs with >255-byte names untestable (+2 passes)
+- **What**: PCRE2 rejects mark verbs when NAME exceeds 255 bytes (fixed mark-buffer). RGX accepts arbitrary length. Added length check in pattern_body_carries_untestable_construct: scans for `(*:` and measures to closing `)`.
+- **Delta**: 12,527 → 12,529 (+2 pass), 283 → 281 fail. Baselines 12,529 / 281.
+
 ### 2026-04-21 — Harness: `r` short-flag in pattern bundle untestable (+7 passes)
 - **What**: Short-bundle untestable check only caught `a` (PCRE2_EXTRA_ASCII_*). Added `r` (PCRE2_EXTRA_CASELESS_RESTRICT). Patterns like `/A\x{17f}\x{212a}Z/ir` now untestable.
 - **Delta**: 12,520 → 12,527 (+7 pass), 290 → 283 fail. Baselines 12,527 / 283.

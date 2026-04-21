@@ -632,6 +632,29 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     if pattern_references_bidi_class_property(pattern) {
         return true;
     }
+    // PCRE2 rejects `(*:NAME)` mark verbs when NAME exceeds 255
+    // bytes (per the pcre2_compile documentation on mark-buffer
+    // limits). RGX accepts arbitrary-length marks. Detect and gate
+    // any mark verb whose name exceeds 255 bytes — this is the
+    // specific testinput9:259/:262 case pattern.
+    {
+        let bytes = pattern.as_bytes();
+        let mut i = 0;
+        while i + 3 < bytes.len() {
+            if bytes[i] == b'(' && bytes[i + 1] == b'*' && bytes[i + 2] == b':' {
+                let name_start = i + 3;
+                let Some(close_off) = bytes[name_start..].iter().position(|&b| b == b')') else {
+                    break;
+                };
+                if close_off > 255 {
+                    return true;
+                }
+                i = name_start + close_off + 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
     // `(?C"…")` / `(?C'…'`) / `(?C`…``) — PCRE2 callouts with a
     // STRING argument. PCRE2 routes the string to a user-registered
     // callback and rejects patterns at compile time when the string
@@ -2704,8 +2727,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_527;
-    const FAIL_BASELINE: usize = 283;
+    const PASS_BASELINE: usize = 12_529;
+    const FAIL_BASELINE: usize = 281;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

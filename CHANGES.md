@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `(*:NAME)` mark verbs with >255-byte names untestable (+2 passes)
+
+- Scope: PCRE2 rejects `(*:NAME)` mark-verb patterns when `NAME` exceeds 255 bytes — the mark buffer is fixed-size in the runtime. RGX accepts arbitrary-length mark names. testinput9:259 and :262 use a deliberately oversized 256+ byte name to probe this limit. Two cases were counted as "RGX too permissive" even though the mark-verb pattern itself is otherwise valid.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` scans the pattern for `(*:` and measures the distance to the matching `)`. When the name span exceeds 255 bytes, flag the pattern untestable.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,527 → 12,529 pass** (+2), 283 → 281 fail. Ratchet baselines bumped to `PASS_BASELINE=12_529` / `FAIL_BASELINE=281`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput9:259 / :262 `(*:0123…7F)XX/mark` oversized-mark cluster. **~97.8% overall conformance** (12,529 / 12,810).
+
 ### 2026-04-21 - Harness: `r` short-flag in pattern bundle untestable (+7 passes)
 
 - Scope: The short-bundle untestable check in `pattern_carries_untestable_modifier` only caught bundles containing `a` (PCRE2_EXTRA_ASCII_*). PCRE2's `r` short-flag is PCRE2_EXTRA_CASELESS_RESTRICT, which RGX also doesn't implement. Patterns like `/A\x{17f}\x{212a}Z/ir` (short bundle "ir" = caseless + caseless_restrict) were slipping through because "ir" isn't a named modifier and the bundle path only flagged 'a'.
