@@ -832,7 +832,14 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             // named-modifier forms `extended_more` / `xx` need
             // explicit gating here.
             | "extended_more"
-            | "xx" => return true,
+            | "xx"
+            // `/startchar` prints an extra `Starting char:` diagnostic
+            // from pcre2test, and (crucially) when `\K` is present the
+            // harness-visible match span in the output runs from the
+            // startchar to the match end, not from the \K-reset start.
+            // RGX reports match-start..end natively, so the spans
+            // diverge. Similar family to `/aftertext`.
+            | "startchar" => return true,
             _ => {}
         }
     }
@@ -2694,8 +2701,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_517;
-    const FAIL_BASELINE: usize = 293;
+    const PASS_BASELINE: usize = 12_520;
+    const FAIL_BASELINE: usize = 290;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

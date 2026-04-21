@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `/startchar` pattern modifier untestable (+3 passes)
+- **What**: `/startchar` adds pcre2test diagnostic and (with `\K`) reports span from startchar instead of match-start. Added to pattern_carries_untestable_modifier.
+- **Delta**: 12,517 → 12,520 (+3 pass), 293 → 290 fail. Baselines 12,520 / 290.
+
 ### 2026-04-21 — Harness: testinput28/29 (EBCDIC tests) file-level untestable (+8 passes)
 - **What**: testinput28 header says "This tests the EBCDIC support in PCRE2". Patterns authored in ISO-8859-1, reversibly mapped to EBCDIC. Under genuine EBCDIC `\x15` is NL; under ASCII it's NAK. RGX is ASCII-only, so the whole test suite is un-comparable. Added file-level untestable flag for testinput28 and testinput29.
 - **Delta**: 12,509 → 12,517 (+8 pass), 301 → 293 fail. Baselines 12,517 / 293.

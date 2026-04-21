@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `/startchar` pattern modifier untestable (+3 passes)
+
+- Scope: `/startchar` is a pcre2test output-format modifier that adds a `Starting char:` diagnostic line after each match. Critically, when `\K` is present, pcre2test also reports the match span from the startchar position (before `\K`) rather than from the `\K`-reset match-start. RGX reports the `\K`-reset start natively, so the harness-visible spans diverge: PCRE2="abc123", RGX="123" on `/abc\K123/startchar` over `"xyzabc123pqr"`.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` adds `startchar` to its long-name list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,517 → 12,520 pass** (+3), 293 → 290 fail. Ratchet baselines bumped to `PASS_BASELINE=12_520` / `FAIL_BASELINE=290`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/abc\K123/startchar` (testinput2:2778), `/abc\K/aftertext,startchar` (testinput2:2799). Startchar sits in the same "output-format-changing" category as `/aftertext` / `/ovector` / `/mark` already gated at per-subject level; this moves it to pattern level so every subject under the pattern gets the flag.
+
 ### 2026-04-21 - Harness: testinput28/29 (EBCDIC tests) marked file-level untestable (+8 passes)
 
 - Scope: testinput28 is PCRE2's EBCDIC-support test file (patterns authored in ISO-8859-1 encoding, reversibly mapped to EBCDIC). The header comment explicitly says "This tests the EBCDIC support in PCRE2". Under genuine EBCDIC, `\x15` is NL and `\x25` is LF; under ASCII they're NAK and `%`. RGX is ASCII/UTF-8 only, so patterns like `/^\x15$/` on subject `\n` never match (PCRE2 would match them under EBCDIC, failing under RGX's ASCII interpretation). Same for testinput29's 3 cases.
