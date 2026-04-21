@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Parser: UCP `[:xdigit:]` fullwidth + `[:graph:]`/`[:print:]` drop bidi-format exclusions (+17 passes, crossed 12k)
+- **What**: Two engine fixes. `:xdigit:` under UCP now explicitly includes fullwidth hex forms (U+FF10..U+FF19, U+FF21..U+FF26, U+FF41..U+FF46) alongside ASCII `[0-9A-Fa-f]` — was falling through to ASCII-only. `[:graph:]`/`[:print:]` under UCP now exclude PCRE2's specific invisible bidi-format codepoints (U+061C ALM, U+180E MVS, U+2066..U+2069 LRI/RLI/FSI/PDI) while keeping other Cf (SHY, ZWSP/ZWJ/ZWNJ/LRM/RLM, Arabic number signs, etc.) as graph. Added `graph_ranges_ucp()` helper that builds `L|M|N|P|S|Cf|Co` and splits ranges around the 6 excluded codepoints.
+- **Delta**: 11,984 → 12,001 (+17 pass), 826 → 809 fail. **Crossed 12k threshold.** Baselines 12,001 / 809.
+
 ### 2026-04-21 — Parser: `.`/`\N` under `(*CRLF)` + `\s`/UCP U+180E (+6 passes, two small engine fixes)
 - **What**: `(*CRLF)` `newline_chars()` returned `['\r','\n']` like Anycrlf, making `.`/`\N` fail on both bytes of a `\r\n` pair AND on bare `\r` or bare `\n`. PCRE2 fails only at the START of the pair — bare `\r`, bare `\n`, and the `\n` inside the pair all match. Simplest fix: return empty vec for Crlf (a context-free class can't model start-of-pair; the surrounding pattern still fails on `\r\n` because two bytes can't both be consumed). Also: `ucp_space_ranges` now includes U+180E MVS (PCRE2 historical-compat: was Zs pre-Unicode-6.3, reclassified to Cf but PCRE2 kept it as space).
 - **Delta**: 11,978 → 11,984 (+6 pass), 832 → 826 fail. Baselines 11,984 / 826. Closes `/A\NB/newline=crlf` and `/^A\s+Z/utf,ucp` on NEL+MVS+MMSP.

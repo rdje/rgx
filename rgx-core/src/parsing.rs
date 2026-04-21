@@ -3092,20 +3092,89 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
         }
         "cntrl" => p("Cc"),
         // PCRE2 `[:graph:]` under UCP matches any codepoint that is
-        // not one of {Cc, Cs, Cn, Zs, Zl, Zp}. The positive list
-        // (L + M + N + P + S + Cf + Co) matches the implementation
-        // behavior, which includes format (Cf) and private-use (Co)
-        // codepoints — the documentation-only list (L+M+N+P+S) misses
-        // several Unicode testinput4 cases that PCRE2 actually treats
-        // as "graph".
-        "graph" => merge(&["L", "M", "N", "P", "S", "Cf", "Co"]),
+        // not one of {Cc, Cs, Cn, Zs, Zl, Zp}, AND is not one of the
+        // specific "invisible" bidi-formatting codepoints PCRE2 has
+        // historically excluded: U+061C (ARABIC LETTER MARK),
+        // U+180E (MONGOLIAN VOWEL SEPARATOR, was Zs pre-6.3), and
+        // U+2066..U+2069 (bidi isolate controls LRI/RLI/FSI/PDI).
+        // The rest of Cf (soft-hyphen, zero-width joiner/non-joiner,
+        // LRM/RLM, Arabic number signs, etc.) IS graph, matching
+        // testinput4:2131-2147 expectations where those codepoints
+        // are listed as graph subjects. Co (private use) is also
+        // graph.
+        "graph" => graph_ranges_ucp(),
         // `[:print:]` = graph + space-separators (Zs).
-        "print" => merge(&["L", "M", "N", "P", "S", "Cf", "Co", "Zs"]),
+        "print" => {
+            let mut v = graph_ranges_ucp();
+            v.extend(p("Zs"));
+            v.sort_by_key(|r| r.start);
+            v
+        }
         "punct" => merge(&["P", "S"]),
-        // `:xdigit:` and `:ascii:` keep their ASCII-only semantics
-        // under PCRE2_UCP (per pcre2pattern(3)).
+        // `:xdigit:` under PCRE2_UCP adds the fullwidth hex forms:
+        // FULLWIDTH DIGIT ZERO..NINE (U+FF10..U+FF19), FULLWIDTH
+        // LATIN CAPITAL LETTER A..F (U+FF21..U+FF26), and FULLWIDTH
+        // LATIN SMALL LETTER A..F (U+FF41..U+FF46). The ASCII set
+        // (`0-9A-Fa-f`) is always included. Matches testinput5:2758
+        // where `/^[[:xdigit:]]+$/utf,ucp` accepts `d\x{ff10}` and
+        // `\x{ff26}8`.
+        "xdigit" => vec![
+            CharRange::range('0', '9'),
+            CharRange::range('A', 'F'),
+            CharRange::range('a', 'f'),
+            CharRange::range('\u{FF10}', '\u{FF19}'),
+            CharRange::range('\u{FF21}', '\u{FF26}'),
+            CharRange::range('\u{FF41}', '\u{FF46}'),
+        ],
+        // `:ascii:` keeps its ASCII-only semantic under PCRE2_UCP
+        // (per pcre2pattern(3)).
         _ => return None,
     })
+}
+
+/// PCRE2 `[:graph:]` under UCP — `L | M | N | P | S | Cf | Co`, minus
+/// the specific invisible bidi-formatting codepoints that PCRE2
+/// excludes. Split out from `ucp_posix_class_ranges` so `[:print:]`
+/// can reuse the same base set before unioning `Zs`.
+#[cfg(feature = "pgen-parser")]
+fn graph_ranges_ucp() -> Vec<CharRange> {
+    use crate::unicode_support::resolve_unicode_property_class as unicode_prop;
+    let p = |prop: &str| unicode_prop(prop, false).unwrap_or_default();
+    let mut ranges: Vec<CharRange> = Vec::new();
+    for prop in ["L", "M", "N", "P", "S", "Cf", "Co"] {
+        ranges.extend(p(prop));
+    }
+    // Remove PCRE2's excluded bidi-formatting codepoints. Each is a
+    // single codepoint; we walk `ranges` and split any range that
+    // straddles the exclusion point.
+    const EXCLUDED: &[char] = &[
+        '\u{061C}', '\u{180E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+    ];
+    for &ex in EXCLUDED {
+        let mut out: Vec<CharRange> = Vec::with_capacity(ranges.len() + 1);
+        for r in ranges.drain(..) {
+            if ex < r.start || ex > r.end {
+                out.push(r);
+                continue;
+            }
+            // `ex` falls inside `r`. Split around the excluded point.
+            if r.start < ex {
+                out.push(CharRange {
+                    start: r.start,
+                    end: char::from_u32(ex as u32 - 1).unwrap_or(r.start),
+                });
+            }
+            if r.end > ex {
+                out.push(CharRange {
+                    start: char::from_u32(ex as u32 + 1).unwrap_or(r.end),
+                    end: r.end,
+                });
+            }
+        }
+        ranges = out;
+    }
+    ranges.sort_by_key(|r| r.start);
+    ranges
 }
 
 fn posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {

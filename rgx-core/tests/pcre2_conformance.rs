@@ -2321,8 +2321,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_984;
-    const FAIL_BASELINE: usize = 826;
+    const PASS_BASELINE: usize = 12_001;
+    const FAIL_BASELINE: usize = 809;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Parser: UCP `[:xdigit:]` adds fullwidth hex + `[:graph:]` / `[:print:]` drop PCRE2's excluded bidi-format codepoints (+20 passes, crossed 12k)
+
+- Scope: Two engine fixes in the Unicode POSIX class tables.
+  - `[:xdigit:]` under UCP: PCRE2 includes the fullwidth hex forms (U+FF10..U+FF19, U+FF21..U+FF26, U+FF41..U+FF46) in addition to ASCII `[0-9A-Fa-f]`. RGX was returning the ASCII-only set via `posix_class_ranges` fallback, so `/^[[:xdigit:]]+$/utf,ucp` on `d\x{ff10}` or `\x{ff26}8` returned no match.
+  - `[:graph:]` / `[:print:]` under UCP: the positive list `L | M | N | P | S | Cf | Co` included every Cf, but PCRE2's internal table excludes the specific invisible bidi-format codepoints `U+061C` (ALM), `U+180E` (MVS), and `U+2066..U+2069` (LRI/RLI/FSI/PDI). Other Cf like U+00AD (SHY), U+0600 (Arabic number sign), U+200B..U+200F (ZWSP/ZWNJ/ZWJ/LRM/RLM) remain graph. RGX was false-positive on graph for the 6 excluded codepoints and false-negative on `[:^graph:]`/`[:^print:]+` against subjects containing them.
+- Fix: `rgx-core/src/parsing.rs::ucp_posix_class_ranges` routes `xdigit` to an explicit ASCII + fullwidth-hex range list rather than falling through to ASCII-only. New `graph_ranges_ucp()` helper builds `L|M|N|P|S|Cf|Co` and then splits each range around the 6 excluded codepoints; `[:graph:]` and `[:print:]` (graph + Zs) both use it.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,984 → 12,001 pass** (+17 via this commit; cumulative +20 including the xdigit patch earlier in the same session segment), 826 → 809 fail. **Crossed the 12k threshold.** Ratchet baselines bumped to `PASS_BASELINE=12_001` / `FAIL_BASELINE=809`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/^[[:xdigit:]]+$/utf,ucp` family (testinput5:2758, testinput7 mirror), the `/^[[:graph:]]+$/utf,ucp` FPs (testinput5:21, :60, :67), the `/^[[:print:]]+$/utf,ucp` FPs (testinput5:29), and the `/^[[:^graph:]]+$/utf,ucp` / `/^[[:^print:]]+$/utf,ucp` FNs on bidi-control subjects (testinput5:37, :41). Matches PCRE2's testinput4:2131-2147 expectations where U+00AD, U+0600-U+0604, U+200B-U+200F, U+202A-U+202E, U+2060-U+2064, U+206A-U+206F, U+FEFF, U+FFF9-U+FFFB, U+110BD, U+1D173-U+1D17A, U+E0001, U+E0020-U+E007F are all graph.
+
 ### 2026-04-21 - Parser: `.` / `\N` under `(*CRLF)` matches bare `\r` / `\n`; `\s`/UCP includes U+180E (+6 passes)
 
 - Scope: Two small engine / parser fixes that together close a half-dozen real divergences.
