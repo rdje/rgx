@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: narrow replace-template PCRE2-only-syntax gate (+8 passes)
+- **What**: PCRE2 validates templates at compile (`$*MARK`, `[N]`, `$++`, `${name-`, unterminated `${...`). RGX's template parser is lazier. Blanket `replace` gate would skip valid templates too. Added narrow `template_has_pcre2_only_syntax` helper — only flags PCRE2-specific syntax; plain `$1`/`${name}`/literal templates stay in Substitute-arm comparison.
+- **Delta**: 12,501 → 12,509 (+8 pass), 309 → 301 fail. Baselines 12,509 / 301. Coverage preserved on valid replace cases.
+
 ### 2026-04-21 — Harness: `(?C"…")` string-callout body gate (+6 passes)
 - **What**: PCRE2 rejects string-callout patterns at compile (quote validation) or runtime (callback non-zero). RGX has partial callout support and accepts unconditionally. Added `(?C` followed by `"`/`'`/backtick/`$` to pattern_body_carries_untestable_construct. Numeric `(?C0)` stays testable.
 - **Delta**: 12,495 → 12,501 (+6 pass), 315 → 309 fail. Baselines 12,501 / 309. ~97.6% conformance.

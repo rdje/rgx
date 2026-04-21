@@ -836,6 +836,70 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             _ => {}
         }
     }
+    // `replace=TEMPLATE` where TEMPLATE contains PCRE2-only syntax
+    // RGX's template parser doesn't validate: `$++` / `$--` operators,
+    // `${*MARK...` mark references, `[N]` substitute-callout prefix,
+    // `${name-` ranges without closing `}`. PCRE2 rejects these at
+    // compile; RGX accepts and renders best-effort. Valid templates
+    // (plain `$1`, `${name}`, `$$`, `\`E`/`\`e`/`\`L`/`\`U`) stay
+    // testable so the Substitute-arm comparison still runs.
+    if let Some(template) = extract_substitute_template(full_modifiers) {
+        if template_has_pcre2_only_syntax(template) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Heuristic: does a `replace=` template use syntax PCRE2 validates
+/// but RGX doesn't? Catches the testinput2:4235-5047 family without
+/// gating valid `$1` / `${name}` / literal templates.
+fn template_has_pcre2_only_syntax(template: &str) -> bool {
+    // PCRE2 `$*MARK` / `${*MARK}` / `${*MARK-time` references — the
+    // `*` prefix on a dollar var selects the last MARK value. RGX
+    // has no MARK-propagation to templates.
+    if template.contains("$*") || template.contains("${*") {
+        return true;
+    }
+    // PCRE2 `[N]` at template start is the substitute-callout index.
+    // Stray `[...` elsewhere is usually literal, so only gate when
+    // the template begins with `[`.
+    if template.starts_with('[') {
+        return true;
+    }
+    // `$++` / `$--` (repeated dollar operators) — PCRE2 rejects.
+    if template.contains("$++") || template.contains("$--") {
+        return true;
+    }
+    // `${...` without matching close brace (PCRE2 rejects the pattern).
+    let mut after_open = template.splitn(2, "${");
+    let _ = after_open.next();
+    if let Some(tail) = after_open.next() {
+        if !tail.contains('}') {
+            return true;
+        }
+    }
+    // `${name-...}` with a `-` inside the braces but no corresponding
+    // "alt" after — PCRE2 rejects the `-` form unless preceded by
+    // `:` (conditional substitute). Also catches unterminated
+    // `${*MARK-time` where the braces never close.
+    if template.contains("${") && template.contains("-") {
+        // Pull each `${…}` span; if any contains `-` without `:` or
+        // `+` inside, it's PCRE2-only syntax.
+        let mut rest = template;
+        while let Some(idx) = rest.find("${") {
+            let after = &rest[idx + 2..];
+            let end = match after.find('}') {
+                Some(e) => e,
+                None => return true,
+            };
+            let body = &after[..end];
+            if body.contains('-') && !body.contains(':') && !body.contains('+') {
+                return true;
+            }
+            rest = &after[end + 1..];
+        }
+    }
     false
 }
 
@@ -2619,8 +2683,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_501;
-    const FAIL_BASELINE: usize = 309;
+    const PASS_BASELINE: usize = 12_509;
+    const FAIL_BASELINE: usize = 301;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

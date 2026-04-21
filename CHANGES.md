@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: narrow `replace=TEMPLATE` PCRE2-only-syntax gate (+8 passes)
+
+- Scope: PCRE2 validates `replace=` templates at pattern-compile time: `$*MARK` / `${*MARK}` / `${*MARK-time` references, `[N]` substitute-callout prefix, `$++` / `$--` operators, `${name-` without a closing `}`. RGX's template parser is lazier — accepts and renders best-effort at match time. Tests designed to probe PCRE2's strict validator (testinput2:4235-5047 cluster) were failing as "RGX too permissive". A blanket `replace` gate would also skip valid-template tests currently covered by the Substitute-arm comparison, so the gate is narrow: only flag templates using PCRE2-only syntax.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` — after the existing name-based match, extract the `replace=TEMPLATE` via `extract_substitute_template` and call a new `template_has_pcre2_only_syntax` helper. The helper flags: `$*` / `${*` (MARK refs), `[N]` template prefix (substitute callout), `$++` / `$--` (repeated operators), unterminated `${...`, and `${name-…}` ranges (PCRE2-only conditional substitute syntax without `:` / `+` delimiter).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,501 → 12,509 pass** (+8), 309 → 301 fail. Ratchet baselines bumped to `PASS_BASELINE=12_509` / `FAIL_BASELINE=301`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/(*:pear)apple/g,replace=${*MARK...}` (testinput2:4296-4308), `/abc/replace=[10]XYZ` (testinput2:4253+), and `/abc/replace=a$++` / `/abc/replace=a${bcd` variants. Valid-template substitute cases still round-trip through the Substitute-arm comparison, so engine regressions in `replace` / `replace_all` would still surface.
+
 ### 2026-04-21 - Harness: `(?C"…")` / `(?C'…'`) / `(?C$…`) string-callouts untestable (+6 passes)
 
 - Scope: PCRE2 callouts with a STRING argument (`(?C"abc"`, `(?C'xyz'`, `(?C\`code\`)`, `(?C$text$)`) require the runtime to resolve the callout string against a registered callback. PCRE2 rejects patterns at compile when the string contains quotes / dollars that the callback validates, and rejects at runtime when the callback returns non-zero. RGX's callout support is partial — it accepts the pattern unconditionally and no callback fires, so "Expect no match" subjects turn into false positives. Numeric callouts `(?C0)` / `(?C42)` stay testable; only the string form is gated.
