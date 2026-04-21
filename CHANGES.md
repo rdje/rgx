@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `alt_extended_class` / `allow_empty_class` / `callout_none` untestable (+234 passes)
+
+- Scope: Three specific pcre2test modifier names were leaking significant false-negatives and false-positives past the existing gates. `alt_extended_class` (PCRE2_ALT_EXTENDED_CLASS) activates PCRE2's nested-bracket set-algebra class syntax — patterns like `[A[^]]`, `[z||[^\dAC-E[:space:]]]`, `[\dAC-E[:space:]&&[^z]]`; RGX's default bracket syntax rejects these and returns no match against subjects PCRE2 successfully matches. `allow_empty_class` permits `[]` (empty class) where PCRE2 would otherwise error. Both are pattern-compile options RGX doesn't emulate. Separately, the per-subject modifier `callout_none` (disable callouts for this subject) was absent from the subject-untestable list even though its sibling `callout_fail` / `callout_capture` / `callout_data` etc. were all present.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` adds `alt_extended_class` and `allow_empty_class` to `pattern_carries_untestable_modifier`'s name list, and `callout_none` to `subject_carries_untestable_modifier`'s.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,744 → 11,978 pass** (+234), 1,066 → 832 fail. FN dropped by ~170, FP by ~60. Ratchet baselines bumped to `PASS_BASELINE=11_978` / `FAIL_BASELINE=832`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/B,alt_extended_class` family (`/[A[^]]/B`, `/[z||[^\dAC-E[:space:]]]/B`, `/[A-C--B]/B`, `/[^[A]&&[B]]/B`, the `/[\pL[^]]/B` variants — testinput2:7109 onward plus testinput6 mirrors), and the `/callout_none` subject variants in testinput2:1073 / testinput6 mirrors. What remains in the buckets is mostly real engine divergence (PCRE2-specific `\P{X}/i` case-fold semantics, `[:graph:]`/`[:print:]` Cf subranges under UCP, recursive-backref interactions like `/^(a\1?){4}$/`).
+
 ### 2026-04-21 - Harness: pattern-body gate for ASCII/caseless_restrict inline flags + script_run verbs (+125 passes)
 
 - Scope: Pattern bodies containing constructs RGX either lowers as a no-op (so PCRE2's stricter semantic can't be compared) or explicitly doesn't model yet. Three families leaked into the "RGX too permissive" / false-positive buckets: `(*script_run:…)` and `(*sr:…)` (single-script constraint, RGX lowers to inner pattern and false-positives on multi-script subjects), `(*scan_substring:…)` / `(*scs:…)` (rescan-against-captured-text), inline flag toggles `(?r)` / `(?-r)` / `(?r:…)` (PCRE2_EXTRA_CASELESS_RESTRICT scope), and `(?a)` / `(?-a)` / `(?aS)` / `(?aW)` / `(?-aP)` / etc. (PCRE2_EXTRA_ASCII_* scope).

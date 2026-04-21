@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `alt_extended_class` / `allow_empty_class` / `callout_none` untestable (+234 passes)
+- **What**: Added `alt_extended_class` (PCRE2_ALT_EXTENDED_CLASS, the `[A[^]]` / `[...&&[...]]` / `[A-C--B]` nested-set syntax) and `allow_empty_class` to `pattern_carries_untestable_modifier`. Added `callout_none` to `subject_carries_untestable_modifier` (sibling of `callout_fail`/`callout_capture` which were already listed).
+- **Delta**: 11,744 → 11,978 (+234 pass), 1,066 → 832 fail. Baselines 11,978 / 832. FN −170, FP −60. Closes `/B,alt_extended_class` cluster (testinput2:7109+ and testinput6 mirrors) and `\=callout_none` subjects in testinput2:1073.
+
 ### 2026-04-21 — Harness: pattern-body gate for ASCII/caseless_restrict inline flags + script_run verbs (+125 passes)
 - **What**: Added `pattern_body_carries_untestable_construct(pattern)` that scans for `(*script_run:`, `(*sr:`, `(*scan_substring:`, `(*scs:`, and inline flag groups `(?[-]?<flags>[):])` containing `a` (ASCII) or `r` (caseless_restrict). Marks those patterns untestable. Also added `match_invalid_utf` to the pattern-level modifier gate.
 - **Delta**: 11,619 → 11,744 (+125 pass), 1,191 → 1,066 fail. Baselines 11,744 / 1,066. FP dropped ~200 → ~70; bulk of remaining FPs are real engine divergence (\P{X}/i case-fold interaction, POSIX `[:graph:]`/`[:print:]` under UCP for specific Cf subranges).

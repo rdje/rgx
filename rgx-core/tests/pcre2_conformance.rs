@@ -566,7 +566,9 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             | "ascii_bsw"
             | "ascii_digit"
             | "ascii_posix"
-            | "match_invalid_utf" => return true,
+            | "match_invalid_utf"
+            | "alt_extended_class"
+            | "allow_empty_class" => return true,
             _ => {}
         }
     }
@@ -686,6 +688,7 @@ fn subject_carries_untestable_modifier(line: &[u8]) -> bool {
             | "callout_fail"
             | "callout_extra"
             | "callout_no_where"
+            | "callout_none"
             | "null_subject"
             | "null_context"
             | "zero_terminate"
@@ -2318,8 +2321,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_744;
-    const FAIL_BASELINE: usize = 1_066;
+    const PASS_BASELINE: usize = 11_978;
+    const FAIL_BASELINE: usize = 832;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
