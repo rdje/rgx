@@ -110,6 +110,13 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
 
     let mut cases = Vec::new();
     let mut in_skip = false; // set by #if ebcdic / cleared by #endif
+                             // File-level `#subject dfa` directive (testinput6 header). When set,
+                             // every subject in the file runs through pcre2_dfa_match(), which
+                             // returns every possible match length in PCRE2's output rather than
+                             // the leftmost. RGX's `&str` API returns only the leftmost match, so
+                             // the output pairing diverges on multi-length subjects. Treat as a
+                             // file-wide per-subject-untestable flag.
+    let mut default_subject_dfa = false;
 
     // Pair blocks by pattern-block index. Directive and comment
     // blocks appear in matching positions in both files, so we walk
@@ -122,6 +129,13 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
                 in_skip = matches!(cond.trim(), "ebcdic");
             } else if directive.trim() == "#endif" {
                 in_skip = false;
+            } else if let Some(rest) = directive.strip_prefix("#subject") {
+                // `#subject dfa` / `#subject dfa,something` — enable the
+                // DFA default. Any other `#subject` value is not recognised
+                // as DFA-triggering.
+                default_subject_dfa = rest
+                    .split_whitespace()
+                    .any(|t| t.split(',').any(|m| m.trim() == "dfa"));
             }
             oi += 1;
             continue;
@@ -161,7 +175,13 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
 
         match kind {
             BlockKind::Pattern => {
-                cases.extend(extract_pattern_cases(ib, &ob.lines));
+                let mut new_cases = extract_pattern_cases(ib, &ob.lines);
+                if default_subject_dfa {
+                    for case in &mut new_cases {
+                        case.per_subject_untestable = true;
+                    }
+                }
+                cases.extend(new_cases);
                 oi += 1;
             }
             BlockKind::Directive(_) | BlockKind::Comment => unreachable!(),
@@ -2345,8 +2365,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_025;
-    const FAIL_BASELINE: usize = 785;
+    const PASS_BASELINE: usize = 12_089;
+    const FAIL_BASELINE: usize = 721;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

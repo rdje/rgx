@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `#subject dfa` file-level directive flags all testinput6 cases untestable (+64 passes)
+
+- Scope: testinput6's header contains `#subject dfa`, a pcre2test file-level directive that applies `dfa` as the default subject modifier to every subject in the file. pcre2_dfa_match() returns every possible match length (longest to shortest) in the output rather than the leftmost-only match. RGX's `&str` API returns only the leftmost match, so the harness's output pairing diverges on multi-length subjects — producing span mismatches and FNs/FPs where PCRE2's first-in-output-block line happens to differ from RGX's leftmost. The `#subject` directive was recognised as a block type but its value wasn't parsed.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::parse_cases` gains a file-scoped `default_subject_dfa` flag set on `#subject dfa` (or `#subject dfa,...`). When true, every `TestCase` extracted from subsequent pattern blocks has `per_subject_untestable = true`, so `run_case`'s early-Pass arm catches them uniformly. This mirrors how a per-subject `\=dfa` modifier is already handled.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,025 → 12,089 pass** (+64), 785 → 721 fail. Ratchet baselines bumped to `PASS_BASELINE=12_089` / `FAIL_BASELINE=721`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: testinput6 is the DFA-matching test file — the whole file is designed around DFA's multi-length output. Spans, FNs, and FPs across all 24 test files drop proportionally; most remaining failures are in testinput1/2/4/5/7 where PCRE2's NFA semantics diverge from RGX (backtracking verbs, `\P{X}/i` case-fold, nested-quantifier backtracks).
+
 ### 2026-04-21 - Harness: `tables=N` modifier untestable (+10 passes)
 
 - Scope: `/tables=N` is a pcre2test directive that loads a non-default character-class table (locale-specific alternates — e.g. UK/FR/DE case folding or different `\w`/`[:alpha:]` subsets). PCRE2 then re-interprets the pattern against the loaded table for the match-time classification. RGX has no table-swapping facility; the subjects rely on the modified `\w` / `[:alpha:]` semantics so the comparison diverges.

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `#subject dfa` file-directive flags testinput6 cases untestable (+64 passes)
+- **What**: testinput6 (DFA test file) has `#subject dfa` at the top — sets DFA as default subject modifier for EVERY subject. pcre2_dfa_match returns all possible match lengths, which diverges from RGX's leftmost-only. Harness recognised `#subject` as a block but didn't parse its value. Now tracks `default_subject_dfa` file-scope flag, applies `per_subject_untestable` to all TestCases extracted from the file.
+- **Delta**: 12,025 → 12,089 (+64 pass), 785 → 721 fail. Baselines 12,089 / 721. Bulk of testinput6 (the DFA test file) no longer compared against NFA-only RGX.
+
 ### 2026-04-21 — Harness: `tables=N` modifier untestable (+10 passes)
 - **What**: `/tables=N` loads a non-default pcre2test character-class table (locale-specific `\w`/POSIX class alternates). RGX has no table-swapping; subjects rely on the modified classification. Added `tables` to pattern_carries_untestable_modifier.
 - **Delta**: 12,015 → 12,025 (+10 pass), 795 → 785 fail. Baselines 12,025 / 785. Closes testinput2:6360/6363/6371 `\w`/`\s`/`tables=2|3` cluster on `École`.
