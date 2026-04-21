@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser: `[:blank:]` under UCP includes U+180E MVS (+1 pass)
+
+- Scope: Completes the U+180E (MONGOLIAN VOWEL SEPARATOR) space-family additions. Earlier commits added U+180E to `\s` (ucp_space_ranges) and `[:print:]` (print = graph + Zs + U+180E). `[:blank:]` (`Zs` + `\t`) was still missing it, so `/^>[[:blank:]]*/utf,ucp` on a subject mixing Zs, U+180E, and tab stopped at the U+180E char instead of continuing.
+- Fix: `rgx-core/src/parsing.rs::ucp_posix_class_ranges` — the `"blank"` arm now appends U+180E alongside `\t` after unioning Zs.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,543 → 12,544 pass** (+1), 267 → 266 fail. Ratchet baselines bumped to `PASS_BASELINE=12_544` / `FAIL_BASELINE=266`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/^>[[:blank:]]*/utf,ucp` (testinput5:50). Third and final U+180E blank-family addition.
+
 ### 2026-04-22 - Harness: `(*:NAME)` with backslash-escaped metacharacters untestable (+3 passes)
 
 - Scope: PCRE2 supports backslash-escaped metacharacters inside `(*:NAME)` mark verb names — `(*:ab\t(d\)c)` embeds a literal tab, paren, and closing paren in the mark. RGX's PGEN parser rejects those escape sequences in mark names with `E_PARSE_FAILURE: generated regex parse failed`. The existing mark-length gate caught names >255 bytes; this extends it to also flag any mark whose name contains a `\`-escape.

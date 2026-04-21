@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Parser: `[:blank:]` under UCP includes U+180E MVS (+1 pass)
+- **What**: Completes U+180E space-family additions (`\s`, `[:print:]` already had it). `[:blank:]` = Zs + `\t` + U+180E under UCP.
+- **Delta**: 12,543 → 12,544 (+1 pass), 267 → 266 fail. Baselines 12,544 / 266.
+
 ### 2026-04-22 — Harness: `(*:NAME)` with backslash-escaped metacharacters untestable (+3 passes)
 - **What**: PCRE2 supports `\`-escapes inside mark names (`(*:ab\t(d\)c)`). RGX's PGEN parser rejects. Extended mark-gate to also flag escape-containing names alongside the >255-byte length check.
 - **Delta**: 12,540 → 12,543 (+3 pass), 270 → 267 fail. Baselines 12,543 / 267.

@@ -3097,8 +3097,12 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
         }
         "space" => p("White_Space"),
         "blank" => {
+            // `[:blank:]` under UCP = Zs + `\t` + U+180E (PCRE2
+            // historical treatment of MVS as blank-space, mirrors
+            // the `\s` and `[:print:]` additions elsewhere).
             let mut v = p("Zs");
             v.push(CharRange::single('\t'));
+            v.push(CharRange::single('\u{180E}'));
             v.sort_by_key(|r| r.start);
             v
         }
