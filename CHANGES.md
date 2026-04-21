@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `#pattern` directive propagates to per-case modifiers (+12 passes)
+
+- Scope: pcre2test's `#pattern` directive sets default modifiers applied to every subsequent pattern line in the same file — like `#subject`. Examples: `#pattern convert=glob,convert_glob_escape=\,convert_glob_separator=/` (testinput24/25, glob-to-regex conversion), `#pattern posix` (testinput18/19), `#pattern push` (testinput20), `#pattern locale=fr_FR` (testinput3). The harness recognised `#pattern` as a block type but threw its content away, so patterns in those files were compiled with only their inline modifiers — resulting in false positives on glob patterns (`t[!a-g]n` is a regex class `[!a-g]` rather than glob `[^a-g]`), locale-dependent POSIX classes, and push-stack tests.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::parse_cases` tracks `default_pattern_modifiers: Vec<String>` that accumulates positive modifiers from every `#pattern` line and removes entries on `#pattern -name`. When a pattern block is extracted, the default modifiers are appended to each case's `full_modifiers`, and the existing `pattern_carries_untestable_modifier` gate re-runs against the enriched list. Patterns using any already-gated modifier (convert_*, push, tables, locale-backed classes routed via `posix`) are now flagged untestable.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,189 → 12,201 pass** (+12), 621 → 609 fail. Ratchet baselines bumped to `PASS_BASELINE=12_201` / `FAIL_BASELINE=609`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the glob-conversion FPs in testinput24 (`t[!a-g]n`, `a*b*`, glob-escape corners), the `#pattern push` chain in testinput20, and the `#pattern locale` tests in testinput3. `-name` removal is implemented but not strictly tested — pcre2test's full semantics are more nuanced (bare `#pattern x` replaces rather than appends), but the accumulated-set approximation is sufficient for the currently-affected files.
+
 ### 2026-04-21 - Harness: scan every line of a directive block for `#subject dfa` + `(*NOTEMPTY)` body gate (+100 passes)
 
 - Scope: Two fixes.

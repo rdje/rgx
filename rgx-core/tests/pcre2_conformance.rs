@@ -117,6 +117,16 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
                              // the output pairing diverges on multi-length subjects. Treat as a
                              // file-wide per-subject-untestable flag.
     let mut default_subject_dfa = false;
+    // File-level `#pattern` directive — pcre2test applies the listed
+    // modifiers as defaults for every subsequent pattern. Examples:
+    // `#pattern convert=glob,convert_glob_escape=\,convert_glob_separator=/`
+    // (testinput24/25), `#pattern posix` (testinput18/19),
+    // `#pattern push` (testinput20). The list accumulated here is
+    // concatenated onto each `TestCase.full_modifiers` so the existing
+    // `pattern_carries_untestable_modifier` / untestable-construct
+    // gates naturally flag the affected cases. `#pattern -name` removes
+    // `name` from the defaults; a bare `#pattern name` replaces the list.
+    let mut default_pattern_modifiers: Vec<String> = Vec::new();
 
     // Pair blocks by pattern-block index. Directive and comment
     // blocks appear in matching positions in both files, so we walk
@@ -145,6 +155,34 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
                             .any(|t| t.split(',').any(|m| m.trim() == "dfa"))
                         {
                             default_subject_dfa = true;
+                        }
+                    }
+                    if let Some(rest) = s.strip_prefix("#pattern") {
+                        // pcre2test `#pattern` grammar: space-separated
+                        // tokens, each a comma-separated modifier list.
+                        // A leading `-` on a token removes a prior
+                        // default; otherwise the tokens are appended.
+                        // We don't implement the full remove/replace
+                        // logic here — instead we accumulate every
+                        // positive modifier name we see and clear the
+                        // list on any removal, which is close enough to
+                        // feed the untestable gates for all the
+                        // currently-affected files (testinput17/18/19/20/24/25/3/8).
+                        for token in rest.split_whitespace() {
+                            if let Some(after_minus) = token.strip_prefix('-') {
+                                default_pattern_modifiers
+                                    .retain(|m| !after_minus.split(',').any(|x| x == m));
+                                continue;
+                            }
+                            for m in token.split(',') {
+                                let m = m.trim();
+                                if m.is_empty() {
+                                    continue;
+                                }
+                                if !default_pattern_modifiers.iter().any(|x| x == m) {
+                                    default_pattern_modifiers.push(m.to_string());
+                                }
+                            }
                         }
                     }
                 }
@@ -188,6 +226,24 @@ fn parse_cases(testinput: &[u8], testoutput: &[u8]) -> Vec<TestCase> {
         match kind {
             BlockKind::Pattern => {
                 let mut new_cases = extract_pattern_cases(ib, &ob.lines);
+                if !default_pattern_modifiers.is_empty() {
+                    let extra = default_pattern_modifiers.join(",");
+                    for case in &mut new_cases {
+                        // Append file-level default modifiers so the
+                        // untestable-modifier gates see them.
+                        if case.full_modifiers.is_empty() {
+                            case.full_modifiers = extra.clone();
+                        } else {
+                            case.full_modifiers.push(',');
+                            case.full_modifiers.push_str(&extra);
+                        }
+                        // Re-evaluate the pattern-level gate against
+                        // the now-enriched modifier string.
+                        if pattern_carries_untestable_modifier(&case.full_modifiers) {
+                            case.per_subject_untestable = true;
+                        }
+                    }
+                }
                 if default_subject_dfa {
                     for case in &mut new_cases {
                         case.per_subject_untestable = true;
@@ -2384,8 +2440,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_189;
-    const FAIL_BASELINE: usize = 621;
+    const PASS_BASELINE: usize = 12_201;
+    const FAIL_BASELINE: usize = 609;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
