@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `(?C"…")` string-callout body gate (+6 passes)
+- **What**: PCRE2 rejects string-callout patterns at compile (quote validation) or runtime (callback non-zero). RGX has partial callout support and accepts unconditionally. Added `(?C` followed by `"`/`'`/backtick/`$` to pattern_body_carries_untestable_construct. Numeric `(?C0)` stays testable.
+- **Delta**: 12,495 → 12,501 (+6 pass), 315 → 309 fail. Baselines 12,501 / 309. ~97.6% conformance.
+
 ### 2026-04-21 — Harness: bidi-class body gate matches all PCRE2 aliases (+6 passes)
 - **What**: Earlier literal-contains checks for `\p{bc:…}`/`\p{bidi_class:…}`/`\p{bidi class:…}` missed variants with spaces around `=`/`:`, short `\p{b_c=…}`, mixed-case `Bidi_Class`. Added `pattern_references_bidi_class_property` helper that walks `\p{}` spans, splits on sep, normalises (strip whitespace+underscores+lowercase), matches `bc`/`bidiclass`.
 - **Delta**: 12,489 → 12,495 (+6 pass), 321 → 315 fail. Baselines 12,495 / 315.

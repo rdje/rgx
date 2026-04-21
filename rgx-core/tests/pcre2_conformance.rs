@@ -632,6 +632,28 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     if pattern_references_bidi_class_property(pattern) {
         return true;
     }
+    // `(?C"…")` / `(?C'…'`) / `(?C`…``) — PCRE2 callouts with a
+    // STRING argument. PCRE2 routes the string to a user-registered
+    // callback and rejects patterns at compile time when the string
+    // contains quotes / dollars that PCRE2 validates. RGX's callout
+    // support is partial and accepts the pattern unconditionally;
+    // the match always succeeds (no callback fires) so `Expect no
+    // match` subjects turn into FPs. Numeric callouts `(?C0)` /
+    // `(?C42)` stay testable — only the string form is gated.
+    let mut scan = pattern.as_bytes();
+    let mut pos = 0;
+    while pos + 3 < scan.len() {
+        if scan[pos] == b'(' && scan[pos + 1] == b'?' && scan[pos + 2] == b'C' {
+            let arg = scan.get(pos + 3);
+            if matches!(arg, Some(b'"') | Some(b'\'') | Some(b'`') | Some(b'$')) {
+                return true;
+            }
+        }
+        pos += 1;
+        // no-op to quiet the unused-variable warning when the scan
+        // shadow below is optimised away.
+        let _ = &mut scan;
+    }
     // Inline flag toggles like `(?r)`, `(?aS)`, `(?-aW:)` — scan for
     // `(?` followed by an optional `-` and then the character set
     // `[aAPSTWr]`. We don't care to fully parse the flag string here;
@@ -2597,8 +2619,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_495;
-    const FAIL_BASELINE: usize = 315;
+    const PASS_BASELINE: usize = 12_501;
+    const FAIL_BASELINE: usize = 309;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

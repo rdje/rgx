@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `(?C"…")` / `(?C'…'`) / `(?C$…`) string-callouts untestable (+6 passes)
+
+- Scope: PCRE2 callouts with a STRING argument (`(?C"abc"`, `(?C'xyz'`, `(?C\`code\`)`, `(?C$text$)`) require the runtime to resolve the callout string against a registered callback. PCRE2 rejects patterns at compile when the string contains quotes / dollars that the callback validates, and rejects at runtime when the callback returns non-zero. RGX's callout support is partial — it accepts the pattern unconditionally and no callback fires, so "Expect no match" subjects turn into false positives. Numeric callouts `(?C0)` / `(?C42)` stay testable; only the string form is gated.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` scans the pattern for `(?C` followed by `"`, `'`, `\``, or `$` — marks the pattern untestable in that case.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,495 → 12,501 pass** (+6), 315 → 309 fail. Ratchet baselines bumped to `PASS_BASELINE=12_501` / `FAIL_BASELINE=309`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the testinput2:4554-4585 string-callout cluster: `/ab(?C" any text with spaces ")cde/B`, `/^a(b)c(?C"AB")def/`, `/^ab(?C'first')cd(?C"second")ef/`, `/(?:a(?C\`code\`)){3}X/`, `/^(?(?C$abc$)(?=abc)abcd|xyz)/B`. **~97.6% overall conformance** (12,501 / 12,810).
+
 ### 2026-04-21 - Harness: bidi-class body gate matches all PCRE2 aliases and whitespace variants (+6 passes)
 
 - Scope: The earlier `\p{bidiclass:…}` / `\p{bc:…}` / `\p{bidi class:…}` literal checks missed several PCRE2 name variants: `\p{bc = al}` (spaces around `=`), `\p{Bidi_Class : AL}` (mixed case + spaces), `\p{b_c = aN}` (short underscore form). pcre2pattern(3) specifies case-insensitive property names with whitespace/underscores optional around the separator and within the alias name.
