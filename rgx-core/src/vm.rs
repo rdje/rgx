@@ -6983,7 +6983,27 @@ impl OptimizingCompiler {
                         self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
                     }
                     Quantifier::ZeroOrOne { .. } => {
-                        self.emit_subexpr_opcode(OpCode::QuestionGreedy, expr);
+                        // Split-based codegen: Split pushes a backtrack
+                        // frame that skips the body, then the body runs
+                        // inline in the main VM loop. This keeps any
+                        // backtrack frames created INSIDE the body
+                        // (e.g. `.+` within `(.+)?`) on the global
+                        // `ctx.backtrack_stack` rather than a local
+                        // subexpr stack — necessary for patterns like
+                        // `^(.+)?B` where the body's `.+` needs to
+                        // backtrack to a shorter match length after
+                        // the outer `B` fails.
+                        self.emit_op(OpCode::Split);
+                        let split_offset_pos = self.code.len();
+                        self.code.push(0);
+                        self.code.push(0);
+                        self.codegen_pass(expr, false);
+                        let skip_expr_target = self.code.len();
+                        let split_offset =
+                            skip_expr_target - (split_offset_pos + 2);
+                        let offset_bytes = (split_offset as u16).to_le_bytes();
+                        self.code[split_offset_pos] = offset_bytes[0];
+                        self.code[split_offset_pos + 1] = offset_bytes[1];
                     }
                     Quantifier::Range { min, max, lazy } if effective_lazy(*lazy) => {
                         let min_count = *min as usize;
