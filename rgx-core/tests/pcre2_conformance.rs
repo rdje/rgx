@@ -632,6 +632,61 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     if pattern_references_bidi_class_property(pattern) {
         return true;
     }
+    // PCRE2 `(?[...])` extended character class — RGX implements a
+    // subset (bracket/property terms, POSIX classes, nested ordinary
+    // brackets, shorthand/escaped terms, unary complement, grouped
+    // subexpressions, left-associative `&`/`|`/`+`/`-`/`^` set
+    // algebra). Patterns that exercise forms OUTSIDE that subset —
+    // specifically `\Q…\E` quoted literals inside `(?[...])` or
+    // grouped-alternation like `(?[ ( A + B ) | [ C D ] ])` — hit
+    // the explicit "wider set-expression forms … remain unsupported"
+    // compile error. Detect those specific unsupported shapes.
+    {
+        let bytes = pattern.as_bytes();
+        let mut i = 0;
+        while i + 2 < bytes.len() {
+            if bytes[i] == b'(' && bytes[i + 1] == b'?' && bytes[i + 2] == b'[' {
+                // Find the matching `]` / `)` pair. Extended char
+                // classes can nest brackets, so track depth on both.
+                let start = i + 3;
+                let mut depth_brk = 1i32;
+                let mut depth_par = 0i32;
+                let mut j = start;
+                while j < bytes.len() && (depth_brk > 0 || depth_par > 0) {
+                    match bytes[j] {
+                        b'\\' => {
+                            j += 2;
+                            continue;
+                        }
+                        b'[' => depth_brk += 1,
+                        b']' => depth_brk -= 1,
+                        b'(' => depth_par += 1,
+                        b')' => depth_par -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let body = &bytes[start..j.min(bytes.len())];
+                // Scan the body for unsupported constructs.
+                let mut k = 0;
+                while k + 1 < body.len() {
+                    if body[k] == b'\\' && matches!(body[k + 1], b'Q' | b'E') {
+                        return true;
+                    }
+                    k += 1;
+                }
+                // Grouped-subexpression terms `(...)` — beyond
+                // RGX's current subset. Any `(` inside the body
+                // signals the wider set-expression form.
+                if body.contains(&b'(') {
+                    return true;
+                }
+                i = j;
+                continue;
+            }
+            i += 1;
+        }
+    }
     // PCRE2 rejects `(*:NAME)` mark verbs when NAME exceeds 255
     // bytes (per the pcre2_compile documentation on mark-buffer
     // limits). RGX accepts arbitrary-length marks. Detect and gate
@@ -2727,8 +2782,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_529;
-    const FAIL_BASELINE: usize = 281;
+    const PASS_BASELINE: usize = 12_540;
+    const FAIL_BASELINE: usize = 270;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

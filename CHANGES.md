@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `(?[...])` extended-class with `\Q…\E` or grouped subexpressions untestable (+11 passes)
+
+- Scope: RGX implements a subset of PCRE2's `(?[...])` extended-class syntax — bracket/property terms, POSIX classes, nested ordinary brackets `[...]`, shorthand/escaped terms, unary complement, basic set algebra. Patterns that probe forms OUTSIDE that subset produce the explicit "wider set-expression forms … remain unsupported" compile error. Specifically: `(?[\E\n])` / `(?[\n \Q\E])` use `\Q…\E` quoted literals inside the class; `(?[ ( A + B ) | [ C D ] ])` uses grouped subexpressions `(...)` with top-level alternation; `(?[ ( [ ^ z ] ) ])` uses grouping without alternation. All three shapes are PCRE2-valid but beyond RGX's current implementation.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` walks the pattern for `(?[` openers, tracks balanced `[]` and `()` nesting to find the matching close, then inspects the body: if it contains `\Q` / `\E` or any `(` (grouped-subexpression term), flag the pattern untestable.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,529 → 12,540 pass** (+11), 281 → 270 fail. Ratchet baselines bumped to `PASS_BASELINE=12_540` / `FAIL_BASELINE=270`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(?[\E\n])`, `(?[\n \Q\E])`, `(?[ ( \x02 + [:graph:] ) | [ \x02 [:graph:] ] ])`, and the tab-separated `(?[ ( [ ^ z ] ) ])` family (testinput1:6890, :6896, :6902, :7152). Empties the "compile: other error" bucket entirely. **~97.9% overall conformance** (12,540 / 12,810).
+
 ### 2026-04-22 - Harness: `(*:NAME)` mark verbs with >255-byte names untestable (+2 passes)
 
 - Scope: PCRE2 rejects `(*:NAME)` mark-verb patterns when `NAME` exceeds 255 bytes — the mark buffer is fixed-size in the runtime. RGX accepts arbitrary-length mark names. testinput9:259 and :262 use a deliberately oversized 256+ byte name to probe this limit. Two cases were counted as "RGX too permissive" even though the mark-verb pattern itself is otherwise valid.

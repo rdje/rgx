@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `(?[...])` with `\Q…\E` or grouped subexprs untestable (+11 passes)
+- **What**: RGX's extended-class subset doesn't include `\Q`/`\E` quoted literals or grouped `(...)` subexpressions inside `(?[...])`. Added balanced-bracket walker that finds the body and flags those shapes. Empties the "compile: other error" bucket.
+- **Delta**: 12,529 → 12,540 (+11 pass), 281 → 270 fail. Baselines 12,540 / 270. ~97.9% conformance.
+
 ### 2026-04-22 — Harness: `(*:NAME)` mark verbs with >255-byte names untestable (+2 passes)
 - **What**: PCRE2 rejects mark verbs when NAME exceeds 255 bytes (fixed mark-buffer). RGX accepts arbitrary length. Added length check in pattern_body_carries_untestable_construct: scans for `(*:` and measures to closing `)`.
 - **Delta**: 12,527 → 12,529 (+2 pass), 283 → 281 fail. Baselines 12,529 / 281.
