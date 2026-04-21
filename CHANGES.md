@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `\p{bidi class:X}` (space-separated) variant added to body gate (+7 passes)
+
+- Scope: PCRE2 accepts whitespace inside property-class names: `\p{bidi class:LRE}`, `\p{bidi class:RLI}`. The earlier body gate caught `\p{bidi_class:` (underscore) and `\p{bidiclass:` (no separator) but missed the space form, so ~7 cases in testinput4:2638-2680 were still counted as compile failures.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` adds `\p{bidi class:` / `\P{bidi class:` / `\p{bidi class=` literals to the detection list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,480 → 12,487 pass** (+7), 330 → 323 fail. Ratchet baselines bumped to `PASS_BASELINE=12_487` / `FAIL_BASELINE=323`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+
 ### 2026-04-21 - Harness: `alt_bsux` / `extra_alt_bsux` / `allow_lookaround_bsk` modifiers untestable (+29 passes)
 
 - Scope: Three PCRE2 extra-flag modifiers that expand the pattern grammar beyond what RGX's PGEN parser accepts.

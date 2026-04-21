@@ -584,12 +584,15 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     // fully deliver.
     if pattern.contains("\\p{bidiclass:")
         || pattern.contains("\\p{bidi_class:")
+        || pattern.contains("\\p{bidi class:")
         || pattern.contains("\\p{bc:")
         || pattern.contains("\\p{bc=")
         || pattern.contains("\\p{bidiclass=")
         || pattern.contains("\\p{bidi_class=")
+        || pattern.contains("\\p{bidi class=")
         || pattern.contains("\\P{bidiclass:")
         || pattern.contains("\\P{bidi_class:")
+        || pattern.contains("\\P{bidi class:")
         || pattern.contains("\\P{bc:")
         || pattern.contains("\\P{bc=")
     {
@@ -2560,8 +2563,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_480;
-    const FAIL_BASELINE: usize = 330;
+    const PASS_BASELINE: usize = 12_487;
+    const FAIL_BASELINE: usize = 323;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
