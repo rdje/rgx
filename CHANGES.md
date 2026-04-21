@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `r` short-flag in pattern bundle untestable (+7 passes)
+
+- Scope: The short-bundle untestable check in `pattern_carries_untestable_modifier` only caught bundles containing `a` (PCRE2_EXTRA_ASCII_*). PCRE2's `r` short-flag is PCRE2_EXTRA_CASELESS_RESTRICT, which RGX also doesn't implement. Patterns like `/A\x{17f}\x{212a}Z/ir` (short bundle "ir" = caseless + caseless_restrict) were slipping through because "ir" isn't a named modifier and the bundle path only flagged 'a'.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` — the short-bundle arm now returns true when the bundle contains EITHER `a` OR `r`.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,520 → 12,527 pass** (+7), 290 → 283 fail. Ratchet baselines bumped to `PASS_BASELINE=12_527` / `FAIL_BASELINE=283`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/A\x{17f}\x{212a}Z/ir`, `/[\x{17f}\x{212a}]+/ir`, and `/k(?^i)k/ir` (already gated by `(?^`) and similar `/ir` patterns in testinput5/testinput7.
+
 ### 2026-04-21 - Harness: `/startchar` pattern modifier untestable (+3 passes)
 
 - Scope: `/startchar` is a pcre2test output-format modifier that adds a `Starting char:` diagnostic line after each match. Critically, when `\K` is present, pcre2test also reports the match span from the startchar position (before `\K`) rather than from the `\K`-reset match-start. RGX reports the `\K`-reset start natively, so the harness-visible spans diverge: PCRE2="abc123", RGX="123" on `/abc\K123/startchar` over `"xyzabc123pqr"`.

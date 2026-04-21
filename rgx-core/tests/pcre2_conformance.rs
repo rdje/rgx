@@ -727,7 +727,10 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
         let trimmed = piece.trim();
         let is_short_bundle =
             !trimmed.is_empty() && trimmed.chars().all(|c| SHORT_FLAGS.contains(&c));
-        if is_short_bundle && trimmed.contains('a') {
+        if is_short_bundle && (trimmed.contains('a') || trimmed.contains('r')) {
+            // `a` → PCRE2_EXTRA_ASCII_*, `r` → PCRE2_EXTRA_CASELESS_RESTRICT.
+            // Neither is implemented in RGX; any bundle containing
+            // either letter marks the pattern untestable.
             return true;
         }
         let name = trimmed.split('=').next().unwrap_or(trimmed).trim();
@@ -2701,8 +2704,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_520;
-    const FAIL_BASELINE: usize = 290;
+    const PASS_BASELINE: usize = 12_527;
+    const FAIL_BASELINE: usize = 283;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

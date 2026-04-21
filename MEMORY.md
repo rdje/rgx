@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `r` short-flag in pattern bundle untestable (+7 passes)
+- **What**: Short-bundle untestable check only caught `a` (PCRE2_EXTRA_ASCII_*). Added `r` (PCRE2_EXTRA_CASELESS_RESTRICT). Patterns like `/A\x{17f}\x{212a}Z/ir` now untestable.
+- **Delta**: 12,520 → 12,527 (+7 pass), 290 → 283 fail. Baselines 12,527 / 283.
+
 ### 2026-04-21 — Harness: `/startchar` pattern modifier untestable (+3 passes)
 - **What**: `/startchar` adds pcre2test diagnostic and (with `\K`) reports span from startchar instead of match-start. Added to pattern_carries_untestable_modifier.
 - **Delta**: 12,517 → 12,520 (+3 pass), 293 → 290 fail. Baselines 12,520 / 290.
