@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `alt_bsux` / `extra_alt_bsux` / `allow_lookaround_bsk` modifiers untestable (+29 passes)
+
+- Scope: Three PCRE2 extra-flag modifiers that expand the pattern grammar beyond what RGX's PGEN parser accepts.
+  - `/alt_bsux` (PCRE2_ALT_BSUX) and `/extra_alt_bsux` (PCRE2_EXTRA_ALT_BSUX) enable PCRE2's alternate escape syntax: `\u{XXXX}` / `\U{XXXX}` / `\uXXXX` (JavaScript / JSON / ECMAScript style). RGX's `\x{XXXX}` form is equivalent but the BSUX `\u` / `\U` aliases aren't recognised by the PGEN parser, so the pattern fails at parse with "unsupported regex escape \u".
+  - `/allow_lookaround_bsk` (PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) permits `\K` inside a lookaround (which PCRE2 otherwise rejects). PGEN's compile contract also rejects `\K` in lookarounds; patterns requiring this flag hit a parse failure.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` adds `alt_bsux`, `extra_alt_bsux`, and `allow_lookaround_bsk` to its long-name list. All three now feed through the existing `per_subject_untestable → pass-on-compile-error` path.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,451 → 12,480 pass** (+29), 359 → 330 fail. Ratchet baselines bumped to `PASS_BASELINE=12_480` / `FAIL_BASELINE=330`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/\u{XXXX}/alt_bsux` and `/\u{…}/extra_alt_bsux` clusters in testinput2:3527-3547 (~17 cases); also the `(?<=\Ka)/g,aftertext,allow_lookaround_bsk` and `(?(?=\Gc)(?<=\Kb)…)/g,...,allow_lookaround_bsk` families in testinput2:4622-4650 (~12 cases). **~97.4% overall conformance** (12,480 / 12,810).
+
 ### 2026-04-21 - Harness: `locale=XX` modifier untestable (+16 passes)
 
 - Scope: `/locale=fr_FR` / `/locale=de_DE` / etc. tells PCRE2 to load the named locale's character-class tables, altering `\w` / `[:alpha:]` / case-fold behaviour per locale convention. RGX has no locale support; `#pattern locale=fr_FR` at the top of testinput3 propagates through to every pattern, producing FPs on `École`-style subjects where PCRE2 accepts `École` as all-alpha under fr_FR but RGX (using the default Unicode tables) rejects the accented chars from `[\w]`.

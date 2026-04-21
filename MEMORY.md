@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: alt_bsux / extra_alt_bsux / allow_lookaround_bsk modifiers untestable (+29 passes)
+- **What**: Added three PCRE2 extra-flag modifiers to pattern_carries_untestable_modifier. `alt_bsux`/`extra_alt_bsux` enable `\u{XXXX}`/`\U{XXXX}` escapes PGEN rejects as "unsupported \u". `allow_lookaround_bsk` permits `\K` inside lookaround which PGEN's compile contract also rejects.
+- **Delta**: 12,451 → 12,480 (+29 pass), 359 → 330 fail. Baselines 12,480 / 330. ~97.4% conformance.
+
 ### 2026-04-21 — Harness: locale=XX modifier untestable (+16 passes)
 - **What**: Added `locale` to pattern_carries_untestable_modifier. `/locale=fr_FR` etc. loads per-locale character-class tables (French/German/etc. `\w`, case-fold); RGX has no locale support. `#pattern locale=fr_FR` at testinput3 top propagates to every pattern. Closes testinput3 locale cluster.
 - **Delta**: 12,435 → 12,451 (+16 pass), 375 → 359 fail. Baselines 12,451 / 359. ~97.2% conformance.

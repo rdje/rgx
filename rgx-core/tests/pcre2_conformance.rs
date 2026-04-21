@@ -750,6 +750,21 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             // to `/tables=N` but locale-specific rather than
             // table-index-specific.
             | "locale"
+            // `/alt_bsux` (PCRE2_ALT_BSUX) and `/extra_alt_bsux`
+            // (PCRE2_EXTRA_ALT_BSUX) enable PCRE2's alternate escape
+            // syntax: `\u{XXXX}` / `\U{XXXX}` / `\uXXXX`. RGX's
+            // `\x{XXXX}` form is equivalent but the BSUX `\u`/`\U`
+            // aliases aren't recognised by the PGEN parser, so any
+            // pattern using them fails with "unsupported regex
+            // escape \u" at parse time.
+            | "alt_bsux"
+            | "extra_alt_bsux"
+            // `/allow_lookaround_bsk` (PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK)
+            // permits `\K` inside a lookaround (which PCRE2 normally
+            // rejects). RGX's PGEN parser contract also rejects
+            // `\K` in lookarounds, so any pattern requiring this
+            // flag hits a compile-time parse failure.
+            | "allow_lookaround_bsk"
             // `/xx` (PCRE2_EXTRA_EXTENDED_MORE): whitespace inside
             // character classes is ignored (in addition to `/x`'s
             // outside-class handling). RGX only implements `/x`. The
@@ -2545,8 +2560,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_451;
-    const FAIL_BASELINE: usize = 359;
+    const PASS_BASELINE: usize = 12_480;
+    const FAIL_BASELINE: usize = 330;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
