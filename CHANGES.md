@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `locale=XX` modifier untestable (+16 passes)
+
+- Scope: `/locale=fr_FR` / `/locale=de_DE` / etc. tells PCRE2 to load the named locale's character-class tables, altering `\w` / `[:alpha:]` / case-fold behaviour per locale convention. RGX has no locale support; `#pattern locale=fr_FR` at the top of testinput3 propagates through to every pattern, producing FPs on `École`-style subjects where PCRE2 accepts `École` as all-alpha under fr_FR but RGX (using the default Unicode tables) rejects the accented chars from `[\w]`.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` adds `locale` to its long-name list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,435 → 12,451 pass** (+16), 375 → 359 fail. Ratchet baselines bumped to `PASS_BASELINE=12_451` / `FAIL_BASELINE=359`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput3's whole `#pattern locale=fr_FR` cluster. **~97.2% overall conformance** (12,451 / 12,810).
+
 ### 2026-04-21 - Parser: `extend_ranges_from_regex` honours `Custom { negated: true }` (UCP `\W`/`\D`/`\S` inside char class) (+17 passes)
 
 - Scope: Engine bug — when `\W` / `\D` / `\S` is used inside a character class under `(*UCP)`, the parser's UCP path produces `Regex::CharClass(CharClass::Custom { ranges: ucp_word_ranges, negated: true })` (i.e. the POSITIVE range set with a `negated` flag). But `extend_ranges_from_regex`, which unions class escapes into the surrounding `[...]`, matched `Custom { ranges: custom, .. }` with `..` (ignoring `negated`), so `\W` inside `[...]` effectively contributed the WORD character set instead of its complement. Symptoms: `(*UCP)[^\W]` accepted `;` (a non-word) and rejected `Ā`/`a`/`A`/`1` (all word chars) — exactly inverted. The non-UCP path was unaffected because `\W` there compiles to `CharClass::Word { negated: true }`, which has a dedicated arm.

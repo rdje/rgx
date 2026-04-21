@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: locale=XX modifier untestable (+16 passes)
+- **What**: Added `locale` to pattern_carries_untestable_modifier. `/locale=fr_FR` etc. loads per-locale character-class tables (French/German/etc. `\w`, case-fold); RGX has no locale support. `#pattern locale=fr_FR` at testinput3 top propagates to every pattern. Closes testinput3 locale cluster.
+- **Delta**: 12,435 → 12,451 (+16 pass), 375 → 359 fail. Baselines 12,451 / 359. ~97.2% conformance.
+
 ### 2026-04-21 — Parser: extend_ranges_from_regex honours Custom{negated:true} for UCP \W/\D/\S in class (+17 passes, engine fix #7)
 - **What**: Engine bug. Under UCP, `\W` inside `[...]` compiles to `Custom{ranges:ucp_word_ranges, negated:true}` (positive set + negation flag). `extend_ranges_from_regex` matched Custom with `..` (ignored `negated`), unioning the word set instead of its complement. `(*UCP)[^\W]` was inverted: matched `;` rejected `Ā`. Added negated branch using `complement_ranges(&custom)`.
 - **Delta**: 12,418 → 12,435 (+17 pass), 392 → 375 fail. Baselines 12,435 / 375. **Seventh real engine fix this session.**

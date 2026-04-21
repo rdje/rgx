@@ -743,6 +743,13 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             | "posix_extended"
             | "posix_nosub"
             | "posix_startend"
+            // `/locale=XX` — match against a specific locale's
+            // character-class tables (fr_FR, de_DE, etc.). RGX has
+            // no locale support; PCRE2 alters `\w` / `[:alpha:]` /
+            // case folding behaviour per locale. Similar-in-spirit
+            // to `/tables=N` but locale-specific rather than
+            // table-index-specific.
+            | "locale"
             // `/xx` (PCRE2_EXTRA_EXTENDED_MORE): whitespace inside
             // character classes is ignored (in addition to `/x`'s
             // outside-class handling). RGX only implements `/x`. The
@@ -2538,8 +2545,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_435;
-    const FAIL_BASELINE: usize = 375;
+    const PASS_BASELINE: usize = 12_451;
+    const FAIL_BASELINE: usize = 359;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
