@@ -587,7 +587,12 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             // the case runs with garbled subjects and FPs against
             // PCRE2's no-match-on-directive-line behaviour.
             | "push"
-            | "pushcopy" => return true,
+            | "pushcopy"
+            // `tables=N` loads a non-default character-class table
+            // (e.g. locale-specific alternates). RGX has no table-
+            // swapping facility; the test subjects rely on the
+            // modified `\w` / `[:alpha:]` semantics.
+            | "tables" => return true,
             _ => {}
         }
     }
@@ -2340,8 +2345,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_015;
-    const FAIL_BASELINE: usize = 795;
+    const PASS_BASELINE: usize = 12_025;
+    const FAIL_BASELINE: usize = 785;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

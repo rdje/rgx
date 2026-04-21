@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `tables=N` modifier untestable (+10 passes)
+
+- Scope: `/tables=N` is a pcre2test directive that loads a non-default character-class table (locale-specific alternates — e.g. UK/FR/DE case folding or different `\w`/`[:alpha:]` subsets). PCRE2 then re-interprets the pattern against the loaded table for the match-time classification. RGX has no table-swapping facility; the subjects rely on the modified `\w` / `[:alpha:]` semantics so the comparison diverges.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` adds `tables` to its long-name list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,015 → 12,025 pass** (+10), 795 → 785 fail. Ratchet baselines bumped to `PASS_BASELINE=12_025` / `FAIL_BASELINE=785`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/^\w+/tables=2` and `/^\w+/tables=3` on `École` (testinput2:6363, :6371) and related `\s xxx \s/tables=2` (testinput2:6360) cases in testinput2/testinput6.
+
 ### 2026-04-21 - VM: `X?` codegen switches to Split-based to preserve nested backtrack state (+5 passes)
 
 - Scope: Engine bug — `QuestionGreedy` wrapped its body in an inline sub-program and dispatched it through `execute_subexpr`, which has its own *local* backtrack stack. Any backtrack frames created inside the body (e.g. a `.+` inside `(.+)?` that reached its maximum greedy length) were pushed onto the local stack and discarded when `execute_subexpr` returned. A subsequent failure in the outer pattern could not retry the body with a shorter match. Symptom: `^(.+)?B` on `"AB"` returned no match — the outer `B` failed at pos 2, the main-loop backtrack only found the "skip the optional" frame (restoring pos 0), and the inner `.+`'s 1-iteration fallback was unreachable.

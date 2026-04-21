@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `tables=N` modifier untestable (+10 passes)
+- **What**: `/tables=N` loads a non-default pcre2test character-class table (locale-specific `\w`/POSIX class alternates). RGX has no table-swapping; subjects rely on the modified classification. Added `tables` to pattern_carries_untestable_modifier.
+- **Delta**: 12,015 → 12,025 (+10 pass), 795 → 785 fail. Baselines 12,025 / 785. Closes testinput2:6360/6363/6371 `\w`/`\s`/`tables=2|3` cluster on `École`.
+
 ### 2026-04-21 — VM: `X?` codegen switches to Split-based to preserve nested backtrack state (+5 passes)
 - **What**: Engine bug: `QuestionGreedy` wraps body in `execute_subexpr` (local backtrack stack), so body-internal quantifiers' backtrack frames were lost. Switched `X?` greedy codegen to `Split + body` (Range{0,1} pattern), keeping body inline in main loop so internal `PlusGreedy`/`SaveStart` frames land on `ctx.backtrack_stack`. `X??` (lazy) retains `QuestionLazy` codegen.
 - **Delta**: 12,010 → 12,015 (+5 pass), 800 → 795 fail. Baselines 12,015 / 795. Closes `^(.+)?B` cluster. `StarGreedy`-wrapping case (`^(a+)*ax`) still broken — follow-up.
