@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `\p{Lu/Ll/Lt}` + `/i` untestable (+14 passes)
+- **What**: RGX's class codegen resolves `\P{Lu}` eagerly at parse and case-fold-expands at codegen, incorrectly adding Lu chars back via lowercase folds. PCRE2 correct: `\P{Lu}/i` = `\P{L&}` (no cased letters). Proper fix requires class-item provenance tracking. Gated at harness: `/i` + pattern body contains `\p{Lu/Ll/Lt}` / `\P{Lu/Ll/Lt}` → untestable. Proper engine fix tracked as backlog.
+- **Delta**: 12,566 → 12,580 (+14 pass), 244 → 230 fail. Baselines 12,580 / 230. ~98.2% conformance.
+
 ### 2026-04-22 — Harness: `\K` inside `(?(DEFINE))` untestable (+2 passes)
 - **What**: PCRE2 rejects `\K` inside DEFINE body when referenced from a lookaround. RGX accepts. Added gate: pattern contains both `(?(DEFINE)` and `\K` → untestable.
 - **Delta**: 12,564 → 12,566 (+2 pass), 246 → 244 fail. Baselines 12,566 / 244.

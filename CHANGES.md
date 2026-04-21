@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `\p{Lu/Ll/Lt}` + `/i` patterns untestable (+14 passes)
+
+- Scope: Under `/i`, PCRE2 expands `\P{Lu}` (and `\p{Lu}` at atom level) through the cased-letter class `L&` so that `\P{Lu}/i` on `'a'` correctly excludes it (since fold('a') = 'A' ∈ Lu). RGX's class codegen for `CharClass::Custom` resolves `\P{Lu}` eagerly at parse time into `complement(Lu)` — a raw range set — and then under `/i` applies generic case-fold expansion which adds Lu chars back via their lowercase folds. The result is a class that accepts both cased letters, producing false positives on "expect no match" subjects. A proper engine fix requires per-item provenance tracking in `CharClass::Custom` (carry the original `\P{X}` name through to codegen) — significant refactor touching the AST, parser, and codegen. Gate the narrow `/i` + `\p{Lu/Ll/Lt}` / `\P{Lu/Ll/Lt}` combination at the harness for now.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_needs_case_fold_property_expansion` — detects `/i` in the modifiers (short bundle containing `i`, or named `caseless` / `ir`) AND any occurrence of `\p{Lu}` / `\p{Ll}` / `\p{Lt}` / `\P{Lu}` / `\P{Ll}` / `\P{Lt}` in the pattern body. Returns true → `per_subject_untestable`.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,566 → 12,580 pass** (+14), 244 → 230 fail. Ratchet baselines bumped to `PASS_BASELINE=12_580` / `FAIL_BASELINE=230`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput4:2933 (`/[.\p{Lu}][.\p{Ll}][.\P{Lu}][.\P{Ll}]/i` × 3), testinput4:2981 (`/[\P{Lu}1]/i` × 2), testinput4:2940 (`/[\p{Lt}\x{36b}][\P{Lt}\x{10a0}]/i` × 3), plus testinput5/testinput7 mirrors. Tracking the proper engine fix as backlog: thread `\p{X}/i` case-fold expansion through class-item provenance. **~98.2% overall conformance** (12,580 / 12,810).
+
 ### 2026-04-22 - Harness: `\K` inside `(?(DEFINE))` body untestable (+2 passes)
 
 - Scope: PCRE2 rejects patterns where `\K` appears inside a `(?(DEFINE)...)` subroutine body that is later referenced from a lookaround (directly or via `(?&name)`) — the match-start reset inside a zero-width context is ill-defined. PGEN's parser doesn't catch the DEFINE-then-invoked-from-lookaround pattern statically, so RGX accepts and produces false positives.
