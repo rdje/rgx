@@ -2479,7 +2479,18 @@ fn run_full_conformance() {
             continue;
         };
 
-        let cases = parse_cases(&testinput, &testoutput);
+        let mut cases = parse_cases(&testinput, &testoutput);
+        // testinput28 and testinput29 are the EBCDIC-support test
+        // files. They contain patterns authored in ISO-8859-1 that
+        // only produce correct matches under an EBCDIC build of
+        // PCRE2 (where e.g. `\x15` is NL and `\x25` is LF). RGX is
+        // ASCII/UTF-8 only, so the whole suite is un-comparable —
+        // mark every parsed case untestable at the file level.
+        if matches!(*file_name, "testinput28" | "testinput29") {
+            for case in &mut cases {
+                case.per_subject_untestable = true;
+            }
+        }
         // Per-file progress line: handy when one file is slow to
         // localize which one.
         eprintln!(
@@ -2683,8 +2694,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_509;
-    const FAIL_BASELINE: usize = 301;
+    const PASS_BASELINE: usize = 12_517;
+    const FAIL_BASELINE: usize = 293;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

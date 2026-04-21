@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: testinput28/29 (EBCDIC tests) file-level untestable (+8 passes)
+- **What**: testinput28 header says "This tests the EBCDIC support in PCRE2". Patterns authored in ISO-8859-1, reversibly mapped to EBCDIC. Under genuine EBCDIC `\x15` is NL; under ASCII it's NAK. RGX is ASCII-only, so the whole test suite is un-comparable. Added file-level untestable flag for testinput28 and testinput29.
+- **Delta**: 12,509 → 12,517 (+8 pass), 301 → 293 fail. Baselines 12,517 / 293.
+
 ### 2026-04-21 — Harness: narrow replace-template PCRE2-only-syntax gate (+8 passes)
 - **What**: PCRE2 validates templates at compile (`$*MARK`, `[N]`, `$++`, `${name-`, unterminated `${...`). RGX's template parser is lazier. Blanket `replace` gate would skip valid templates too. Added narrow `template_has_pcre2_only_syntax` helper — only flags PCRE2-specific syntax; plain `$1`/`${name}`/literal templates stay in Substitute-arm comparison.
 - **Delta**: 12,501 → 12,509 (+8 pass), 309 → 301 fail. Baselines 12,509 / 301. Coverage preserved on valid replace cases.

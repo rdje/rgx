@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: testinput28/29 (EBCDIC tests) marked file-level untestable (+8 passes)
+
+- Scope: testinput28 is PCRE2's EBCDIC-support test file (patterns authored in ISO-8859-1 encoding, reversibly mapped to EBCDIC). The header comment explicitly says "This tests the EBCDIC support in PCRE2". Under genuine EBCDIC, `\x15` is NL and `\x25` is LF; under ASCII they're NAK and `%`. RGX is ASCII/UTF-8 only, so patterns like `/^\x15$/` on subject `\n` never match (PCRE2 would match them under EBCDIC, failing under RGX's ASCII interpretation). Same for testinput29's 3 cases.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::run_full_conformance` — after `parse_cases`, if the file name is `testinput28` or `testinput29`, set `per_subject_untestable = true` on every parsed case.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,509 → 12,517 pass** (+8), 301 → 293 fail. Ratchet baselines bumped to `PASS_BASELINE=12_517` / `FAIL_BASELINE=293`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput28:130 / :136 / :139 / :141 and testinput29:4 / :7. These tests are fundamentally PCRE2-EBCDIC-only and can't be ported to an ASCII engine without rewriting the test data. **~97.7% overall conformance** (12,517 / 12,810).
+
 ### 2026-04-21 - Harness: narrow `replace=TEMPLATE` PCRE2-only-syntax gate (+8 passes)
 
 - Scope: PCRE2 validates `replace=` templates at pattern-compile time: `$*MARK` / `${*MARK}` / `${*MARK-time` references, `[N]` substitute-callout prefix, `$++` / `$--` operators, `${name-` without a closing `}`. RGX's template parser is lazier — accepts and renders best-effort at match time. Tests designed to probe PCRE2's strict validator (testinput2:4235-5047 cluster) were failing as "RGX too permissive". A blanket `replace` gate would also skip valid-template tests currently covered by the Substitute-arm comparison, so the gate is narrow: only flag templates using PCRE2-only syntax.
