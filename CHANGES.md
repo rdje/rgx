@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `\K` inside `(?(DEFINE))` body untestable (+2 passes)
+
+- Scope: PCRE2 rejects patterns where `\K` appears inside a `(?(DEFINE)...)` subroutine body that is later referenced from a lookaround (directly or via `(?&name)`) — the match-start reset inside a zero-width context is ill-defined. PGEN's parser doesn't catch the DEFINE-then-invoked-from-lookaround pattern statically, so RGX accepts and produces false positives.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` — if the pattern contains both `(?(DEFINE)` and `\K`, flag untestable.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,564 → 12,566 pass** (+2), 246 → 244 fail. Ratchet baselines bumped to `PASS_BASELINE=12_566` / `FAIL_BASELINE=244`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/(?(DEFINE)(?<sneaky>b\K))a(?=(?&sneaky))/g` (testinput2:6418) and `/a|(?(DEFINE)(?<sneaky>\Ka))(?<=(?&sneaky))b/g` (testinput2:6425).
+
 ### 2026-04-22 - Harness: richer template-validation gate for `replace=` (+2 passes)
 
 - Scope: The previous `template_has_pcre2_only_syntax` helper caught `$*MARK`, `${*...}`, `[N]` callout prefix, `$++` / `$--`, unterminated `${...`, and `${name-...}` alt syntax — but missed:

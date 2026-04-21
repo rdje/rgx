@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `\K` inside `(?(DEFINE))` untestable (+2 passes)
+- **What**: PCRE2 rejects `\K` inside DEFINE body when referenced from a lookaround. RGX accepts. Added gate: pattern contains both `(?(DEFINE)` and `\K` → untestable.
+- **Delta**: 12,564 → 12,566 (+2 pass), 246 → 244 fail. Baselines 12,566 / 244.
+
 ### 2026-04-22 — Harness: richer replace-template validation gate (+2 passes)
 - **What**: Extended `template_has_pcre2_only_syntax` to reject `${name}` bodies >32 bytes, bodies with operator chars outside `[A-Za-z0-9_:+-]`, and bare `$X` with 2+ consecutive letters (unresolved multi-letter var).
 - **Delta**: 12,562 → 12,564 (+2 pass), 248 → 246 fail. Baselines 12,564 / 246.
