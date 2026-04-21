@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `/xx` + `(?xx` + unique-char short-bundle (+4 passes)
+
+- Scope: Three tiny fixes around PCRE2's `xx` (PCRE2_EXTRA_EXTENDED_MORE) flag. `/xx` lets whitespace INSIDE a character class be ignored, in addition to `/x`'s outside-class handling. RGX only implements `/x`.
+  - `resolve_modifiers` treated `xx` as a short-flag bundle of two `x` characters (applying `/x` twice — a no-op). Now requires short-bundle chars to be distinct; repeated chars fall through to the named-modifier path where `xx` / `extended_more` can gate.
+  - `pattern_carries_untestable_modifier` adds `xx` and `extended_more` to its long-name list (both refer to the same flag).
+  - `pattern_body_carries_untestable_construct` adds `(?xx` literal detection for inline `(?xx:…)` / `(?xxx:…)` scope groups.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` — `resolve_modifiers` short-bundle test gains a uniqueness check (bitmap over 128-char ASCII); `pattern_carries_untestable_modifier` and `pattern_body_carries_untestable_construct` gain the literal checks above.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,414 → 12,418 pass** (+4), 396 → 392 fail. Ratchet baselines bumped to `PASS_BASELINE=12_418` / `FAIL_BASELINE=392`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/<(?:[a b])>/xx` (testinput1:6250), `/<(?xxx:[a b])>/` (testinput1:6253), and one other small `(?xx` variant.
+
 ### 2026-04-21 - Harness: `per_subject_untestable` also passes in the `Ok(compile)` / `PCRE2-rejected` arm (+45 passes)
 
 - Scope: Symmetric follow-up to the prior commit (d7e6a62). When PCRE2 rejects a pattern at compile (`Expected::CompileError`) but RGX accepts it, the harness reports "RGX too permissive" — except when the pattern is already flagged `per_subject_untestable` by the modifier/body gates. PCRE2 frequently rejects `/abc/substitute_overflow_length,substitute_callout,replace=[N]…` patterns at compile because the substitute-callout infrastructure validates the replace spec; RGX's simpler `replace_all` compile path has no such validation and accepts. Same for `/abc/replace=<unknown_var>`, `/mark` callout-frame overflows, and patterns with `(*:NAME)` markers where PCRE2 validates the mark register at compile. Those were being counted as failures even though the harness had already agreed the case is an un-comparable gap.

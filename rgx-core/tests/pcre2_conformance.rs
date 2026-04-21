@@ -566,6 +566,15 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     if pattern.contains("(?^") {
         return true;
     }
+    // `(?xx:...)` / `(?xxx:...)` — inline `x` + `extended_more` /
+    // `extended_more`-scope. Extended_more lets whitespace INSIDE
+    // a character class be ignored (vs `/x` which only ignores
+    // whitespace outside classes). RGX only implements `/x`, so
+    // patterns using `xx` scope produce FPs when the class has
+    // embedded whitespace (`[a b]` should be `[ab]`).
+    if pattern.contains("(?xx") {
+        return true;
+    }
     // `\p{bidiclass:X}` / `\p{bc=X}` / `\p{bidi_class:X}` — PCRE2 bidi
     // class property. `regex_syntax` (RGX's ucd backend) supports the
     // `bc=` form but has limited value coverage for the short PCRE2
@@ -733,7 +742,16 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             | "posix_basic"
             | "posix_extended"
             | "posix_nosub"
-            | "posix_startend" => return true,
+            | "posix_startend"
+            // `/xx` (PCRE2_EXTRA_EXTENDED_MORE): whitespace inside
+            // character classes is ignored (in addition to `/x`'s
+            // outside-class handling). RGX only implements `/x`. The
+            // `xxx` / `xxxi` flag-bundle variants come through the
+            // SHORT_FLAGS path (post-uniqueness fix), but the
+            // named-modifier forms `extended_more` / `xx` need
+            // explicit gating here.
+            | "extended_more"
+            | "xx" => return true,
             _ => {}
         }
     }
@@ -1833,7 +1851,26 @@ fn resolve_modifiers(full: &str) -> Result<EffectiveOptions, &'static str> {
     ];
 
     for piece in full.split(',') {
-        let is_short_bundle = !piece.is_empty() && piece.chars().all(|c| SHORT_FLAGS.contains(&c));
+        // pcre2test disambiguates short bundles vs named modifiers:
+        // a piece is a short bundle ONLY if its chars are all distinct
+        // short-flags. Repeated chars like `xx` / `nn` / `rr` fall to
+        // the named path — `xx` is `extended_more`, not `x` twice.
+        let is_short_bundle =
+            !piece.is_empty() && piece.chars().all(|c| SHORT_FLAGS.contains(&c)) && {
+                let mut seen = [false; 128];
+                let mut all_unique = true;
+                for c in piece.chars() {
+                    let idx = c as usize;
+                    if idx < 128 && seen[idx] {
+                        all_unique = false;
+                        break;
+                    }
+                    if idx < 128 {
+                        seen[idx] = true;
+                    }
+                }
+                all_unique
+            };
         if is_short_bundle {
             for c in piece.chars() {
                 apply_action(classify_modifier(&c.to_string()), &mut opts)?;
@@ -2501,8 +2538,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_414;
-    const FAIL_BASELINE: usize = 396;
+    const PASS_BASELINE: usize = 12_418;
+    const FAIL_BASELINE: usize = 392;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

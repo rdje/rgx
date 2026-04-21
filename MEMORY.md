@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: /xx + (?xx + unique-char short-bundle (+4 passes)
+- **What**: `/xx` (PCRE2_EXTRA_EXTENDED_MORE) was being parsed as short-bundle `x` twice. Added uniqueness check to short-bundle detection; repeated chars fall to named-modifier path. Added `xx`/`extended_more` to pattern_carries_untestable_modifier and `(?xx` literal to pattern_body gate.
+- **Delta**: 12,414 → 12,418 (+4 pass), 396 → 392 fail. Baselines 12,418 / 392.
+
 ### 2026-04-21 — Harness: per_subject_untestable also passes in Ok-compile / PCRE2-rejected arm (+45 passes)
 - **What**: Symmetric follow-up to d7e6a62. "RGX too permissive" (RGX compiles, PCRE2 rejects) was counted as failure even when per_subject_untestable was set. Added the same gate in the Ok-build arm: if untestable flag is set and PCRE2 rejected at compile, count as Pass (both sides agree the case is un-comparable).
 - **Delta**: 12,369 → 12,414 (+45 pass), 441 → 396 fail. Baselines 12,414 / 396. ~96.9% conformance. Closes substitute_overflow_length / substitute_callout / replace=*(with callouts) clusters.
