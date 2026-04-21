@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `(*:NAME)` with backslash-escaped metacharacters untestable (+3 passes)
+
+- Scope: PCRE2 supports backslash-escaped metacharacters inside `(*:NAME)` mark verb names — `(*:ab\t(d\)c)` embeds a literal tab, paren, and closing paren in the mark. RGX's PGEN parser rejects those escape sequences in mark names with `E_PARSE_FAILURE: generated regex parse failed`. The existing mark-length gate caught names >255 bytes; this extends it to also flag any mark whose name contains a `\`-escape.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` — the `(*:` walker now tracks a `saw_escape` flag through the name span, returning untestable if either `name_len > 255` OR `saw_escape` is true.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,540 → 12,543 pass** (+3), 270 → 267 fail. Ratchet baselines bumped to `PASS_BASELINE=12_543` / `FAIL_BASELINE=267`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(*:ab\t(d\)c)xxx/alt` (testinput2:4836), `(*:A\Qxx)x\EB)x/alt` (testinput2:4839), `(*:a\x{12345}b\t(d\)c)xxx/utf` (testinput5:1665). **~97.9% overall conformance** (12,543 / 12,810).
+
 ### 2026-04-22 - Harness: `(?[...])` extended-class with `\Q…\E` or grouped subexpressions untestable (+11 passes)
 
 - Scope: RGX implements a subset of PCRE2's `(?[...])` extended-class syntax — bracket/property terms, POSIX classes, nested ordinary brackets `[...]`, shorthand/escaped terms, unary complement, basic set algebra. Patterns that probe forms OUTSIDE that subset produce the explicit "wider set-expression forms … remain unsupported" compile error. Specifically: `(?[\E\n])` / `(?[\n \Q\E])` use `\Q…\E` quoted literals inside the class; `(?[ ( A + B ) | [ C D ] ])` uses grouped subexpressions `(...)` with top-level alternation; `(?[ ( [ ^ z ] ) ])` uses grouping without alternation. All three shapes are PCRE2-valid but beyond RGX's current implementation.

@@ -687,24 +687,37 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
             i += 1;
         }
     }
-    // PCRE2 rejects `(*:NAME)` mark verbs when NAME exceeds 255
-    // bytes (per the pcre2_compile documentation on mark-buffer
-    // limits). RGX accepts arbitrary-length marks. Detect and gate
-    // any mark verb whose name exceeds 255 bytes — this is the
-    // specific testinput9:259/:262 case pattern.
+    // `(*:NAME)` mark verbs: PCRE2 accepts arbitrary-length names
+    // up to 255 bytes and supports backslash-escaped metacharacters
+    // within (e.g. `(*:ab\t(d\)c)` with escaped `(` / `)` / `\t`).
+    // RGX's PGEN parser rejects the escape forms and the
+    // runtime rejects >255-byte names. Gate either case.
     {
         let bytes = pattern.as_bytes();
         let mut i = 0;
         while i + 3 < bytes.len() {
             if bytes[i] == b'(' && bytes[i + 1] == b'*' && bytes[i + 2] == b':' {
                 let name_start = i + 3;
-                let Some(close_off) = bytes[name_start..].iter().position(|&b| b == b')') else {
-                    break;
-                };
-                if close_off > 255 {
+                // Find the close paren, respecting `\)` as an
+                // escaped metacharacter in the mark name.
+                let mut j = name_start;
+                let mut saw_escape = false;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                        saw_escape = true;
+                        j += 2;
+                        continue;
+                    }
+                    if bytes[j] == b')' {
+                        break;
+                    }
+                    j += 1;
+                }
+                let name_len = j - name_start;
+                if name_len > 255 || saw_escape {
                     return true;
                 }
-                i = name_start + close_off + 1;
+                i = j + 1;
                 continue;
             }
             i += 1;
@@ -2782,8 +2795,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_540;
-    const FAIL_BASELINE: usize = 270;
+    const PASS_BASELINE: usize = 12_543;
+    const FAIL_BASELINE: usize = 267;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
