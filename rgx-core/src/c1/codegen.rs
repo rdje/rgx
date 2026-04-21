@@ -319,6 +319,7 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
         | OpCode::Jump
         | OpCode::Split
         | OpCode::SplitLazy
+        | OpCode::AltSplit
 
         // === Eligible: capture groups ===
         | OpCode::SaveStart
@@ -427,7 +428,7 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
         }
 
         // 2 byte signed offset
-        OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
+        OpCode::Jump | OpCode::Split | OpCode::SplitLazy | OpCode::AltSplit => {
             if rest.len() < 2 {
                 return None;
             }
@@ -2041,8 +2042,12 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
             OpCode::EndText => ops.push(JitOp::EndText),
             OpCode::WordBoundary => ops.push(JitOp::WordBoundary { negated: false }),
             OpCode::NonWordBoundary => ops.push(JitOp::WordBoundary { negated: true }),
-            OpCode::Split => {
-                // 2-byte u16 forward offset. Target = ip_after_operand + offset.
+            OpCode::Split | OpCode::AltSplit => {
+                // Same JIT lowering for both: the alt_boundaries
+                // bookkeeping for `(*THEN)` lives in the interpreter
+                // path only. Tests that exercise `(*THEN)` semantics
+                // route through the interpreter (the JIT dispatch
+                // excludes patterns with THEN — see `is_jit_eligible`).
                 let target_idx = decode_forward_target(code, &mut ip, &op_positions, "Split")?;
                 ops.push(JitOp::Split {
                     branch_b_op_idx: target_idx,

@@ -133,6 +133,14 @@ pub enum OpCode {
     Split = 0x41,
     /// Split execution (lazy quantifier) - try second path first
     SplitLazy = 0x42,
+    /// Alternation-boundary Split — identical runtime semantics to
+    /// `Split`, but additionally records the pushed frame's index
+    /// into `ctx.alt_boundaries` so `(*THEN)` can skip past any
+    /// inner quantifier backtracks and resume at the next
+    /// alternative of the innermost enclosing alternation group.
+    /// Emitted only at alternation boundaries by the codegen; not
+    /// interchangeable with plain `Split` for quantifier fallbacks.
+    AltSplit = 0x47,
     /// Conditional jump based on lookahead
     JumpIfMatch = 0x43, // Reserved: not yet emitted by the compiler
     /// Conditional jump based on negative lookahead
@@ -627,6 +635,14 @@ pub struct ExecContext<'a> {
     /// while the pattern could have continued matching with more data.
     /// Used by partial-match APIs to distinguish "no match" from "need more input".
     pub hit_end: bool,
+    /// Indices into `backtrack_stack` marking alternation-next-alt
+    /// frames — frames pushed by `OpCode::AltSplit` when entering an
+    /// alternation. `(*THEN)` uses this stack to skip directly to
+    /// the next alternative in the innermost enclosing alternation
+    /// instead of walking the entire backtrack stack. Kept in sync
+    /// with `backtrack_stack` — whenever a frame at index `i` is
+    /// popped, any `alt_boundaries` entry `>= i` is also popped.
+    pub alt_boundaries: Vec<usize>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -1084,6 +1100,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -1217,6 +1234,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -1287,6 +1305,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -1340,6 +1359,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         // Scan through positions looking for one that hits end-of-input.
@@ -2067,6 +2087,13 @@ impl RegexVM {
             ctx.pos = frame.pos;
             Self::restore_frame(ctx, &frame);
             ctx.code_result = frame.saved_code_result;
+            // Keep `alt_boundaries` in sync: the popped frame is
+            // no longer on the stack, so any alt_boundaries entry
+            // pointing at it or beyond must be dropped too.
+            let new_len = ctx.backtrack_stack.len();
+            while ctx.alt_boundaries.last().map_or(false, |&b| b >= new_len) {
+                ctx.alt_boundaries.pop();
+            }
             self.emit_event(&MatchEvent::BacktrackOccurred {
                 position: ctx.pos,
                 stack_depth,
@@ -2103,6 +2130,7 @@ impl RegexVM {
             max_backtrack_frames: ctx.max_backtrack_frames,
             max_recursion_depth: ctx.max_recursion_depth,
             hit_end: false,
+            alt_boundaries: Vec::new(),
         }
     }
 
@@ -2578,13 +2606,26 @@ impl RegexVM {
                 }
 
                 OpCode::Then => {
-                    // (*THEN): simplified as (*PRUNE) — clear backtrack
-                    // stack. Full alternation-aware behavior is not yet
-                    // implemented.
-                    // TODO: implement full alternation-aware (*THEN)
-                    // semantics that skip to the next alternative in the
-                    // innermost enclosing alternation.
-                    ctx.backtrack_stack.clear();
+                    // (*THEN): if inside an alternation, drop every
+                    // backtrack frame pushed since entering the
+                    // innermost alternation branch so that when the
+                    // current branch fails, control resumes at the
+                    // next alternative. If no enclosing alternation
+                    // remains, (*THEN) degrades to (*PRUNE) and the
+                    // attempt fails cleanly.
+                    if let Some(&alt_idx) = ctx.alt_boundaries.last() {
+                        // Keep the alt-boundary frame itself; drop
+                        // anything stacked above it.
+                        ctx.backtrack_stack.truncate(alt_idx + 1);
+                        // Remove any nested alt_boundaries entries
+                        // that referenced the frames we just dropped.
+                        // The current boundary at `alt_idx` stays.
+                        while ctx.alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
+                            ctx.alt_boundaries.pop();
+                        }
+                    } else {
+                        ctx.backtrack_stack.clear();
+                    }
                 }
 
                 OpCode::Mark => {
@@ -3196,6 +3237,33 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
+                }
+
+                OpCode::AltSplit => {
+                    // Identical to `Split` for matching, but also
+                    // records the new frame's index in
+                    // `ctx.alt_boundaries`. `(*THEN)` consults that
+                    // list to skip past any inner-quantifier
+                    // backtrack frames and resume execution at the
+                    // next alternative of the enclosing
+                    // alternation group.
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
+                    let backtrack_frame = BacktrackFrame {
+                        ip: ip + offset,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                    };
+                    let new_idx = ctx.backtrack_stack.len();
+                    ctx.backtrack_stack.push(backtrack_frame);
+                    ctx.alt_boundaries.push(new_idx);
                 }
 
                 OpCode::Jump => {
@@ -3897,6 +3965,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         let mut matches = Vec::new();
@@ -4167,6 +4236,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -4330,6 +4400,7 @@ impl RegexVM {
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
+            alt_boundaries: Vec::new(),
         };
 
         // Determine the CodeBlockOutcome from the callback result.
@@ -4699,7 +4770,7 @@ impl RegexVM {
                         return false;
                     }
                 }
-                OpCode::Split => {
+                OpCode::Split | OpCode::AltSplit => {
                     if ip + 3 < code.len() {
                         let offset1 = i16::from_le_bytes([code[ip], code[ip + 1]]);
                         let offset2 = i16::from_le_bytes([code[ip + 2], code[ip + 3]]);
@@ -5426,7 +5497,15 @@ impl RegexVM {
                     }
                 }
 
-                OpCode::Split => {
+                OpCode::Split | OpCode::AltSplit => {
+                    // `AltSplit` semantics fall back to plain Split
+                    // inside subexpression execution because the
+                    // subexpr has its own local backtrack stack —
+                    // alt_boundaries live on `ctx` and refer to the
+                    // outer stack. Alternation inside a subexpr
+                    // still routes (*THEN) through the outer layer
+                    // if appropriate; the local branch just follows
+                    // Split semantics.
                     if ip + 1 >= code.len() {
                         return false;
                     }
@@ -6794,8 +6873,11 @@ impl OptimizingCompiler {
                         }
                         self.codegen_pass(alt, false);
                     } else {
-                        // Not the last - emit Split to next alternative
-                        self.emit_op(OpCode::Split);
+                        // Not the last - emit AltSplit (alternation-
+                        // boundary split) so the runtime can record
+                        // the next-alt frame in `ctx.alt_boundaries`
+                        // for (*THEN) to jump to on failure.
+                        self.emit_op(OpCode::AltSplit);
                         let split_offset_pos = self.code.len();
                         self.code.push(0); // Will be patched
                         self.code.push(0); // Will be patched
@@ -6999,8 +7081,7 @@ impl OptimizingCompiler {
                         self.code.push(0);
                         self.codegen_pass(expr, false);
                         let skip_expr_target = self.code.len();
-                        let split_offset =
-                            skip_expr_target - (split_offset_pos + 2);
+                        let split_offset = skip_expr_target - (split_offset_pos + 2);
                         let offset_bytes = (split_offset as u16).to_le_bytes();
                         self.code[split_offset_pos] = offset_bytes[0];
                         self.code[split_offset_pos + 1] = offset_bytes[1];
@@ -7568,7 +7649,7 @@ impl OptimizingCompiler {
                     code[ip] = new_id as u8;
                     ip += 1;
                 }
-                OpCode::Jump | OpCode::Split | OpCode::SplitLazy => {
+                OpCode::Jump | OpCode::Split | OpCode::SplitLazy | OpCode::AltSplit => {
                     ip += 2;
                 }
                 OpCode::SaveStart
@@ -7887,9 +7968,9 @@ impl TryFrom<u8> for OpCode {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
-            Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, BackrefCaseInsensitive, Call, Char,
-            CharClass, CharClassNeg, CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine,
-            EndText, EndTextOrNL, Fail, GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch,
+            AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, BackrefCaseInsensitive,
+            Call, Char, CharClass, CharClassNeg, CodeBlock, Commit, DigitAscii, DigitAsciiNeg,
+            EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch,
             Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark, Match, MatchReset,
             NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy,
             QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split,
@@ -7933,6 +8014,7 @@ impl TryFrom<u8> for OpCode {
             0x43 => Ok(JumpIfMatch),
             0x44 => Ok(JumpIfNoMatch),
             0x45 => Ok(Call),
+            0x47 => Ok(AltSplit),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),

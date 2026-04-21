@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: full alternation-aware `(*THEN)` (+18 passes, engine fix #9)
+- **What**: `(*THEN)` was a fake alias for `(*PRUNE)` (clear backtrack stack). PCRE2 semantics: skip to next alt in innermost enclosing alternation, not clear all. Added `OpCode::AltSplit = 0x47` (same as Split + records frame idx in new `ctx.alt_boundaries`). Alternation codegen emits AltSplit; quantifier Splits stay plain. `(*THEN)` handler truncates backtrack_stack to most recent alt-boundary. `try_backtrack` syncs alt_boundaries on frame pop. Added field to ExecContext at 8 construction sites (scripted insertion).
+- **Delta**: 12,544 → 12,562 (+18 pass), 266 → 248 fail. Baselines 12,562 / 248. ~98% conformance. Closes `/^(?:aaa(*THEN)\w{6}|bbb(*THEN)\w{5}|ccc(*THEN)\w{4}|\w{3})/` cluster (testinput1:4597/:4606, 6 cases) plus assorted THEN + COMMIT/PRUNE/SKIP combos.
+
 ### 2026-04-22 — Parser: `[:blank:]` under UCP includes U+180E MVS (+1 pass)
 - **What**: Completes U+180E space-family additions (`\s`, `[:print:]` already had it). `[:blank:]` = Zs + `\t` + U+180E under UCP.
 - **Delta**: 12,543 → 12,544 (+1 pass), 267 → 266 fail. Baselines 12,544 / 266.

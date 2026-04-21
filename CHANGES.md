@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: full alternation-aware `(*THEN)` backtracking-verb semantics (+18 passes, engine #9)
+
+- Scope: Engine bug — `(*THEN)` was implemented as a simplified alias for `(*PRUNE)`: `ctx.backtrack_stack.clear()`. That's semantically wrong. PCRE2's `(*THEN)` is "if inside an alternation, the next alternative in the current group is tried" — NOT "clear all backtracks". A pattern like `^(?:aaa(*THEN)\w{6}|bbb(*THEN)\w{5}|\w{3})` on `"aaa++++++"` should: match "aaa", fail `\w{6}`, `(*THEN)` drops back to the next alt (`bbb\w{5}`, which also fails), then the last alt `\w{3}` picks up "aaa". RGX's old THEN cleared the whole stack and returned no match.
+- Fix: `rgx-core/src/vm.rs`:
+  - New opcode `OpCode::AltSplit = 0x47` — identical matching semantics to `Split` but also records the pushed frame's index into a new `ctx.alt_boundaries: Vec<usize>`.
+  - Alternation codegen (`Regex::Alternation` arm) emits `AltSplit` instead of `Split` at each alternation-boundary fork. Quantifier Splits (`X?` greedy, `{n,m}`) continue to emit plain `Split` so they don't pollute the alt_boundaries stack.
+  - `OpCode::Then` handler: if `alt_boundaries` non-empty, truncate `backtrack_stack` to keep only up-to-and-including the most recent alt-boundary frame, then drop any nested alt_boundary entries referring to the dropped frames. If no alt boundary exists, fall through to the existing PRUNE behaviour.
+  - `try_backtrack` syncs `alt_boundaries` on frame pop — after popping, any `alt_boundaries` index `>= backtrack_stack.len()` is removed.
+  - `OpCode::AltSplit` handled as alias for `Split` in `execute_subexpr_inner`, `execute_at_continuation`, `rebase_inline_char_class_ids`, and c1/codegen eligibility / JIT lowering — the alt_boundaries bookkeeping lives on the outer context only, which is fine because `(*THEN)` routes through the interpreter main loop.
+  - New `alt_boundaries` field initialised at every `ExecContext` construction site (8 sites, scripted via Python to avoid missing one).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,544 → 12,562 pass** (+18), 266 → 248 fail. Ratchet baselines bumped to `PASS_BASELINE=12_562` / `FAIL_BASELINE=248`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/^(?:aaa(*THEN)\w{6}|bbb(*THEN)\w{5}|ccc(*THEN)\w{4}|\w{3})/` cluster (testinput1:4597, :4606 — 6 cases), `/^.*? (a(*THEN)b|(*F)) c/x` (testinput1:5026+), `/aaaaa(*COMMIT)(*THEN)b|a+c/` SM, and related `(*THEN)` combinations with PRUNE / SKIP / atomic groups. **Ninth real RGX engine fix of the session. ~98% overall conformance** (12,562 / 12,810).
+
 ### 2026-04-22 - Parser: `[:blank:]` under UCP includes U+180E MVS (+1 pass)
 
 - Scope: Completes the U+180E (MONGOLIAN VOWEL SEPARATOR) space-family additions. Earlier commits added U+180E to `\s` (ucp_space_ranges) and `[:print:]` (print = graph + Zs + U+180E). `[:blank:]` (`Zs` + `\t`) was still missing it, so `/^>[[:blank:]]*/utf,ucp` on a subject mixing Zs, U+180E, and tab stopped at the U+180E char instead of continuing.
