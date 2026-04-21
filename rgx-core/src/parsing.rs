@@ -3115,10 +3115,17 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
         // are listed as graph subjects. Co (private use) is also
         // graph.
         "graph" => graph_ranges_ucp(),
-        // `[:print:]` = graph + space-separators (Zs).
+        // `[:print:]` = graph + space-separators (Zs) + U+180E.
+        // PCRE2 historically treats U+180E (MONGOLIAN VOWEL SEPARATOR)
+        // as a space/print codepoint for compatibility with pre-
+        // Unicode-6.3 classification (it was Zs then, Cf now). The
+        // graph set excludes it (as an invisible-format Cf), but
+        // print unions Zs on top, and PCRE2's Zs-equivalent for
+        // print also covers U+180E.
         "print" => {
             let mut v = graph_ranges_ucp();
             v.extend(p("Zs"));
+            v.push(CharRange::single('\u{180E}'));
             v.sort_by_key(|r| r.start);
             v
         }

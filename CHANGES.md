@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Parser: `[:print:]` under UCP includes U+180E (MVS) (+2 passes)
+
+- Scope: PCRE2 treats U+180E (MONGOLIAN VOWEL SEPARATOR) as a space/print character for historical compatibility. The earlier `[:graph:]` / `[:print:]` commit (5f23128) excluded U+180E from graph (correct — it's an invisible-format Cf) but didn't re-add it to print (graph + Zs). PCRE2's print set DOES include it, because PCRE2's Zs-analog for print covers U+180E too. Symptom: `/^[[:^print:]]+$/utf,ucp` on subject `\u{180e}` matched under RGX (`\u{180e}` wasn't in print, so `[:^print:]` matched), but PCRE2 says no match.
+- Fix: `rgx-core/src/parsing.rs::ucp_posix_class_ranges` — the `"print"` arm now appends U+180E explicitly after unioning graph + Zs.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,487 → 12,489 pass** (+2), 323 → 321 fail. Ratchet baselines bumped to `PASS_BASELINE=12_489` / `FAIL_BASELINE=321`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/^[[:print:]]+$/utf,ucp` on `\u{180e}` (testinput5:65) and the `/^[[:^print:]]+$/utf,ucp` no-match counterpart (testinput5:70). The Zs for `\s`/space (`ucp_space_ranges`) already included U+180E via the earlier 36ccf97 commit; print now matches.
+
 ### 2026-04-21 - Harness: `\p{bidi class:X}` (space-separated) variant added to body gate (+7 passes)
 
 - Scope: PCRE2 accepts whitespace inside property-class names: `\p{bidi class:LRE}`, `\p{bidi class:RLI}`. The earlier body gate caught `\p{bidi_class:` (underscore) and `\p{bidiclass:` (no separator) but missed the space form, so ~7 cases in testinput4:2638-2680 were still counted as compile failures.

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Parser: `[:print:]` under UCP includes U+180E MVS (+2 passes)
+- **What**: Earlier commit excluded U+180E from `[:graph:]` (correct) but print = graph + Zs didn't re-add it. PCRE2 treats U+180E as space/print for compat. Added explicit push of U+180E in the "print" arm.
+- **Delta**: 12,487 → 12,489 (+2 pass), 323 → 321 fail. Baselines 12,489 / 321.
+
 ### 2026-04-21 — Harness: `\p{bidi class:X}` space-separated variant in body gate (+7 passes)
 - **What**: Previous gate caught `bidiclass:` and `bidi_class:` but missed the space form `bidi class:`. Added space-variant literals.
 - **Delta**: 12,480 → 12,487 (+7 pass), 330 → 323 fail. Baselines 12,487 / 323.
