@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - VM: `(*CRLF)` + `(*ANY)` line anchors treat `\r\n` as one newline unit (+8 passes)
+
+- Scope: Engine bug — `VmNewlineMode::Crlf` and `VmNewlineMode::Anycrlf` shared one branch that accepted either bare `\r` or bare `\n` as a line terminator, but PCRE2's `(*CRLF)` convention recognises only the exact 2-byte `\r\n` pair. Under `/^abc/Im,newline=crlf` on `"xyz\nabclf"` the harness prepends `(*CRLF)` via the pattern modifier, but RGX's `^` fired after the bare `\n` anyway (because the mode check accepted it) — false positive where PCRE2 correctly said no match. Symmetric bug on `$`. `(*ANY)` had a subtler bug: `\r` followed by `\n` should be a SINGLE newline unit (line starts only after the `\n`, `$` fires only before the `\r`), but the old code fired on both bytes of the pair.
+- Fix: `rgx-core/src/vm.rs::VmNewlineMode::is_line_start_before` and `is_line_end_at` split `Crlf` out of the shared arm. `Crlf`'s `^` requires `pos >= 2 && text[pos-2] == b'\r' && text[pos-1] == b'\n'`; `$` requires `text[pos] == b'\r' && text[pos+1] == b'\n'`. `(*ANY)`'s bare-`\r` path checks the next byte isn't `\n` (else it's part of a `\r\n` unit); bare-`\n` path checks the previous byte isn't `\r`.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,611 → 11,619 pass** (+8), 1,199 → 1,191 fail. Ratchet baselines bumped to `PASS_BASELINE=11_619` / `FAIL_BASELINE=1_191`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the `/^abc/Im,newline=crlf` family (testinput2:1571, testinput6:4052) and several `(*ANY)` edge cases where subjects straddle a `\r\n` pair. `Anycrlf` keeps its liberal `\r || \n` semantics because that's what PCRE2 intends. The fix leaves `Lf`, `Cr`, `Nul` unchanged.
+
 ### 2026-04-21 - VM: `\b` / `\B` honour PCRE2_UCP (+13 passes)
 
 - Scope: Engine bug — `(*UCP)` or `/ucp` pattern-level modifier switched `\d` / `\w` / `\s` to Unicode-property ranges but `\b` / `\B` kept classifying word chars with the ASCII-only `ch.is_ascii_alphanumeric() || ch == '_'` test. `\b` between ASCII and non-ASCII letters never fired; `/\b...\B/utf,ucp` on `!\x{c0}++\x{c1}\x{c2}` (expected "++\x{c1}") returned None because positions inside `\x{c0}++\x{c1}` weren't seen as boundaries.

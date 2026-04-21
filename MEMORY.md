@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — VM: `(*CRLF)` / `(*ANY)` line anchors treat `\r\n` as one newline unit (+8 passes)
+- **What**: `Crlf` and `Anycrlf` shared a VM branch that fired `^`/`$` on either bare `\r` or bare `\n`; PCRE2 `(*CRLF)` mode only recognises the exact `\r\n` pair. Split `Crlf` into its own arm (require both bytes). Also fixed `(*ANY)`: a `\r\n` pair is ONE newline, so bare-`\r` path skips if next byte is `\n`, bare-`\n` path skips if prev byte is `\r`.
+- **Delta**: 11,611 → 11,619 (+8 pass), 1,199 → 1,191 fail. Baselines 11,619 / 1,191. Closes `/^abc/Im,newline=crlf` family.
+
 ### 2026-04-21 — VM: `\b` / `\B` honour PCRE2_UCP (+13 passes)
 - **What**: `(*UCP)` switched `\d`/`\w`/`\s` to Unicode ranges but `\b`/`\B` stayed ASCII-only. Added `Program.ucp_enabled` (propagated from `(*UCP)` pragma via compiler.rs) and routed all 5 WordBoundary call sites through unified `is_at_word_boundary(ctx, ucp)` — Rust's `is_alphanumeric` covers PCRE2's UCP word set `L|N|_` exactly. Also folded the `execute_at_continuation` byte-level fast path into the same helper.
 - **Delta**: 11,598 → 11,611 (+13 pass), 1,212 → 1,199 fail. Closes `/\b...\B/utf,ucp` and `/\b...\B/ucp` clusters in testinput5/7. Baselines 11,611 / 1,199.

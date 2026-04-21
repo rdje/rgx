@@ -389,9 +389,27 @@ impl VmNewlineMode {
         match self {
             VmNewlineMode::Lf => prev == b'\n',
             VmNewlineMode::Cr => prev == b'\r',
-            VmNewlineMode::Crlf | VmNewlineMode::Anycrlf => prev == b'\r' || prev == b'\n',
+            // PCRE2 `(*CRLF)`: only the 2-byte `\r\n` sequence is a
+            // newline. A bare `\r` or bare `\n` is an ordinary character
+            // under this convention, so `^` must only fire after `\n`
+            // that is immediately preceded by `\r`.
+            VmNewlineMode::Crlf => pos >= 2 && text[pos - 2] == b'\r' && prev == b'\n',
+            // `(*ANYCRLF)` accepts `\r\n`, bare `\r`, or bare `\n`.
+            VmNewlineMode::Anycrlf => prev == b'\r' || prev == b'\n',
             VmNewlineMode::Any => {
-                if matches!(prev, b'\r' | b'\n' | 0x0B | 0x0C | 0x85) {
+                // `(*ANY)` recognises `\r\n` as ONE newline plus bare
+                // `\r`, bare `\n`, `\v`, `\f`, NEL (0x85), LS (U+2028),
+                // and PS (U+2029). A `\r` immediately followed by `\n`
+                // is only a line start AFTER the `\n` (not after the
+                // `\r`), because the pair is a single newline unit.
+                if prev == b'\n' {
+                    return true;
+                }
+                if prev == b'\r' {
+                    // Bare `\r` (not the lead of a `\r\n` pair).
+                    return pos >= text.len() || text[pos] != b'\n';
+                }
+                if matches!(prev, 0x0B | 0x0C | 0x85) {
                     return true;
                 }
                 // LINE SEPARATOR / PARAGRAPH SEPARATOR are 3-byte
@@ -418,9 +436,26 @@ impl VmNewlineMode {
         match self {
             VmNewlineMode::Lf => cur == b'\n',
             VmNewlineMode::Cr => cur == b'\r',
-            VmNewlineMode::Crlf | VmNewlineMode::Anycrlf => cur == b'\r' || cur == b'\n',
+            // `(*CRLF)`: `$` fires only immediately before the 2-byte
+            // `\r\n` sequence. Bare `\r` or bare `\n` is an ordinary
+            // character under this convention.
+            VmNewlineMode::Crlf => cur == b'\r' && pos + 1 < text.len() && text[pos + 1] == b'\n',
+            // `(*ANYCRLF)` accepts `\r\n`, bare `\r`, or bare `\n`.
+            VmNewlineMode::Anycrlf => cur == b'\r' || cur == b'\n',
             VmNewlineMode::Any => {
-                if matches!(cur, b'\r' | b'\n' | 0x0B | 0x0C | 0x85) {
+                // Mirror `is_line_start_before`'s `(*ANY)` logic: `$`
+                // fires before a newline unit, where `\r\n` is a single
+                // unit. A `\r` that is followed by `\n` only ends the
+                // line WHEN we reach the `\r`; being at the `\n` inside
+                // the pair is still mid-line.
+                if cur == b'\r' {
+                    return true;
+                }
+                if cur == b'\n' {
+                    // Bare `\n` (not the tail of a `\r\n` pair).
+                    return pos == 0 || text[pos - 1] != b'\r';
+                }
+                if matches!(cur, 0x0B | 0x0C | 0x85) {
                     return true;
                 }
                 if pos + 3 <= text.len() {
