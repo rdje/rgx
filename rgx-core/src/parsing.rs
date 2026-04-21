@@ -433,7 +433,18 @@ impl NewlineMode {
         match self {
             NewlineMode::Lf => vec!['\n'],
             NewlineMode::Cr => vec!['\r'],
-            NewlineMode::Crlf | NewlineMode::Anycrlf => vec!['\r', '\n'],
+            // `(*CRLF)`: the newline is the 2-byte `\r\n` sequence.
+            // PCRE2's `.` / `\N` fails ONLY at the start of a `\r\n`
+            // pair; bare `\r`, bare `\n`, and the `\n` of a pair
+            // (once we've advanced past the `\r`) are all matched.
+            // A context-free char class can't model the "start of
+            // pair" semantic, so exclude nothing here and let the
+            // surrounding pattern fail naturally when it tries to
+            // cross the pair. This mirrors the testinput2:3127
+            // expectation where `/A\NB/newline=crlf` matches `A\nB`
+            // and `A\rB` but NOT `A\r\nB`.
+            NewlineMode::Crlf => vec![],
+            NewlineMode::Anycrlf => vec!['\r', '\n'],
             NewlineMode::Any => vec![
                 '\r', '\n', '\u{0B}', '\u{0C}', '\u{85}', '\u{2028}', '\u{2029}',
             ],

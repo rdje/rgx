@@ -162,9 +162,16 @@ pub(crate) fn ucp_word_ranges() -> Vec<CharRange> {
 }
 
 /// PCRE2 `\s` range set under `PCRE2_UCP` — any character in the
-/// Unicode `White_Space` property.
+/// Unicode `White_Space` property, plus U+180E MONGOLIAN VOWEL
+/// SEPARATOR. PCRE2 retains U+180E as a space character for
+/// historical compatibility (it was Zs in Unicode pre-6.3 and
+/// reclassified to Cf in 6.3+, but PCRE2's table still treats it as
+/// a space; see testinput5:50 commentary).
 pub(crate) fn ucp_space_ranges() -> Vec<CharRange> {
-    resolve_unicode_property_class("White_Space", false).unwrap_or_default()
+    let mut ranges = resolve_unicode_property_class("White_Space", false).unwrap_or_default();
+    ranges.push(CharRange::single('\u{180E}'));
+    ranges.sort_by_key(|r| r.start);
+    ranges
 }
 
 /// Merge range-sets for several Unicode property names into a single

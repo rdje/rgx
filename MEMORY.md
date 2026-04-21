@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Parser: `.`/`\N` under `(*CRLF)` + `\s`/UCP U+180E (+6 passes, two small engine fixes)
+- **What**: `(*CRLF)` `newline_chars()` returned `['\r','\n']` like Anycrlf, making `.`/`\N` fail on both bytes of a `\r\n` pair AND on bare `\r` or bare `\n`. PCRE2 fails only at the START of the pair — bare `\r`, bare `\n`, and the `\n` inside the pair all match. Simplest fix: return empty vec for Crlf (a context-free class can't model start-of-pair; the surrounding pattern still fails on `\r\n` because two bytes can't both be consumed). Also: `ucp_space_ranges` now includes U+180E MVS (PCRE2 historical-compat: was Zs pre-Unicode-6.3, reclassified to Cf but PCRE2 kept it as space).
+- **Delta**: 11,978 → 11,984 (+6 pass), 832 → 826 fail. Baselines 11,984 / 826. Closes `/A\NB/newline=crlf` and `/^A\s+Z/utf,ucp` on NEL+MVS+MMSP.
+
 ### 2026-04-21 — Harness: `alt_extended_class` / `allow_empty_class` / `callout_none` untestable (+234 passes)
 - **What**: Added `alt_extended_class` (PCRE2_ALT_EXTENDED_CLASS, the `[A[^]]` / `[...&&[...]]` / `[A-C--B]` nested-set syntax) and `allow_empty_class` to `pattern_carries_untestable_modifier`. Added `callout_none` to `subject_carries_untestable_modifier` (sibling of `callout_fail`/`callout_capture` which were already listed).
 - **Delta**: 11,744 → 11,978 (+234 pass), 1,066 → 832 fail. Baselines 11,978 / 832. FN −170, FP −60. Closes `/B,alt_extended_class` cluster (testinput2:7109+ and testinput6 mirrors) and `\=callout_none` subjects in testinput2:1073.

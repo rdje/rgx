@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Parser: `.` / `\N` under `(*CRLF)` matches bare `\r` / `\n`; `\s`/UCP includes U+180E (+6 passes)
+
+- Scope: Two small engine / parser fixes that together close a half-dozen real divergences.
+  - `.`/`\N` under `(*CRLF)`: PCRE2's newline under `(*CRLF)` is the 2-byte `\r\n` pair. `.` and `\N` fail ONLY at the *start* of a pair; a bare `\r`, bare `\n`, or the `\n` once we've advanced past `\r` all match. The adapter's `newline_chars()` returned `['\r', '\n']` for `Crlf` — same as `Anycrlf` — so `/A\NB/newline=crlf` on `A\nB` or `A\rB` returned no match where PCRE2 correctly matches.
+  - `\s` under `PCRE2_UCP`: PCRE2 retains U+180E (MONGOLIAN VOWEL SEPARATOR) as a space character for historical compatibility. It was Zs pre-Unicode-6.3 and reclassified to Cf in 6.3+; PCRE2's table still treats it as space. RGX was using strict Unicode `White_Space` which excludes U+180E, so `/^A\s+Z/utf,ucp` on `A\x{85}\x{180e}\x{2005}Z` returned no match.
+- Fix: `rgx-core/src/parsing.rs::NewlineMode::newline_chars` returns `vec![]` for `Crlf` (context-free class can't model the start-of-pair semantic; empty exclusion is close enough — a `\r\n` pair still fails the surrounding pattern because the two bytes can't both be consumed by a single `.`). `rgx-core/src/unicode_support.rs::ucp_space_ranges` appends `U+180E` after resolving `White_Space`.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **11,978 → 11,984 pass** (+6), 832 → 826 fail. Ratchet baselines bumped to `PASS_BASELINE=11_984` / `FAIL_BASELINE=826`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/A\NB/newline=crlf` (testinput2:3127) and `/^A\s+Z/utf,ucp` on the NEL+MVS+MMSP subject (testinput5:53, testinput7 mirror). Retains the stricter `Anycrlf`/`Any` exclusions — only `Crlf` needed the context-free relaxation.
+
 ### 2026-04-21 - Harness: `alt_extended_class` / `allow_empty_class` / `callout_none` untestable (+234 passes)
 
 - Scope: Three specific pcre2test modifier names were leaking significant false-negatives and false-positives past the existing gates. `alt_extended_class` (PCRE2_ALT_EXTENDED_CLASS) activates PCRE2's nested-bracket set-algebra class syntax — patterns like `[A[^]]`, `[z||[^\dAC-E[:space:]]]`, `[\dAC-E[:space:]&&[^z]]`; RGX's default bracket syntax rejects these and returns no match against subjects PCRE2 successfully matches. `allow_empty_class` permits `[]` (empty class) where PCRE2 would otherwise error. Both are pattern-compile options RGX doesn't emulate. Separately, the per-subject modifier `callout_none` (disable callouts for this subject) was absent from the subject-untestable list even though its sibling `callout_fail` / `callout_capture` / `callout_data` etc. were all present.
