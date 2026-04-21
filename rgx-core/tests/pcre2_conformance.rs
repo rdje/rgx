@@ -687,7 +687,33 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             // (e.g. locale-specific alternates). RGX has no table-
             // swapping facility; the test subjects rely on the
             // modified `\w` / `[:alpha:]` semantics.
-            | "tables" => return true,
+            | "tables"
+            // `dollar_endonly` (PCRE2_DOLLAR_ENDONLY): `$` matches
+            // only at end-of-text, NOT before a final `\n`. RGX
+            // uses PCRE2's default `\Z`-like behaviour where `$`
+            // also fires before a trailing `\n`; the flag has no
+            // runtime hook.
+            | "dollar_endonly"
+            // `D` short modifier = dollar_endonly (pcre2test
+            // shorthand).
+            | "D"
+            // pcre2test JIT-verification mode: PCRE2 compiles the
+            // pattern twice (JIT + interpreter) and diffs the
+            // outputs. If they diverge, PCRE2 prints a `JIT ERROR`
+            // diagnostic that the harness parses as no-match. RGX
+            // has one engine, so no diff semantics to honour.
+            | "jit"
+            | "jitverify"
+            // `/posix` compile flag: the pattern is treated as a
+            // POSIX ERE. PCRE2 converts it via `pcre2_pattern_convert`.
+            // RGX has no POSIX-ERE front-end; patterns using POSIX-
+            // specific quirks (different grouping, no lookaround,
+            // bracket-class interpretation) diverge.
+            | "posix"
+            | "posix_basic"
+            | "posix_extended"
+            | "posix_nosub"
+            | "posix_startend" => return true,
             _ => {}
         }
     }
@@ -2440,8 +2466,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_201;
-    const FAIL_BASELINE: usize = 609;
+    const PASS_BASELINE: usize = 12_208;
+    const FAIL_BASELINE: usize = 602;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

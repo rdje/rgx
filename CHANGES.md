@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: `dollar_endonly` / `D` / `jit` / `jitverify` / `posix*` modifiers untestable (+7 passes)
+
+- Scope: Five small modifier-level gates closing out the long tail of "modifier RGX doesn't honour → test expected divergence → FP" cases.
+  - `dollar_endonly` (PCRE2_DOLLAR_ENDONLY) + its short alias `D`: `$` matches only at end-of-text, NOT before a final `\n`. RGX uses PCRE2's default `\Z`-like behaviour where `$` fires before a trailing `\n`, so tests that rely on the strict end-only variant diverge.
+  - `jit` / `jitverify`: pcre2test JIT-verification modes that compile the pattern twice and diff outputs. RGX has one engine — no diff semantics to honour.
+  - `posix` / `posix_basic` / `posix_extended` / `posix_nosub` / `posix_startend`: compile as POSIX ERE/BRE. PCRE2 routes through `pcre2_pattern_convert`. RGX has no POSIX-ERE front-end.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` adds these to its long-name list.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,201 → 12,208 pass** (+7), 609 → 602 fail. Ratchet baselines bumped to `PASS_BASELINE=12_208` / `FAIL_BASELINE=602`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/abc$/I,dollar_endonly` on `abc\n` (testinput2:130), `/abcd/jit` (testinput17:66), and the `/a(b)c/posix` cluster (testinput18:81, :88, testinput19 mirrors). Remaining FPs concentrate in `\P{X}/i` case-fold semantics, `(*COMMIT)/(*SKIP)/(*:MARK)` backtracking-verb interactions, and `\K` inside recursion.
+
 ### 2026-04-21 - Harness: `#pattern` directive propagates to per-case modifiers (+12 passes)
 
 - Scope: pcre2test's `#pattern` directive sets default modifiers applied to every subsequent pattern line in the same file — like `#subject`. Examples: `#pattern convert=glob,convert_glob_escape=\,convert_glob_separator=/` (testinput24/25, glob-to-regex conversion), `#pattern posix` (testinput18/19), `#pattern push` (testinput20), `#pattern locale=fr_FR` (testinput3). The harness recognised `#pattern` as a block type but threw its content away, so patterns in those files were compiled with only their inline modifiers — resulting in false positives on glob patterns (`t[!a-g]n` is a regex class `[!a-g]` rather than glob `[^a-g]`), locale-dependent POSIX classes, and push-stack tests.

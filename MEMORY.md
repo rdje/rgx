@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: `dollar_endonly` / `D` / `jit` / `jitverify` / `posix*` untestable (+7 passes)
+- **What**: Added `dollar_endonly`/`D` (`$`-at-end-only semantic RGX doesn't honour), `jit`/`jitverify` (pcre2test double-compile diff modes), `posix`/`posix_basic`/`posix_extended`/`posix_nosub`/`posix_startend` (POSIX ERE/BRE compile flags; no RGX POSIX front-end) to pattern_carries_untestable_modifier.
+- **Delta**: 12,201 → 12,208 (+7 pass), 609 → 602 fail. Baselines 12,208 / 602. Closes `/abc$/I,dollar_endonly`, `/abcd/jit`, `/a(b)c/posix` cluster.
+
 ### 2026-04-21 — Harness: `#pattern` directive propagates to per-case modifiers (+12 passes)
 - **What**: pcre2test's `#pattern` directive sets default modifiers for every subsequent pattern (testinput18/19 `posix`, 20 `push`, 24/25 `convert=glob,...`, 3 `locale=fr_FR`, etc.). Harness recognised the block type but ignored its content. Added `default_pattern_modifiers: Vec<String>` that accumulates positive modifiers and drops entries on `#pattern -name`. Appended to each case's `full_modifiers` so existing untestable-modifier gates see them.
 - **Delta**: 12,189 → 12,201 (+12 pass), 621 → 609 fail. Baselines 12,201 / 609. Closes glob-conversion FPs in testinput24/25 and the `#pattern push` chain in testinput20.
