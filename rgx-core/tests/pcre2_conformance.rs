@@ -540,6 +540,53 @@ fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
 ///   * `(?a)` / `(?-a)` / `(?aS)` / `(?aD)` / `(?aT)` / `(?aP)` / `(?aW)`
 ///     / any `(?[+-]?a[SDTPW]?)` toggle or `(?a…:…)` scope — PCRE2_EXTRA_ASCII_*.
 ///     Not implemented.
+/// Detect whether the pattern references the Unicode Bidi_Class
+/// property. PCRE2 accepts all the following spellings (per
+/// pcre2pattern(3) §"Unicode character properties"): `\p{bc=X}`,
+/// `\p{bc:X}`, `\p{bidiclass=X}`, `\p{bidi_class=X}`,
+/// `\p{bidi class=X}`, `\p{Bidi_Class : X}`, `\p{b_c=X}`, with any
+/// whitespace around the separator and any letter case.
+/// `regex_syntax` accepts only a subset of value names, so any
+/// reference marks the pattern untestable.
+fn pattern_references_bidi_class_property(pattern: &str) -> bool {
+    // Walk the pattern looking for `\p{…}` or `\P{…}` spans, then
+    // check if the NAME (portion before `=` or `:`) lowercases to
+    // one of the bidi-class aliases: "bc", "b_c", "bidiclass",
+    // "bidi_class", or "bidi class".
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        if bytes[i] == b'\\'
+            && (bytes[i + 1] == b'p' || bytes[i + 1] == b'P')
+            && bytes[i + 2] == b'{'
+        {
+            let name_start = i + 3;
+            let Some(close_off) = bytes[name_start..].iter().position(|&b| b == b'}') else {
+                return false;
+            };
+            let name_span = &bytes[name_start..name_start + close_off];
+            let sep = name_span
+                .iter()
+                .position(|&b| b == b'=' || b == b':')
+                .unwrap_or(name_span.len());
+            let raw = std::str::from_utf8(&name_span[..sep]).unwrap_or("");
+            // Lowercase + strip spaces/underscores for alias compare.
+            let normalised: String = raw
+                .chars()
+                .filter(|c| !c.is_whitespace() && *c != '_')
+                .flat_map(char::to_lowercase)
+                .collect();
+            if matches!(normalised.as_str(), "bc" | "bidiclass") {
+                return true;
+            }
+            i = name_start + close_off + 1;
+            continue;
+        }
+        i += 1;
+    }
+    false
+}
+
 fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     if pattern.contains("(*script_run:")
         || pattern.contains("(*sr:")
@@ -582,20 +629,7 @@ fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
     // partial value map, mark any pattern that references the property
     // untestable so we don't claim Unicode-property parity we don't
     // fully deliver.
-    if pattern.contains("\\p{bidiclass:")
-        || pattern.contains("\\p{bidi_class:")
-        || pattern.contains("\\p{bidi class:")
-        || pattern.contains("\\p{bc:")
-        || pattern.contains("\\p{bc=")
-        || pattern.contains("\\p{bidiclass=")
-        || pattern.contains("\\p{bidi_class=")
-        || pattern.contains("\\p{bidi class=")
-        || pattern.contains("\\P{bidiclass:")
-        || pattern.contains("\\P{bidi_class:")
-        || pattern.contains("\\P{bidi class:")
-        || pattern.contains("\\P{bc:")
-        || pattern.contains("\\P{bc=")
-    {
+    if pattern_references_bidi_class_property(pattern) {
         return true;
     }
     // Inline flag toggles like `(?r)`, `(?aS)`, `(?-aW:)` — scan for
@@ -2563,8 +2597,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_489;
-    const FAIL_BASELINE: usize = 321;
+    const PASS_BASELINE: usize = 12_495;
+    const FAIL_BASELINE: usize = 315;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

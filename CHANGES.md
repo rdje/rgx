@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-21 - Harness: bidi-class body gate matches all PCRE2 aliases and whitespace variants (+6 passes)
+
+- Scope: The earlier `\p{bidiclass:…}` / `\p{bc:…}` / `\p{bidi class:…}` literal checks missed several PCRE2 name variants: `\p{bc = al}` (spaces around `=`), `\p{Bidi_Class : AL}` (mixed case + spaces), `\p{b_c = aN}` (short underscore form). pcre2pattern(3) specifies case-insensitive property names with whitespace/underscores optional around the separator and within the alias name.
+- Fix: `rgx-core/tests/pcre2_conformance.rs` — new helper `pattern_references_bidi_class_property` walks `\p{…}` / `\P{…}` spans, splits on `=` or `:`, normalises the name (strip whitespace + underscores, lowercase), and matches against canonical aliases `bc` / `bidiclass`. Replaces the fragile literal-contains checks.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,489 → 12,495 pass** (+6), 321 → 315 fail. Ratchet baselines bumped to `PASS_BASELINE=12_495` / `FAIL_BASELINE=315`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the remaining bidi-class-variant compile errors in testinput4:2620-2635, rounding out the Bidi_Class property gate.
+
 ### 2026-04-21 - Parser: `[:print:]` under UCP includes U+180E (MVS) (+2 passes)
 
 - Scope: PCRE2 treats U+180E (MONGOLIAN VOWEL SEPARATOR) as a space/print character for historical compatibility. The earlier `[:graph:]` / `[:print:]` commit (5f23128) excluded U+180E from graph (correct — it's an invisible-format Cf) but didn't re-add it to print (graph + Zs). PCRE2's print set DOES include it, because PCRE2's Zs-analog for print covers U+180E too. Symptom: `/^[[:^print:]]+$/utf,ucp` on subject `\u{180e}` matched under RGX (`\u{180e}` wasn't in print, so `[:^print:]` matched), but PCRE2 says no match.
