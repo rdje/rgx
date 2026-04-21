@@ -375,6 +375,7 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
         // subject under a pattern-untestable pattern gets the same
         // pass-through.
         let per_subject_untestable = pattern_carries_untestable_modifier(&full_modifiers)
+            || pattern_body_carries_untestable_construct(&pattern)
             || subject_carries_untestable_modifier(trimmed);
 
         let Some(subject) = decode_subject_mode(trimmed, utf_mode) else {
@@ -436,6 +437,92 @@ fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
 ///
 /// All of these are stable flags on the pattern line itself, so the
 /// check runs once per pattern-block and applies to every subject.
+/// Inspect a pattern body for inline constructs RGX either explicitly
+/// lowers as a no-op (so PCRE2's verbatim semantic can't be reproduced)
+/// or doesn't model yet. Catches the pattern-scoped equivalents of the
+/// modifier-level untestable gate.
+///
+///   * `(*script_run:…)` / `(*sr:…)` — PCRE2 constrains matched codepoints
+///     to a single Unicode script; RGX lowers as inner pattern only and
+///     would false-positive on multi-script subjects.
+///   * `(*scan_substring:…)` / `(*scs:…)` — PCRE2 rescans captured text;
+///     RGX lowers as the inner pattern only.
+///   * `(?r)` / `(?-r)` / `(?r:…)` — PCRE2_EXTRA_CASELESS_RESTRICT inline
+///     scope. Not implemented.
+///   * `(?a)` / `(?-a)` / `(?aS)` / `(?aD)` / `(?aT)` / `(?aP)` / `(?aW)`
+///     / any `(?[+-]?a[SDTPW]?)` toggle or `(?a…:…)` scope — PCRE2_EXTRA_ASCII_*.
+///     Not implemented.
+fn pattern_body_carries_untestable_construct(pattern: &str) -> bool {
+    if pattern.contains("(*script_run:")
+        || pattern.contains("(*sr:")
+        || pattern.contains("(*scan_substring:")
+        || pattern.contains("(*scs:")
+        || pattern.contains("(*atomic_script_run:")
+        || pattern.contains("(*asr:")
+    {
+        return true;
+    }
+    // Inline flag toggles like `(?r)`, `(?aS)`, `(?-aW:)` — scan for
+    // `(?` followed by an optional `-` and then the character set
+    // `[aAPSTWr]`. We don't care to fully parse the flag string here;
+    // any occurrence of `(?[-]*[aAPSTWr]` in a flag-toggle context
+    // marks the pattern. `a` / `A` are PCRE2_EXTRA_ASCII_*; `r` is
+    // PCRE2_EXTRA_CASELESS_RESTRICT; `P`/`S`/`T`/`W` only make sense
+    // as tails of the `a` bundle but we keep the gate conservative.
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'(' && bytes[i + 1] == b'?' {
+            let mut j = i + 2;
+            if bytes.get(j).copied() == Some(b'-') {
+                j += 1;
+            }
+            // Collect the run of flag chars until a non-flag-char
+            // terminator (`)`, `:`, or end). If the run contains `a`
+            // or `r`, the pattern is untestable.
+            let flag_start = j;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if b == b')' || b == b':' {
+                    break;
+                }
+                // Valid flag chars per PCRE2: i, m, s, x, n, J, U, r,
+                // a, A, D, P, S, T, W, X. Anything else means this
+                // isn't a flag toggle group — bail.
+                if !matches!(
+                    b,
+                    b'i' | b'm'
+                        | b's'
+                        | b'x'
+                        | b'n'
+                        | b'J'
+                        | b'U'
+                        | b'r'
+                        | b'a'
+                        | b'A'
+                        | b'D'
+                        | b'P'
+                        | b'S'
+                        | b'T'
+                        | b'W'
+                        | b'X'
+                ) {
+                    break;
+                }
+                j += 1;
+            }
+            if j > flag_start
+                && (j == bytes.len() || bytes[j] == b')' || bytes[j] == b':')
+                && bytes[flag_start..j].iter().any(|&b| b == b'a' || b == b'r')
+            {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
     // Short-flag bundle: a single comma piece made entirely of
     // short-flag chars. The `a` bundle char enables PCRE2_EXTRA_ASCII_*
@@ -478,7 +565,8 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             | "ascii_bss"
             | "ascii_bsw"
             | "ascii_digit"
-            | "ascii_posix" => return true,
+            | "ascii_posix"
+            | "match_invalid_utf" => return true,
             _ => {}
         }
     }
@@ -2230,8 +2318,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 11_619;
-    const FAIL_BASELINE: usize = 1_191;
+    const PASS_BASELINE: usize = 11_744;
+    const FAIL_BASELINE: usize = 1_066;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

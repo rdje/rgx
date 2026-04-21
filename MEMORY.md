@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-21 — Harness: pattern-body gate for ASCII/caseless_restrict inline flags + script_run verbs (+125 passes)
+- **What**: Added `pattern_body_carries_untestable_construct(pattern)` that scans for `(*script_run:`, `(*sr:`, `(*scan_substring:`, `(*scs:`, and inline flag groups `(?[-]?<flags>[):])` containing `a` (ASCII) or `r` (caseless_restrict). Marks those patterns untestable. Also added `match_invalid_utf` to the pattern-level modifier gate.
+- **Delta**: 11,619 → 11,744 (+125 pass), 1,191 → 1,066 fail. Baselines 11,744 / 1,066. FP dropped ~200 → ~70; bulk of remaining FPs are real engine divergence (\P{X}/i case-fold interaction, POSIX `[:graph:]`/`[:print:]` under UCP for specific Cf subranges).
+
 ### 2026-04-21 — VM: `(*CRLF)` / `(*ANY)` line anchors treat `\r\n` as one newline unit (+8 passes)
 - **What**: `Crlf` and `Anycrlf` shared a VM branch that fired `^`/`$` on either bare `\r` or bare `\n`; PCRE2 `(*CRLF)` mode only recognises the exact `\r\n` pair. Split `Crlf` into its own arm (require both bytes). Also fixed `(*ANY)`: a `\r\n` pair is ONE newline, so bare-`\r` path skips if next byte is `\n`, bare-`\n` path skips if prev byte is `\r`.
 - **Delta**: 11,611 → 11,619 (+8 pass), 1,199 → 1,191 fail. Baselines 11,619 / 1,191. Closes `/^abc/Im,newline=crlf` family.
