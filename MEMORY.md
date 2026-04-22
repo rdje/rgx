@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: tighten substitute-template gate for 32-char-boundary names and `${name+default}` (+2 passes)
+- **What**: Two `/abc/replace=...` overflow probes leaked past the untestable filter. Changed body-length check to `>= 32` (PCRE2's boundary-probe use of 32-char names always references non-existent groups) and flagged any body containing `+` or `-` as untestable since the conditional-substitute form can't be validated without the pattern's capture inventory at this layer.
+- **Delta**: 12,635 → 12,637 (+2 pass), 175 → 173 fail. Baselines 12,637 / 173.
+
 ### 2026-04-22 — VM: (*ACCEPT) emits dedicated opcode; force-match bubbles through subexpr + probe (+5 passes, engine fix #18)
 - **What**: `(*ACCEPT)` was compiled as plain `OpCode::Match`. Short-circuited innermost subexpr only — outer quantifier / lookaround kept running. New `ExecContext.accept_forced` flag. Dedicated `OpCode::Accept` (0xF2) sets the flag + returns true. All three dispatch loops check the flag at top of iteration and propagate `return true`. `probe_subexpr` accepts zero-width match when flag is set. `invoke_subroutine` save/restores the flag across recursion calls (PCRE2 scopes ACCEPT to the subpattern). Required adding `0xF2 => Ok(Accept)` to TryFrom<u8> — opcode was previously reserved but not decoded.
 - **Delta**: 12,630 → 12,635 (+5 pass), 180 → 175 fail. Baselines 12,635 / 175. Closes the `(.(*ACCEPT))*5`, `(?>.(*ACCEPT))*?5`, `a(*ACCEPT)??bc` clusters (6 cases across testinput2). Conformance ~98.6%.

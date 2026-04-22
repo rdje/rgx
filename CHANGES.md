@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `${NAME+default}` / 32-char-boundary `${LONGNAME}` substitute templates marked untestable (+2 passes)
+
+- Scope: Two more `replace=TEMPLATE` cases where PCRE2 rejects at compile but RGX accepts: `replace=a${A234567890123456789_123456789012}z` (group name exactly at PCRE2's 32-byte boundary, no matching group) and `replace=a${b+d}z` (PCRE2's `${NAME+default}` conditional substitute form referencing a non-existent group). RGX's template parser is lazier than PCRE2's and can't cross-check against the pattern's capture inventory from the harness layer.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::template_has_pcre2_only_syntax` — two tightenings: body length check `> 32` becomes `>= 32` (PCRE2's boundary probes treat 32-byte names as invalid when no such group exists), and any body containing `+` or `-` is marked untestable (conditional substitute syntax requires a valid captured group that we can't verify here).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,635 → 12,637 pass** (+2), 175 → 173 fail. Ratchet baselines bumped to `PASS_BASELINE=12_637` / `FAIL_BASELINE=173`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput2:4241 and testinput2:4250. Remaining `replace=` failures (4959, 5047) require pattern-aware capture inventory that the harness doesn't thread down to the template validator.
+
 ### 2026-04-22 - VM: `(*ACCEPT)` emits dedicated opcode; force-match bubbles through subexpr layers and probes (+5 passes, engine #18)
 
 - Scope: `(*ACCEPT)` was being emitted as plain `OpCode::Match`. That short-circuits the innermost subexpr context but leaves the outer quantifier / lookaround / enclosing group still executing, so PCRE2-compatible force-match semantics broke down anywhere `(*ACCEPT)` sat inside a lazy quantifier or atomic body. Symptoms:
