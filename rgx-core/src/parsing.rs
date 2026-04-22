@@ -501,6 +501,23 @@ impl<'a> PgenAstAdapter<'a> {
         if self.newline_mode == NewlineMode::Lf {
             return Regex::Dot;
         }
+        // `(*CRLF)`: the newline unit is the 2-byte `\r\n` pair.
+        // PCRE2's `.` / `\N` fails only AT THE START of a `\r\n`
+        // pair; bare `\r`, bare `\n`, or the `\n` inside a pair
+        // (once past the `\r`) all match. Model this with a
+        // negative lookahead `(?!\r\n)` followed by a dotall-any.
+        if self.newline_mode == NewlineMode::Crlf {
+            return Regex::Sequence(vec![
+                Regex::Lookahead {
+                    expr: Box::new(Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')])),
+                    positive: false,
+                },
+                Regex::CharClass(CharClass::Custom {
+                    ranges: Vec::new(),
+                    negated: true,
+                }),
+            ]);
+        }
         let mut ranges: Vec<CharRange> = self
             .newline_mode
             .newline_chars()

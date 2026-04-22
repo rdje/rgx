@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser: `.` / `\N` under `(*CRLF)` compiles to `(?!\r\n)<any>` — precise PCRE2 semantics (+2 passes, engine #11)
+
+- Scope: Earlier `36ccf97` made `.`/`\N` under `(*CRLF)` permissive (returned empty `newline_chars` → Custom{ranges=[], negated=true} → match any byte) as a trade-off: covered the `/A\NB/newline=crlf` FN cluster but introduced FPs on `/.+foo/newline=crlf` on `\r\nfoo` and `/.+A/newline=crlf` on `\r\nA`. PCRE2's actual semantic is: `.` fails *only at the start of a `\r\n` pair* — bare `\r`, bare `\n`, or the `\n` inside a pair (once `\r` is consumed) all match. A context-free char class can't model this, but a negative lookahead `(?!\r\n)` followed by dotall-any does.
+- Fix: `rgx-core/src/parsing.rs::dot_ast` — when `newline_mode == NewlineMode::Crlf`, build the AST as `Sequence [Lookahead{expr: "\r\n", positive: false}, Custom{ranges: [], negated: true}]`. Lf mode still uses `Regex::Dot`; `Cr` / `Anycrlf` / `Any` / `Nul` keep their char-class exclusions.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,603 → 12,605 pass** (+2), 207 → 205 fail. Ratchet baselines bumped to `PASS_BASELINE=12_605` / `FAIL_BASELINE=205`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/.+foo/newline=crlf` on `\r\nfoo` (testinput2:2107) and `/.+A/newline=crlf` on `\r\nA` (testinput2:2296) — the FP trade-off from commit 36ccf97 is now resolved with the correct semantic. Retains the earlier FN fixes (`/A\NB/newline=crlf` matches `A\nB` / `A\rB`). **Eleventh real engine fix of the session.**
+
 ### 2026-04-22 - Harness: `escaped_cr_is_lf` / `bad_escape_is_literal` / `never_ucp` / `match_unset_backref` modifiers untestable (+1 pass)
 
 - Scope: Four PCRE2 extra compile-option modifiers that RGX either silently ignores or handles with different default semantics. `escaped_cr_is_lf` rewrites `\r` in the pattern to `\n`; `bad_escape_is_literal` accepts unrecognised escapes as literal chars; `never_ucp` forbids `(*UCP)`; `match_unset_backref` makes references to unset groups match empty instead of failing. Added to `pattern_carries_untestable_modifier` as honest gaps — each maps to a known PCRE2-only semantic.

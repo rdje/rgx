@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Parser: `.`/`\N` under `(*CRLF)` → `(?!\r\n)<any>` via lookahead (+2 passes, engine fix #11)
+- **What**: Earlier fix 36ccf97 made `.` under CRLF match any byte (empty exclusion) which closed `/A\NB/newline=crlf` FN but introduced `/.+foo/newline=crlf` FP. Real PCRE2 semantic: `.` fails only at start of `\r\n` pair. Modelled as `Sequence[Lookahead{\r\n, negative}, AnyDotAll]`. Precise.
+- **Delta**: 12,603 → 12,605 (+2 pass), 207 → 205 fail. Baselines 12,605 / 205.
+
 ### 2026-04-22 — Harness: `escaped_cr_is_lf`/`bad_escape_is_literal`/`never_ucp`/`match_unset_backref` untestable (+1 pass)
 - **What**: Four PCRE2 extra compile-option modifiers RGX ignores or defaults differently. Added to pattern_carries_untestable_modifier.
 - **Delta**: 12,602 → 12,603 (+1 pass), 208 → 207 fail. Baselines 12,603 / 207.
