@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `(*COMMIT)` inside atomic group uses a sentinel frame (+3 passes, engine #19)
+
+- Scope: Commit #17 made `(*COMMIT)` clear the whole backtrack stack unconditionally. That was right for non-atomic uses (`a(*COMMIT)bc|abd` on `"abd"` correctly fails) but wrong for `(?>a(*COMMIT)b)c|abd` on `"abd"` — PCRE2 expects a match via the `abd` alternative because the atomic group (`a(*COMMIT)b`) *succeeds* internally. The clear-everything approach wiped the outer alt-split frame and blocked the fall-through. Conversely, `(?>a(*COMMIT)c)d|abd` on `"abd"` must **not** match: the atomic group fails and COMMIT's abort should still fire. A simple atomic-scoped truncate handled the first family but broke the second (because the outer alt-split survived).
+- Fix: `rgx-core/src/vm.rs` — new `COMMIT_SENTINEL_IP = usize::MAX` marker. The `OpCode::Commit` dispatch in the top-level interpreter and `execute_at_continuation` now branches on `ctx.call_stack.is_empty()`:
+  - Outside atomic: clear stack + set `ctx.committed` (existing behaviour).
+  - Inside atomic: push a sentinel `BacktrackFrame` with `ip = COMMIT_SENTINEL_IP`.
+
+  On atomic success `OpCode::AtomicEnd` truncates to the stored call-stack mark, discarding the sentinel along with the atomic's inner frames — no outer effect. On atomic failure `try_backtrack` pops the sentinel, recognises the marker, clears the rest of the stack, sets `ctx.committed`, and returns `false` — escalating COMMIT's abort semantics out of the atomic. The subexpr interpreter keeps the simpler clear-stack-and-flag path (local backtrack stack is discarded on subexpr exit anyway).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,638 → 12,641 pass** (+3), 172 → 169 fail. Ratchet baselines bumped to `PASS_BASELINE=12_641` / `FAIL_BASELINE=169`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(?>a(*COMMIT)b)c|abd` on `"abd"` (testinput1:5501, 5521) and `(\w+)(?>b(*COMMIT))\w{2}` on `"abbb"` (testinput1:4828) while keeping the testinput1:4842/4846/5514/5524 cluster (atomic-fail paths) correctly rejecting. **Nineteenth engine fix of the session; conformance at ~98.7%**.
+
 ### 2026-04-22 - Harness: `endanchored` no-match branch post-checks match end to catch `(*ACCEPT)` bubbles (+1 pass)
 
 - Scope: `abc(*ACCEPT)d/endanchored` on `"xyzabcdef"` — PCRE2 expects no match because the `(*ACCEPT)` force-match happens at pos 6 and the subject ends at pos 9, violating the end-anchoring. RGX's harness wraps the pattern as `(?:abc(*ACCEPT)d)\z`, but (*ACCEPT) now bubbles through the enclosing `\z` (per engine fix #18), so the wrap no longer enforces end-of-subject.

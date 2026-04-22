@@ -296,6 +296,20 @@ const CONDITIONAL_KIND_RECURSION_ANY: u8 = 6;
 const CONDITIONAL_KIND_RECURSION_GROUP: u8 = 7;
 const MAX_RECURSION_DEPTH: usize = 1024;
 
+/// Reserved `BacktrackFrame.ip` value used by `(*COMMIT)` when it
+/// fires inside an atomic group. The frame acts as a **sentinel**:
+/// if the atomic group eventually exits successfully, the frame is
+/// discarded alongside the group's other inner frames (per the
+/// `AtomicEnd` truncate-to-mark). If the atomic group fails and
+/// backtracking reaches this frame, the pop site treats it as a
+/// committed-failure — clears the remaining stack and sets
+/// `ctx.committed` so the scanning loop abandons the attempt
+/// without advancing to a new start position.
+///
+/// `usize::MAX` is well beyond any real bytecode address, so
+/// regular opcode dispatch will never produce it by accident.
+const COMMIT_SENTINEL_IP: usize = usize::MAX;
+
 /// Bytecode instruction with operands
 #[derive(Debug, Clone)]
 pub struct Instruction {
@@ -2097,6 +2111,18 @@ impl RegexVM {
     /// Returns true when a frame was restored and execution should continue.
     fn try_backtrack(&self, ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
         if let Some(frame) = ctx.backtrack_stack.pop() {
+            // `(*COMMIT)` fired inside an atomic group and the
+            // atomic is now failing: escalate to a committed abort.
+            // See `COMMIT_SENTINEL_IP` and the `OpCode::Commit`
+            // dispatch. Drop any remaining frames, set the
+            // scanner-abort flag, and return false so execution
+            // unwinds without trying further alternatives.
+            if frame.ip == COMMIT_SENTINEL_IP {
+                ctx.backtrack_stack.clear();
+                ctx.alt_boundaries.clear();
+                ctx.committed = true;
+                return false;
+            }
             let stack_depth = ctx.backtrack_stack.len() + 1; // depth before pop
             *ip = frame.ip;
             ctx.pos = frame.pos;
@@ -2629,21 +2655,44 @@ impl RegexVM {
 
                 // --- Backtracking control verbs ---
                 OpCode::Commit => {
-                    // (*COMMIT): like (*PRUNE), drops every backtrack
-                    // frame pushed before this point so the current
-                    // path cannot backtrack past the verb. In
-                    // addition, sets `ctx.committed` so that when the
-                    // current match attempt ultimately fails, the
-                    // scanning loop does not advance to the next
-                    // starting position either (per PCRE2 docs:
-                    // "the entire matching attempt is committed").
-                    // Prior implementation set only the flag, so a
-                    // failing path past `(*COMMIT)` still backtracked
-                    // into earlier alternatives — e.g.
-                    // `a(*COMMIT)bc|abd` on `abd` would try the `abd`
-                    // branch after `a(*COMMIT)bc` failed.
-                    ctx.backtrack_stack.clear();
-                    ctx.committed = true;
+                    // (*COMMIT): cuts backtracking past the verb and
+                    // (outside atomic groups) aborts the whole match
+                    // attempt. Per pcre2pattern(3):
+                    //   "(*COMMIT) overrides the normal behaviour of
+                    //    backtracking; if it does not match, the
+                    //    entire match attempt fails, except that the
+                    //    scope of (*COMMIT) is limited to an
+                    //    enclosing atomic group."
+                    //
+                    // Outside any atomic group: clear the whole
+                    // backtrack stack and set `ctx.committed` so
+                    // the scanning loop does not advance after a
+                    // committed failure.
+                    //
+                    // Inside an atomic group: push a sentinel frame
+                    // (`COMMIT_SENTINEL_IP`). If the atomic group
+                    // later succeeds, `AtomicEnd` truncates its
+                    // inner frames, discarding the sentinel — no
+                    // effect on the outer world. If the atomic
+                    // group fails and backtracking reaches the
+                    // sentinel, `try_backtrack` escalates to a
+                    // committed abort. This mirrors the PCRE2
+                    // semantic where COMMIT is only "sticky" when
+                    // the enclosing atomic actually rolls back.
+                    if ctx.call_stack.is_empty() {
+                        ctx.backtrack_stack.clear();
+                        ctx.committed = true;
+                    } else {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: COMMIT_SENTINEL_IP,
+                            pos: ctx.pos,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
+                            saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
+                        });
+                    }
                 }
 
                 OpCode::Prune => {
@@ -5157,9 +5206,22 @@ impl RegexVM {
                     }
                 }
                 OpCode::Commit => {
-                    // See top-level dispatch for rationale.
-                    ctx.backtrack_stack.clear();
-                    ctx.committed = true;
+                    // See top-level dispatch for rationale. Mirror
+                    // of the sentinel-when-inside-atomic approach.
+                    if ctx.call_stack.is_empty() {
+                        ctx.backtrack_stack.clear();
+                        ctx.committed = true;
+                    } else {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: COMMIT_SENTINEL_IP,
+                            pos: ctx.pos,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
+                            saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
+                        });
+                    }
                 }
                 OpCode::Prune | OpCode::Then => {
                     ctx.backtrack_stack.clear();

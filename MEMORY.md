@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: (*COMMIT) inside atomic uses sentinel frame (+3 passes, engine fix #19)
+- **What**: Commit #17's unconditional stack-clear broke `(?>a(*COMMIT)b)c|abd` on "abd" (outer alt-split wiped when atomic succeeded). Fixed by introducing COMMIT_SENTINEL_IP (usize::MAX): inside atomic, push a sentinel frame instead of clearing. AtomicEnd discards via truncate-to-mark on success. try_backtrack detects sentinel on pop (atomic failing) and escalates to full committed-abort. Subexpr interpreter keeps simple clear+flag (its stack is local anyway).
+- **Delta**: 12,638 → 12,641 (+3 pass), 172 → 169 fail. Baselines 12,641 / 169. Closes `(?>a(*COMMIT)b)c|abd` cluster while preserving earlier `(?>a(*COMMIT)c)d|abd` fixes.
+
 ### 2026-04-22 — Harness: anchored_end NoMatch check fixed to detect mid-subject (*ACCEPT) (+1 pass)
 - **What**: After engine fix #18, `(*ACCEPT)` bubbles through the `\z` the harness wraps for `endanchored`. So a pattern like `abc(*ACCEPT)d/endanchored` now silently matches mid-subject, passing the `is_match` check and failing the NoMatch expectation. Changed NoMatch branch to use find_first + match.end == subject.len() when opts.anchored_end is set.
 - **Delta**: 12,637 → 12,638 (+1 pass), 173 → 172 fail. Baselines 12,638 / 172.
