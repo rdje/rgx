@@ -6747,9 +6747,15 @@ impl OptimizingCompiler {
     fn quantifier_body_needs_inline_backtrack(expr: &Regex) -> bool {
         match expr {
             Regex::Alternation(_) => true,
-            Regex::Quantified { expr: inner, .. } => {
-                Self::quantifier_body_needs_inline_backtrack(inner)
-            }
+            // A nested quantifier itself requires frame
+            // preservation: the inner quantifier emits Split-based
+            // backtrack frames that need to survive across outer
+            // iterations so patterns like `(a+)*ax` can backtrack
+            // the inner `a+` to a shorter match after the trailing
+            // literal fails. The prior recursive descent only
+            // returned true when the NESTED body also needed
+            // inlining, missing simple cases like `(a+)*ax`.
+            Regex::Quantified { .. } => true,
             Regex::Sequence(items) => items
                 .iter()
                 .any(Self::quantifier_body_needs_inline_backtrack),
@@ -7466,7 +7472,60 @@ impl OptimizingCompiler {
                         self.emit_subexpr_opcode(OpCode::StarLazy, expr);
                     }
                     Quantifier::ZeroOrMore { .. } => {
-                        self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                        // Same dispatch as `X+`: when the body
+                        // contains an alternation or a nested
+                        // quantifier whose backtrack frames need
+                        // to survive across iterations, emit an
+                        // inline Thompson loop so the inner Splits
+                        // land on the global `ctx.backtrack_stack`.
+                        // Simple bodies stay on the compact
+                        // `StarGreedy` subexpr opcode — the inline
+                        // form would otherwise accumulate O(N)
+                        // frames on long inputs.
+                        //
+                        // `X*` differs from `X+` only in having no
+                        // mandatory first iteration:
+                        //   LOOP:
+                        //     Split EXIT   ; prefer body, fallback to EXIT
+                        //     <body>
+                        //     Jump LOOP
+                        //   EXIT:
+                        if Self::quantifier_body_needs_inline_backtrack(expr)
+                            && !Self::expr_can_match_empty(expr)
+                        {
+                            let loop_start = self.code.len();
+                            self.emit_op(OpCode::Split);
+                            let split_offset_pos = self.code.len();
+                            self.code.push(0);
+                            self.code.push(0);
+                            let body_start = self.code.len();
+                            self.codegen_pass(expr, false);
+                            if self.code.len() == body_start {
+                                // Empty body — rewind and fall back
+                                // to the subexpr form (runtime empty
+                                // detection avoids infinite loops).
+                                self.code.truncate(loop_start);
+                                self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                            } else {
+                                self.emit_op(OpCode::Jump);
+                                let jump_operand_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                let jump_from = jump_operand_pos + 2;
+                                let back_offset = (loop_start as isize) - (jump_from as isize);
+                                let back_i16 = back_offset as i16;
+                                let bo_bytes = back_i16.to_le_bytes();
+                                self.code[jump_operand_pos] = bo_bytes[0];
+                                self.code[jump_operand_pos + 1] = bo_bytes[1];
+                                let exit_target = self.code.len();
+                                let split_offset = exit_target - (split_offset_pos + 2);
+                                let offset_bytes = (split_offset as u16).to_le_bytes();
+                                self.code[split_offset_pos] = offset_bytes[0];
+                                self.code[split_offset_pos + 1] = offset_bytes[1];
+                            }
+                        } else {
+                            self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                        }
                     }
                     Quantifier::ZeroOrOne { lazy } if effective_lazy(*lazy) => {
                         self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: X* Split-based inlining when body needs frame preservation (+5 passes, engine fix #22)
+- **What**: `^(a+)*ax` on "aax" was no-match — StarGreedy's subexpr ran `(a+)` in a local stack, losing inner a+ backtrack frames. Mirror of fix #15 applied to ZeroOrMore. Also tightened `quantifier_body_needs_inline_backtrack` to return true on any nested `Quantified` (was recursing into its inner, missing `(a+)*` because `a` itself doesn't need preservation).
+- **Delta**: 12,646 → 12,651 (+5 pass), 164 → 159 fail. Baselines 12,651 / 159. Closes the `^(a+)*ax` / `^((a|b)+)*ax` / `^((a|bc)+)*ax` cluster.
+
 ### 2026-04-22 — VM: literal-prefix scan skips past backtracking verbs (+1, engine fix #21)
 - **What**: extract_prefix_filter bailed with PrefixFilter::None on any backtracking verb, killing the memmem-jump optimization for patterns like `(*COMMIT)ABC`. Verbs are zero-width — added them to the skip-past list. Named verbs (Mark, VerbSkipNamed) skip past their length-prefixed operand. Guard: `no_start_optimize` + leading verb is now untestable because RGX's prefix scan can't be disabled per-pattern, so the always-skip-to-candidate behaviour would diverge from PCRE2's "try every pos" semantic.
 - **Delta**: 12,645 → 12,646 (+1 pass net), 165 → 164 fail. Baselines 12,646 / 164.

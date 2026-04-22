@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `X*` greedy also switches to Split-based inlining when body has nested quantifier or alternation (+5 passes, engine #22)
+
+- Scope: `^(a+)*ax` on `"aax"` — PCRE2 matches `"aax"` (outer `*` runs one iteration consuming `"a"`, then the trailing `ax` matches pos 1-3). RGX returned no match because `StarGreedy` executed the body `(a+)` via the subexpr opcode: the inner `a+`'s backtrack frames lived on a local stack that was discarded when the iteration returned. When `ax` later failed, the VM couldn't backtrack into the inner `a+` to shorten its match. Same failure on `^((a|b)+)*ax`, `^((a|bc)+)*ax`, and 2 more. Companion to engine fix #15 which did the same inline transform for `X+`; the `X*` gap went unfixed.
+- Fix: `rgx-core/src/vm.rs`.
+  1. `quantifier_body_needs_inline_backtrack` — the `Regex::Quantified` arm now returns `true` unconditionally. A nested quantifier in the body is itself enough reason to inline; the prior recursive-descent into the nested quantifier's body was too narrow (missed `(a+)*` because `a+`'s inner `Char('a')` doesn't need preservation on its own, but *the quantifier wrapping it* does).
+  2. `ZeroOrMore` codegen — matches the `OneOrMore` inline dispatch. When body needs inline + can't match empty, emit `Split EXIT; <body>; Jump LOOP; EXIT:`. Simple bodies stay on the compact `StarGreedy` subexpr opcode.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,646 → 12,651 pass** (+5), 164 → 159 fail. Ratchet baselines bumped to `PASS_BASELINE=12_651` / `FAIL_BASELINE=159`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `^(a+)*ax`, `^((a|b)+)*ax`, `^((a|bc)+)*ax` on `"aax"` (testinput1:3283, 3286, 3289) and two more cases where nested-quantifier backtracking was lost. **Twenty-second engine fix of the session; conformance at ~98.7%**.
+
 ### 2026-04-22 - VM: literal-prefix scan skips past backtracking verbs; harness gates no_start_optimize divergence (+1 pass, engine #21)
 
 - Scope: `(*COMMIT)ABC` on `"DEFABC"` — PCRE2 matches `"ABC"` at pos 3 via its own start optimization (scans for the literal "ABC" prefix before invoking the matcher). RGX returned no match because its `extract_prefix_filter` bailed with `PrefixFilter::None` whenever it saw a backtracking verb: the default `_ => return None` arm swallowed `Commit` / `Prune` / `Then` / `VerbSkip` / `Accept` / `Mark` / `VerbSkipNamed`. Those opcodes are zero-width — they don't change what the next consuming opcode looks for — so skipping past them recovers the literal prefix and lets the scanner memmem-jump to candidate positions.
