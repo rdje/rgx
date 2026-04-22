@@ -3267,13 +3267,16 @@ impl RegexVM {
                 }
 
                 OpCode::Jump => {
-                    // Read jump offset (2 bytes, little-endian)
+                    // Read jump offset (2 bytes, little-endian, signed).
+                    // `Jump` is documented as a 16-bit signed offset so
+                    // codegen can emit back-edges (e.g. `X+` inline
+                    // loop). Offsets fit in i16 range (±32767).
                     if ip + 1 >= code.len() {
                         return false;
                     }
-                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
                     ip += 2; // Skip the 2-byte offset operand
-                    ip += offset; // Then add the offset
+                    ip = ((ip as isize) + (offset as isize)) as usize;
                 }
 
                 OpCode::SetAlternative => {
@@ -5592,12 +5595,14 @@ impl RegexVM {
                 }
 
                 OpCode::Jump => {
+                    // See the matching comment in the top-level
+                    // interpreter: 16-bit signed offset.
                     if ip + 1 >= code.len() {
                         return false;
                     }
-                    let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
                     ip += 2;
-                    ip += offset;
+                    ip = ((ip as isize) + (offset as isize)) as usize;
                 }
 
                 OpCode::Call => {
@@ -6556,6 +6561,109 @@ impl OptimizingCompiler {
         Self::with_named_groups(HashMap::new())
     }
 
+    /// Does `body` contain sub-expressions that push backtrack
+    /// frames which must survive across repetitions of the
+    /// enclosing `X+` / `X*`? If yes, codegen must inline the loop
+    /// (Split + Jump back-edge) so frames land on the global
+    /// `ctx.backtrack_stack`. If no, the compact `PlusGreedy` /
+    /// `StarGreedy` subexpr opcode is equivalent and cheaper.
+    ///
+    /// Returns true when the body transitively contains an
+    /// alternation or an inner greedy / bounded quantifier whose
+    /// own body itself emits Splits (conservative over-approx:
+    /// any inner `Quantified` counts). `Atomic` groups, lookaround,
+    /// and backrefs do not leak frames past their end.
+    fn quantifier_body_needs_inline_backtrack(expr: &Regex) -> bool {
+        match expr {
+            Regex::Alternation(_) => true,
+            Regex::Quantified { expr: inner, .. } => {
+                Self::quantifier_body_needs_inline_backtrack(inner)
+            }
+            Regex::Sequence(items) => items
+                .iter()
+                .any(Self::quantifier_body_needs_inline_backtrack),
+            Regex::Group {
+                expr: inner, kind, ..
+            } => {
+                // Atomic groups discard inner frames at their end
+                // (AtomicEnd pops back to the mark), so inner
+                // alternations / quantifiers inside an atomic
+                // group do not need outer-loop preservation.
+                if matches!(kind, GroupKind::Atomic) {
+                    false
+                } else {
+                    Self::quantifier_body_needs_inline_backtrack(inner)
+                }
+            }
+            Regex::Conditional {
+                true_branch,
+                false_branch,
+                ..
+            } => {
+                Self::quantifier_body_needs_inline_backtrack(true_branch)
+                    || false_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::quantifier_body_needs_inline_backtrack(b))
+            }
+            _ => false,
+        }
+    }
+
+    /// Can `expr` match the empty string? Conservative — returns
+    /// true on anything recursive we cannot analyze. The inline
+    /// `X+` codegen above must NOT engage when the body can match
+    /// empty: without runtime empty-match detection (which the
+    /// subexpr `PlusGreedy` opcode provides), the loop would push
+    /// Splits forever. Falling back to the subexpr form for
+    /// empty-capable bodies preserves correctness at the cost of
+    /// the cross-iteration backtrack frames that the inline form
+    /// would otherwise retain.
+    fn expr_can_match_empty(expr: &Regex) -> bool {
+        match expr {
+            Regex::Char(_)
+            | Regex::CharClass(_)
+            | Regex::Dot
+            | Regex::Digit { .. }
+            | Regex::Word { .. }
+            | Regex::Space { .. }
+            | Regex::UnicodeClass { .. }
+            | Regex::ExtendedCharClass { .. }
+            | Regex::Backreference(_)
+            | Regex::NamedBackreference(_)
+            | Regex::RelativeBackreference(_) => false,
+            Regex::Anchor(_) | Regex::WordBoundary { .. } => true,
+            Regex::Lookahead { .. } | Regex::Lookbehind { .. } => true,
+            Regex::Quantified {
+                expr: inner,
+                quantifier,
+            } => match quantifier {
+                Quantifier::ZeroOrOne { .. } | Quantifier::ZeroOrMore { .. } => true,
+                Quantifier::OneOrMore { .. } => Self::expr_can_match_empty(inner),
+                Quantifier::Range { min, .. } => *min == 0 || Self::expr_can_match_empty(inner),
+            },
+            Regex::Sequence(items) => items.iter().all(Self::expr_can_match_empty),
+            Regex::Alternation(alts) => alts.iter().any(Self::expr_can_match_empty),
+            Regex::Group { expr: inner, .. } => Self::expr_can_match_empty(inner),
+            Regex::Conditional {
+                true_branch,
+                false_branch,
+                ..
+            } => {
+                Self::expr_can_match_empty(true_branch)
+                    || match false_branch {
+                        Some(b) => Self::expr_can_match_empty(b),
+                        // Missing false-branch is equivalent to
+                        // empty, which matches empty.
+                        None => true,
+                    }
+            }
+            // Recursion, code blocks, verbs, etc. — conservatively
+            // treat as "could be empty" to stay out of the inline
+            // fast path.
+            _ => true,
+        }
+    }
+
     /// Create new optimizing compiler with resolved named group references.
     #[must_use]
     pub fn with_named_groups(named_groups: HashMap<String, u32>) -> Self {
@@ -7123,7 +7231,65 @@ impl OptimizingCompiler {
                         self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
                     }
                     Quantifier::OneOrMore { .. } => {
-                        self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                        // For most `X+` patterns the compact
+                        // `PlusGreedy` subexpr opcode is ideal: one
+                        // frame, tight loop, cheap backtrack. But
+                        // when `X` contains an *alternation* or an
+                        // inner quantifier, the subexpr form loses
+                        // the per-iteration backtrack frames when
+                        // each iteration returns — so `(?:a+|ab)+c`
+                        // on `aabc` cannot retry the alternation
+                        // after the first iteration consumes `aa`
+                        // and the trailing literal `c` fails at
+                        // position 2.
+                        //
+                        // Only when the body can push frames that
+                        // need to survive across iterations do we
+                        // switch to Split-based inline codegen:
+                        //   <body>                ; mandatory #1
+                        //   LOOP:
+                        //     Split EXIT          ; push skip-backtrack
+                        //     <body>
+                        //     Jump LOOP
+                        //   EXIT:
+                        // Mirror of the `X?` Split-based fix
+                        // (commit d6cfa5f).
+                        if Self::quantifier_body_needs_inline_backtrack(expr)
+                            && !Self::expr_can_match_empty(expr)
+                        {
+                            let before_first = self.code.len();
+                            self.codegen_pass(expr, false);
+                            let after_first = self.code.len();
+                            if after_first == before_first {
+                                // Empty body — avoid infinite
+                                // zero-width loop; fall back.
+                                self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                            } else {
+                                let loop_start = self.code.len();
+                                self.emit_op(OpCode::Split);
+                                let split_offset_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                self.codegen_pass(expr, false);
+                                self.emit_op(OpCode::Jump);
+                                let jump_operand_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                let jump_from = jump_operand_pos + 2;
+                                let back_offset = (loop_start as isize) - (jump_from as isize);
+                                let back_i16 = back_offset as i16;
+                                let bo_bytes = back_i16.to_le_bytes();
+                                self.code[jump_operand_pos] = bo_bytes[0];
+                                self.code[jump_operand_pos + 1] = bo_bytes[1];
+                                let exit_target = self.code.len();
+                                let split_offset = exit_target - (split_offset_pos + 2);
+                                let offset_bytes = (split_offset as u16).to_le_bytes();
+                                self.code[split_offset_pos] = offset_bytes[0];
+                                self.code[split_offset_pos + 1] = offset_bytes[1];
+                            }
+                        } else {
+                            self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                        }
                     }
                     Quantifier::ZeroOrMore { lazy } if effective_lazy(*lazy) => {
                         self.emit_subexpr_opcode(OpCode::StarLazy, expr);

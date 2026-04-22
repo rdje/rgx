@@ -2634,13 +2634,15 @@ fn emit_plus_quantifier(
     Ok(())
 }
 
-/// Decode a 2-byte u16 forward offset from the bytecode (the
-/// operand of `Split` / `SplitLazy` / `Jump`) and resolve it to a
-/// JIT op index via binary search on `op_positions`. Advances `ip`
-/// past the operand bytes.
+/// Decode a 2-byte signed offset from the bytecode (the operand of
+/// `Split` / `SplitLazy` / `Jump`) and resolve it to a JIT op index
+/// via binary search on `op_positions`. Advances `ip` past the
+/// operand bytes.
 ///
-/// The encoding (per the existing VM dispatch in `vm.rs`):
-/// - Operand at `code[ip..ip+2]` is `u16::from_le_bytes`.
+/// The encoding (per the VM dispatch in `vm.rs`):
+/// - Operand at `code[ip..ip+2]` is `i16::from_le_bytes` (signed —
+///   negative offsets are valid and used by back-edges in the `X+`
+///   inline loop codegen).
 /// - Target byte = `ip + 2 + offset` (the offset is from
 ///   immediately after the operand, NOT from the opcode start).
 /// - Target byte must exactly match a bytecode op start, otherwise
@@ -2653,18 +2655,18 @@ fn decode_forward_target(
 ) -> Result<usize, JitHostError> {
     if *ip + 1 >= code.len() {
         return Err(JitHostError::CodegenUnsupported(format!(
-            "truncated {op_name} opcode (missing 2-byte forward offset)"
+            "truncated {op_name} opcode (missing 2-byte offset)"
         )));
     }
-    let offset = u16::from_le_bytes([code[*ip], code[*ip + 1]]) as usize;
+    let offset = i16::from_le_bytes([code[*ip], code[*ip + 1]]);
     *ip += 2;
-    let target_byte = *ip + offset;
+    let target_byte = ((*ip as isize) + (offset as isize)) as usize;
     op_positions
         .binary_search_by_key(&target_byte, |&(byte, _)| byte)
         .map(|idx| op_positions[idx].1)
         .map_err(|_| {
             JitHostError::CodegenUnsupported(format!(
-                "{op_name} forward offset {offset} (target byte {target_byte}) \
+                "{op_name} offset {offset} (target byte {target_byte}) \
                  does not land on an op start; bytecode is malformed or the \
                  target is mid-operand"
             ))

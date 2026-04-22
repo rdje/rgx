@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: `X+` inline Split-based codegen when body has alt/inner-quant (+3 passes, engine fix #15)
+- **What**: Mirror of the `X?` Split-based codegen (commit `d6cfa5f`). `(?:a+|ab)+c` on `"aabc"` with runtime limits set returned None — same subexpr-frame-isolation bug as the earlier `X?` case. Body frames lost when PlusGreedy iteration returned, so couldn't retry the `ab` branch after the first iteration greedily consumed `aa`. Added AST helpers `quantifier_body_needs_inline_backtrack` (Alt / inner Quantified / non-Atomic Group wrapping either) and `expr_can_match_empty` (conservative nullability). When both "needs inline" AND "not empty-capable" hold, emit inline loop: mandatory body + `Split EXIT; body; Jump LOOP; EXIT:` with i16 signed back-edge. Simple cases (`\d+`, `a+`, `.+`) stay on compact PlusGreedy subexpr (no O(N) frame blow-up). Fixed `Jump` opcode decoding to i16 signed across all three interpreters + C1 JIT lowering (doc already said signed; two decoders were wrong).
+- **Delta**: 12,615 → 12,618 (+3 pass), 195 → 192 fail. Baselines 12,618 / 192. Closes `/(?:a+|ab)+c/` (testinput1:4220), `/^(?:a|ab)+c/` (testinput1:4237), `/^(aa|aa(bb))+$/I` (testinput2:742). Conformance ~98.5%.
+
 ### 2026-04-22 — VM: /i case-variants use simple fold only, drops Turkic + full (+5 passes, engine fix #14)
 - **What**: `unicode_case_variants` combined `try_case_fold_simple` AND Rust's `to_lowercase`/`to_uppercase`. Rust's apply full + Turkic mappings (CaseFolding.txt F + T status) which PCRE2's default /i doesn't use. İ → 'i' + U+307 via to_lowercase incorrectly made `/\x{0130}/i` match 'i'. Removed the to_lowercase/to_uppercase fallback.
 - **Delta**: 12,610 → 12,615 (+5 pass), 200 → 195 fail. Baselines 12,615 / 195. Closes Turkish-I default-fold FP cluster (testinput5:2390+).

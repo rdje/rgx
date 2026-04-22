@@ -120,6 +120,24 @@ The `Split` at position 2 is what makes the `+` greedy: the first target (back t
 
 Possessive quantifiers (`++`, `*+`, `?+`) get compiled through an atomic-group wrapper: after the loop exits, an `Accept`-like opcode prevents backtracking into the loop body. This is why possessive quantifiers are faster — they guarantee the VM will never revisit those positions.
 
+### Compact vs inline quantifier codegen
+
+The `\d+` pseudo-bytecode above is idealised. In practice RGX picks between two codegen strategies for each `X?` / `X+` / `X*`:
+
+- **Compact subexpr opcodes** (`QuestionGreedy`, `PlusGreedy`, `StarGreedy`, and their `Lazy` siblings). A single opcode carries a length-prefixed body buffer. The VM steps through the body in a local frame-stack that is torn down when the iteration returns — one frame per quantifier, O(1) memory regardless of input size. Perfect for simple bodies like `\d+`, `a+`, `.*?`, `[abc]?`.
+- **Inline Split-based loops** (Thompson-style). When the body contains an alternation or an inner quantifier, the local frame-stack would lose the per-iteration branch state, so backtracking into the inner alternation from outside the loop would fail. For those bodies the compiler inlines the loop:
+  ```text
+    <body>                 ; mandatory first iteration (X+ only)
+    LOOP:
+      Split EXIT           ; skip-branch pushed to the global backtrack stack
+      <body>
+      Jump LOOP            ; signed i16 back-edge
+    EXIT:
+  ```
+  Splits pushed inside `<body>` land on the same stack as the loop's skip-branch, so `(?:a+|ab)+c` on `"aabc"` can still retry the `ab` alternative after the first iteration greedily took `aa` and the trailing `c` failed.
+
+The dispatch is AST-driven: a predicate scans the body for `Alternation` or a nested `Quantified` (non-Atomic groups are transparent; atomic groups discard their frames at the end and stay compact). A nullability check avoids inlining when the body can match empty — those patterns need the compact form's runtime empty-match detection to avoid infinite zero-width loops. Possessive quantifiers remain compact even over complex bodies because the atomic wrapper discards the frames anyway.
+
 ## Stage 4: Optimization
 
 Once the bytecode exists, the compiler runs a handful of analysis passes that attach optimization hints to the `Program`. These do not change what the program matches — they only change how the VM scans for candidate positions.
