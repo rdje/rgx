@@ -152,10 +152,15 @@ pub(crate) fn ucp_digit_ranges() -> Vec<CharRange> {
     resolve_unicode_property_class("Nd", false).unwrap_or_default()
 }
 
-/// PCRE2 `\w` range set under `PCRE2_UCP` — any character in `\p{L}` or
-/// `\p{N}`, plus `_`. Per pcre2pattern(3) §"Generic character types".
+/// PCRE2 `\w` range set under `PCRE2_UCP`. Per pcre2pattern(3) §"Generic
+/// character types": any character with the `Alphabetic` property, any
+/// character in `Nd` / `Nl`, any character in `Mc` / `Mn` / `Me`
+/// (combining marks), plus `Pc` (connector punctuation, which covers
+/// `_` and the other connector chars like U+203F UNDERTIE / U+2040 CHARACTER
+/// TIE). Matches PCRE2 testinput4:2896 expectation where `\w+/utf,ucp` on
+/// `--cafe\x{300}_au\x{203f}lait!` spans `cafe\x{300}_au\x{203f}lait`.
 pub(crate) fn ucp_word_ranges() -> Vec<CharRange> {
-    let mut ranges = merge_properties(&["L", "N"]);
+    let mut ranges = merge_properties(&["L", "N", "M", "Pc"]);
     ranges.push(CharRange::single('_'));
     ranges.sort_by_key(|r| r.start);
     ranges

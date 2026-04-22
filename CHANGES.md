@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser: UCP `\w` now includes combining marks (M) and connector punctuation (Pc) (+2 passes, engine #10)
+
+- Scope: Per pcre2pattern(3) §"Generic character types", `\w` under `PCRE2_UCP` covers ID_Continue — Alphabetic letters, `Nd` / `Nl` numbers, `Mn` / `Mc` / `Me` combining marks, and `Pc` connector punctuation (which includes `_` plus U+203F UNDERTIE, U+2040 CHARACTER TIE, etc.). RGX's `ucp_word_ranges` only unioned `L` + `N` + `_`, missing marks and extended connectors. Symptom: `/\w+/utf,ucp` on `"--cafe\u{300}_au\u{203f}lait!"` stopped at `cafe` (after the Ll run) because `\u{300}` (Mn combining mark) and `\u{203f}` (Pc connector) weren't in `\w`. Same failure on `/\b.+?\b/utf,ucp` and `/caf\B.+?\B/utf,ucp` which both rely on the word boundary classification.
+- Fix: `rgx-core/src/unicode_support.rs::ucp_word_ranges` — now unions `L` + `N` + `M` + `Pc` (all mark categories + connector punctuation), plus explicit `_`. Updated the doc comment to reference the PCRE2 spec.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,600 → 12,602 pass** (+2), 210 → 208 fail. Ratchet baselines bumped to `PASS_BASELINE=12_602` / `FAIL_BASELINE=208`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/\w+/utf,ucp` and `/\b.+?\b/utf,ucp` SM on the "cafe\u{300}_au\u{203f}lait" subject (testinput4:2896, :2908). Tenth real engine fix of the session.
+
 ### 2026-04-22 - Harness: `(*TURKISH_CASING)`/`(*CASELESS_RESTRICT)` body verbs + `/dupnames` backref interaction untestable (+20 passes)
 
 - Scope: Two final gates.
