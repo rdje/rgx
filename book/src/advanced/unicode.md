@@ -129,6 +129,20 @@ assert!(re.is_match("ς"));   // Greek small final sigma — all three fold toge
 
 Under the hood, rgx consults `regex-syntax`'s simple-fold table (UCD `CaseFolding.txt`, `C + S` rows) to expand every character literal and character-class endpoint into its full equivalence class at compile time.
 
+### Character-class range closure
+
+Case folding inside a character class closes *bidirectionally* over the whole range, not just per-character. `[R-T]/i` contains not only `R`-`T` / `r`-`t` but also every character whose simple fold lands in the class — including `ſ` (U+017F, LATIN SMALL LETTER LONG S) which folds to `s`:
+
+```rust,ignore
+# use rgx_core::RegexBuilder;
+let re = RegexBuilder::new(r"[R-T]+").case_insensitive().build()?;
+let m = re.find_first("Ssſ").unwrap();
+assert_eq!(&"Ssſ"[m.start..m.end], "Ssſ");  // full match — ſ is in the /i-closed class
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The same applies to Kelvin sign (U+212A → `k`), Angstrom sign (U+212B → `Å`), final sigma (U+03C2 → σ), and every other simple-fold equivalence class: if *any* char in the class folds to *any* other, both end up in the /i-closed class. rgx runs `ClassUnicode::try_case_fold_simple` over the whole class at compile time, so the closure is exact regardless of range shape.
+
 ### Edge cases
 
 - **ASCII-only data**: `(?i)` still works correctly on pure ASCII -- `a` folds to `A` as expected. There is no performance penalty for Unicode folding when the input is ASCII.

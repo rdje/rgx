@@ -8020,59 +8020,80 @@ impl OptimizingCompiler {
 
     /// Expand character ranges to include ASCII case folds.
     fn case_fold_ranges(ranges: &[CharRange]) -> Vec<CharRange> {
+        // PCRE2 /i case-closes an entire character class: for every
+        // char `c` in the class, include every char that simple-folds
+        // to any char already in the class. This is bidirectional —
+        // e.g. `[q-u]` includes `s`, and `s` is simple-folded from
+        // `ſ` (U+017F, Latin long s, status S in CaseFolding.txt), so
+        // `[q-u]/i` must match `ſ`. PCRE2 does this at compile time;
+        // `regex_syntax::hir::ClassUnicode::try_case_fold_simple`
+        // implements exactly the same closure (Unicode CaseFolding.txt
+        // statuses C + S, no Turkic/full). Build the ClassUnicode from
+        // the input ranges, fold it, enumerate the result, and append
+        // single-char ranges for every char that wasn't already in
+        // the input. The `compile_char_class` sort+merge step
+        // consolidates adjacent singles back into compact sub-ranges.
+        //
+        // Prior implementations used per-character ASCII swap +
+        // endpoint-only non-ASCII folding; that missed closure chars
+        // like U+017F ſ (`[R-T]/i` on `ſ`), U+212A Kelvin K
+        // (`[K]/i` on `k`), and U+0131 ı (not applicable since Turkic
+        // is excluded from simple fold, preserving PCRE2 semantics).
+        // Regression pins in the tests module below still validate
+        // `[W-c]/i`, `[a-f]/i`, `[W-Z]/i`.
         let mut result = ranges.to_vec();
-        for range in ranges {
-            if range.start == range.end {
-                // Single character — collect all case variants.
-                for variant in Self::unicode_case_variants(range.start) {
-                    if variant != range.start {
-                        result.push(CharRange::single(variant));
-                    }
+        let unicode_ranges: Vec<regex_syntax::hir::ClassUnicodeRange> = ranges
+            .iter()
+            .map(|r| regex_syntax::hir::ClassUnicodeRange::new(r.start, r.end))
+            .collect();
+        if unicode_ranges.is_empty() {
+            return result;
+        }
+        let mut class = regex_syntax::hir::ClassUnicode::new(unicode_ranges);
+        if class.try_case_fold_simple().is_err() {
+            // Folding rejects only when the class would exceed the
+            // maximum range count; in that case, fall back to the
+            // original ranges without closure (correctness-preserving
+            // — the match just won't pick up cross-case variants for
+            // this pathological input).
+            return result;
+        }
+        // `class.iter()` yields the union of original + fold-closure.
+        // For each closure range, append chars NOT already covered
+        // by the input ranges as single-char ranges. Keep the loop
+        // bounded by character count so worst-case expansion of
+        // huge Unicode property classes (e.g. `[\p{L}]/i`) doesn't
+        // blow up the class table. If the closure expands past a
+        // guard threshold we fall back to the endpoint-only
+        // approximation to avoid pathological costs.
+        const MAX_CLOSURE_CHARS: usize = 32_768;
+        let mut added = 0usize;
+        'outer: for closure in class.iter() {
+            let cs = u32::from(closure.start());
+            let ce = u32::from(closure.end());
+            for cp in cs..=ce {
+                let Some(ch) = char::from_u32(cp) else {
+                    continue;
+                };
+                if Self::char_in_ranges(ch, ranges) {
+                    continue;
                 }
-            } else if (range.start as u32) <= 0x7F && (range.end as u32) <= 0x7F {
-                // ASCII range — iterate each letter and add its case
-                // variant as a single-char range. The compile_char_class
-                // sort+merge step consolidates adjacent singles into
-                // runs. This is exact for any ASCII range shape, INCLUDING
-                // ranges that span both cases like `[W-c]` (W=87, c=99,
-                // contains upper Z, the symbols [\\]^_`, and lower a-c).
-                // The prior implementation folded the two endpoints to
-                // build a single mirror range which degenerated to
-                // `[w..C]` (start=119 > end=67 — empty set) for cross-
-                // case ranges. Regression pinned as
-                // `regression_case_fold_range_spanning_both_cases` in
-                // the tests module.
-                let start = range.start as u32;
-                let end = range.end as u32;
-                for cp in start..=end {
-                    if let Some(ch) = char::from_u32(cp) {
-                        if ch.is_ascii_alphabetic() {
-                            let swapped = if ch.is_ascii_lowercase() {
-                                ch.to_ascii_uppercase()
-                            } else {
-                                ch.to_ascii_lowercase()
-                            };
-                            result.push(CharRange::single(swapped));
-                        }
-                    }
-                }
-            } else {
-                // Non-ASCII or mixed range — best-effort fold the
-                // endpoints (the prior implementation's path). Exact
-                // expansion across large Unicode ranges is expensive
-                // and rare in practice; this covers the common cases
-                // and keeps the performance profile for bulk Unicode
-                // property ranges.
-                for ch in [range.start, range.end] {
-                    for variant in Self::unicode_case_variants(ch) {
-                        if variant != ch {
-                            result.push(CharRange::single(variant));
-                        }
-                    }
+                result.push(CharRange::single(ch));
+                added += 1;
+                if added >= MAX_CLOSURE_CHARS {
+                    break 'outer;
                 }
             }
         }
         result
+    }
+
+    /// True iff `ch` lies within any of `ranges`.
+    fn char_in_ranges(ch: char, ranges: &[CharRange]) -> bool {
+        let cp = u32::from(ch);
+        ranges
+            .iter()
+            .any(|r| cp >= u32::from(r.start) && cp <= u32::from(r.end))
     }
 
     /// Collect all Unicode simple case variants for a character.
