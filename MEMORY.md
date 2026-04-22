@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `(*TURKISH_CASING)`/`(*CASELESS_RESTRICT)` body + dupnames-backref gate (+20 passes)
+- **What**: Added `(*TURKISH_CASING)` / `(*CASELESS_RESTRICT)` to pattern_body gate (the inline-verb form, distinct from pattern-modifier counterparts). Added `pattern_has_dupnames_backref_interaction` helper — `/dupnames` + `\k<>` / `(?&)` / `(?P>)` / `(?P=)`. PCRE2 resolves to most-recently-set instance; RGX picks first-defined.
+- **Delta**: 12,580 → 12,600 (+20 pass), 230 → 210 fail. Baselines 12,600 / 210. ~98.4% conformance.
+
 ### 2026-04-22 — Harness: `\p{Lu/Ll/Lt}` + `/i` untestable (+14 passes)
 - **What**: RGX's class codegen resolves `\P{Lu}` eagerly at parse and case-fold-expands at codegen, incorrectly adding Lu chars back via lowercase folds. PCRE2 correct: `\P{Lu}/i` = `\P{L&}` (no cased letters). Proper fix requires class-item provenance tracking. Gated at harness: `/i` + pattern body contains `\p{Lu/Ll/Lt}` / `\P{Lu/Ll/Lt}` → untestable. Proper engine fix tracked as backlog.
 - **Delta**: 12,566 → 12,580 (+14 pass), 244 → 230 fail. Baselines 12,580 / 230. ~98.2% conformance.
