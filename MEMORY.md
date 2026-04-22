@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — MSRV bump 1.88 → 1.95
+- **What**: User upgraded their local toolchain to Rust 1.95 and wanted the workspace MSRV to follow. `Cargo.toml::workspace.package.rust-version` bumped from 1.88 to 1.95; the contributor-setup note in `book/src/internals/contributing.md` updated from "1.85 or newer" to "1.95 or newer". No code changes needed.
+- **Validation**: 1,052 lib + 30 CLI tests green; clippy clean; conformance ratchet intact (12,630 / 180).
+
 ### 2026-04-22 — Parser: `\81`-style backrefs error when groups exist but don't cover N (+1 pass)
 - **What**: `((((((((x))))))))\81` — 8 groups then \81 — PCRE2 rejects, RGX accepted. resolve_octal_backreferences fell through to literal fallback for first-digit-8/9 multi-digit forms. Added guard: if total_groups > 0 AND first digit >= '8', return Backreference(n) so validator errors. Group-less `\89` → literal still works.
 - **Delta**: 12,629 → 12,630 (+1 pass), 181 → 180 fail. Baselines 12,630 / 180. Closes testinput2:4671.

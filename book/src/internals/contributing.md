@@ -6,7 +6,7 @@ Contributing to RGX is deliberately straightforward: clone the repo, run the tes
 
 ## Setting up your development environment
 
-**1. Install Rust.** RGX requires Rust 1.85 or newer (per `workspace.package.rust-version`). The easiest way to get a current Rust is via rustup:
+**1. Install Rust.** RGX requires Rust 1.95 or newer (per `workspace.package.rust-version`). The easiest way to get a current Rust is via rustup:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

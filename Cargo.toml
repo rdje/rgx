@@ -11,7 +11,7 @@ exclude = ["subs/pgen/rust"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.95"
 authors = ["Richard De Jesus <richard.dje@gmail.com>"]
 license = "Apache-2.0"
 description = "High-performance, programmable regex engine for Rust"

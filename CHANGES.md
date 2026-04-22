@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Toolchain: MSRV bumped from 1.88 to 1.95
+
+- Scope: Workspace `rust-version` and the Book's contributor-setup note pointed at older toolchains. The local build has moved to Rust 1.95.0 (2026-04-14) and the user wants the supported minimum to follow.
+- Fix: `Cargo.toml` (`[workspace.package] rust-version = "1.95"`) + `book/src/internals/contributing.md` install note.
+- Validation: 1,052 lib tests + 30 rgx-cli tests pass on 1.95. PCRE2 conformance ratchet unchanged (12,630 / 180). `cargo clippy --workspace --all-targets` zero errors (warnings tolerated per project rules).
+- Notes/impact: No source changes required — existing code was already MSRV-compatible with 1.95. Clippy's new-lint surface under 1.95 did not produce any errors RGX needs to chase.
+
 ### 2026-04-22 - Parser: `\81` / `\89`-style back-references rejected when groups exist but don't cover `N` (+1 pass)
 
 - Scope: `((((((((x))))))))\81` — 8 capturing groups followed by `\81` — PCRE2 rejects at compile time ("reference to non-existent subpattern"). RGX accepted the pattern because `resolve_octal_backreferences` fell through to its "multi-digit non-octal-prefix → literal" branch: first digit `8` isn't octal, so 0 octal digits were consumed and the remaining decimal digits were emitted as literal characters. That fallback is the right behaviour for *group-less* patterns (`\89` on a pattern with no parens compiles to literal "89"), but when the pattern has some capturing groups and the referenced `N` exceeds them, PCRE2 treats the sequence as a back-reference attempt and errors.
