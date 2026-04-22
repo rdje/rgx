@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: (*COMMIT) also clears backtrack stack (+3 passes, engine fix #17)
+- **What**: `(*COMMIT)` was setting only `ctx.committed` abort flag without clearing the backtrack stack. `a(*COMMIT)bc|abd` on "abd" would fail the first alt then backtrack into the `abd` alt — PCRE2 doesn't allow that. COMMIT now clears the stack like PRUNE/THEN do, while also keeping the scanner-abort flag. Applied in all three interpreters (execute_at, execute_at_continuation, execute_subexpr_inner).
+- **Delta**: 12,626 → 12,629 (+3 pass), 184 → 181 fail. Baselines 12,629 / 181. Closes multiple COMMIT-with-alternation clusters.
+
 ### 2026-04-22 — VM: /i char-class range folding uses full Unicode case closure (+8 passes, engine fix #16)
 - **What**: `[R-T]+/i` on "Ssſ" didn't extend through ſ (U+017F). ſ simple-folds to s (CaseFolding.txt S), and s ∈ [R-T]/i, so ſ belongs in the /i-closed class. RGX's case_fold_ranges did per-char ASCII swap (misses ſ) + endpoint-only non-ASCII folding. Replaced with `regex_syntax::hir::ClassUnicode::try_case_fold_simple` over the whole class (bidirectional C+S closure, matches PCRE2 semantics). Guard: 32K-char cap to prevent expansion of huge Unicode property ranges from blowing up class table.
 - **Delta**: 12,618 → 12,626 (+8 pass), 192 → 184 fail. Baselines 12,626 / 184. Closes [R-T]+/i, [q-u]+/i on Ssſ + [\x{100}-\x{400}]+/Bi SÿĀꟅ cluster. Conformance ~98.6%.

@@ -2584,8 +2584,20 @@ impl RegexVM {
 
                 // --- Backtracking control verbs ---
                 OpCode::Commit => {
-                    // (*COMMIT): set flag so that if this attempt fails,
-                    // the scanning loop aborts the entire search.
+                    // (*COMMIT): like (*PRUNE), drops every backtrack
+                    // frame pushed before this point so the current
+                    // path cannot backtrack past the verb. In
+                    // addition, sets `ctx.committed` so that when the
+                    // current match attempt ultimately fails, the
+                    // scanning loop does not advance to the next
+                    // starting position either (per PCRE2 docs:
+                    // "the entire matching attempt is committed").
+                    // Prior implementation set only the flag, so a
+                    // failing path past `(*COMMIT)` still backtracked
+                    // into earlier alternatives — e.g.
+                    // `a(*COMMIT)bc|abd` on `abd` would try the `abd`
+                    // branch after `a(*COMMIT)bc` failed.
+                    ctx.backtrack_stack.clear();
                     ctx.committed = true;
                 }
 
@@ -5091,6 +5103,8 @@ impl RegexVM {
                     }
                 }
                 OpCode::Commit => {
+                    // See top-level dispatch for rationale.
+                    ctx.backtrack_stack.clear();
                     ctx.committed = true;
                 }
                 OpCode::Prune | OpCode::Then => {
@@ -5898,6 +5912,11 @@ impl RegexVM {
                 }
 
                 OpCode::Commit => {
+                    // See top-level dispatch for rationale. In
+                    // subexpr context only the local backtrack stack
+                    // is cleared; the outer scanner abort is signalled
+                    // via `ctx.committed`.
+                    backtrack_stack.clear();
                     ctx.committed = true;
                 }
 

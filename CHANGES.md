@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `(*COMMIT)` also clears the backtrack stack, not just the abort flag (+3 passes, engine #17)
+
+- Scope: `a(*COMMIT)bc|abd` on `"abd"` — PCRE2 reports no match because `(*COMMIT)` prevents any backtracking past the verb and also prevents the scanner from advancing to new starting positions. RGX matched `"abd"` because the `Commit` opcode set only the `ctx.committed` abort flag and did not clear the backtrack stack. After `a(*COMMIT)bc` failed at pos 0, the VM happily backtracked to the `abd` alternative and matched there. Same class of bug shows up in `^((yes|no)(*THEN)(*F))?`, `^.*? (a(*THEN)b)++ c/x`, `(A (.*)   (?:C|) (*THEN)  | A D) z/x`, and 3+ more patterns mixing COMMIT with alternation or nested quantifiers.
+- Fix: `rgx-core/src/vm.rs` — `OpCode::Commit` in all three interpreters (top-level `execute_at`, `execute_at_continuation`, `execute_subexpr_inner`) now clears its working backtrack stack before setting `ctx.committed`. PCRE2 docs: "When COMMIT is encountered… if the match fails, the entire matching attempt is committed and no further alternatives or backtracks are considered." The stack-clear matches the existing `Prune`/`Then` implementation; COMMIT additionally keeps the scanner-abort flag so the match loop won't advance past the original start position after a committed failure.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,626 → 12,629 pass** (+3), 184 → 181 fail. Ratchet baselines bumped to `PASS_BASELINE=12_629` / `FAIL_BASELINE=181`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(a(*COMMIT)b)c|abd` (testinput1 cluster), `(\w+)b(*COMMIT)\w{2}` on `abbb` (testinput1:4831), `(?>(*COMMIT)(?>yes|no)(*THEN)(*F))?` (testinput1:4842), and sibling cases. **Seventeenth engine fix of the session; conformance at ~98.6%**.
+
 ### 2026-04-22 - VM: `/i` char-class range folding uses full Unicode case closure (+8 passes, engine #16)
 
 - Scope: `[R-T]+/i` on `"Ssſ"` stopped at `"Ss"` instead of extending through `ſ` (U+017F, Latin long s). PCRE2 matches `"Ssſ"` because simple case folding closes `ſ → s` (CaseFolding.txt status S), and `s ∈ [R-T]/i`, so `ſ` must be in the /i-folded class. Same pattern for `[q-u]+/i`, `[\x{100}-\x{400}]+/Bi` (which misses ÿ folding with Ā and Ʂ), and 5 more cluster cases. RGX's prior `case_fold_ranges` used per-character ASCII swap (covers `R→r` but misses `R→ſ`) and endpoint-only folding for non-ASCII ranges (covers `start` and `end` char closures only). Neither path did full bidirectional closure.
