@@ -713,6 +713,21 @@ impl Compiler {
                     return RegexAst::Backreference(n);
                 }
 
+                // Multi-digit forms whose first digit is 8 or 9
+                // cannot be octal escapes. When there ARE capturing
+                // groups and `n` exceeds them, PCRE2 treats the
+                // whole sequence as a back-reference to a
+                // non-existent group and rejects at compile time
+                // ("reference to non-existent subpattern"). Only
+                // the "no groups at all" case falls through to the
+                // literal fallback below (`\89` on a group-less
+                // pattern → literal "89"). Preserving the validator
+                // route for `(...)\81` keeps RGX aligned with PCRE2
+                // on testinput2:4671 and siblings.
+                if bytes[0] >= b'8' && total_groups > 0 {
+                    return RegexAst::Backreference(n);
+                }
+
                 // Count leading octal digits (0..=7), at most 3.
                 let mut octal_count = 0;
                 while octal_count < 3 && octal_count < bytes.len() && bytes[octal_count] < b'8' {

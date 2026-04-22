@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser: `\81` / `\89`-style back-references rejected when groups exist but don't cover `N` (+1 pass)
+
+- Scope: `((((((((x))))))))\81` — 8 capturing groups followed by `\81` — PCRE2 rejects at compile time ("reference to non-existent subpattern"). RGX accepted the pattern because `resolve_octal_backreferences` fell through to its "multi-digit non-octal-prefix → literal" branch: first digit `8` isn't octal, so 0 octal digits were consumed and the remaining decimal digits were emitted as literal characters. That fallback is the right behaviour for *group-less* patterns (`\89` on a pattern with no parens compiles to literal "89"), but when the pattern has some capturing groups and the referenced `N` exceeds them, PCRE2 treats the sequence as a back-reference attempt and errors.
+- Fix: `rgx-core/src/compiler.rs::resolve_octal_backreferences` — additional guard after the single-digit 8/9 check: if the first digit is 8 or 9 *and* `total_groups > 0`, return `Backreference(n)` so the existing validator surfaces a clean compile error. Group-less patterns still fall through to the octal+literal rule (test `parser_multi_digit_non_octal_backref_becomes_literal` unchanged).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,629 → 12,630 pass** (+1), 181 → 180 fail. Ratchet baselines bumped to `PASS_BASELINE=12_630` / `FAIL_BASELINE=180`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `((((((((x))))))))\81` (testinput2:4671). Conformance at ~98.6%.
+
 ### 2026-04-22 - VM: `(*COMMIT)` also clears the backtrack stack, not just the abort flag (+3 passes, engine #17)
 
 - Scope: `a(*COMMIT)bc|abd` on `"abd"` — PCRE2 reports no match because `(*COMMIT)` prevents any backtracking past the verb and also prevents the scanner from advancing to new starting positions. RGX matched `"abd"` because the `Commit` opcode set only the `ctx.committed` abort flag and did not clear the backtrack stack. After `a(*COMMIT)bc` failed at pos 0, the VM happily backtracked to the `abd` alternative and matched there. Same class of bug shows up in `^((yes|no)(*THEN)(*F))?`, `^.*? (a(*THEN)b)++ c/x`, `(A (.*)   (?:C|) (*THEN)  | A D) z/x`, and 3+ more patterns mixing COMMIT with alternation or nested quantifiers.
