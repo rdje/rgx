@@ -1610,7 +1610,29 @@ impl RegexVM {
                 | OpCode::StartLine
                 | OpCode::EndLine
                 | OpCode::PreviousMatchEnd
-                | OpCode::MatchReset => continue,
+                | OpCode::MatchReset
+                // Backtracking verbs are zero-width too — they
+                // don't consume input and don't change what the
+                // next consuming opcode will look for. Skipping
+                // past them lets patterns like `(*COMMIT)ABC`
+                // still expose `ABC` as a literal prefix so the
+                // scanning loop can memmem-jump to candidate
+                // positions. Verbs with name operands (`Mark`,
+                // `VerbSkipNamed`) need their operand skipped; the
+                // plain verbs are single-byte.
+                | OpCode::Commit
+                | OpCode::Prune
+                | OpCode::Then
+                | OpCode::VerbSkip
+                | OpCode::Accept => continue,
+                OpCode::Mark | OpCode::VerbSkipNamed => {
+                    if ip >= code.len() {
+                        return PrefixFilter::None;
+                    }
+                    let name_len = code[ip] as usize;
+                    ip = ip.saturating_add(1 + name_len);
+                    continue;
+                }
                 OpCode::CharClass => {
                     // Extract the class ID and use the ASCII bitmap for filtering
                     if ip < code.len() {

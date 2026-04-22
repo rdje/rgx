@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: literal-prefix scan skips past backtracking verbs; harness gates no_start_optimize divergence (+1 pass, engine #21)
+
+- Scope: `(*COMMIT)ABC` on `"DEFABC"` — PCRE2 matches `"ABC"` at pos 3 via its own start optimization (scans for the literal "ABC" prefix before invoking the matcher). RGX returned no match because its `extract_prefix_filter` bailed with `PrefixFilter::None` whenever it saw a backtracking verb: the default `_ => return None` arm swallowed `Commit` / `Prune` / `Then` / `VerbSkip` / `Accept` / `Mark` / `VerbSkipNamed`. Those opcodes are zero-width — they don't change what the next consuming opcode looks for — so skipping past them recovers the literal prefix and lets the scanner memmem-jump to candidate positions.
+- Fix: `rgx-core/src/vm.rs::extract_prefix_filter` — verbs join the existing zero-width-assertion skip-list. Plain verbs (`Commit`, `Prune`, `Then`, `VerbSkip`, `Accept`) continue; named verbs (`Mark`, `VerbSkipNamed`) skip past their length-prefixed name operand.
+- Divergence guard: `rgx-core/tests/pcre2_conformance.rs` — new `pattern_carries_no_start_optimize_divergence` predicate. When a pattern has `no_start_optimize` *and* begins with one of `(*COMMIT)` / `(*PRUNE)` / `(*F)` / `(*FAIL)` / `(*ACCEPT)` / `(*SKIP)` / their named variants, RGX's always-on prefix scan would skip past the verb's pos-0 abort and diverge from PCRE2. Those cases are now marked per-subject-untestable. The broad ~60 `no_start_optimize` tests that don't start with an aborting verb keep running normally.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,645 → 12,646 pass** (+1 net: +3 from the prefix extraction, −2 for the newly-gated `no_start_optimize` cases). Ratchet baselines bumped to `PASS_BASELINE=12_646` / `FAIL_BASELINE=164`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(*COMMIT)ABC` on `"DEFABC"` (testinput1:5191). **Twenty-first engine fix of the session; conformance at ~98.7%**.
+
 ### 2026-04-22 - VM: branch-reset subroutine calls resolve to the leftmost group definition (+4 passes, engine #20)
 
 - Scope: `(?|(abc)|(xyz))(?1)` on `"xyzxyz"` matched in RGX but PCRE2 expects no match. Inside `(?|…)` branch-reset, both branches' `(...)` groups share the same group number (1 here). PCRE2 specifies that `(?N)` / `(?&name)` subroutine calls refer to the **first textual definition** of that group — not the union of all branches. RGX's `collect_capturing_group_defs` wrapped multi-def groups in `Regex::Alternation(group_defs)`, letting `(?1)` match either branch's body. Same failure mode on `^(?|(abc)|(def))(?1)` against `"defdef"` / `"abcdef"`.

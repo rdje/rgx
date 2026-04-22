@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: literal-prefix scan skips past backtracking verbs (+1, engine fix #21)
+- **What**: extract_prefix_filter bailed with PrefixFilter::None on any backtracking verb, killing the memmem-jump optimization for patterns like `(*COMMIT)ABC`. Verbs are zero-width — added them to the skip-past list. Named verbs (Mark, VerbSkipNamed) skip past their length-prefixed operand. Guard: `no_start_optimize` + leading verb is now untestable because RGX's prefix scan can't be disabled per-pattern, so the always-skip-to-candidate behaviour would diverge from PCRE2's "try every pos" semantic.
+- **Delta**: 12,645 → 12,646 (+1 pass net), 165 → 164 fail. Baselines 12,646 / 164.
+
 ### 2026-04-22 — VM: branch-reset subroutine calls use first-def only (+4 passes, engine fix #20)
 - **What**: `collect_capturing_group_defs` wrapped multi-def groups (from branch-reset `(?|…|…)`) in `Alternation(group_defs)`, so `(?1)` inside `(?|(abc)|(xyz))(?1)` could match either branch's body. PCRE2 semantic: subroutine calls refer to the LEFTMOST textual definition only. Changed to `group_defs.remove(0)`.
 - **Delta**: 12,641 → 12,645 (+4 pass), 169 → 165 fail. Baselines 12,645 / 165. Closes (?|(abc)|(xyz))(?1) and ^(?|(abc)|(def))(?1) clusters.
