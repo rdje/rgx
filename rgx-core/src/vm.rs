@@ -7905,12 +7905,20 @@ impl OptimizingCompiler {
         let mut next_group = 0;
         Self::collect_capturing_group_defs_inner(ast, &mut next_group, &mut defs);
         defs.into_iter()
-            .map(|(group_id, group_defs)| {
-                let group_ast = if group_defs.len() == 1 {
-                    group_defs.into_iter().next().expect("single group def")
-                } else {
-                    Regex::Alternation(group_defs)
-                };
+            .map(|(group_id, mut group_defs)| {
+                // When a capturing group appears under multiple
+                // branches of a `(?|…|…)` branch-reset (the only
+                // legitimate way in PCRE2 to share a group number
+                // across definitions), PCRE2 resolves `(?N)` /
+                // `(?&name)` subroutine calls to the **first**
+                // textual definition — not the union. Earlier this
+                // code wrapped every multi-def id in
+                // `Alternation(group_defs)`, letting `(?1)` match
+                // any branch's body (FP on patterns like
+                // `(?|(abc)|(xyz))(?1)` matching `"xyzxyz"`). Use
+                // the leftmost definition only so subroutine calls
+                // match PCRE2's "first-def" semantic.
+                let group_ast = group_defs.remove(0);
                 (group_id, group_ast)
             })
             .collect()

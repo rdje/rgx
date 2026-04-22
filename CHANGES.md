@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: branch-reset subroutine calls resolve to the leftmost group definition (+4 passes, engine #20)
+
+- Scope: `(?|(abc)|(xyz))(?1)` on `"xyzxyz"` matched in RGX but PCRE2 expects no match. Inside `(?|…)` branch-reset, both branches' `(...)` groups share the same group number (1 here). PCRE2 specifies that `(?N)` / `(?&name)` subroutine calls refer to the **first textual definition** of that group — not the union of all branches. RGX's `collect_capturing_group_defs` wrapped multi-def groups in `Regex::Alternation(group_defs)`, letting `(?1)` match either branch's body. Same failure mode on `^(?|(abc)|(def))(?1)` against `"defdef"` / `"abcdef"`.
+- Fix: `rgx-core/src/vm.rs::collect_capturing_group_defs` — now always returns the leftmost definition (index 0) rather than an Alternation of all collected defs. Branch-reset is the only PCRE2 construct that assigns the same group number to multiple textual definitions, so the single-def case is unaffected.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,641 → 12,645 pass** (+4), 169 → 165 fail. Ratchet baselines bumped to `PASS_BASELINE=12_645` / `FAIL_BASELINE=165`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(?|(abc)|(xyz))(?1)` (testinput1:4429) and `^(?|(abc)|(def))(?1)` × 2 subjects (testinput1:4666). **Twentieth engine fix of the session; conformance at ~98.7%**.
+
 ### 2026-04-22 - VM: `(*COMMIT)` inside atomic group uses a sentinel frame (+3 passes, engine #19)
 
 - Scope: Commit #17 made `(*COMMIT)` clear the whole backtrack stack unconditionally. That was right for non-atomic uses (`a(*COMMIT)bc|abd` on `"abd"` correctly fails) but wrong for `(?>a(*COMMIT)b)c|abd` on `"abd"` — PCRE2 expects a match via the `abd` alternative because the atomic group (`a(*COMMIT)b`) *succeeds* internally. The clear-everything approach wiped the outer alt-split frame and blocked the fall-through. Conversely, `(?>a(*COMMIT)c)d|abd` on `"abd"` must **not** match: the atomic group fails and COMMIT's abort should still fire. A simple atomic-scoped truncate handled the first family but broke the second (because the outer alt-split survived).
