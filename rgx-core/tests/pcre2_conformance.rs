@@ -2510,7 +2510,20 @@ fn run_case(case: &TestCase) -> Outcome {
             Outcome::Pass
         }
         (Expected::NoMatch, _) | (_, true) => {
-            if re.is_match(subject) {
+            // Post-match `anchored_end` guard: the pattern wrap
+            // `(?:…)\z` ordinarily enforces end-of-subject, but
+            // `(*ACCEPT)` can bubble through the enclosing `\z`
+            // and let a shorter match through. Fall back to
+            // `find_first` + an explicit end-of-text check so those
+            // mid-subject ACCEPT matches still count as no-match
+            // when the test modifier demands end-anchoring.
+            let matched = if opts.anchored_end {
+                re.find_first(subject)
+                    .is_some_and(|m| m.end == subject.len())
+            } else {
+                re.is_match(subject)
+            };
+            if matched {
                 return Outcome::Fail {
                     detail: format!("PCRE2 expected no match, RGX matched (subject={subject:?})"),
                 };
@@ -2979,8 +2992,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_637;
-    const FAIL_BASELINE: usize = 173;
+    const PASS_BASELINE: usize = 12_638;
+    const FAIL_BASELINE: usize = 172;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

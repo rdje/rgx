@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: anchored_end NoMatch check fixed to detect mid-subject (*ACCEPT) (+1 pass)
+- **What**: After engine fix #18, `(*ACCEPT)` bubbles through the `\z` the harness wraps for `endanchored`. So a pattern like `abc(*ACCEPT)d/endanchored` now silently matches mid-subject, passing the `is_match` check and failing the NoMatch expectation. Changed NoMatch branch to use find_first + match.end == subject.len() when opts.anchored_end is set.
+- **Delta**: 12,637 → 12,638 (+1 pass), 173 → 172 fail. Baselines 12,638 / 172.
+
 ### 2026-04-22 — Harness: tighten substitute-template gate for 32-char-boundary names and `${name+default}` (+2 passes)
 - **What**: Two `/abc/replace=...` overflow probes leaked past the untestable filter. Changed body-length check to `>= 32` (PCRE2's boundary-probe use of 32-char names always references non-existent groups) and flagged any body containing `+` or `-` as untestable since the conditional-substitute form can't be validated without the pattern's capture inventory at this layer.
 - **Delta**: 12,635 → 12,637 (+2 pass), 175 → 173 fail. Baselines 12,637 / 173.

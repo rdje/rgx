@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `endanchored` no-match branch post-checks match end to catch `(*ACCEPT)` bubbles (+1 pass)
+
+- Scope: `abc(*ACCEPT)d/endanchored` on `"xyzabcdef"` — PCRE2 expects no match because the `(*ACCEPT)` force-match happens at pos 6 and the subject ends at pos 9, violating the end-anchoring. RGX's harness wraps the pattern as `(?:abc(*ACCEPT)d)\z`, but (*ACCEPT) now bubbles through the enclosing `\z` (per engine fix #18), so the wrap no longer enforces end-of-subject.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::run_case` — when a `NoMatch` case has `opts.anchored_end`, use `find_first` + `match.end == subject.len()` instead of plain `is_match`, so a mid-subject ACCEPT match is correctly rejected as not satisfying end-anchoring.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,637 → 12,638 pass** (+1), 173 → 172 fail. Ratchet baselines bumped to `PASS_BASELINE=12_638` / `FAIL_BASELINE=172`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput2:5472. Companion to engine fix #18 — without this harness guard, that fix's ACCEPT propagation flipped an otherwise-correct `\z`-wrap check into a false positive.
+
 ### 2026-04-22 - Harness: `${NAME+default}` / 32-char-boundary `${LONGNAME}` substitute templates marked untestable (+2 passes)
 
 - Scope: Two more `replace=TEMPLATE` cases where PCRE2 rejects at compile but RGX accepts: `replace=a${A234567890123456789_123456789012}z` (group name exactly at PCRE2's 32-byte boundary, no matching group) and `replace=a${b+d}z` (PCRE2's `${NAME+default}` conditional substitute form referencing a non-existent group). RGX's template parser is lazier than PCRE2's and can't cross-check against the pattern's capture inventory from the harness layer.
