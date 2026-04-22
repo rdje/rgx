@@ -266,6 +266,16 @@ pub enum CharClass {
         ranges: Vec<CharRange>,
         /// Whether the class is negated ([^...])
         negated: bool,
+        /// Optional override ranges used when the surrounding
+        /// pattern is compiled with case-insensitive mode. Populated
+        /// by the parser when a class item is `\P{Lu/Ll/Lt}`: under
+        /// /i, those properties case-close through PCRE2's `L&`
+        /// (cased-letter class), so the complement expands to
+        /// `\P{L&}` (non-cased-letters). The codegen case-fold
+        /// expansion then unions the folds of literal members
+        /// correctly. `None` means the class needs no /i-specific
+        /// override (codegen falls back to `ranges`).
+        ci_override_ranges: Option<Vec<CharRange>>,
     },
 }
 

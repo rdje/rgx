@@ -813,6 +813,7 @@ mod dispatch_tests {
         let ast = Regex::CharClass(crate::ast::CharClass::Custom {
             ranges: vec![CharRange::range('a', 'z')],
             negated: false,
+            ci_override_ranges: None,
         });
         assert_eq!(first_literal_byte(&ast), None);
     }
@@ -973,6 +974,7 @@ mod tests {
                 .map(|(s, e)| CharRange::range(s, e))
                 .collect(),
             negated: false,
+            ci_override_ranges: None,
         })
     }
 

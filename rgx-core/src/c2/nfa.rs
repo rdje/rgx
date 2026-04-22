@@ -759,7 +759,11 @@ impl<'a> NfaBuilder<'a> {
 
     fn build_char_class(&mut self, cc: &CharClass) -> Fragment {
         match cc {
-            CharClass::Custom { ranges, negated } => self.build_char_ranges(ranges, *negated),
+            CharClass::Custom {
+                ranges,
+                negated,
+                ci_override_ranges: _,
+            } => self.build_char_ranges(ranges, *negated),
             CharClass::Digit { negated } => self.build_shorthand_digit(*negated),
             CharClass::Word { negated } => self.build_shorthand_word(*negated),
             CharClass::Space { negated } => self.build_shorthand_space(*negated),
@@ -1186,6 +1190,7 @@ mod tests {
                 .map(|(s, e)| CharRange::range(s, e))
                 .collect(),
             negated: false,
+            ci_override_ranges: None,
         })
     }
 
@@ -1321,6 +1326,7 @@ mod tests {
         let nfa = build_anchored(&Regex::CharClass(CharClass::Custom {
             ranges: vec![CharRange::range('a', 'z')],
             negated: true,
+            ci_override_ranges: None,
         }));
         assert!(is_reachable(&nfa, nfa.start(), nfa.accept()));
         // Negation gives many ranges; transitions count > 1.

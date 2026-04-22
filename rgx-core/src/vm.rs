@@ -6797,11 +6797,26 @@ impl OptimizingCompiler {
                     CharClass::Word { negated: true } => self.emit_op(OpCode::WordAsciiNeg),
                     CharClass::Space { negated: false } => self.emit_op(OpCode::SpaceAscii),
                     CharClass::Space { negated: true } => self.emit_op(OpCode::SpaceAsciiNeg),
-                    CharClass::Custom { ranges, negated } => {
+                    CharClass::Custom {
+                        ranges,
+                        negated,
+                        ci_override_ranges,
+                    } => {
                         // Compile custom character class into optimized bytecode
                         // Store the class definition and emit CharClass opcode with index
                         let effective_ranges = if self.case_insensitive {
-                            Self::case_fold_ranges(ranges)
+                            // If the parser supplied a /i-specific
+                            // override (set when any `\P{Lu/Ll/Lt}`
+                            // class item was present), use those
+                            // ranges as the base before folding —
+                            // PCRE2 case-closes `\P{Lu}` through
+                            // `L&` (cased-letter class) under /i, so
+                            // the override substitutes complement(L&)
+                            // for the original complement(Lu). Then
+                            // the normal case-fold expansion adds
+                            // folds of literal members on top.
+                            let base = ci_override_ranges.as_ref().unwrap_or(ranges);
+                            Self::case_fold_ranges(base)
                         } else {
                             ranges.clone()
                         };
@@ -8125,6 +8140,7 @@ mod tests {
         let ast = Regex::CharClass(CharClass::Custom {
             ranges: vec![CharRange::range('0', '9')],
             negated: true,
+            ci_override_ranges: None,
         });
         let program = compiler.compile(&ast);
 

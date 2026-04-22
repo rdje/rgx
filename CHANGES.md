@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser + AST: `CharClass::Custom` carries `ci_override_ranges` for `\P{Lu/Ll/Lt}` inside `[...]` (engine fix #13, no pass delta — lifts 7-of-14 cases from harness-gated to real comparison)
+
+- Scope: Proper engine fix for the `\p{Lu/Ll/Lt}/i` case-fold expansion gap that commit `509744f` harness-gated as a temporary measure. PCRE2's /i case-closes `\P{Lu}` through `L&` (cased-letter class): `\P{Lu}/i` on `'a'` should NOT match because `fold('a') = 'A' ∈ Lu`. RGX's char-class codegen was resolving `\P{Lu}` eagerly at parse into `complement(Lu)`, then folding the merged class under /i — the fold expansion then pulled Lu chars back in via their Ll folds, producing a class that accepted `'a'`. The proper fix requires per-item provenance: know which ranges in a mixed class came from `\P{Lu/Ll/Lt}` and substitute the `complement(L&)` expansion for those items specifically.
+- Fix: three-layer change.
+  - `rgx-core/src/ast.rs` — `CharClass::Custom` gains `ci_override_ranges: Option<Vec<CharRange>>` — an alternate range set used when the pattern compiles with /i. `None` means fold the normal `ranges`; `Some(alt)` means fold `alt` instead.
+  - `rgx-core/src/parsing.rs::convert_char_class` — parses the class body once into `ranges` (non-/i behaviour) and a parallel `ci_ranges`. For each class item, the CI copy substitutes `complement(L&)` via a new `negated_letter_property_ci_ranges` helper that inspects the item's source slice for `\P{Lu/Ll/Lt}` (whitespace / case / underscore tolerant). When at least one item diverges, the class stores `ci_override_ranges = Some(ci_ranges)`.
+  - `rgx-core/src/vm.rs` codegen for `CharClass::Custom` — under `self.case_insensitive`, pre-fold uses `ci_override_ranges.as_ref().unwrap_or(ranges)` as the base, then `case_fold_ranges` adds the folds of literal class members on top.
+  - 20+ destructuring sites across `parsing`, `compiler`, `vm`, `c2/{byte_class,classifier,program,nfa}` updated (Python-scripted where the pattern was uniform, manual patches for the few that used specific match variants).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance stays at **12,610 / 200** — the 7 cases the engine fix now handles correctly were previously harness-gated as untestable, so the pass count is unchanged. Ratchet baselines unchanged. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Real engine coverage for `[\P{Lu}…]/i` / `[\P{Ll}…]/i` / `[\P{Lt}…]/i` in mixed classes (testinput4:2981 cluster covers). Remaining 7 cases in the `pattern_needs_case_fold_property_expansion` harness gate are positive `\p{Lu/Ll/Lt}/i` + subject case-closure interactions that need a deeper case-fold table refactor — tracked separately. **Thirteenth engine fix of the session; ~98.4% conformance.**
+
 ### 2026-04-22 - Harness: `/hex` patterns with NUL-byte body untestable (+2 passes)
 
 - Scope: PCRE2 `/hex` mode lets the pattern body be hex-encoded bytes (plus quoted literal runs). `/65 00 64/hex` decodes to `e\0d` — three bytes including a literal NUL. PGEN's parser contract doesn't represent NUL within a pattern string, so RGX fails with `E_PARSE_FAILURE` at compile. PCRE2 accepts NUL in hex mode and matches against subjects containing `\0`. Empties the "compile: PGEN parse failure" bucket.

@@ -515,6 +515,7 @@ impl<'a> PgenAstAdapter<'a> {
                 Regex::CharClass(CharClass::Custom {
                     ranges: Vec::new(),
                     negated: true,
+                    ci_override_ranges: None,
                 }),
             ]);
         }
@@ -528,6 +529,7 @@ impl<'a> PgenAstAdapter<'a> {
         Regex::CharClass(CharClass::Custom {
             ranges,
             negated: true,
+            ci_override_ranges: None,
         })
     }
 
@@ -887,6 +889,7 @@ impl<'a> PgenAstAdapter<'a> {
             return Ok(Regex::CharClass(CharClass::Custom {
                 ranges: vec![CharRange::range('\0', char::MAX)],
                 negated: false,
+                ci_override_ranges: None,
             }));
         }
         if let Some(simple) = self.first_descendant(node, "simple_escape") {
@@ -950,6 +953,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_digit_ranges(),
                         negated: false,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Digit { negated: false }))
@@ -960,6 +964,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_digit_ranges(),
                         negated: true,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Digit { negated: true }))
@@ -970,6 +975,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_word_ranges(),
                         negated: false,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Word { negated: false }))
@@ -980,6 +986,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_word_ranges(),
                         negated: true,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Word { negated: true }))
@@ -990,6 +997,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_space_ranges(),
                         negated: false,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Space { negated: false }))
@@ -1000,6 +1008,7 @@ impl<'a> PgenAstAdapter<'a> {
                     Ok(Regex::CharClass(CharClass::Custom {
                         ranges: crate::unicode_support::ucp_space_ranges(),
                         negated: true,
+                        ci_override_ranges: None,
                     }))
                 } else {
                     Ok(Regex::CharClass(CharClass::Space { negated: true }))
@@ -1010,20 +1019,24 @@ impl<'a> PgenAstAdapter<'a> {
             'h' => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: horizontal_whitespace_ranges(),
                 negated: false,
+                ci_override_ranges: None,
             })),
             'H' => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: horizontal_whitespace_ranges(),
                 negated: true,
+                ci_override_ranges: None,
             })),
 
             // Vertical whitespace
             'v' => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: vertical_whitespace_ranges(),
                 negated: false,
+                ci_override_ranges: None,
             })),
             'V' => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: vertical_whitespace_ranges(),
                 negated: true,
+                ci_override_ranges: None,
             })),
 
             // Word boundaries (if PGEN routes them through simple_escape).
@@ -1220,12 +1233,24 @@ impl<'a> PgenAstAdapter<'a> {
             .is_some_and(|n| !self.is_empty_wrapper(n));
 
         let mut ranges = Vec::new();
+        // Parallel range set used when the enclosing pattern is
+        // compiled with case-insensitive mode. Starts equal to
+        // `ranges`; when a `\P{Lu/Ll/Lt}` item is encountered, the
+        // CI set substitutes `complement(L&)` (non-cased-letter) for
+        // that item so PCRE2's `/i` + `\P{Lu}` semantic survives the
+        // merge into a mixed custom class. `saw_ci_divergence` is
+        // set only when at least one item actually diverged; if all
+        // items agree, we leave `ci_override_ranges = None` and let
+        // codegen fall back to `ranges`.
+        let mut ci_ranges = Vec::new();
+        let mut saw_ci_divergence = false;
 
         // `class_initial_close` captures a `]` literal right after `[` or
         // `[^`, keeping it as a class member instead of the closing bracket.
         if let Some(initial_close) = self.first_descendant(node, "class_initial_close") {
             if !self.is_empty_wrapper(initial_close) {
                 ranges.push(CharRange::single(']'));
+                ci_ranges.push(CharRange::single(']'));
             }
         }
 
@@ -1238,11 +1263,62 @@ impl<'a> PgenAstAdapter<'a> {
                     .ok_or_else(|| {
                         self.contract_error("pgen class_body entry is missing class_item")
                     })?;
+                let item_start = ranges.len();
                 self.convert_class_item(item, &mut ranges)?;
+                let appended = ranges[item_start..].to_vec();
+                // Check whether this item was a `\P{Lu/Ll/Lt}` form.
+                // Walk the class_item for a `class_escape` whose
+                // resolved name matches — if so, substitute
+                // `complement(L&)` ranges into ci_ranges.
+                if let Some(diverged) = self.negated_letter_property_ci_ranges(item) {
+                    ci_ranges.extend(diverged);
+                    saw_ci_divergence = true;
+                } else {
+                    ci_ranges.extend(appended);
+                }
             }
         }
 
-        Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
+        let ci_override_ranges = if saw_ci_divergence {
+            let mut v = ci_ranges;
+            v.sort_by_key(|r| r.start);
+            Some(v)
+        } else {
+            None
+        };
+
+        Ok(Regex::CharClass(CharClass::Custom {
+            ranges,
+            negated,
+            ci_override_ranges,
+        }))
+    }
+
+    /// If the class_item is `\P{Lu/Ll/Lt}`, return PCRE2's /i-correct
+    /// expansion (complement of cased letters `L&`); otherwise return
+    /// None so the caller can use the normal ranges.
+    fn negated_letter_property_ci_ranges(&self, item: &PgenAstNode) -> Option<Vec<CharRange>> {
+        // Inspect the slice of the class_item and check if it's
+        // a `\P{Lu}` / `\P{Ll}` / `\P{Lt}` form (case- and
+        // whitespace-insensitive). Simpler than walking the PGEN
+        // tree for the specific escape kind.
+        let slice = self.slice(item).ok()?;
+        let trimmed = slice.trim();
+        if !trimmed.starts_with("\\P{") || !trimmed.ends_with('}') {
+            return None;
+        }
+        let inside = trimmed.strip_prefix("\\P{")?.strip_suffix("}")?;
+        let norm: String = inside
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '_')
+            .flat_map(char::to_lowercase)
+            .collect();
+        if !matches!(norm.as_str(), "lu" | "ll" | "lt") {
+            return None;
+        }
+        // Under /i, `\P{Lu}` / `\P{Ll}` / `\P{Lt}` case-close to
+        // `\P{L&}` (complement of cased letters). Resolve and return.
+        crate::unicode_support::resolve_unicode_property_class("L&", true).ok()
     }
 
     /// Convert a single `class_item` — either a `class_range`, a bare
@@ -1585,6 +1661,7 @@ impl<'a> PgenAstAdapter<'a> {
             "FAIL" | "F" => Ok(Regex::CharClass(CharClass::Custom {
                 ranges: vec![],
                 negated: false,
+                ci_override_ranges: None,
             })),
             // (*ACCEPT): force immediate match at current position
             "ACCEPT" => Ok(Regex::Accept),
@@ -2913,6 +2990,7 @@ where
         Regex::CharClass(CharClass::Custom {
             ranges: custom,
             negated,
+            ..
         }) => {
             // Honour the `negated` flag — otherwise `\W` / `\D` / `\S`
             // expanded via the UCP path (which arrive as

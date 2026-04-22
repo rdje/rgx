@@ -361,6 +361,7 @@ mod tests {
         let cc = Regex::CharClass(CharClass::Custom {
             ranges: vec![CharRange::range('a', 'z'), CharRange::range('0', '9')],
             negated: false,
+            ci_override_ranges: None,
         });
         assert_no_backtracking(&cc);
     }
@@ -705,11 +706,13 @@ mod tests {
                         Regex::CharClass(CharClass::Custom {
                             ranges: vec![CharRange::range('A', 'Z')],
                             negated: false,
+                            ci_override_ranges: None,
                         }),
                         quantified(
                             Regex::CharClass(CharClass::Custom {
                                 ranges: vec![CharRange::range('a', 'z')],
                                 negated: false,
+                                ci_override_ranges: None,
                             }),
                             Quantifier::OneOrMore { lazy: false },
                         ),

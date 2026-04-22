@@ -450,6 +450,7 @@ mod tests {
                 .map(|(s, e)| CharRange::range(s, e))
                 .collect(),
             negated: false,
+            ci_override_ranges: None,
         })
     }
 
@@ -460,6 +461,7 @@ mod tests {
                 .map(|(s, e)| CharRange::range(s, e))
                 .collect(),
             negated: true,
+            ci_override_ranges: None,
         })
     }
 

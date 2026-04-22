@@ -550,7 +550,11 @@ impl<'a> Parser<'a> {
                 let ranges = ranges.clone();
                 let negated = *negated;
                 self.advance()?;
-                Ok(Regex::CharClass(CharClass::Custom { ranges, negated }))
+                Ok(Regex::CharClass(CharClass::Custom {
+                    ranges,
+                    negated,
+                    ci_override_ranges: _,
+                }))
             }
             Some(Token::UnicodeClass { name }) => {
                 let name = name.clone();
