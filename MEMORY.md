@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `/hex` patterns with NUL byte in decoded body untestable (+2 passes)
+- **What**: PCRE2 `/hex` allows NUL bytes in pattern (e.g. `/65 00 64/hex` → `e\0d`). PGEN doesn't represent NUL, fails at compile. Added `pattern.as_bytes().contains(&0)` to per_subject_untestable. Empties compile-fail bucket.
+- **Delta**: 12,608 → 12,610 (+2 pass), 202 → 200 fail. Baselines 12,610 / 200. **Crossed 200-failure threshold.**
+
 ### 2026-04-22 — Parser: `[:word:]` under UCP aligned with `\w` (+1 pass)
 - **What**: `ucp_posix_class_ranges` "word" arm still had L + N + `_`; updated to L + N + M + Pc matching `ucp_word_ranges`.
 - **Delta**: 12,607 → 12,608 (+1 pass), 203 → 202 fail. Baselines 12,608 / 202.
