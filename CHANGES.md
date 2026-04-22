@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `/i` case-variants use Unicode *simple* fold only (matches PCRE2; drops Turkic + full mappings) (+5 passes, engine #14)
+
+- Scope: `unicode_case_variants` produced the case-fold equivalence class for a single char by combining `regex_syntax::try_case_fold_simple` (C + S status in CaseFolding.txt) AND Rust's `char::to_lowercase` / `to_uppercase` (full case mapping, status F, plus Turkic status T). The extra mappings pulled in İ (U+0130) → i + U+0307 (full) and Turkic-specific i ↔ İ, which PCRE2's `/i` default behaviour doesn't apply. Symptoms: `/\x{0130}/i` on `'i'` matched under RGX (because `to_lowercase(İ)` yields 'i' as its first char), but PCRE2 says no match (İ has no simple fold). Same for `/\x{0131}/i` on `'I'`, `/[\x{0130}]/i`, `/[\x{0120}-\x{0130}]/i`, `/[z\x{0130}]/i`.
+- Fix: `rgx-core/src/vm.rs::unicode_case_variants` — drop the `to_lowercase` / `to_uppercase` loops. Keep only the `try_case_fold_simple` path which applies Unicode CaseFolding.txt status C (unconditional simple) and S (simple-where-full-differs). Matches PCRE2's default `/i` semantic (PCRE2_CASELESS without PCRE2_EXTRA_TURKISH_CASING).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,610 → 12,615 pass** (+5), 200 → 195 fail. Ratchet baselines bumped to `PASS_BASELINE=12_615` / `FAIL_BASELINE=195`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes the Turkish-I default-fold FP cluster (testinput5:2390/2404/2446/2460/2488). Patterns that exercise Turkish casing explicitly use `(*TURKISH_CASING)` or `/turkish_casing` and are already harness-gated. **Fourteenth engine fix of the session.**
+
 ### 2026-04-22 - Parser + AST: `CharClass::Custom` carries `ci_override_ranges` for `\P{Lu/Ll/Lt}` inside `[...]` (engine fix #13, no pass delta — lifts 7-of-14 cases from harness-gated to real comparison)
 
 - Scope: Proper engine fix for the `\p{Lu/Ll/Lt}/i` case-fold expansion gap that commit `509744f` harness-gated as a temporary measure. PCRE2's /i case-closes `\P{Lu}` through `L&` (cased-letter class): `\P{Lu}/i` on `'a'` should NOT match because `fold('a') = 'A' ∈ Lu`. RGX's char-class codegen was resolving `\P{Lu}` eagerly at parse into `complement(Lu)`, then folding the merged class under /i — the fold expansion then pulled Lu chars back in via their Ll folds, producing a class that accepted `'a'`. The proper fix requires per-item provenance: know which ranges in a mixed class came from `\P{Lu/Ll/Lt}` and substitute the `complement(L&)` expansion for those items specifically.

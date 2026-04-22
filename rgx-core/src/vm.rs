@@ -7917,6 +7917,15 @@ impl OptimizingCompiler {
     /// `char::to_lowercase` / `char::to_uppercase` miss, then augments with
     /// those mappings as a backstop for codepoints outside the fold table.
     fn unicode_case_variants(ch: char) -> Vec<char> {
+        // PCRE2 `/i` uses *simple* case folding only (Unicode
+        // CaseFolding.txt statuses C and S) — single-char to
+        // single-char mappings. This excludes Turkic-only folds
+        // (status T: U+0130 İ → i, U+0131 ı → I) and full-folding
+        // that maps to multiple chars (status F: İ → i+̇).
+        // `regex_syntax::try_case_fold_simple` applies the C+S
+        // tables, which matches PCRE2's behaviour. Rust's
+        // `to_lowercase` / `to_uppercase` would also pull in
+        // full/Turkic mappings — skip them to stay PCRE2-compatible.
         let mut variants = vec![ch];
         let range = regex_syntax::hir::ClassUnicodeRange::new(ch, ch);
         let mut class = regex_syntax::hir::ClassUnicode::new([range]);
@@ -7931,16 +7940,6 @@ impl OptimizingCompiler {
                         }
                     }
                 }
-            }
-        }
-        for lower in ch.to_lowercase() {
-            if lower != ch && !variants.contains(&lower) {
-                variants.push(lower);
-            }
-        }
-        for upper in ch.to_uppercase() {
-            if upper != ch && !variants.contains(&upper) {
-                variants.push(upper);
             }
         }
         variants

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: /i case-variants use simple fold only, drops Turkic + full (+5 passes, engine fix #14)
+- **What**: `unicode_case_variants` combined `try_case_fold_simple` AND Rust's `to_lowercase`/`to_uppercase`. Rust's apply full + Turkic mappings (CaseFolding.txt F + T status) which PCRE2's default /i doesn't use. İ → 'i' + U+307 via to_lowercase incorrectly made `/\x{0130}/i` match 'i'. Removed the to_lowercase/to_uppercase fallback.
+- **Delta**: 12,610 → 12,615 (+5 pass), 200 → 195 fail. Baselines 12,615 / 195. Closes Turkish-I default-fold FP cluster (testinput5:2390+).
+
 ### 2026-04-22 — Parser+AST+VM: CharClass::Custom carries `ci_override_ranges` for `\P{Lu/Ll/Lt}` in `[...]` (engine fix #13, no pass delta — lifts 7-of-14 cases from harness-gated to real engine coverage)
 - **What**: AST `CharClass::Custom` gained `ci_override_ranges: Option<Vec<CharRange>>`. Parser builds parallel ci_ranges where `\P{Lu/Ll/Lt}` items substitute `complement(L&)`. VM codegen uses ci_override_ranges under /i. Restored the original harness gate for the 7 remaining positive `\p{Lu/Ll/Lt}/i` cases that need deeper case-fold work.
 - **Delta**: 12,610 unchanged (cases moved from gated-Pass to engine-Pass). Real engine coverage for `[\P{Lu/Ll/Lt}…]/i` mixed classes. Backlog: positive `\p{Lu/Ll/Lt}/i` needs case-fold table refactor.
