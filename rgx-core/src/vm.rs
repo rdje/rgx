@@ -6073,13 +6073,27 @@ impl RegexVM {
                 }
 
                 OpCode::Prune | OpCode::Then => {
-                    // Inside a subexpression run we only control the
-                    // local `backtrack_stack`. The subexpr variant
-                    // of THEN doesn't propagate to the outer
-                    // alt_boundaries because the subexpr's return
-                    // value (match vs no-match) is what the outer
-                    // caller actually acts on.
+                    // Inside a subexpression run we clear the local
+                    // backtrack stack, but when the verb has *no
+                    // enclosing alternation* it degrades to
+                    // `(*PRUNE)` — which must prevent *all*
+                    // backtracking at the current start position,
+                    // including backtracking in the outer
+                    // (ctx.backtrack_stack) context that put us in
+                    // this subexpr. Without the outer clear,
+                    // patterns like `^.*? (a(*THEN)b)++ c` would
+                    // let `.*?` retry with more characters even
+                    // after the inner THEN's PRUNE semantic fired,
+                    // producing a false match. Clearing the global
+                    // stack here is safe because PCRE2's PRUNE
+                    // documentation specifies that matching at the
+                    // current start position should fail cleanly
+                    // once PRUNE is reached — exactly what the
+                    // stack clear enforces.
                     backtrack_stack.clear();
+                    if ctx.alt_boundaries.is_empty() {
+                        ctx.backtrack_stack.clear();
+                    }
                 }
 
                 OpCode::VerbSkip => {

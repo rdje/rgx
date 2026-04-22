@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: subexpr `(*PRUNE)` / `(*THEN)` with no enclosing alt propagate to the outer backtrack stack (+3 passes, engine #23)
+
+- Scope: `^.*? (a(*THEN)b)++ c/x` on `"aabc"` — PCRE2 expects no match because `(*THEN)` inside the possessive body has no enclosing alternation and so degrades to `(*PRUNE)`, which must prevent all backtracking at the current start position (including the outer `.*?`'s lazy retry). RGX matched `"aabc"` because the subexpr `Then`/`Prune` handler only cleared the *local* backtrack stack — the outer `.*?`'s retry frame on `ctx.backtrack_stack` (global) survived, and after the body failed, `.*?` expanded to consume one character and the pattern succeeded. Same false-positive mode on 4 variants in testinput1:5070/5080/5086/5096.
+- Fix: `rgx-core/src/vm.rs::execute_subexpr_inner` — the `Prune` / `Then` arm now also clears `ctx.backtrack_stack` when `ctx.alt_boundaries` is empty (i.e., no enclosing alternation to jump to). That's the exact condition under which PCRE2 degrades `THEN` to `PRUNE`, so clearing the outer stack matches the semantic precisely. Runs with an enclosing alternation still leave the outer stack alone: the alt-jump is handled at a higher level and doesn't need PRUNE's reach.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,651 → 12,654 pass** (+3), 159 → 156 fail. Ratchet baselines bumped to `PASS_BASELINE=12_654` / `FAIL_BASELINE=156`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `^.*? (a(*THEN)b)++ c` and sibling possessive patterns. **Twenty-third engine fix of the session; conformance at ~98.8%**.
+
 ### 2026-04-22 - VM: `X*` greedy also switches to Split-based inlining when body has nested quantifier or alternation (+5 passes, engine #22)
 
 - Scope: `^(a+)*ax` on `"aax"` — PCRE2 matches `"aax"` (outer `*` runs one iteration consuming `"a"`, then the trailing `ax` matches pos 1-3). RGX returned no match because `StarGreedy` executed the body `(a+)` via the subexpr opcode: the inner `a+`'s backtrack frames lived on a local stack that was discarded when the iteration returned. When `ax` later failed, the VM couldn't backtrack into the inner `a+` to shorten its match. Same failure on `^((a|b)+)*ax`, `^((a|bc)+)*ax`, and 2 more. Companion to engine fix #15 which did the same inline transform for `X+`; the `X*` gap went unfixed.
