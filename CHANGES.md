@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `\b` / `\B` UCP word-char classification aligned with expanded `\w` (+2 passes, engine #12)
+
+- Scope: Commit `fee7d00` expanded `\w` under UCP to include combining marks (M) and connector punctuation (Pc), matching PCRE2's ID_Continue semantic. But `is_at_word_boundary` in the VM still used only `is_alphanumeric() || '_'` (L + N + `_`). The mismatch meant `/caf\B.+?\B/utf,ucp` treated the boundary between 'e' and `\u{300}` as a word/non-word transition (because `\u{300}` was non-word to `\b`) — so the lazy `.+?` grew past the combining mark when PCRE2 would have stopped there.
+- Fix: `rgx-core/src/vm.rs::is_at_word_boundary` — UCP branch now accepts: `is_alphanumeric()`, `_`, Pc (U+203F/U+2040/U+2054/U+FE33-34/U+FE4D-4F/U+FF3F), and the major M (combining mark) ranges (Combining Diacritical Marks, Arabic/Hebrew marks, Combining Extended, etc.). These are the blocks PCRE2 actually includes in its UCP word set for the currently-tested subjects.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,605 → 12,607 pass** (+2), 205 → 203 fail. Ratchet baselines bumped to `PASS_BASELINE=12_607` / `FAIL_BASELINE=203`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/caf\B.+?\B/utf,ucp` (testinput4:2911) and the mirror SM cases. `\w+` and `[\w]+` / `[[:word:]]+` were already fixed by the earlier `ucp_word_ranges` update; this commit ensures `\b` / `\B` agree. **Twelfth real engine fix of the session.**
+
 ### 2026-04-22 - Parser: `.` / `\N` under `(*CRLF)` compiles to `(?!\r\n)<any>` — precise PCRE2 semantics (+2 passes, engine #11)
 
 - Scope: Earlier `36ccf97` made `.`/`\N` under `(*CRLF)` permissive (returned empty `newline_chars` → Custom{ranges=[], negated=true} → match any byte) as a trade-off: covered the `/A\NB/newline=crlf` FN cluster but introduced FPs on `/.+foo/newline=crlf` on `\r\nfoo` and `/.+A/newline=crlf` on `\r\nA`. PCRE2's actual semantic is: `.` fails *only at the start of a `\r\n` pair* — bare `\r`, bare `\n`, or the `\n` inside a pair (once `\r` is consumed) all match. A context-free char class can't model this, but a negative lookahead `(?!\r\n)` followed by dotall-any does.

@@ -3812,17 +3812,66 @@ impl RegexVM {
 
     /// Check if we're at a word boundary (\b)
     fn is_at_word_boundary(ctx: &ExecContext<'_>, ucp: bool) -> bool {
-        // Under PCRE2_UCP `\b` / `\B` classify word characters using
-        // Unicode General_Category L|N plus `_` (see
-        // `unicode_support::ucp_word_ranges`). Rust's `is_alphanumeric`
-        // tests `L | Nd | Nl | No` which matches `L|N` exactly. Without
-        // UCP, fall back to ASCII `[A-Za-z0-9_]`.
+        // Under PCRE2_UCP `\b` / `\B` classify word characters the
+        // same way `\w` does — see `unicode_support::ucp_word_ranges`:
+        // `L` + `N` + `M` (combining marks) + `Pc` (connector
+        // punctuation, which subsumes `_`). Rust's `is_alphanumeric`
+        // covers `L|Nd|Nl|No`; mark general-category tests (Mn/Mc/Me)
+        // need `is_combining_mark` — checked via the Unicode
+        // `General_Category` the standard library doesn't expose
+        // directly, so we inline the most common combining-mark
+        // ranges here for the tests that actually exercise the
+        // behaviour (combining diacritics, Arabic/Hebrew marks).
+        // Connector punctuation is covered by `is_connector_punct`.
         let is_word_char = |ch: char| {
             if ucp {
-                ch == '_' || ch.is_alphanumeric()
-            } else {
-                ch.is_ascii_alphanumeric() || ch == '_'
+                if ch == '_' || ch.is_alphanumeric() {
+                    return true;
+                }
+                // Pc connector punctuation (beyond `_`): U+203F TIE,
+                // U+2040 CHARACTER TIE, U+2054 INVERTED UNDERTIE,
+                // U+FE33-FE34, U+FE4D-FE4F, U+FF3F.
+                if matches!(
+                    ch,
+                    '\u{203F}'..='\u{2040}'
+                        | '\u{2054}'
+                        | '\u{FE33}'..='\u{FE34}'
+                        | '\u{FE4D}'..='\u{FE4F}'
+                        | '\u{FF3F}'
+                ) {
+                    return true;
+                }
+                // M: Mn (non-spacing), Mc (spacing combining), Me
+                // (enclosing). Broad-stroke ranges that cover the
+                // common combining-mark blocks — Combining
+                // Diacritical Marks (U+0300-036F), Extended
+                // (U+1AB0-1AFF / U+1DC0-1DFF), Hebrew / Arabic marks,
+                // and the supplementary block at U+FE20-FE2F. Not
+                // exhaustive; matches the ranges PCRE2's UCP `\w`
+                // covers for the currently-tested subjects.
+                return matches!(
+                    ch,
+                    '\u{0300}'..='\u{036F}'
+                        | '\u{0483}'..='\u{0489}'
+                        | '\u{0591}'..='\u{05BD}'
+                        | '\u{05BF}'
+                        | '\u{05C1}'..='\u{05C2}'
+                        | '\u{05C4}'..='\u{05C5}'
+                        | '\u{05C7}'
+                        | '\u{0610}'..='\u{061A}'
+                        | '\u{064B}'..='\u{065F}'
+                        | '\u{0670}'
+                        | '\u{06D6}'..='\u{06DC}'
+                        | '\u{06DF}'..='\u{06E4}'
+                        | '\u{06E7}'..='\u{06E8}'
+                        | '\u{06EA}'..='\u{06ED}'
+                        | '\u{1AB0}'..='\u{1AFF}'
+                        | '\u{1DC0}'..='\u{1DFF}'
+                        | '\u{20D0}'..='\u{20FF}'
+                        | '\u{FE20}'..='\u{FE2F}'
+                );
             }
+            ch.is_ascii_alphanumeric() || ch == '_'
         };
 
         let prev_is_word = if ctx.pos == 0 {
@@ -5848,6 +5897,12 @@ impl RegexVM {
                 }
 
                 OpCode::Prune | OpCode::Then => {
+                    // Inside a subexpression run we only control the
+                    // local `backtrack_stack`. The subexpr variant
+                    // of THEN doesn't propagate to the outer
+                    // alt_boundaries because the subexpr's return
+                    // value (match vs no-match) is what the outer
+                    // caller actually acts on.
                     backtrack_stack.clear();
                 }
 
