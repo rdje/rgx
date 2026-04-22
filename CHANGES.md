@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Parser: `[:word:]` under UCP aligned with `\w` (+1 pass)
+
+- Scope: The previous UCP `\w` expansion (M + Pc) didn't reach the POSIX `[:word:]` class. `ucp_posix_class_ranges` "word" arm still unioned only L + N + `_`. `/[[:word:]]+/utf,ucp` on `"--cafe\u{300}_au\u{203f}lait!"` stopped at `cafe` while `/\w+/utf,ucp` correctly extended through combining marks and connector punctuation.
+- Fix: `rgx-core/src/parsing.rs::ucp_posix_class_ranges` — "word" arm now unions L + N + M + Pc (same as `ucp_word_ranges`).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,607 → 12,608 pass** (+1), 203 → 202 fail. Ratchet baselines bumped to `PASS_BASELINE=12_608` / `FAIL_BASELINE=202`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/[[:word:]]+/utf,ucp` (testinput4:2902).
+
 ### 2026-04-22 - VM: `\b` / `\B` UCP word-char classification aligned with expanded `\w` (+2 passes, engine #12)
 
 - Scope: Commit `fee7d00` expanded `\w` under UCP to include combining marks (M) and connector punctuation (Pc), matching PCRE2's ID_Continue semantic. But `is_at_word_boundary` in the VM still used only `is_alphanumeric() || '_'` (L + N + `_`). The mismatch meant `/caf\B.+?\B/utf,ucp` treated the boundary between 'e' and `\u{300}` as a word/non-word transition (because `\u{300}` was non-word to `\b`) — so the lazy `.+?` grew past the combining mark when PCRE2 would have stopped there.

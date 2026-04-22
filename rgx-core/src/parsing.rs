@@ -3106,8 +3106,11 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
         "digit" => p("Nd"),
         "lower" => p("Ll"),
         "upper" => p("Lu"),
+        // PCRE2 `[:word:]` under UCP matches the same set as `\w`:
+        // L + N + M (combining marks) + Pc (connector punctuation
+        // including `_`). See `ucp_word_ranges` for rationale.
         "word" => {
-            let mut v = merge(&["L", "N"]);
+            let mut v = merge(&["L", "N", "M", "Pc"]);
             v.push(CharRange::single('_'));
             v.sort_by_key(|r| r.start);
             v

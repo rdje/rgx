@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Parser: `[:word:]` under UCP aligned with `\w` (+1 pass)
+- **What**: `ucp_posix_class_ranges` "word" arm still had L + N + `_`; updated to L + N + M + Pc matching `ucp_word_ranges`.
+- **Delta**: 12,607 → 12,608 (+1 pass), 203 → 202 fail. Baselines 12,608 / 202.
+
 ### 2026-04-22 — VM: `\b`/`\B` UCP word-char now aligned with expanded `\w` (+2 passes, engine fix #12)
 - **What**: `ucp_word_ranges` already included M + Pc (fee7d00), but `is_at_word_boundary` still used only `is_alphanumeric()` + `_`. Mismatch made `\B` treat combining marks as non-word, so `/caf\B.+?\B/utf,ucp` grew past `\u{300}`. Extended boundary check to cover Pc connectors and major M blocks (Combining Diacritical Marks, Arabic/Hebrew marks, Extended combining).
 - **Delta**: 12,605 → 12,607 (+2 pass), 205 → 203 fail. Baselines 12,607 / 203.
