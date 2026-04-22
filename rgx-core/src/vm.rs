@@ -606,6 +606,17 @@ pub struct ExecContext<'a> {
     /// On match failure, the scanning loop advances to this position instead
     /// of `start + 1`.
     pub skip_position: Option<usize>,
+    /// Set by `(*ACCEPT)` — forces an immediate successful match,
+    /// bubbling through any enclosing subexpression runs. PCRE2
+    /// docs: "(*ACCEPT) ... causes the match to succeed immediately;
+    /// any containing groups are closed." Compiling ACCEPT as
+    /// plain `Match` only short-circuits the innermost subexpr,
+    /// which fails when ACCEPT sits inside a quantifier body (the
+    /// outer quantifier sees a successful zero-width iteration and
+    /// keeps running). The flag lets every execute layer detect
+    /// the force-match and return `true` without consulting the
+    /// remaining opcodes.
+    pub accept_forced: bool,
     /// A11: stack of `(*MARK:name)` records `(name, text_pos)` collected
     /// during the current match attempt. Used by `(*SKIP:name)` to look
     /// up the most recent matching mark — the SKIP advances the scan
@@ -1088,6 +1099,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
             suspension: None,
@@ -1222,6 +1234,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
             suspension: None,
@@ -1293,6 +1306,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
             suspension: None,
@@ -1347,6 +1361,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
             suspension: None,
@@ -2122,6 +2137,7 @@ impl RegexVM {
             previous_match_end: ctx.previous_match_end,
             committed: ctx.committed,
             skip_position: ctx.skip_position,
+            accept_forced: ctx.accept_forced,
             marks: ctx.marks.clone(),
             suspendable: ctx.suspendable,
             suspension: None,
@@ -2161,11 +2177,20 @@ impl RegexVM {
         let trail_mark = ctx.capture_trail.len();
         let saved_code_result = ctx.code_result.clone();
         let saved_alternative = ctx.current_alternative;
+        // `(*ACCEPT)` inside a subroutine call is scoped to that
+        // recursion per pcre2pattern(3): "If (*ACCEPT) is inside
+        // a subpattern call, only that subpattern is ended." Save
+        // the outer flag, clear it for the subroutine body, and
+        // restore on return. Without this, an ACCEPT inside `(?1)`
+        // would bubble into the caller and end the whole match.
+        let saved_accept_forced = ctx.accept_forced;
+        ctx.accept_forced = false;
 
         ctx.recursion_stack.push((target, ctx.pos));
         let matched = self.execute_subexpr(ctx, code);
         ctx.recursion_stack.pop();
         ctx.current_alternative = saved_alternative;
+        ctx.accept_forced = saved_accept_forced;
 
         if matched {
             // PCRE2 semantics: subroutine calls advance position but do NOT
@@ -2229,6 +2254,15 @@ impl RegexVM {
                 return false;
             }
 
+            // `(*ACCEPT)` inside a subexpression sets this flag
+            // and returns `true` from its local run. When the main
+            // dispatch resumes here after a subexpr call, propagate
+            // the force-match up so the full pattern succeeds at
+            // the current position without executing any trailing
+            // opcodes.
+            if ctx.accept_forced {
+                return true;
+            }
             let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
             trace_log!(
                 "vm",
@@ -2547,6 +2581,17 @@ impl RegexVM {
 
                 OpCode::Match => {
                     debug_log!("vm", "  ✓✓ MATCH opcode reached at pos={}", ctx.pos);
+                    return true;
+                }
+
+                OpCode::Accept => {
+                    // (*ACCEPT): like `Match` at the top level, but
+                    // the flag tells any enclosing
+                    // `execute_subexpr_inner` run to also return
+                    // true immediately instead of letting the outer
+                    // quantifier / atomic / lookaround keep
+                    // scanning past the ACCEPT point.
+                    ctx.accept_forced = true;
                     return true;
                 }
 
@@ -3348,7 +3393,9 @@ impl RegexVM {
     /// Probe whether a sub-expression can match once while advancing the input.
     fn probe_subexpr<'a>(&self, ctx: &ExecContext<'a>, code: &[u8]) -> Option<ExecContext<'a>> {
         let mut probe_ctx = Self::clone_exec_context(ctx);
-        if self.execute_subexpr(&mut probe_ctx, code) && probe_ctx.pos != ctx.pos {
+        if self.execute_subexpr(&mut probe_ctx, code)
+            && (probe_ctx.pos != ctx.pos || probe_ctx.accept_forced)
+        {
             Some(probe_ctx)
         } else {
             None
@@ -4017,6 +4064,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
             suspension: None,
@@ -4288,6 +4336,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            accept_forced: false,
             marks: Vec::new(),
             suspendable: true,
             suspension: None,
@@ -4452,6 +4501,7 @@ impl RegexVM {
             previous_match_end: state.previous_match_end,
             committed: state.committed,
             skip_position: state.skip_position,
+            accept_forced: false,
             marks: state.marks,
             suspendable: true,
             suspension: None,
@@ -4734,6 +4784,10 @@ impl RegexVM {
 
             match op {
                 OpCode::Match => return true,
+                OpCode::Accept => {
+                    ctx.accept_forced = true;
+                    return true;
+                }
                 OpCode::Fail => {
                     if self.try_backtrack(ctx, &mut ip) {
                         continue;
@@ -5230,6 +5284,13 @@ impl RegexVM {
                 return true; // Successfully executed all instructions
             }
 
+            // See top-level dispatch: `(*ACCEPT)` signals the
+            // subexpr to bubble success upward. Honour it in
+            // subexpr context too, otherwise nested quantifier
+            // bodies ignore the force-match.
+            if ctx.accept_forced {
+                return true;
+            }
             let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
             ip += 1;
 
@@ -5904,6 +5965,13 @@ impl RegexVM {
                             local_backtrack_or_return_false!();
                         }
                     }
+                    return true;
+                }
+
+                OpCode::Accept => {
+                    // Force-match: signals the caller to short-circuit
+                    // all enclosing subexpr contexts too.
+                    ctx.accept_forced = true;
                     return true;
                 }
 
@@ -7515,8 +7583,18 @@ impl OptimizingCompiler {
             }
 
             Regex::Accept => {
-                // (*ACCEPT): force immediate match at current position.
-                self.emit_op(OpCode::Match);
+                // (*ACCEPT): force immediate match at current
+                // position. Emits the dedicated `Accept` opcode
+                // (distinct from `Match`) so the runtime can set
+                // `ctx.accept_forced` and bubble the success
+                // through any enclosing subexpression layers — a
+                // plain `Match` would only short-circuit the
+                // innermost subexpr (e.g. the probe body of a
+                // `QuestionLazy` / `StarLazy` quantifier), letting
+                // the outer quantifier continue to run and miss
+                // the force-match semantic. See the `OpCode::Accept`
+                // dispatch below.
+                self.emit_op(OpCode::Accept);
             }
 
             Regex::Commit => {
@@ -8243,14 +8321,14 @@ impl TryFrom<u8> for OpCode {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
-            AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart, Backref, BackrefCaseInsensitive,
-            Call, Char, CharClass, CharClassNeg, CodeBlock, Commit, DigitAscii, DigitAsciiNeg,
-            EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch,
-            Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark, Match, MatchReset,
-            NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy,
-            QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split,
-            SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then, VerbSkip, VerbSkipNamed,
-            WordAscii, WordAsciiNeg, WordBoundary,
+            Accept, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart, Backref,
+            BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock, Commit,
+            DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump,
+            JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark,
+            Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune,
+            QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
+            SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
+            VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -8307,6 +8385,7 @@ impl TryFrom<u8> for OpCode {
             0xA5 => Ok(VerbSkipNamed),
             0xF0 => Ok(Match),
             0xF1 => Ok(Fail),
+            0xF2 => Ok(Accept),
             _ => Err(()),
         }
     }

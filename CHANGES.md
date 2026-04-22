@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - VM: `(*ACCEPT)` emits dedicated opcode; force-match bubbles through subexpr layers and probes (+5 passes, engine #18)
+
+- Scope: `(*ACCEPT)` was being emitted as plain `OpCode::Match`. That short-circuits the innermost subexpr context but leaves the outer quantifier / lookaround / enclosing group still executing, so PCRE2-compatible force-match semantics broke down anywhere `(*ACCEPT)` sat inside a lazy quantifier or atomic body. Symptoms:
+  - `a(*ACCEPT)??bc` on `"axy"` should match `"a"` (lazy 1-iter path takes ACCEPT, match ends) — RGX returned no match.
+  - `(?>.(*ACCEPT))*?5` on `"abcde"` should match `"a"` — RGX returned no match.
+  - `(.(*ACCEPT))*?5` / `a(?:(*ACCEPT))??bc` / `a(*ACCEPT:XX)??bc` / `(A(*ACCEPT)??B)C` all in the same family.
+- Fix: three coupled changes in `rgx-core/src/vm.rs`.
+  1. New `ExecContext.accept_forced: bool` flag — runtime signal that `(*ACCEPT)` fired.
+  2. `Regex::Accept` now lowers to `OpCode::Accept` (byte `0xF2`, already reserved in the enum — `TryFrom<u8>` learned the mapping). Accept's dispatch arm in the top-level interpreter, `execute_at_continuation`, and `execute_subexpr_inner` sets `ctx.accept_forced = true` and returns `true`.
+  3. All three dispatch loops check `ctx.accept_forced` at the top of each iteration and propagate via `return true`, so a subexpr that returned true on an ACCEPT bubbles all the way to the scanning loop without executing trailing opcodes.
+  4. `probe_subexpr` now accepts zero-width body matches when `accept_forced` is set — previously it required `probe_ctx.pos != ctx.pos`, which rejected probe bodies that only fired `(*ACCEPT)` (the `QuestionLazy` / `StarLazy` backtrack frame was then never pushed).
+  5. `invoke_subroutine` save/restore `accept_forced` across the call per pcre2pattern(3): "If `(*ACCEPT)` is inside a subpattern call, only that subpattern is ended." Prevents an ACCEPT inside `(?1)` / `(?R)` / DEFINE from bubbling into the caller.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,630 → 12,635 pass** (+5), 180 → 175 fail. Ratchet baselines bumped to `PASS_BASELINE=12_635` / `FAIL_BASELINE=175`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(.(*ACCEPT))*5`, `(.(*ACCEPT))*?5`, `(?>.(*ACCEPT))*?5` (testinput2:3106/3112/3103), `a(?:(*ACCEPT))??bc`, `a(*ACCEPT)??bc`, `a(*ACCEPT:XX)??bc` (testinput2:6075/6079/6083). The `endanchored` + ACCEPT case (testinput2:5472) and the `(*napla:…)` nonatomic-lookahead + ACCEPT (testinput2:6189) remain as separate feature gaps. **Eighteenth engine fix of the session; conformance at ~98.6%**.
+
 ### 2026-04-22 - Toolchain: MSRV bumped from 1.88 to 1.95
 
 - Scope: Workspace `rust-version` and the Book's contributor-setup note pointed at older toolchains. The local build has moved to Rust 1.95.0 (2026-04-14) and the user wants the supported minimum to follow.

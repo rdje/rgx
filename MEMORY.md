@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — VM: (*ACCEPT) emits dedicated opcode; force-match bubbles through subexpr + probe (+5 passes, engine fix #18)
+- **What**: `(*ACCEPT)` was compiled as plain `OpCode::Match`. Short-circuited innermost subexpr only — outer quantifier / lookaround kept running. New `ExecContext.accept_forced` flag. Dedicated `OpCode::Accept` (0xF2) sets the flag + returns true. All three dispatch loops check the flag at top of iteration and propagate `return true`. `probe_subexpr` accepts zero-width match when flag is set. `invoke_subroutine` save/restores the flag across recursion calls (PCRE2 scopes ACCEPT to the subpattern). Required adding `0xF2 => Ok(Accept)` to TryFrom<u8> — opcode was previously reserved but not decoded.
+- **Delta**: 12,630 → 12,635 (+5 pass), 180 → 175 fail. Baselines 12,635 / 175. Closes the `(.(*ACCEPT))*5`, `(?>.(*ACCEPT))*?5`, `a(*ACCEPT)??bc` clusters (6 cases across testinput2). Conformance ~98.6%.
+
 ### 2026-04-22 — MSRV bump 1.88 → 1.95
 - **What**: User upgraded their local toolchain to Rust 1.95 and wanted the workspace MSRV to follow. `Cargo.toml::workspace.package.rust-version` bumped from 1.88 to 1.95; the contributor-setup note in `book/src/internals/contributing.md` updated from "1.85 or newer" to "1.95 or newer". No code changes needed.
 - **Validation**: 1,052 lib + 30 CLI tests green; clippy clean; conformance ratchet intact (12,630 / 180).
