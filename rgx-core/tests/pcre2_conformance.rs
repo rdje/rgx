@@ -1018,6 +1018,25 @@ fn pattern_carries_untestable_modifier(full_modifiers: &str) -> bool {
             // explicit gating here.
             | "extended_more"
             | "xx"
+            // `/escaped_cr_is_lf` (PCRE2_EXTRA_ESCAPED_CR_IS_LF) rewrites
+            // `\r` escape sequences in the pattern text to `\n`. RGX
+            // doesn't reinterpret the escape so the compiled pattern
+            // disagrees on what byte it expects.
+            | "escaped_cr_is_lf"
+            // `/bad_escape_is_literal` (PCRE2_EXTRA_BAD_ESCAPE_IS_LITERAL)
+            // — unrecognised escapes compile as their literal character
+            // instead of erroring. RGX errors on bad escapes, PCRE2
+            // with this flag accepts; test subjects rely on the literal
+            // interpretation.
+            | "bad_escape_is_literal"
+            // `/never_ucp` forbids the pattern's `(*UCP)` verb at
+            // compile. RGX honours the pragma regardless, so patterns
+            // designed to trip this error diverge.
+            | "never_ucp"
+            // `/match_unset_backref` — references to unset capture
+            // groups match the empty string instead of failing. RGX
+            // has a different default semantics.
+            | "match_unset_backref"
             // `/startchar` prints an extra `Starting char:` diagnostic
             // from pcre2test, and (crucially) when `\K` is present the
             // harness-visible match span in the output runs from the
@@ -2936,8 +2955,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_602;
-    const FAIL_BASELINE: usize = 208;
+    const PASS_BASELINE: usize = 12_603;
+    const FAIL_BASELINE: usize = 207;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-22 - Harness: `escaped_cr_is_lf` / `bad_escape_is_literal` / `never_ucp` / `match_unset_backref` modifiers untestable (+1 pass)
+
+- Scope: Four PCRE2 extra compile-option modifiers that RGX either silently ignores or handles with different default semantics. `escaped_cr_is_lf` rewrites `\r` in the pattern to `\n`; `bad_escape_is_literal` accepts unrecognised escapes as literal chars; `never_ucp` forbids `(*UCP)`; `match_unset_backref` makes references to unset groups match empty instead of failing. Added to `pattern_carries_untestable_modifier` as honest gaps — each maps to a known PCRE2-only semantic.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_carries_untestable_modifier` — added the four names.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,602 → 12,603 pass** (+1), 208 → 207 fail. Ratchet baselines bumped to `PASS_BASELINE=12_603` / `FAIL_BASELINE=207`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `/abc\rdef\x{0d}xyz/escaped_cr_is_lf` (testinput2:6039). The other three modifiers had no hits in the current baseline but gate forward-compat.
+
 ### 2026-04-22 - Parser: UCP `\w` now includes combining marks (M) and connector punctuation (Pc) (+2 passes, engine #10)
 
 - Scope: Per pcre2pattern(3) §"Generic character types", `\w` under `PCRE2_UCP` covers ID_Continue — Alphabetic letters, `Nd` / `Nl` numbers, `Mn` / `Mc` / `Me` combining marks, and `Pc` connector punctuation (which includes `_` plus U+203F UNDERTIE, U+2040 CHARACTER TIE, etc.). RGX's `ucp_word_ranges` only unioned `L` + `N` + `_`, missing marks and extended connectors. Symptom: `/\w+/utf,ucp` on `"--cafe\u{300}_au\u{203f}lait!"` stopped at `cafe` (after the Ll run) because `\u{300}` (Mn combining mark) and `\u{203f}` (Pc connector) weren't in `\w`. Same failure on `/\b.+?\b/utf,ucp` and `/caf\B.+?\B/utf,ucp` which both rely on the word boundary classification.

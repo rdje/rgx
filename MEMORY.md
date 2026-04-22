@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-22 — Harness: `escaped_cr_is_lf`/`bad_escape_is_literal`/`never_ucp`/`match_unset_backref` untestable (+1 pass)
+- **What**: Four PCRE2 extra compile-option modifiers RGX ignores or defaults differently. Added to pattern_carries_untestable_modifier.
+- **Delta**: 12,602 → 12,603 (+1 pass), 208 → 207 fail. Baselines 12,603 / 207.
+
 ### 2026-04-22 — Parser: UCP `\w` now includes M + Pc (+2 passes, engine fix #10)
 - **What**: Per pcre2pattern(3), UCP `\w` covers ID_Continue: Alphabetic + Nd/Nl + M (all mark categories) + Pc (connector punctuation). RGX's `ucp_word_ranges` only had L + N + _. Added M + Pc. Combining marks like U+300 and connector punctuation like U+203F UNDERTIE now match `\w` under /utf,ucp.
 - **Delta**: 12,600 → 12,602 (+2 pass), 210 → 208 fail. Baselines 12,602 / 208. ~98.4% conformance.
