@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: lookbehind body honours a must-end-at target so greedy bodies backtrack to the anchor (+2 passes, engine #32)
+
+- Scope: `(?<!a?)` on `"a"` — PCRE2 expects no match because `a?` can always match the empty string, making the negative lookbehind always fail. RGX matched at pos 0 because the lookbehind's greedy `a?` body consumed the `'a'` and advanced the clone's `pos` to 1. The outer post-check `lookbehind_ctx.pos == assertion_end` rejected that, but the body's local backtrack stack was already gone — the alternate "match empty" branch couldn't be tried, so the whole lookbehind body reported failure and the negative assertion falsely succeeded.
+- Fix: `rgx-core/src/vm.rs` — new `execute_subexpr_ending_at` variant of the subexpr interpreter that takes a `must_end_at: Option<usize>` parameter. At end-of-code, if pos doesn't equal the target, the body triggers an internal local backtrack and retries shorter alternatives; only a body that lands exactly on the anchor returns true. `execute_lookbehind_assertion` now calls that variant instead of running the body + post-check. Works for any lookbehind body whose natural match length is variable (optional / alternation / quantified).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,691 → 12,693 pass** (+2), 119 → 117 fail. Ratchet baselines bumped to `PASS_BASELINE=12_693` / `FAIL_BASELINE=117`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(?<!a?)` on `"a"` (testinput1:6791) plus a sibling case. **Thirty-second engine fix of the session; conformance at ~99.1%**.
+
 ### 2026-04-24 - VM: lookbehind body no longer truncates subject end, so nested lookaheads can peek past `assertion_end` (+2 passes, engine #31)
 
 - Scope: `(?<=(?=.(?<=x)))` asserts "the character at the current position is `x`" via a zero-width lookbehind whose body is a lookahead that peeks forward one character then looks back. RGX's `execute_lookbehind_assertion` truncated the subject to `end = assertion_end` before running the body, so the inner lookahead couldn't see the character at `assertion_end` (and beyond) to assert its existence. Result: false negative on `"abx"`, `"bxyz"`, and other subjects where the asserted 'x' sits at or after the lookbehind's current position.

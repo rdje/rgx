@@ -5422,11 +5422,36 @@ impl RegexVM {
         self.execute_subexpr_inner(ctx, code, Some(origin))
     }
 
+    /// Like [`execute_subexpr`], but requires the body to end at
+    /// exactly `target_end`. Used by `execute_lookbehind_assertion`
+    /// so a greedy lookbehind body that overshoots the assertion's
+    /// anchor position triggers an internal back-track through the
+    /// body's local stack, retrying until a match lands on the
+    /// boundary or all alternatives are exhausted.
+    fn execute_subexpr_ending_at(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        target_end: usize,
+    ) -> bool {
+        self.execute_subexpr_inner_full(ctx, code, None, Some(target_end))
+    }
+
     fn execute_subexpr_inner(
         &self,
         ctx: &mut ExecContext<'_>,
         code: &[u8],
         must_advance_from: Option<usize>,
+    ) -> bool {
+        self.execute_subexpr_inner_full(ctx, code, must_advance_from, None)
+    }
+
+    fn execute_subexpr_inner_full(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        must_advance_from: Option<usize>,
+        must_end_at: Option<usize>,
     ) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
@@ -5457,6 +5482,18 @@ impl RegexVM {
                 // matches by back-tracking through alternatives.
                 if let Some(origin) = must_advance_from {
                     if ctx.pos == origin {
+                        local_backtrack_or_return_false!();
+                    }
+                }
+                // When must_end_at is set, require the body to
+                // finish exactly at that position — a greedy
+                // overshoot triggers an internal backtrack through
+                // the body's local stack so alternative shorter
+                // matches get a chance. Used by lookbehind
+                // assertions to enforce the "body consumed content
+                // ending at the anchor" boundary.
+                if let Some(end) = must_end_at {
+                    if ctx.pos != end {
                         local_backtrack_or_return_false!();
                     }
                 }
@@ -6444,12 +6481,13 @@ impl RegexVM {
             // current position is `x`). Leave `end` at the full
             // subject length so the forward-facing nested
             // assertion can see the character at `assertion_end`
-            // and beyond; the `lookbehind_ctx.pos == assertion_end`
-            // post-check still enforces the backward-match
-            // boundary for the lookbehind's consuming content.
-            if self.execute_subexpr(&mut lookbehind_ctx, code)
-                && lookbehind_ctx.pos == assertion_end
-            {
+            // and beyond; `execute_subexpr_ending_at` enforces
+            // the "body must consume content ending at the
+            // anchor" boundary by triggering internal backtracks
+            // when a greedy body overshoots — the key to getting
+            // `(?<!a?)` to fail on `"a"` where `a?` can match
+            // empty at the anchor position.
+            if self.execute_subexpr_ending_at(&mut lookbehind_ctx, code, assertion_end) {
                 if propagate_captures {
                     ctx.captures = lookbehind_ctx.captures;
                     ctx.capture_trail = lookbehind_ctx.capture_trail;

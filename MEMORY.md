@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: lookbehind body must-end-at triggers internal backtrack (+2 passes, engine fix #32)
+- **What**: `(?<!a?)` on "a" falsely matched. Greedy `a?` consumed 'a', body returned true with pos=1, post-check pos≠assertion_end rejected — but the body's local alt-frames were already gone. New `execute_subexpr_ending_at` variant takes must_end_at: Option<usize>. At end-of-code, if pos != target, trigger internal local backtrack to try shorter alternatives. Replaces the external post-check in execute_lookbehind_assertion.
+- **Delta**: 12,691 → 12,693 (+2), 119 → 117. Baselines 12,693 / 117.
+
 ### 2026-04-24 — VM: lookbehind body keeps full subject visible (+2 passes, engine fix #31)
 - **What**: `execute_lookbehind_assertion` was truncating `lookbehind_ctx.end = assertion_end` before running the body. Patterns like `(?<=(?=.(?<=x)))` (zero-width lookbehind whose body peeks forward via an inner lookahead) couldn't see the char at/past assertion_end and failed. Drop the truncation; post-match check `pos == assertion_end` still enforces the consuming boundary for the lookbehind itself.
 - **Delta**: 12,689 → 12,691 (+2), 121 → 119. Baselines 12,691 / 119.
