@@ -2132,6 +2132,18 @@ impl RegexVM {
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
     fn try_backtrack(&self, ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
+        // `(*COMMIT)` already fired during this match attempt
+        // (either directly or propagated from a failing assertion
+        // body). PCRE2's semantic is that the current match
+        // attempt is aborted — no further backtracking allowed,
+        // even into frames that were pushed before the commit.
+        // Clear the remaining stack so higher-level code treats
+        // the attempt as failed cleanly.
+        if ctx.committed {
+            ctx.backtrack_stack.clear();
+            ctx.alt_boundaries.clear();
+            return false;
+        }
         if let Some(frame) = ctx.backtrack_stack.pop() {
             // `(*COMMIT)` fired inside an atomic group and the
             // atomic is now failing: escalate to a committed abort.
@@ -2233,12 +2245,19 @@ impl RegexVM {
         // would bubble into the caller and end the whole match.
         let saved_accept_forced = ctx.accept_forced;
         ctx.accept_forced = false;
+        // `(*COMMIT)` is similarly scoped: a commit fired inside
+        // a subroutine call should not propagate to the caller's
+        // match attempt. Save/restore the scanner-abort flag
+        // around the call.
+        let saved_committed = ctx.committed;
+        ctx.committed = false;
 
         ctx.recursion_stack.push((target, ctx.pos));
         let matched = self.execute_subexpr(ctx, code);
         ctx.recursion_stack.pop();
         ctx.current_alternative = saved_alternative;
         ctx.accept_forced = saved_accept_forced;
+        ctx.committed = saved_committed;
 
         if matched {
             // PCRE2 semantics: subroutine calls advance position but do NOT
@@ -6076,22 +6095,18 @@ impl RegexVM {
                 }
 
                 OpCode::Commit => {
-                    // Subexpr context (typically an assertion body):
-                    // COMMIT only sets the scanner-abort flag on the
-                    // current `ctx` (which is the assertion's cloned
-                    // context for lookahead/lookbehind). It does NOT
-                    // clear the local backtrack stack, because that
-                    // would prevent the assertion's remaining
-                    // alternatives from being tried — e.g.
-                    // `(?=b(*COMMIT)c|)` on `"bd"` should still
-                    // succeed via the empty second branch after the
-                    // first branch fails past COMMIT. The commit's
-                    // effect on the outer scanner is scoped: since
-                    // `execute_assertion_subexpr` discards the
-                    // clone's committed flag, a zero-width assertion
-                    // absorbs COMMIT entirely. For non-assertion
-                    // subexpr paths the flag still reaches the
-                    // outer scanner via shared `ctx`.
+                    // Subexpr context: clear the local backtrack
+                    // stack so the COMMIT point cannot be
+                    // revisited by subsequent fallback branches
+                    // within this subexpr, and set the scanner-
+                    // abort flag on `ctx`. In assertion context,
+                    // `execute_assertion_subexpr` gates the
+                    // propagation of that flag on the assertion
+                    // body actually failing — a subsequent alt of
+                    // the assertion that succeeds absorbs the
+                    // commit; a pure failure exposes it to the
+                    // outer match attempt.
+                    backtrack_stack.clear();
                     ctx.committed = true;
                 }
 
@@ -6196,16 +6211,18 @@ impl RegexVM {
             ctx.captures = assertion_ctx.captures;
             ctx.capture_trail = assertion_ctx.capture_trail;
         }
-        // Per pcre2pattern(3): "(*COMMIT) in an assertion only
-        // affects the assertion." The assertion is zero-width and
-        // its internal commit/abort state must not leak to the
-        // surrounding pattern — otherwise a committed-and-failed
-        // branch of a lookahead would silently abort the outer
-        // scanner even when a later assertion branch succeeded (or
-        // when the enclosing negative lookahead intends to fail).
-        // The clone's own ctx.committed is already isolated from
-        // ours; defensively leave it discarded so a shared `ctx`
-        // mutation by some deeper subexpr can't leak back either.
+        // `(*COMMIT)` inside a FAILING assertion propagates its
+        // scanner-abort to the outer match. PCRE2 semantic: once
+        // COMMIT fires inside an assertion body and the body
+        // subsequently fails, the whole match attempt at the
+        // current start position is aborted (pcre2pattern(3):
+        // "if the assertion subsequently fails, the entire matching
+        // attempt is aborted"). If the assertion succeeded, COMMIT
+        // is absorbed — the successful zero-width match discards
+        // the commit-on-fail effect.
+        if !body_matched && assertion_ctx.committed {
+            ctx.committed = true;
+        }
         body_matched
     }
 

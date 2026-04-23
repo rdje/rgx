@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: `(*COMMIT)` propagates on assertion failure; `try_backtrack` honours `ctx.committed` (+2 passes net, engine #28)
+
+- Scope: `(?=a(*COMMIT)b|ac)ac|ac` on `"ac"` — PCRE2 expects no match because the first branch of the lookahead fires COMMIT and fails, which aborts the surrounding match attempt even though a later branch of the lookahead (or the outer alternation) could succeed. RGX matched `"ac"` through outer alt 2. Companion cases: `a(?=b(*COMMIT)c)[^d]|abd` (testinput1:5505), `(?=a(*COMMIT)b|(ac)) ac | (a)c/x` (5603), `(?1)(A(*COMMIT)|B)D` (5913).
+- Fix: `rgx-core/src/vm.rs`.
+  1. `execute_assertion_subexpr` — when the assertion body **fails** and its clone's `committed` is set, propagate to the outer `ctx.committed`. Success-on-a-later-branch absorbs the commit.
+  2. Subexpr `OpCode::Commit` restored to the clear-local-stack form (my prior revert had left alt-branches reachable, blocking the assertion-fail propagation).
+  3. `try_backtrack` now short-circuits with `return false` when `ctx.committed` is set, clearing the remaining stack. That's how the commit actually aborts the match attempt in the main dispatch — the outer alt-split frame can't be revisited once COMMIT has fired.
+  4. `invoke_subroutine` save/restore of `ctx.committed` across the call — COMMIT inside `(?1)` / `(?&name)` / `(?R)` stays scoped to the subroutine per pcre2pattern(3) ("if (*COMMIT) is inside a subpattern call, only that subpattern is ended").
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,673 → 12,675 pass** (+2 net: +4 wins at testinput1:5505/5599/5603/5913, −2 regressions at testinput2:6604/6607). Ratchet baselines bumped to `PASS_BASELINE=12_675` / `FAIL_BASELINE=135`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: The 6604/6607 regressions are cases where PCRE2's start-optimization skips the COMMIT-bearing pos 0 entirely — RGX's literal-prefix scan would need to look past a leading `a?` quantifier to achieve the same. **Twenty-eighth engine fix of the session; conformance at ~99.0%**.
+
 ### 2026-04-23 - Harness: `[X-[:class:]]` malformed range endpoints marked untestable (+2 passes)
 
 - Scope: PCRE2 rejects `[a-[:digit:]]+` and `[A-[:alpha:]]+` at compile time — a POSIX class cannot be a character-range endpoint. RGX's parser accepts them and produces a degenerate class that never matches. The harness can't reconcile "PCRE2 compile error" against "RGX compiles to a no-match," so those cases counted as false permissiveness.
