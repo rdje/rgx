@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: lookbehind body no longer truncates subject end, so nested lookaheads can peek past `assertion_end` (+2 passes, engine #31)
+
+- Scope: `(?<=(?=.(?<=x)))` asserts "the character at the current position is `x`" via a zero-width lookbehind whose body is a lookahead that peeks forward one character then looks back. RGX's `execute_lookbehind_assertion` truncated the subject to `end = assertion_end` before running the body, so the inner lookahead couldn't see the character at `assertion_end` (and beyond) to assert its existence. Result: false negative on `"abx"`, `"bxyz"`, and other subjects where the asserted 'x' sits at or after the lookbehind's current position.
+- Fix: `rgx-core/src/vm.rs::execute_lookbehind_assertion` — drop the `end = assertion_end` truncation. The body runs with the full subject visible; the post-match check `lookbehind_ctx.pos == assertion_end` still enforces that the lookbehind's *consuming* content lands exactly at the original position. Zero-width bodies that want to peek forward now work.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,689 → 12,691 pass** (+2), 121 → 119 fail. Ratchet baselines bumped to `PASS_BASELINE=12_691` / `FAIL_BASELINE=119`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput1:6493, testinput2:6222 (×2). **Thirty-first engine fix of the session; conformance at ~99.1%**.
+
 ### 2026-04-24 - VM: subexpr and continuation `Call` dispatch also push empty-match retry frames (+3 passes, engine #30)
 
 - Scope: engine fix #29 added the empty-match retry backtrack frame only to the top-level `OpCode::Call` dispatch. Patterns where `(?1)` / `(?&name)` calls are reached from inside a subexpression (e.g. the palindrome family `^((.)(?1)\2|.?)$`, `^(.|(.)(?1)\2)$`) went through the subexpr `Call` dispatch and missed the retry, so backtracking into the inner recursion couldn't try the empty-match alternative.

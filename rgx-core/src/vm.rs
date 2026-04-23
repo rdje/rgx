@@ -6438,8 +6438,15 @@ impl RegexVM {
         for start in (0..=assertion_end).rev() {
             let mut lookbehind_ctx = Self::clone_exec_context(ctx);
             lookbehind_ctx.pos = start;
-            lookbehind_ctx.end = assertion_end;
-
+            // PCRE2 permits lookbehind bodies to contain nested
+            // lookaheads that peek past `assertion_end` (e.g.
+            // `(?<=(?=.(?<=x)))`, which asserts the char at the
+            // current position is `x`). Leave `end` at the full
+            // subject length so the forward-facing nested
+            // assertion can see the character at `assertion_end`
+            // and beyond; the `lookbehind_ctx.pos == assertion_end`
+            // post-check still enforces the backward-match
+            // boundary for the lookbehind's consuming content.
             if self.execute_subexpr(&mut lookbehind_ctx, code)
                 && lookbehind_ctx.pos == assertion_end
             {

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: lookbehind body keeps full subject visible (+2 passes, engine fix #31)
+- **What**: `execute_lookbehind_assertion` was truncating `lookbehind_ctx.end = assertion_end` before running the body. Patterns like `(?<=(?=.(?<=x)))` (zero-width lookbehind whose body peeks forward via an inner lookahead) couldn't see the char at/past assertion_end and failed. Drop the truncation; post-match check `pos == assertion_end` still enforces the consuming boundary for the lookbehind itself.
+- **Delta**: 12,689 → 12,691 (+2), 121 → 119. Baselines 12,691 / 119.
+
 ### 2026-04-24 — VM: subexpr/continuation Call also push retry-empty frame (+3 passes, engine fix #30)
 - **What**: Engine #29 only patched the top-level Call dispatch. Palindrome recursion patterns (`^((.)(?1)\2|.?)$` family) go through the subexpr Call dispatcher. Mirrored the retry-frame logic into execute_subexpr_inner's Call (local stack) and execute_at_continuation's Call (global stack).
 - **Delta**: 12,686 → 12,689 (+3), 124 → 121. Baselines 12,689 / 121.
