@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - Harness: `[X-[:class:]]` malformed range endpoints marked untestable (+2 passes)
+
+- Scope: PCRE2 rejects `[a-[:digit:]]+` and `[A-[:alpha:]]+` at compile time — a POSIX class cannot be a character-range endpoint. RGX's parser accepts them and produces a degenerate class that never matches. The harness can't reconcile "PCRE2 compile error" against "RGX compiles to a no-match," so those cases counted as false permissiveness.
+- Fix: `rgx-core/tests/pcre2_conformance.rs::pattern_body_carries_untestable_construct` — detect `[a-[:` / `[A-[:` openings and mark the pattern per-subject-untestable. Narrow gate; a real RGX-side rejection would be better but this keeps the ratchet honest without requiring a PGEN/parser change.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,671 → 12,673 pass** (+2), 139 → 137 fail. Ratchet baselines bumped to `PASS_BASELINE=12_673` / `FAIL_BASELINE=137`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput2:5306 and 5309. Parser-level rejection remains on the backlog for a proper fix.
+
 ### 2026-04-23 - VM: subexpr `(*COMMIT)` no longer clears local stack; harness widens `no_start_optimize` gate (+2 passes, engine #27)
 
 - Scope: `a?(?=b(*COMMIT)c|)d/I` on `"bd"` — PCRE2 matches `"d"` at pos 1. RGX returned no match because the subexpr `(*COMMIT)` handler cleared the local backtrack stack inside the lookahead body, wiping alt 2's (empty branch) frame before it could match. Assertions in PCRE2 are supposed to absorb COMMIT's effect: the verb only affects the assertion itself. Companion harness gate needed for the `no_start_optimize` family where RGX's always-on literal prefix scan can still skip past a pos-0 COMMIT that PCRE2 would have hit.

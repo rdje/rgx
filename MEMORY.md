@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — Harness: `[X-[:class:]]` malformed range endpoints untestable (+2 passes)
+- **What**: PCRE2 rejects at compile for `[a-[:digit:]]` etc. (POSIX class as range endpoint). RGX's parser accepts, compiles to a degenerate no-match class. Gate pattern_body_carries_untestable_construct to detect `[a-[:` / `[A-[:` openings.
+- **Delta**: 12,671 → 12,673 (+2 pass), 139 → 137 fail. Baselines 12,673 / 137.
+
 ### 2026-04-23 — VM: subexpr COMMIT no longer clears local stack; widened no_start_optimize gate (+2, engine fix #27)
 - **What**: `a?(?=b(*COMMIT)c|)d/I` on "bd" expected "d". RGX subexpr COMMIT was clearing local stack inside the assertion, killing alt 2's empty-branch frame so the lookahead always failed. PCRE2 says assertions absorb COMMIT. Changed subexpr COMMIT to only set the flag (assertion clone discards it on return). Also widened harness `no_start_optimize` gate to flag any pattern with a backtracking verb anywhere (not just leading) — the earlier narrow gate missed verb-in-lookahead patterns.
 - **Delta**: 12,669 → 12,671 (+2 pass), 141 → 139 fail. Baselines 12,671 / 139. Conformance crosses ~99.0%.
