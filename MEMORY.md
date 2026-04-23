@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — VM: (*PRUNE) also clears pending (*SKIP) mark (+2 passes, engine fix #24)
+- **What**: `aaaaa(*SKIP)(*PRUNE)b|a+c` on "aaaaaac": PCRE2 expects PRUNE's "advance by 1" to supersede SKIP's "advance to mark" when PRUNE lexically follows SKIP. RGX scanner jumped to SKIP'd pos 5 → matched "ac". After fix, PRUNE clears ctx.skip_position → scanner advances by 1 → pos 2 matches "aaaac".
+- **Delta**: 12,654 → 12,656 (+2 pass), 156 → 154 fail. Baselines 12,656 / 154.
+
 ### 2026-04-22 — VM: subexpr PRUNE/THEN with no enclosing alt propagates outer stack clear (+3, engine fix #23)
 - **What**: `^.*? (a(*THEN)b)++ c/x` on "aabc" was a false positive. THEN inside the possessive body, with no enclosing alt, should degrade to PRUNE and prevent all backtracking at the current start position. Subexpr's Prune/Then handler only cleared local stack — outer .*? retry frame survived and rescued the match. Added `if ctx.alt_boundaries.is_empty() { ctx.backtrack_stack.clear() }` so the degraded-PRUNE case reaches global.
 - **Delta**: 12,651 → 12,654 (+3), 159 → 156. Baselines 12,654 / 156. Closes the THEN-inside-possessive false-positive cluster (4 cases).

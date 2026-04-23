@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: `(*PRUNE)` clears any pending `(*SKIP)` mark (+2 passes, engine #24)
+
+- Scope: `aaaaa(*SKIP)(*PRUNE)b|a+c` on `"aaaaaac"` — PCRE2 matches `"aaaac"` starting at pos 2. RGX matched `"ac"` at pos 5. Both verbs fired on alt 1's failing path: SKIP marked pos 5 (from the `(*SKIP)` position), PRUNE cut backtracking. RGX's scanner loop honoured SKIP's mark and jumped to pos 5, skipping pos 1-4. PCRE2's semantic for `(*SKIP)(*PRUNE)`: PRUNE's "advance by 1" supersedes SKIP's "advance to mark" because PRUNE comes lexically after SKIP in the pattern — so the scanner proceeds normally pos 1, 2, …, and finds the `a+c` match starting at pos 2.
+- Fix: `rgx-core/src/vm.rs::OpCode::Prune` — after clearing the backtrack stack, also clear `ctx.skip_position`. Any SKIP target pending from an earlier verb on this path is discarded, so the scanning loop falls back to `start + 1` when PRUNE's failure path unwinds. SKIP without a following PRUNE retains its advance-to-mark effect.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,654 → 12,656 pass** (+2), 156 → 154 fail. Ratchet baselines bumped to `PASS_BASELINE=12_656` / `FAIL_BASELINE=154`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `aaaaa(*SKIP)(*PRUNE)b|a+c` (testinput1:5389) and sibling `aaaaa(*SKIP)(*THEN)b|a+c` / `aaaaa(*PRUNE)(*THEN)b|a+c` variants where PRUNE's semantic needs to win over an earlier SKIP mark. **Twenty-fourth engine fix of the session; conformance at ~98.8%**.
+
 ### 2026-04-22 - VM: subexpr `(*PRUNE)` / `(*THEN)` with no enclosing alt propagate to the outer backtrack stack (+3 passes, engine #23)
 
 - Scope: `^.*? (a(*THEN)b)++ c/x` on `"aabc"` — PCRE2 expects no match because `(*THEN)` inside the possessive body has no enclosing alternation and so degrades to `(*PRUNE)`, which must prevent all backtracking at the current start position (including the outer `.*?`'s lazy retry). RGX matched `"aabc"` because the subexpr `Then`/`Prune` handler only cleared the *local* backtrack stack — the outer `.*?`'s retry frame on `ctx.backtrack_stack` (global) survived, and after the body failed, `.*?` expanded to consume one character and the pattern succeeded. Same false-positive mode on 4 variants in testinput1:5070/5080/5086/5096.

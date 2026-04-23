@@ -2721,7 +2721,19 @@ impl RegexVM {
                     // (*PRUNE): clear backtrack stack so that if the
                     // current path fails, the entire attempt at this
                     // start position fails immediately.
+                    //
+                    // When PRUNE follows a SKIP verb lexically
+                    // (`(*SKIP)(*PRUNE)` in the pattern), PCRE2's
+                    // documented behaviour is that PRUNE's
+                    // "advance by 1" supersedes SKIP's
+                    // "advance to mark" — the scanner should move
+                    // to `start + 1`, not to the SKIP'd position.
+                    // Discard any pending SKIP target so the
+                    // scanning loop falls into the default
+                    // +1-advance branch. Preserves SKIP's effect
+                    // when no PRUNE follows.
                     ctx.backtrack_stack.clear();
+                    ctx.skip_position = None;
                 }
 
                 OpCode::VerbSkip => {
