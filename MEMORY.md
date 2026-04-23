@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — Compiler: `\N{U+HEX}` pre-transform to `\x{HEX}` (+3 passes)
+- **What**: PCRE2 `\N{U+1234}` = Unicode codepoint escape. PGEN doesn't recognize; RGX was treating `\N` as dot and `{U+1234}` as literal. Added rewrite_unicode_name_escapes pre-transform in Compiler::compile that syntactically rewrites `\N{<ws>U+<hex>[<ws>]}` → `\x{<hex>}` respecting backslash-escape depth.
+- **Delta**: 12,675 → 12,678 (+3), 135 → 132 fail. Baselines 12,678 / 132. Closes testinput4:2369/2372/2884.
+
 ### 2026-04-23 — VM: (*COMMIT) propagates on assertion failure + try_backtrack honours committed (+2, engine fix #28)
 - **What**: 4 FP/FN fixed where COMMIT inside an assertion should abort the outer match when the assertion fails. Changes: (1) assertion helper propagates `committed` from the clone when the body failed, (2) subexpr COMMIT restored to clear-local-stack (so alternation alternatives don't override the failing-branch commit), (3) try_backtrack short-circuits if ctx.committed is set (clear remaining frames + return false), (4) invoke_subroutine save/restores ctx.committed so calls like `(?1)` don't leak their COMMIT outward. Net +2 after absorbing −2 regressions at testinput2:6604/6607 where PCRE2 relies on start-optimization that RGX can't apply past `a?` prefixes.
 - **Delta**: 12,673 → 12,675 (+2 pass), 137 → 135 fail. Baselines 12,675 / 135.

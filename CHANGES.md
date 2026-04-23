@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - Compiler: `\N{U+HEX}` pre-transform to `\x{HEX}` (+3 passes)
+
+- Scope: `\N{U+1234}` / `\N{ U+1234 }` / `[\N{U+1234}]/utf` — PCRE2 treats `\N{U+HEX}` as a Unicode codepoint escape, equivalent to `\x{HEX}`. PGEN's grammar recognises `\N` as "any char except newline" and doesn't parse the named form, so the `{U+1234}` tail leaked through as a literal-brace sequence. Subject `"ሴ"` (U+1234) matched nothing.
+- Fix: `rgx-core/src/compiler.rs` — new `rewrite_unicode_name_escapes` pre-transform runs before PGEN parses. Every `\N{<ws>U+<hex>[<ws>]}` span is rewritten to `\x{<hex>}` (ASCII-only rewrite, respects backslash-escape depth so `\\N{U+...}` stays literal). `Compiler::compile` uses the rewritten pattern for parsing and error reporting so compile errors still point at the original column after adjustment.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,675 → 12,678 pass** (+3), 135 → 132 fail. Ratchet baselines bumped to `PASS_BASELINE=12_678` / `FAIL_BASELINE=132`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput4:2369/2372/2884. Other `\N{NAME}` forms (Unicode character names like `\N{LATIN CAPITAL LETTER A}`) are left to the parser to reject — RGX has no name-to-codepoint table to handle them.
+
 ### 2026-04-23 - VM: `(*COMMIT)` propagates on assertion failure; `try_backtrack` honours `ctx.committed` (+2 passes net, engine #28)
 
 - Scope: `(?=a(*COMMIT)b|ac)ac|ac` on `"ac"` — PCRE2 expects no match because the first branch of the lookahead fires COMMIT and fails, which aborts the surrounding match attempt even though a later branch of the lookahead (or the outer alternation) could succeed. RGX matched `"ac"` through outer alt 2. Companion cases: `a(?=b(*COMMIT)c)[^d]|abd` (testinput1:5505), `(?=a(*COMMIT)b|(ac)) ac | (a)c/x` (5603), `(?1)(A(*COMMIT)|B)D` (5913).

@@ -16,6 +16,86 @@ use crate::vm::VmNewlineMode;
 /// `NewlineMode` detection; kept here so the compiler can forward
 /// the value onto the VM program even though the adapter already
 /// rewrote the `.` / `\N` atoms.
+/// Pre-transform PCRE2's `\N{U+HEX}` / `\N{ U+HEX }` named-codepoint
+/// escape into the equivalent `\x{HEX}` form that PGEN's grammar
+/// already accepts. Returns `Some(rewritten)` when at least one
+/// occurrence was rewritten, `None` if the pattern is free of the
+/// construct (in which case callers keep the original borrow).
+///
+/// The match is intentionally narrow — only the `U+HEX` name form
+/// is rewritten; other `\N{NAME}` variants (Unicode character names
+/// like `\N{LATIN CAPITAL LETTER A}`) are left alone for PGEN to
+/// reject, since RGX has no name-to-codepoint table.
+fn rewrite_unicode_name_escapes(pattern: &str) -> Option<String> {
+    let bytes = pattern.as_bytes();
+    let mut out: Option<String> = None;
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        // Need a literal `\N{` — backslash must not itself be
+        // escaped (preceded by an odd run of backslashes).
+        if bytes[i] == b'\\' && bytes[i + 1] == b'N' && bytes[i + 2] == b'{' {
+            // Count preceding backslashes to decide whether this
+            // `\N` is itself escaped (e.g. `\\N{…}` is a literal
+            // `\N{…}` and shouldn't be transformed).
+            let mut back = 0usize;
+            let mut k = i;
+            while k > 0 && bytes[k - 1] == b'\\' {
+                back += 1;
+                k -= 1;
+            }
+            if back % 2 == 1 {
+                i += 1;
+                continue;
+            }
+            let mut j = i + 3;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j + 1 >= bytes.len() || bytes[j] != b'U' || bytes[j + 1] != b'+' {
+                i += 1;
+                continue;
+            }
+            j += 2;
+            let hex_start = j;
+            while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
+                j += 1;
+            }
+            if j == hex_start {
+                i += 1;
+                continue;
+            }
+            let hex_end = j;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j >= bytes.len() || bytes[j] != b'}' {
+                i += 1;
+                continue;
+            }
+            let close = j;
+            let hex = &pattern[hex_start..hex_end];
+            let owned = out.get_or_insert_with(|| pattern.to_string());
+            // Rebuild the relative span inside `owned`. Because
+            // earlier rewrites shrink / grow the string we can't
+            // reuse `pattern` indices after the first replacement —
+            // reset the scan over `owned` each time to stay
+            // correct without tracking deltas manually.
+            let original_span_bytes = &pattern.as_bytes()[i..=close];
+            let span = std::str::from_utf8(original_span_bytes).expect("ASCII-only span");
+            let replacement = format!("\\x{{{hex}}}");
+            if let Some(pos) = owned.find(span) {
+                owned.replace_range(pos..pos + span.len(), &replacement);
+            }
+            // Restart scanning from the end of the replacement to
+            // avoid re-matching within the rewrite.
+            i = close + 1;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
 fn newline_mode_from_pattern(pattern: &str) -> VmNewlineMode {
     [
         ("(*LF)", VmNewlineMode::Lf),
@@ -476,10 +556,26 @@ impl Compiler {
             "continue with parser and bytecode compilation"
         );
 
+        // Pre-transform `\N{U+HEX}` / `\N{ U+HEX }` to `\x{HEX}`.
+        // PCRE2 treats `\N{U+NNNN}` as a Unicode codepoint escape
+        // (equivalent to `\x{NNNN}`). PGEN's parser handles `\N`
+        // as "any non-newline" and doesn't recognise the named
+        // form, so the `{U+NNNN}` tail used to bleed through as a
+        // literal brace-sequence and produce bogus matches. The
+        // transform is purely syntactic: replace every
+        // `\N{<whitespace>U+<hex>[<whitespace>]}` span with
+        // `\x{<hex>}` before the pattern reaches PGEN.
+        let pattern_owned;
+        let effective_pattern = if let Some(rewritten) = rewrite_unicode_name_escapes(pattern) {
+            pattern_owned = rewritten;
+            pattern_owned.as_str()
+        } else {
+            pattern
+        };
         // Parse pattern into AST using zero-cost compile-time selected parser
         debug_log!("compiler", "Parsing pattern into AST...");
-        let ast = parsing::parse_pattern(pattern)?;
-        let result = self.compile_ast_with_label(ast, pattern);
+        let ast = parsing::parse_pattern(effective_pattern)?;
+        let result = self.compile_ast_with_label(ast, effective_pattern);
         trace_exit!("compiler", "Compiler::compile", "ok={}", result.is_ok());
         result
     }
