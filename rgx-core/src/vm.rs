@@ -5279,7 +5279,30 @@ impl RegexVM {
                     if ip < code.len() {
                         let target = code[ip] as usize;
                         ip += 1;
-                        if !self.invoke_subroutine(ctx, target) {
+                        let saved_pos = ctx.pos;
+                        let trail_mark = ctx.capture_trail.len();
+                        let cs_mark = ctx.call_stack.len();
+                        let saved_code_result = ctx.code_result.clone();
+                        let saved_match_start_override = ctx.match_start_override;
+                        if self.invoke_subroutine(ctx, target) {
+                            // Same retry-empty path as the top-level
+                            // `Call` dispatch — continue-path after
+                            // subroutine advance.
+                            if ctx.pos > saved_pos
+                                && target < self.program.subroutine_can_match_empty.len()
+                                && self.program.subroutine_can_match_empty[target]
+                            {
+                                ctx.backtrack_stack.push(BacktrackFrame {
+                                    ip,
+                                    pos: saved_pos,
+                                    trail_mark,
+                                    call_stack_mark: cs_mark,
+                                    capture_snapshot: None,
+                                    saved_code_result,
+                                    saved_match_start_override,
+                                });
+                            }
+                        } else {
                             if self.try_backtrack(ctx, &mut ip) {
                                 continue;
                             }
@@ -5843,7 +5866,36 @@ impl RegexVM {
                     let target = code[ip] as usize;
                     ip += 1;
 
+                    let saved_pos = ctx.pos;
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = call_stack.len();
+                    let saved_code_result = ctx.code_result.clone();
+                    let saved_match_start_override = ctx.match_start_override;
+
                     if self.invoke_subroutine(ctx, target) {
+                        // Mirror of the top-level Call retry-empty
+                        // frame: when the subroutine actually
+                        // advanced AND its body can match empty,
+                        // push a retry to the LOCAL stack so an
+                        // inner backtrack into this subroutine
+                        // call tries the zero-match alternative
+                        // (needed for palindrome / self-referential
+                        // recursion where inner `(?1)` calls run
+                        // through this dispatch path).
+                        if ctx.pos > saved_pos
+                            && target < self.program.subroutine_can_match_empty.len()
+                            && self.program.subroutine_can_match_empty[target]
+                        {
+                            backtrack_stack.push(BacktrackFrame {
+                                ip,
+                                pos: saved_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                            });
+                        }
                         continue;
                     }
                     local_backtrack_or_return_false!();

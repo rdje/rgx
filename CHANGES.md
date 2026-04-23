@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: subexpr and continuation `Call` dispatch also push empty-match retry frames (+3 passes, engine #30)
+
+- Scope: engine fix #29 added the empty-match retry backtrack frame only to the top-level `OpCode::Call` dispatch. Patterns where `(?1)` / `(?&name)` calls are reached from inside a subexpression (e.g. the palindrome family `^((.)(?1)\2|.?)$`, `^(.|(.)(?1)\2)$`) went through the subexpr `Call` dispatch and missed the retry, so backtracking into the inner recursion couldn't try the empty-match alternative.
+- Fix: `rgx-core/src/vm.rs` — mirrored the retry-frame logic into `execute_subexpr_inner`'s `OpCode::Call` (local backtrack stack) and into `execute_at_continuation`'s version (global stack; covers the suspend/resume path for the same patterns).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,686 → 12,689 pass** (+3), 124 → 121 fail. Ratchet baselines bumped to `PASS_BASELINE=12_689` / `FAIL_BASELINE=121`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes 3 palindrome-recursion cases. The remaining palindrome patterns still need full subroutine-stack reification. **Thirtieth engine fix of the session; conformance at ~99.1%**.
+
 ### 2026-04-23 - VM: `Call` opcode pushes an empty-match retry frame when the target subroutine can match empty (+7 passes, engine #29)
 
 - Scope: `^(a?)b(?1)a` on `"aba"` and 5 siblings (`^(a?)+b(?1)a`, `^(a?)++b(?1)a` × "aba"/"ba") plus `(?(DEFINE)(?<optional_a>a?)X)^(?&optional_a)a$` — PCRE2 matches in every case. RGX's `invoke_subroutine` runs the subroutine body in an isolated local backtrack stack; once the greedy `a?` consumed `'a'`, the outer backtracking path couldn't re-enter the subroutine to try its zero-match alternative, so the trailing `a` at the consumed position failed and no match was found.
