@@ -8036,17 +8036,50 @@ impl OptimizingCompiler {
         next_group: &mut u32,
         defs: &mut std::collections::BTreeMap<u32, Vec<Regex>>,
     ) {
+        Self::collect_capturing_group_defs_inner_scoped(ast, next_group, defs, &[]);
+    }
+
+    /// Variant of the collector that threads the stack of enclosing
+    /// `FlagGroup` modifiers (outermost first). When a capturing
+    /// group is recorded for subroutine use, its stored AST is
+    /// rewrapped in the enclosing flag scopes so `(?1)` / `(?&name)`
+    /// calls run the group body under the same `(?i:)` / `(?s:)` /
+    /// etc. semantics it originally compiled under — matching the
+    /// PCRE2 rule "the flags in effect at the point of definition
+    /// apply to every subroutine call of that group." Without this
+    /// wrapping, `(?i:([^b]))(?1)` on `"aB"` would call `[^b]` with
+    /// default case-sensitivity and falsely accept `'B'`.
+    fn collect_capturing_group_defs_inner_scoped(
+        ast: &Regex,
+        next_group: &mut u32,
+        defs: &mut std::collections::BTreeMap<u32, Vec<Regex>>,
+        flag_scopes: &[String],
+    ) {
         match ast {
             Regex::Sequence(items) | Regex::Alternation(items) => {
                 for item in items {
-                    Self::collect_capturing_group_defs_inner(item, next_group, defs);
+                    Self::collect_capturing_group_defs_inner_scoped(
+                        item,
+                        next_group,
+                        defs,
+                        flag_scopes,
+                    );
                 }
             }
             Regex::Quantified { expr, .. }
             | Regex::Lookahead { expr, .. }
-            | Regex::Lookbehind { expr, .. }
-            | Regex::FlagGroup { expr, .. } => {
-                Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+            | Regex::Lookbehind { expr, .. } => {
+                Self::collect_capturing_group_defs_inner_scoped(
+                    expr,
+                    next_group,
+                    defs,
+                    flag_scopes,
+                );
+            }
+            Regex::FlagGroup { flags, expr } => {
+                let mut scopes = flag_scopes.to_vec();
+                scopes.push(flags.clone());
+                Self::collect_capturing_group_defs_inner_scoped(expr, next_group, defs, &scopes);
             }
             Regex::Group {
                 expr, kind, index, ..
@@ -8054,9 +8087,25 @@ impl OptimizingCompiler {
                 if matches!(kind, GroupKind::Capturing) {
                     let group_id = index.unwrap_or_else(|| next_group.saturating_add(1));
                     *next_group = (*next_group).max(group_id);
-                    defs.entry(group_id).or_default().push(ast.clone());
+                    // Wrap the group AST in every enclosing flag
+                    // scope, innermost first. The resulting tree
+                    // re-applies those scopes when compiled as a
+                    // subroutine body.
+                    let mut wrapped = ast.clone();
+                    for flags in flag_scopes.iter().rev() {
+                        wrapped = Regex::FlagGroup {
+                            flags: flags.clone(),
+                            expr: Box::new(wrapped),
+                        };
+                    }
+                    defs.entry(group_id).or_default().push(wrapped);
                 }
-                Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+                Self::collect_capturing_group_defs_inner_scoped(
+                    expr,
+                    next_group,
+                    defs,
+                    flag_scopes,
+                );
             }
             Regex::Conditional {
                 condition,
@@ -8066,7 +8115,12 @@ impl OptimizingCompiler {
                 match condition {
                     ConditionalTest::Lookahead { expr, .. }
                     | ConditionalTest::Lookbehind { expr, .. } => {
-                        Self::collect_capturing_group_defs_inner(expr, next_group, defs);
+                        Self::collect_capturing_group_defs_inner_scoped(
+                            expr,
+                            next_group,
+                            defs,
+                            flag_scopes,
+                        );
                     }
                     ConditionalTest::GroupExists(_)
                     | ConditionalTest::RelativeGroupExists(_)
@@ -8076,9 +8130,19 @@ impl OptimizingCompiler {
                     | ConditionalTest::RecursionNamed(_)
                     | ConditionalTest::Define => {}
                 }
-                Self::collect_capturing_group_defs_inner(true_branch, next_group, defs);
+                Self::collect_capturing_group_defs_inner_scoped(
+                    true_branch,
+                    next_group,
+                    defs,
+                    flag_scopes,
+                );
                 if let Some(false_branch) = false_branch {
-                    Self::collect_capturing_group_defs_inner(false_branch, next_group, defs);
+                    Self::collect_capturing_group_defs_inner_scoped(
+                        false_branch,
+                        next_group,
+                        defs,
+                        flag_scopes,
+                    );
                 }
             }
             Regex::Char(_)

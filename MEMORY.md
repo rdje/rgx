@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — VM: subroutine defs preserve enclosing FlagGroup scope (+11 passes, engine fix #25)
+- **What**: `(?i:([^b]))(?1)` on "aB" falsely matched. `collect_capturing_group_defs` extracted the inner capturing group's AST without its enclosing (?i:) scope, so (?1) ran case-sensitive. Threaded a `flag_scopes: &[String]` stack through the collector; FlagGroup pushes onto it; Capturing-group recording rewraps the stored AST in all enclosing scopes. Fixes the big palindrome cluster (`^\W*+(?:((.)\W*+(?1)\W*+\2|)|…)$/i` and named-capture mirror).
+- **Delta**: 12,656 → 12,667 (+11 pass), 154 → 143 fail. Baselines 12,667 / 143. Conformance ~98.9%.
+
 ### 2026-04-23 — VM: (*PRUNE) also clears pending (*SKIP) mark (+2 passes, engine fix #24)
 - **What**: `aaaaa(*SKIP)(*PRUNE)b|a+c` on "aaaaaac": PCRE2 expects PRUNE's "advance by 1" to supersede SKIP's "advance to mark" when PRUNE lexically follows SKIP. RGX scanner jumped to SKIP'd pos 5 → matched "ac". After fix, PRUNE clears ctx.skip_position → scanner advances by 1 → pos 2 matches "aaaac".
 - **Delta**: 12,654 → 12,656 (+2 pass), 156 → 154 fail. Baselines 12,656 / 154.

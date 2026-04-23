@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: subroutine calls rewrap the group body in its enclosing `(?i:)` / `(?s:)` flag scopes (+11 passes, engine #25)
+
+- Scope: `(?i:([^b]))(?1)` on `"aB"` — PCRE2 expects no match because `(?1)` must re-invoke group 1 under the same `(?i:)` scope it was defined under, so `[^b]/i` excludes both `'b'` and `'B'`. RGX matched because `collect_capturing_group_defs` extracted the raw `Group{Capturing, CharClass(^b)}` AST without the enclosing `FlagGroup`, causing the subroutine to run case-sensitively and accept `'B'`. Same class of bug affected every `(?flag:...)` block containing a capture that was later referenced via `(?N)` / `(?&name)` — including the whole `^\W*+(?:((.)\W*+(?1)\W*+\2|)|…)\W*+$/i` palindrome-recognition cluster, `^\W*(?:(?<one>(?<two>.)\W*(?&one)\W*\k<two>|)|…)\W*$/Ii`, and the `(?<=abc…)` family with inline flag scopes.
+- Fix: `rgx-core/src/vm.rs::collect_capturing_group_defs_inner` — split into a scoped variant that threads the stack of enclosing `FlagGroup` modifiers through the traversal (outermost first). When a capturing group is recorded, its stored AST is rewrapped in every enclosing flag scope so the subroutine compilation re-applies those scopes. Lookahead/Lookbehind/Quantified traversal also propagates the scope stack. Conditional branches pass it through on both the condition (for Lookahead/Lookbehind tests) and the true/false branches.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,656 → 12,667 pass** (+11), 154 → 143 fail. Ratchet baselines bumped to `PASS_BASELINE=12_667` / `FAIL_BASELINE=143`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `(?i:([^b]))(?1)` (testinput1:4865) plus the palindrome-recognition pattern family (`^\W*+(?:((.)\W*+(?1)\W*+\2|)|…)\W*+$/i` on "A man, a plan..." etc.) and the `^\W*(?:(?<one>...)\W*(?&one)\W*\k<two>|)$/Ii` PCRE1-syntax mirror. The fix is compile-time — no runtime path changes. **Twenty-fifth engine fix of the session; conformance at ~98.9%**.
+
 ### 2026-04-23 - VM: `(*PRUNE)` clears any pending `(*SKIP)` mark (+2 passes, engine #24)
 
 - Scope: `aaaaa(*SKIP)(*PRUNE)b|a+c` on `"aaaaaac"` — PCRE2 matches `"aaaac"` starting at pos 2. RGX matched `"ac"` at pos 5. Both verbs fired on alt 1's failing path: SKIP marked pos 5 (from the `(*SKIP)` position), PRUNE cut backtracking. RGX's scanner loop honoured SKIP's mark and jumped to pos 5, skipping pos 1-4. PCRE2's semantic for `(*SKIP)(*PRUNE)`: PRUNE's "advance by 1" supersedes SKIP's "advance to mark" because PRUNE comes lexically after SKIP in the pattern — so the scanner proceeds normally pos 1, 2, …, and finds the `a+c` match starting at pos 2.
