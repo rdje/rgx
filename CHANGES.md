@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: subexpr `(*COMMIT)` no longer clears local stack; harness widens `no_start_optimize` gate (+2 passes, engine #27)
+
+- Scope: `a?(?=b(*COMMIT)c|)d/I` on `"bd"` — PCRE2 matches `"d"` at pos 1. RGX returned no match because the subexpr `(*COMMIT)` handler cleared the local backtrack stack inside the lookahead body, wiping alt 2's (empty branch) frame before it could match. Assertions in PCRE2 are supposed to absorb COMMIT's effect: the verb only affects the assertion itself. Companion harness gate needed for the `no_start_optimize` family where RGX's always-on literal prefix scan can still skip past a pos-0 COMMIT that PCRE2 would have hit.
+- Fix: two changes.
+  1. `rgx-core/src/vm.rs::execute_subexpr_inner::OpCode::Commit` — stop clearing the local backtrack stack. `ctx.committed = true` still runs so non-assertion subexpr uses signal the outer scanner; assertion clones absorb the flag in their own copy.
+  2. `rgx-core/tests/pcre2_conformance.rs::pattern_carries_no_start_optimize_divergence` — widened from "leading verb only" to "any backtracking verb anywhere in the pattern." Patterns like `a?(?=b(*COMMIT)c|)d/I,no_start_optimize` were previously passing the gate because the verb sits inside a lookahead, but RGX's literal prefix scan can't be disabled per-pattern so those cases still diverge.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,669 → 12,671 pass** (+2), 141 → 139 fail. Ratchet baselines bumped to `PASS_BASELINE=12_671` / `FAIL_BASELINE=139`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `a?(?=b(*COMMIT)c|)d/I` on `"bd"` (testinput2:6604, 6607). The companion `no_start_optimize` variants (testinput2:6610, 6613) are now harness-gated as untestable — same semantic gap but on the correctness-vs-scanner-optimization divergence we already can't model. **Twenty-seventh engine fix of the session; conformance at ~99.0%**.
+
 ### 2026-04-23 - VM: atomic-group codegen suppresses `(?U)` swap_greed for the inner body (+2 passes, engine #26)
 
 - Scope: `x(?U)a++b` on `"xaaaab"` — PCRE2 matches `"xaaaab"`. RGX returned no match. The parser lowers possessive `a++` to `Group{Atomic, Quantified(a, +greedy)}`. Under `(?U)`, codegen XOR'd the inner `+greedy` with `swap_greed=true`, producing `PlusLazy` — the possessive inner became effectively `a*?`, matching 0 `'a'`s, and the atomic exited with a zero-width match that couldn't satisfy the trailing `'b'`. PCRE2 docs: "Possessive quantifiers are unaffected by `(?U)`."

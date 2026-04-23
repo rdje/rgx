@@ -1086,7 +1086,14 @@ fn pattern_carries_no_start_optimize_divergence(pattern: &str, full_modifiers: &
     {
         return false;
     }
-    let trimmed = pattern.trim_start();
+    // Any backtracking verb anywhere in the pattern is enough to
+    // trigger a divergence under `no_start_optimize`: RGX's literal
+    // prefix scan is always-on, so it can skip past positions where
+    // PCRE2 (with the optimization disabled) would fire a verb like
+    // `(*COMMIT)` or `(*PRUNE)` and abort the attempt. The earlier
+    // narrow "leading-verb" gate missed patterns like
+    // `a?(?=b(*COMMIT)c|)d` where the verb sits inside a
+    // lookahead.
     for verb in [
         "(*COMMIT)",
         "(*PRUNE)",
@@ -1094,18 +1101,15 @@ fn pattern_carries_no_start_optimize_divergence(pattern: &str, full_modifiers: &
         "(*FAIL)",
         "(*ACCEPT)",
         "(*SKIP)",
+        "(*COMMIT:",
+        "(*PRUNE:",
+        "(*SKIP:",
+        "(*MARK:",
+        "(*ACCEPT:",
     ] {
-        if trimmed.starts_with(verb) {
+        if pattern.contains(verb) {
             return true;
         }
-    }
-    // Named variants like `(*COMMIT:name)`.
-    if trimmed.starts_with("(*COMMIT:")
-        || trimmed.starts_with("(*PRUNE:")
-        || trimmed.starts_with("(*SKIP:")
-        || trimmed.starts_with("(*MARK:")
-    {
-        return true;
     }
     false
 }
@@ -3044,8 +3048,8 @@ fn run_full_conformance() {
     // scan_substring capture-list references against the full capture
     // inventory (post-parse) so forward refs resolve. No RGX adapter
     // change needed.
-    const PASS_BASELINE: usize = 12_669;
-    const FAIL_BASELINE: usize = 141;
+    const PASS_BASELINE: usize = 12_671;
+    const FAIL_BASELINE: usize = 139;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

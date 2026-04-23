@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — VM: subexpr COMMIT no longer clears local stack; widened no_start_optimize gate (+2, engine fix #27)
+- **What**: `a?(?=b(*COMMIT)c|)d/I` on "bd" expected "d". RGX subexpr COMMIT was clearing local stack inside the assertion, killing alt 2's empty-branch frame so the lookahead always failed. PCRE2 says assertions absorb COMMIT. Changed subexpr COMMIT to only set the flag (assertion clone discards it on return). Also widened harness `no_start_optimize` gate to flag any pattern with a backtracking verb anywhere (not just leading) — the earlier narrow gate missed verb-in-lookahead patterns.
+- **Delta**: 12,669 → 12,671 (+2 pass), 141 → 139 fail. Baselines 12,671 / 139. Conformance crosses ~99.0%.
+
 ### 2026-04-23 — VM: atomic-group codegen suppresses (?U) swap_greed (+2, engine fix #26)
 - **What**: `x(?U)a++b` failed because possessive `a++` lowers to Group{Atomic, Quantified(+greedy)} and (?U) swapped the inner greedy to lazy, producing atomic(a*?) which matched 0 chars. PCRE2 says possessives are unaffected by (?U). Save/restore swap_greed around atomic-group inner codegen.
 - **Delta**: 12,667 → 12,669 (+2 pass), 143 → 141 fail. Baselines 12,669 / 141.

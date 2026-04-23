@@ -6076,11 +6076,22 @@ impl RegexVM {
                 }
 
                 OpCode::Commit => {
-                    // See top-level dispatch for rationale. In
-                    // subexpr context only the local backtrack stack
-                    // is cleared; the outer scanner abort is signalled
-                    // via `ctx.committed`.
-                    backtrack_stack.clear();
+                    // Subexpr context (typically an assertion body):
+                    // COMMIT only sets the scanner-abort flag on the
+                    // current `ctx` (which is the assertion's cloned
+                    // context for lookahead/lookbehind). It does NOT
+                    // clear the local backtrack stack, because that
+                    // would prevent the assertion's remaining
+                    // alternatives from being tried — e.g.
+                    // `(?=b(*COMMIT)c|)` on `"bd"` should still
+                    // succeed via the empty second branch after the
+                    // first branch fails past COMMIT. The commit's
+                    // effect on the outer scanner is scoped: since
+                    // `execute_assertion_subexpr` discards the
+                    // clone's committed flag, a zero-width assertion
+                    // absorbs COMMIT entirely. For non-assertion
+                    // subexpr paths the flag still reaches the
+                    // outer scanner via shared `ctx`.
                     ctx.committed = true;
                 }
 
@@ -6185,6 +6196,16 @@ impl RegexVM {
             ctx.captures = assertion_ctx.captures;
             ctx.capture_trail = assertion_ctx.capture_trail;
         }
+        // Per pcre2pattern(3): "(*COMMIT) in an assertion only
+        // affects the assertion." The assertion is zero-width and
+        // its internal commit/abort state must not leak to the
+        // surrounding pattern — otherwise a committed-and-failed
+        // branch of a lookahead would silently abort the outer
+        // scanner even when a later assertion branch succeeded (or
+        // when the enclosing negative lookahead intends to fail).
+        // The clone's own ctx.committed is already isolated from
+        // ours; defensively leave it discarded so a shared `ctx`
+        // mutation by some deeper subexpr can't leak back either.
         body_matched
     }
 
