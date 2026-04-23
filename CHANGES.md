@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: subexpr `(*THEN)` uses a local alt-boundary stack so alternation inside lookarounds redirects correctly (+3 passes, engine #33)
+
+- Scope: `^(?!a(*THEN)b|ac)..` on `"ac"` — PCRE2 expects no match because the negative lookahead's body `a(*THEN)b|ac` successfully matches via the `ac` alternative after THEN redirects past the failing `a(*THEN)b`. RGX matched `"ac"` because inside the subexpr (lookahead clone), the `AltSplit` frame was pushed to the LOCAL backtrack stack but `ctx.alt_boundaries` (shared with the outer) didn't see it. THEN then fell into the "no alt → PRUNE" branch, cleared the local stack, and the lookahead body returned false — so the negative assertion falsely succeeded.
+- Fix: `rgx-core/src/vm.rs::execute_subexpr_inner_full` — new `local_alt_boundaries: Vec<usize>` tracks indices of local `AltSplit` frames. `AltSplit` pushes to both the local backtrack stack and `local_alt_boundaries`. `(*THEN)` in subexpr context now consults `local_alt_boundaries.last()` before falling back to the PRUNE-degraded path: if a local alt is open, truncate above it and continue — letting backtracking naturally pop the alt frame and jump to the next branch. Local backtrack pops sync `local_alt_boundaries` to drop stale entries.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,693 → 12,696 pass** (+3), 117 → 114 fail. Ratchet baselines bumped to `PASS_BASELINE=12_696` / `FAIL_BASELINE=114`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `^(?!a(*THEN)b|ac)..` (testinput2:3834) and siblings. **Thirty-third engine fix of the session; conformance at ~99.2%**.
+
 ### 2026-04-24 - VM: lookbehind body honours a must-end-at target so greedy bodies backtrack to the anchor (+2 passes, engine #32)
 
 - Scope: `(?<!a?)` on `"a"` — PCRE2 expects no match because `a?` can always match the empty string, making the negative lookbehind always fail. RGX matched at pos 0 because the lookbehind's greedy `a?` body consumed the `'a'` and advanced the clone's `pos` to 1. The outer post-check `lookbehind_ctx.pos == assertion_end` rejected that, but the body's local backtrack stack was already gone — the alternate "match empty" branch couldn't be tried, so the whole lookbehind body reported failure and the negative assertion falsely succeeded.

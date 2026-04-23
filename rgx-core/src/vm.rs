@@ -5456,6 +5456,13 @@ impl RegexVM {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
         let mut call_stack = Vec::new();
+        // Local alt-boundary stack: indices into `backtrack_stack`
+        // of the frames pushed by `AltSplit` inside this subexpr
+        // run. Used by `(*THEN)` to locate the innermost
+        // alternation's fallback frame and truncate above it —
+        // the outer `ctx.alt_boundaries` is keyed to the global
+        // stack and doesn't see these local pushes.
+        let mut local_alt_boundaries: Vec<usize> = Vec::new();
 
         macro_rules! local_backtrack_or_return_false {
             () => {
@@ -5470,6 +5477,14 @@ impl RegexVM {
                     }
                     call_stack.truncate(frame.call_stack_mark);
                     ctx.code_result = frame.saved_code_result;
+                    // Sync local_alt_boundaries with the current
+                    // stack length so stale entries referring to
+                    // popped frames don't survive and mislead a
+                    // later `(*THEN)`.
+                    let new_len = backtrack_stack.len();
+                    while local_alt_boundaries.last().map_or(false, |&b| b >= new_len) {
+                        local_alt_boundaries.pop();
+                    }
                     continue;
                 }
                 return false;
@@ -5841,20 +5856,23 @@ impl RegexVM {
                 }
 
                 OpCode::Split | OpCode::AltSplit => {
-                    // `AltSplit` semantics fall back to plain Split
-                    // inside subexpression execution because the
-                    // subexpr has its own local backtrack stack —
-                    // alt_boundaries live on `ctx` and refer to the
-                    // outer stack. Alternation inside a subexpr
-                    // still routes (*THEN) through the outer layer
-                    // if appropriate; the local branch just follows
-                    // Split semantics.
+                    // Plain `Split` and alternation-boundary
+                    // `AltSplit` both push a fallback frame to the
+                    // subexpr's local backtrack stack. `AltSplit`
+                    // additionally records the frame's index on
+                    // `local_alt_boundaries` so a subsequent
+                    // `(*THEN)` inside this subexpr can navigate
+                    // back to the innermost alternation's fallback
+                    // — needed for patterns like
+                    // `a(*THEN)b|ac` inside a lookahead to still
+                    // redirect to the `ac` alternative at the
+                    // subexpr level.
                     if ip + 1 >= code.len() {
                         return false;
                     }
                     let offset = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
                     ip += 2;
-
+                    let pushed_idx = backtrack_stack.len();
                     backtrack_stack.push(BacktrackFrame {
                         ip: ip + offset,
                         pos: ctx.pos,
@@ -5864,6 +5882,9 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                     });
+                    if matches!(op, OpCode::AltSplit) {
+                        local_alt_boundaries.push(pushed_idx);
+                    }
                 }
 
                 OpCode::SplitLazy => {
@@ -6241,24 +6262,32 @@ impl RegexVM {
                 }
 
                 OpCode::Prune | OpCode::Then => {
-                    // Inside a subexpression run we clear the local
-                    // backtrack stack, but when the verb has *no
-                    // enclosing alternation* it degrades to
-                    // `(*PRUNE)` — which must prevent *all*
-                    // backtracking at the current start position,
-                    // including backtracking in the outer
-                    // (ctx.backtrack_stack) context that put us in
-                    // this subexpr. Without the outer clear,
-                    // patterns like `^.*? (a(*THEN)b)++ c` would
-                    // let `.*?` retry with more characters even
-                    // after the inner THEN's PRUNE semantic fired,
-                    // producing a false match. Clearing the global
-                    // stack here is safe because PCRE2's PRUNE
-                    // documentation specifies that matching at the
-                    // current start position should fail cleanly
-                    // once PRUNE is reached — exactly what the
-                    // stack clear enforces.
+                    // Inside a subexpression run `(*THEN)` uses the
+                    // subexpr's *local* alt boundaries to decide
+                    // where to redirect. If there's a pending local
+                    // alternation frame, truncate above it so
+                    // backtracking picks the next alternative; if
+                    // no local alt is open, THEN degrades to PRUNE
+                    // and we clear the local stack (and the outer
+                    // stack, per pcre2pattern(3): "when (*THEN) is
+                    // in a pattern or assertion with no enclosing
+                    // alternation, it is equivalent to (*PRUNE)"),
+                    // preventing `.*?`-style outer backtracking from
+                    // rescuing a committed failure.
+                    if matches!(op, OpCode::Then) {
+                        if let Some(&alt_idx) = local_alt_boundaries.last() {
+                            backtrack_stack.truncate(alt_idx + 1);
+                            while local_alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
+                                local_alt_boundaries.pop();
+                            }
+                            // Continue execution — on failure the
+                            // alt fallback frame will be popped
+                            // and control flows to the next alt.
+                            continue;
+                        }
+                    }
                     backtrack_stack.clear();
+                    local_alt_boundaries.clear();
                     if ctx.alt_boundaries.is_empty() {
                         ctx.backtrack_stack.clear();
                     }

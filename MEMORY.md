@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: subexpr THEN uses local alt-boundary stack (+3 passes, engine fix #33)
+- **What**: Inside a subexpr (lookahead/lookbehind/etc), AltSplit pushes to the local backtrack stack but ctx.alt_boundaries (global) didn't see it. THEN fell into the "no alt → PRUNE" branch and the lookahead body failed. New `local_alt_boundaries` Vec<usize> tracks AltSplit indices in the subexpr. THEN in subexpr now consults that first, truncates to the frame, and lets backtracking redirect to next alt.
+- **Delta**: 12,693 → 12,696 (+3), 117 → 114. Baselines 12,696 / 114. Conformance ~99.2%.
+
 ### 2026-04-24 — VM: lookbehind body must-end-at triggers internal backtrack (+2 passes, engine fix #32)
 - **What**: `(?<!a?)` on "a" falsely matched. Greedy `a?` consumed 'a', body returned true with pos=1, post-check pos≠assertion_end rejected — but the body's local alt-frames were already gone. New `execute_subexpr_ending_at` variant takes must_end_at: Option<usize>. At end-of-code, if pos != target, trigger internal local backtrack to try shorter alternatives. Replaces the external post-check in execute_lookbehind_assertion.
 - **Delta**: 12,691 → 12,693 (+2), 119 → 117. Baselines 12,693 / 117.
