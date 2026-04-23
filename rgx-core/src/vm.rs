@@ -498,6 +498,14 @@ pub struct Program {
     pub code: Vec<u8>,
     /// Runtime subroutine bytecode, indexed by recursion target ID (0 = whole pattern)
     pub subroutines: Vec<Vec<u8>>,
+    /// Parallel to `subroutines`: `true` if the corresponding
+    /// group's AST can match empty (per `expr_can_match_empty`).
+    /// Read by the `Call` opcode to decide whether to push an
+    /// empty-match retry frame after a successful subroutine
+    /// invocation — outer backtracking into a subroutine whose
+    /// body can match empty must be able to retry with zero
+    /// advance, the way PCRE2 does.
+    pub subroutine_can_match_empty: Vec<bool>,
     /// Pre-compiled character classes
     pub char_classes: Vec<CompiledCharClass>,
     /// String literals extracted for SIMD matching
@@ -3368,7 +3376,40 @@ impl RegexVM {
                     let target = code[ip] as usize;
                     ip += 1;
 
+                    let saved_pos = ctx.pos;
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = ctx.call_stack.len();
+                    let saved_code_result = ctx.code_result.clone();
+                    let saved_match_start_override = ctx.match_start_override;
+
                     if self.invoke_subroutine(ctx, target) {
+                        // Subroutine matched. If its body can
+                        // match the empty string AND the call
+                        // consumed characters (`ctx.pos > saved`),
+                        // push a retry backtrack frame. On
+                        // backtrack, we resume at `ip` with
+                        // `pos = saved_pos`, effectively treating
+                        // the subroutine as having matched empty —
+                        // what PCRE2 would do when backtracking
+                        // into a subroutine to try its shorter
+                        // alternative. Covers the common
+                        // `(?1)`-into-`(a?)` / `(?&name)`-into-
+                        // optional-group cluster without needing
+                        // full subroutine-stack reification.
+                        if ctx.pos > saved_pos
+                            && target < self.program.subroutine_can_match_empty.len()
+                            && self.program.subroutine_can_match_empty[target]
+                        {
+                            ctx.backtrack_stack.push(BacktrackFrame {
+                                ip,
+                                pos: saved_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                            });
+                        }
                         continue;
                     }
                     if self.try_backtrack(ctx, &mut ip) {
@@ -7004,9 +7045,12 @@ impl OptimizingCompiler {
         // Emit final Match instruction
         self.emit_op(OpCode::Match);
         let subroutines = self.compile_subroutines(ast);
+        let subroutine_can_match_empty =
+            Self::compute_subroutine_empty_matches(ast, subroutines.len());
         let program = Program {
             code: self.code.clone(),
             subroutines,
+            subroutine_can_match_empty,
             char_classes: self.char_classes.clone(),
             string_literals: self.strings.clone(),
             named_groups: HashMap::new(),
@@ -8038,6 +8082,28 @@ impl OptimizingCompiler {
         self.group_counter = self.group_counter.max(sub_compiler.group_counter);
 
         sub_code
+    }
+
+    /// Compute, for each subroutine target (indexed 0..size), whether
+    /// its body can match the empty string. Index 0 is the whole
+    /// pattern; indices 1+ are capture groups. Used by the `Call`
+    /// opcode to decide whether an external subroutine call needs
+    /// an empty-match retry backtrack frame — so patterns like
+    /// `^(a?)b(?1)a` can backtrack into `(?1)` and try its zero-char
+    /// alternative after the outer trailing literal fails.
+    fn compute_subroutine_empty_matches(ast: &Regex, size: usize) -> Vec<bool> {
+        let mut out = vec![false; size];
+        if size > 0 {
+            out[0] = Self::expr_can_match_empty(ast);
+        }
+        let defs = Self::collect_capturing_group_defs(ast);
+        for (group_id, group_ast) in defs {
+            let idx = group_id as usize;
+            if idx < out.len() {
+                out[idx] = Self::expr_can_match_empty(&group_ast);
+            }
+        }
+        out
     }
 
     fn compile_subroutines(&mut self, ast: &Regex) -> Vec<Vec<u8>> {

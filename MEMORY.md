@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — VM: Call pushes empty-match retry frame when target can match empty (+7 passes, engine fix #29)
+- **What**: `^(a?)b(?1)a` on "aba" was failing because invoke_subroutine ran `a?` in an isolated local stack; outer backtracking couldn't re-enter to try the zero-match alt. New compile-time `Program.subroutine_can_match_empty` (via `expr_can_match_empty` over the AST). In the top-level Call dispatch, when the subroutine succeeds and advances AND its body can match empty, push a retry frame (ip=post-call, pos=saved). On backtrack the subroutine appears to have matched empty.
+- **Delta**: 12,679 → 12,686 (+7), 131 → 124 fail. Baselines 12,686 / 124. Closes the `(?1)`-into-optional cluster (6276/6282/6288/6272).
+
 ### 2026-04-23 — Parser: UCP [:punct:] = P* + ASCII-punctuation-symbols (+1 pass)
 - **What**: `[:punct:]/utf` was P* ∪ S* which wrongly accepted U+00B4 (Sk). Dropping S entirely would break ASCII `$ + < = > ^ \` | ~`. Narrowed to `P* ∪ {$, +, <, =, >, ^, \`, |, ~}` to match PCRE2's hybrid POSIX/Unicode semantic.
 - **Delta**: 12,678 → 12,679 (+1), 132 → 131. Baselines 12,679 / 131.

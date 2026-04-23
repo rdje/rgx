@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: `Call` opcode pushes an empty-match retry frame when the target subroutine can match empty (+7 passes, engine #29)
+
+- Scope: `^(a?)b(?1)a` on `"aba"` and 5 siblings (`^(a?)+b(?1)a`, `^(a?)++b(?1)a` × "aba"/"ba") plus `(?(DEFINE)(?<optional_a>a?)X)^(?&optional_a)a$` — PCRE2 matches in every case. RGX's `invoke_subroutine` runs the subroutine body in an isolated local backtrack stack; once the greedy `a?` consumed `'a'`, the outer backtracking path couldn't re-enter the subroutine to try its zero-match alternative, so the trailing `a` at the consumed position failed and no match was found.
+- Fix: new compile-time per-subroutine flag `Program.subroutine_can_match_empty` (populated by `compute_subroutine_empty_matches` using the existing `expr_can_match_empty` predicate). The top-level VM's `OpCode::Call` dispatch now, after a successful invocation that actually advanced the position, pushes a retry `BacktrackFrame` with `ip = <post-Call ip>` and `pos = <saved pre-call pos>`. On backtrack the frame restores the pre-call state and resumes past the call — the subroutine is effectively "matched empty," which mirrors PCRE2's behaviour of backtracking into a subroutine call to try a shorter match. Narrow gate (only when the body can match empty) avoids false positives for subroutines like `a+` that can't legitimately match zero chars.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,679 → 12,686 pass** (+7), 131 → 124 fail. Ratchet baselines bumped to `PASS_BASELINE=12_686` / `FAIL_BASELINE=124`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput1:6272, 6276 (×2), 6282 (×2), 6288 (×2). Truly-recursive patterns like `^(.|(.)(?1)\2)$` still need full subroutine-stack reification and remain as a separate gap. **Twenty-ninth engine fix of the session; conformance at ~99.0%**.
+
 ### 2026-04-23 - Parser: UCP `[:punct:]` excludes generic S*, keeps ASCII punctuation-symbols (+1 pass)
 
 - Scope: `[[:punct:]]/utf` on `"´"` (U+00B4 ACUTE ACCENT, Sk) — PCRE2 expects no match. RGX's UCP resolver had `merge(&["P", "S"])`, so any Unicode symbol character matched. Dropping S entirely broke the mirror `[[:punct:]]+$/utf` on `"$+<=>^\`|~"` (testinput4:2199) where ASCII symbols `$ + < = > ^ \` | ~` must match — POSIX treats those as punct even though Unicode categorises them Sm/Sk.
