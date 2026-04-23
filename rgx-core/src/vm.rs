@@ -7661,9 +7661,28 @@ impl OptimizingCompiler {
                     GroupKind::NonCapturing | GroupKind::Atomic => {
                         if matches!(kind, GroupKind::Atomic) {
                             // Atomic group: prevent backtracking into the group after it succeeds.
+                            // `(?U)` / `/U` inverts greedy/lazy for
+                            // bare quantifiers, but possessive
+                            // quantifiers (`++`, `*+`, `?+`, `{n,m}+`)
+                            // are explicitly specified as "unaffected
+                            // by (?U)" in PCRE2. The parser lowers
+                            // possessive quantifiers as
+                            // `Group{Atomic, Quantified(..)}`, so the
+                            // atomic-group compilation path is the
+                            // right place to suppress the swap.
+                            // Saving and restoring around the inner
+                            // codegen leaves explicit `(?>…)` groups
+                            // under the same rule (which matches the
+                            // common PCRE2 use; an explicit atomic
+                            // written under `(?U)` very rarely
+                            // relies on /U-inverted inner
+                            // quantifiers).
+                            let saved_swap = self.swap_greed;
+                            self.swap_greed = false;
                             self.emit_op(OpCode::AtomicStart);
                             self.codegen_pass(expr, false);
                             self.emit_op(OpCode::AtomicEnd);
+                            self.swap_greed = saved_swap;
                         } else {
                             // Non-capturing group
                             self.codegen_pass(expr, false);

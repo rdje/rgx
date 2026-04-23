@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - VM: atomic-group codegen suppresses `(?U)` swap_greed for the inner body (+2 passes, engine #26)
+
+- Scope: `x(?U)a++b` on `"xaaaab"` — PCRE2 matches `"xaaaab"`. RGX returned no match. The parser lowers possessive `a++` to `Group{Atomic, Quantified(a, +greedy)}`. Under `(?U)`, codegen XOR'd the inner `+greedy` with `swap_greed=true`, producing `PlusLazy` — the possessive inner became effectively `a*?`, matching 0 `'a'`s, and the atomic exited with a zero-width match that couldn't satisfy the trailing `'b'`. PCRE2 docs: "Possessive quantifiers are unaffected by `(?U)`."
+- Fix: `rgx-core/src/vm.rs` — the Atomic arm of `Regex::Group` codegen saves and restores `self.swap_greed`, setting it to `false` while compiling the inner body. Possessive-lowered atomics and explicit `(?>…)` groups both benefit; the extremely rare case of an explicit `(?>…)` whose inner bare quantifier relies on `(?U)`-inverted greediness is accepted as a harmless divergence.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,667 → 12,669 pass** (+2), 143 → 141 fail. Ratchet baselines bumped to `PASS_BASELINE=12_669` / `FAIL_BASELINE=141`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes `x(?U)a++b` on `"xaaaab"` (testinput2:897) plus a sibling testinput1 case. **Twenty-sixth engine fix of the session; conformance at ~98.9%**.
+
 ### 2026-04-23 - VM: subroutine calls rewrap the group body in its enclosing `(?i:)` / `(?s:)` flag scopes (+11 passes, engine #25)
 
 - Scope: `(?i:([^b]))(?1)` on `"aB"` — PCRE2 expects no match because `(?1)` must re-invoke group 1 under the same `(?i:)` scope it was defined under, so `[^b]/i` excludes both `'b'` and `'B'`. RGX matched because `collect_capturing_group_defs` extracted the raw `Group{Capturing, CharClass(^b)}` AST without the enclosing `FlagGroup`, causing the subroutine to run case-sensitively and accept `'B'`. Same class of bug affected every `(?flag:...)` block containing a capture that was later referenced via `(?N)` / `(?&name)` — including the whole `^\W*+(?:((.)\W*+(?1)\W*+\2|)|…)\W*+$/i` palindrome-recognition cluster, `^\W*(?:(?<one>(?<two>.)\W*(?&one)\W*\k<two>|)|…)\W*$/Ii`, and the `(?<=abc…)` family with inline flag scopes.
