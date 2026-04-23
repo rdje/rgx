@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-23 - Parser: UCP `[:punct:]` excludes generic S*, keeps ASCII punctuation-symbols (+1 pass)
+
+- Scope: `[[:punct:]]/utf` on `"´"` (U+00B4 ACUTE ACCENT, Sk) — PCRE2 expects no match. RGX's UCP resolver had `merge(&["P", "S"])`, so any Unicode symbol character matched. Dropping S entirely broke the mirror `[[:punct:]]+$/utf` on `"$+<=>^\`|~"` (testinput4:2199) where ASCII symbols `$ + < = > ^ \` | ~` must match — POSIX treats those as punct even though Unicode categorises them Sm/Sk.
+- Fix: `rgx-core/src/parsing.rs::ucp_posix_class_ranges` "punct" arm — P* union the specific ASCII-symbol set (`$`, `+`, `<`, `=`, `>`, `^`, `` ` ``, `|`, `~`). Aligns with PCRE2's published `[:punct:]` under UCP.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,678 → 12,679 pass** (+1), 132 → 131 fail. Ratchet baselines bumped to `PASS_BASELINE=12_679` / `FAIL_BASELINE=131`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput4:2306 without regressing 2199/2256/1550. Narrow ASCII-symbol whitelist mirrors PCRE2's hybrid POSIX/Unicode semantic for `[:punct:]`.
+
 ### 2026-04-23 - Compiler: `\N{U+HEX}` pre-transform to `\x{HEX}` (+3 passes)
 
 - Scope: `\N{U+1234}` / `\N{ U+1234 }` / `[\N{U+1234}]/utf` — PCRE2 treats `\N{U+HEX}` as a Unicode codepoint escape, equivalent to `\x{HEX}`. PGEN's grammar recognises `\N` as "any char except newline" and doesn't parse the named form, so the `{U+1234}` tail leaked through as a literal-brace sequence. Subject `"ሴ"` (U+1234) matched nothing.

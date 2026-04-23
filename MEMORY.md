@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-23 — Parser: UCP [:punct:] = P* + ASCII-punctuation-symbols (+1 pass)
+- **What**: `[:punct:]/utf` was P* ∪ S* which wrongly accepted U+00B4 (Sk). Dropping S entirely would break ASCII `$ + < = > ^ \` | ~`. Narrowed to `P* ∪ {$, +, <, =, >, ^, \`, |, ~}` to match PCRE2's hybrid POSIX/Unicode semantic.
+- **Delta**: 12,678 → 12,679 (+1), 132 → 131. Baselines 12,679 / 131.
+
 ### 2026-04-23 — Compiler: `\N{U+HEX}` pre-transform to `\x{HEX}` (+3 passes)
 - **What**: PCRE2 `\N{U+1234}` = Unicode codepoint escape. PGEN doesn't recognize; RGX was treating `\N` as dot and `{U+1234}` as literal. Added rewrite_unicode_name_escapes pre-transform in Compiler::compile that syntactically rewrites `\N{<ws>U+<hex>[<ws>]}` → `\x{<hex>}` respecting backslash-escape depth.
 - **Delta**: 12,675 → 12,678 (+3), 135 → 132 fail. Baselines 12,678 / 132. Closes testinput4:2369/2372/2884.

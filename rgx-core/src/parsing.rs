@@ -3231,7 +3231,22 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
             v.sort_by_key(|r| r.start);
             v
         }
-        "punct" => merge(&["P", "S"]),
+        // PCRE2 `[:punct:]` under /utf (UCP): Unicode P* plus the
+        // ASCII printable symbols (`$`, `+`, `<`, `=`, `>`, `^`,
+        // `` ` ``, `|`, `~`) that POSIX considers punctuation.
+        // PCRE2 excludes the rest of the S* category (e.g. U+00B4
+        // ACUTE ACCENT is Sk, not punct). Blanket `S` inclusion
+        // caused `[[:punct:]]/utf` on `"´"` to match; blanket
+        // exclusion caused `[[:punct:]]+$/utf` on `"$+<=>^`|~"` to
+        // miss. Restrict to P* + the specific ASCII-symbol set.
+        "punct" => {
+            let mut v = merge(&["P"]);
+            for ch in ['$', '+', '<', '=', '>', '^', '`', '|', '~'] {
+                v.push(CharRange::single(ch));
+            }
+            v.sort_by_key(|r| r.start);
+            v
+        }
         // `:xdigit:` under PCRE2_UCP adds the fullwidth hex forms:
         // FULLWIDTH DIGIT ZERO..NINE (U+FF10..U+FF19), FULLWIDTH
         // LATIN CAPITAL LETTER A..F (U+FF21..U+FF26), and FULLWIDTH
