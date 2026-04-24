@@ -6295,6 +6295,18 @@ mod tests {
     }
 
     #[test]
+    fn skip_in_failing_assertion_propagates_to_outer_scope() {
+        // `(?=b(*SKIP)a)bn|bnn` on "bnn" — PCRE2 no match. The lookahead
+        // body matches 'b', fires (*SKIP), then fails at 'a'. PCRE2
+        // propagates SKIP's position to the outer match attempt,
+        // aborting it at pos 0. Without propagation, alt 2 "bnn" would
+        // match at pos 0 (false positive). Mirror of engine fix #28's
+        // COMMIT-in-failing-assertion propagation.
+        let re = Regex::compile(r"(?=b(*SKIP)a)bn|bnn").unwrap();
+        assert!(re.find_first("bnn").is_none());
+    }
+
+    #[test]
     fn extended_mode_toggle_then_scoped_disable_preserves_outer() {
         // After `(?-x: ...)` exits, the outer `(?x)` mode should still
         // apply. Verify by putting literal whitespace in the tail that

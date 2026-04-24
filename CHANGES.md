@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: `(*SKIP)` inside failing lookahead propagates to outer match attempt (+1 pass, engine #37)
+
+- Scope: `(?=b(*SKIP)a)bn|bnn` on `"bnn"` — PCRE2 expects no match because the lookahead body matches `'b'`, fires `(*SKIP)`, then fails at `'a'`. PCRE2's rule for SKIP inside a failing assertion is parallel to COMMIT's (already fixed in engine fix #28): the `skip_position` and the scanner-abort propagate to the outer match. RGX matched `"bnn"` (alt 2) at pos 0 because `execute_assertion_subexpr` only propagated `committed`, not `skip_position` — the assertion clone's SKIP was discarded and alt 2 ran at the same position.
+- Fix: `rgx-core/src/vm.rs::execute_assertion_subexpr` — after the existing `if !body_matched && assertion_ctx.committed { ctx.committed = true; }` block, add `if !body_matched { if let Some(skip_pos) = assertion_ctx.skip_position { ctx.skip_position = Some(skip_pos); ctx.committed = true; } }`. Mirrors engine fix #28's COMMIT-on-assertion-failure rule exactly. A successful assertion body absorbs SKIP the same way it absorbs COMMIT — the `!body_matched` guard preserves that absorption.
+- Validation: 1,053 lib tests pass (added regression pin `skip_in_failing_assertion_propagates_to_outer_scope`). 30 rgx-cli tests pass. PCRE2 conformance **12,702 → 12,703 pass** (+1), 108 → 107 fail. Ratchet baselines bumped to `PASS_BASELINE=12_703` / `FAIL_BASELINE=107`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput1:5630. The lookbehind variant of the same issue (new top FP `(?<=a(*SKIP)x)|c` at testinput1:6487) is a follow-up — a first attempt to mirror the fix into `execute_lookbehind_assertion` regressed 2 other cases because the all-starts-failed aggregation doesn't compose cleanly with negative-lookbehind semantics (`(?<!...)` body failure = assertion success, where SKIP should be absorbed). The lookbehind case needs positive/negative disambiguation at the caller layer. **Thirty-seventh engine fix of the session; conformance at ~99.2%**. Pre-existing adversarial failure `deep_recursion_with_captures_restored_correctly` remains unchanged (documented as pre-existing since 2026-04-19).
+
 ### 2026-04-24 - Doc refresh: RUST_CODEBASE_ANALYSIS.md brought to head `6a56509`
 
 - Scope: `RUST_CODEBASE_ANALYSIS.md` had gone stale by 8 days of heavy VM-fix work. Numbers claimed a 2026-04-16 snapshot (ratchet 8,822/2,396, 1,007 tests, PGEN 1.1.26, MSRV 1.88, ~48K rgx-core lines); actual state after 36 numbered engine fixes plus harness refinements is 12,702/108 pass/fail, 1,052 lib + 30 CLI tests, PGEN 1.1.29 at `48a9f064`, MSRV 1.95, ~55K rgx-core lines.

@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: (*SKIP) inside failing lookahead propagates (+1, engine fix #37)
+
+- **What**: `(?=b(*SKIP)a)bn|bnn` on "bnn": lookahead body fires SKIP, fails at 'a'. `execute_assertion_subexpr` was propagating `committed` but not `skip_position`. Added parallel propagation block: on body failure, if assertion_ctx.skip_position is Some, set outer ctx.skip_position AND ctx.committed. Exact mirror of engine fix #28's COMMIT rule.
+- **Delta**: 12,702 → 12,703 (+1), 108 → 107. Baselines 12,703 / 107.
+- **Follow-up left**: lookbehind variant `(?<=a(*SKIP)x)|c` (testinput1:6487, new top FP). Attempted mirror fix in `execute_lookbehind_assertion` regressed 2 cases — the all-starts-failed aggregation doesn't compose with negative-lookbehind semantics where body failure = assertion success. Needs positive/negative disambiguation in the caller, not a blanket propagate-on-total-failure. Reverted for this commit.
+- **Why this fix was safe to land on the positive-lookahead path**: `execute_assertion_subexpr` is called with `propagate_captures` set to whether the caller wants positive semantics. The existing committed-propagation ignores that flag, treating assertion-body-failure as "propagate unconditionally" — which works for positive lookahead + conditionally-lookahead cases. My SKIP propagation uses the same rule. Zero regressions in the conformance suite, and the 1,053 lib-test suite stays clean (the pre-existing `deep_recursion_with_captures_restored_correctly` adversarial failure from 2026-04-19 is unchanged and unrelated).
+- **Next concrete action**: the lookbehind variant needs a caller-aware fix. Look at `OpCode::Lookbehind` vs `OpCode::LookbehindNeg` dispatch to thread the positive flag in, then propagate SKIP/COMMIT only when positive-semantics + body-failed. Or alternatively, investigate the top false-negative `/^(a\1?){4}$/` (capture-restoration-across-quantifier-iteration) which is the biggest bucket.
+
 ### 2026-04-24 — Doc refresh: RUST_CODEBASE_ANALYSIS.md brought to head `6a56509`
 
 - **What**: Bootstrap session restarted from README.md at user's direction (prior attempt was cut short before a thorough read). Full read-through of all README-referenced docs, the 45-chapter Book, and a structural codebase analysis (delegated to Explore agent) produced a verified snapshot of the actual current state. RUST_CODEBASE_ANALYSIS.md was 8 days stale — claimed 8,822/2,396 ratchet / 1,007 tests / PGEN 1.1.26 / MSRV 1.88 / ~48K lines; actual is 12,702/108 ratchet / 1,052 lib + 30 CLI tests / PGEN 1.1.29 at `48a9f064` / MSRV 1.95 / ~55K lines.
