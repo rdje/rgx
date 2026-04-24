@@ -2776,20 +2776,22 @@ impl RegexVM {
                 OpCode::Prune => {
                     // (*PRUNE): clear backtrack stack so that if the
                     // current path fails, the entire attempt at this
-                    // start position fails immediately.
+                    // start position fails immediately, then the
+                    // scanner advances to `start + 1` and retries.
                     //
-                    // When PRUNE follows a SKIP verb lexically
-                    // (`(*SKIP)(*PRUNE)` in the pattern), PCRE2's
-                    // documented behaviour is that PRUNE's
-                    // "advance by 1" supersedes SKIP's
-                    // "advance to mark" — the scanner should move
-                    // to `start + 1`, not to the SKIP'd position.
-                    // Discard any pending SKIP target so the
+                    // When PRUNE follows SKIP or COMMIT lexically
+                    // (`(*SKIP)(*PRUNE)`, `(*COMMIT)(*PRUNE)`),
+                    // PCRE2's documented behaviour is that PRUNE's
+                    // normal scanner-advance supersedes SKIP's
+                    // advance-to-mark and COMMIT's
+                    // don't-advance-at-all. Clear both
+                    // `skip_position` and `committed` so the
                     // scanning loop falls into the default
-                    // +1-advance branch. Preserves SKIP's effect
-                    // when no PRUNE follows.
+                    // +1-advance branch; SKIP / COMMIT without a
+                    // trailing PRUNE keep their effects.
                     ctx.backtrack_stack.clear();
                     ctx.skip_position = None;
+                    ctx.committed = false;
                 }
 
                 OpCode::VerbSkip => {

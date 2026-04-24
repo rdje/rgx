@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: (*PRUNE) clears pending (*COMMIT) abort (+1, engine fix #36)
+- **What**: `aaaaa(*COMMIT)(*PRUNE)b|a+c` on "aaaaaac": COMMIT set committed, PRUNE should override with "advance by 1" per PCRE2. Added `ctx.committed = false;` to Prune handler (alongside existing `ctx.skip_position = None;`). Trailing PRUNE after COMMIT/SKIP now lets scanner advance normally.
+- **Delta**: 12,701 → 12,702 (+1), 109 → 108. Baselines 12,702 / 108.
+
 ### 2026-04-24 — VM: StarLazy/PlusLazy propagate (*ACCEPT) from probed body (+2 passes, engine fix #35)
 - **What**: `(?>.(*ACCEPT))*?5` on "abcde" returned no match. Lazy star's probe saw body succeed with accept_forced but only pushed retry frame. Added accept_forced check in StarLazy and PlusLazy — propagate flag to outer ctx, copy captures/pos, return true.
 - **Delta**: 12,699 → 12,701 (+2), 111 → 109. Baselines 12,701 / 109.

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: `(*PRUNE)` clears pending `(*COMMIT)` abort so trailing-PRUNE patterns let the scanner advance (+1 pass, engine #36)
+
+- Scope: `aaaaa(*COMMIT)(*PRUNE)b|a+c` on `"aaaaaac"` — PCRE2 matches `"aaaac"` at pos 2. RGX returned no match: at pos 0, `aaaaa` matched, `(*COMMIT)` set `ctx.committed`, `(*PRUNE)` cleared the local stack (and a prior patch cleared the SKIP pending mark), `b` failed, and the scanner was blocked by the committed flag from trying other positions. PCRE2's rule: when PRUNE lexically follows COMMIT, PRUNE's normal "advance by 1" supersedes COMMIT's "don't advance."
+- Fix: `rgx-core/src/vm.rs::OpCode::Prune` — in addition to clearing the local backtrack stack and `ctx.skip_position`, also clear `ctx.committed`. So after `(*COMMIT)(*PRUNE)` fires the scanner falls into its default +1-advance branch rather than aborting. COMMIT without a trailing PRUNE keeps the abort flag.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,701 → 12,702 pass** (+1), 109 → 108 fail. Ratchet baselines bumped to `PASS_BASELINE=12_702` / `FAIL_BASELINE=108`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput2:3824. **Thirty-sixth engine fix of the session; conformance at ~99.2%**.
+
 ### 2026-04-24 - VM: `StarLazy` / `PlusLazy` propagate `(*ACCEPT)` from probed body (+2 passes, engine #35)
 
 - Scope: `(?>.(*ACCEPT))*?5` on `"abcde"` — PCRE2 matches `"a"` because the lazy star's body fires `(*ACCEPT)` on the first iteration, forcing an immediate overall match. RGX returned no match: `StarLazy`'s probe saw the body succeed with `accept_forced=true` but only pushed a retry backtrack frame and continued, so the outer dispatch never learned ACCEPT had fired. `PlusLazy` had the same structural gap after its mandatory first iteration.
