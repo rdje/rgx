@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: tighten `(*COMMIT)` / `(*SKIP)` assertion propagation to positive-only (no ratchet change, semantic cleanup)
+
+- Scope: engine fix #37 shipped unconditional `skip_position` / `committed` propagation on `!body_matched` in `execute_assertion_subexpr`. That's correct for positive assertions (where body failure = assertion failure → propagate verbs to outer match) but wrong for negative assertions (where body failure = assertion *success* → verbs should be absorbed). The pre-existing engine-fix-#28 `committed` propagation had the same latent asymmetry. No test in the current corpus exercises the divergence, but a negative lookahead like `(?!b(*SKIP)a)bnn` on "bnn" would have leaked SKIP and aborted the outer match incorrectly.
+- Fix: `rgx-core/src/vm.rs::execute_assertion_subexpr` — combine the two propagation blocks (committed + skip_position) into one, gated on `propagate_captures && !body_matched`. `propagate_captures` is the caller-provided positive-assertion flag (same value the function already uses to decide whether to copy captures on body success). Tightens both engine fix #28's and #37's propagation to positive-only, matching PCRE2 semantics precisely.
+- Validation: 1,054 lib tests pass (added regression pin `skip_in_failing_negative_lookahead_absorbs_verb` — `(?!b(*SKIP)a)bnn` on "bnn" → match "bnn", which asserts SKIP is absorbed). 30 rgx-cli tests pass. Conformance ratchet unchanged at 12,703 / 107 — no test relied on the unconditional propagation. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Zero ratchet delta but locks in the correct semantic for negative assertions under SKIP/COMMIT. A blanket `propagate_captures`-gated mirror fix for `execute_lookbehind_assertion` was tried and reverted — it regressed 2 cases elsewhere in the conformance corpus (root cause not yet localized; needs per-case diffing). Tracked as a separate follow-up.
+
 ### 2026-04-24 - VM: `(*SKIP)` inside failing lookahead propagates to outer match attempt (+1 pass, engine #37)
 
 - Scope: `(?=b(*SKIP)a)bn|bnn` on `"bnn"` — PCRE2 expects no match because the lookahead body matches `'b'`, fires `(*SKIP)`, then fails at `'a'`. PCRE2's rule for SKIP inside a failing assertion is parallel to COMMIT's (already fixed in engine fix #28): the `skip_position` and the scanner-abort propagate to the outer match. RGX matched `"bnn"` (alt 2) at pos 0 because `execute_assertion_subexpr` only propagated `committed`, not `skip_position` — the assertion clone's SKIP was discarded and alt 2 ran at the same position.

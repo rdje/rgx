@@ -6455,29 +6455,28 @@ impl RegexVM {
             ctx.captures = assertion_ctx.captures;
             ctx.capture_trail = assertion_ctx.capture_trail;
         }
-        // `(*COMMIT)` inside a FAILING assertion propagates its
-        // scanner-abort to the outer match. PCRE2 semantic: once
-        // COMMIT fires inside an assertion body and the body
-        // subsequently fails, the whole match attempt at the
-        // current start position is aborted (pcre2pattern(3):
-        // "if the assertion subsequently fails, the entire matching
-        // attempt is aborted"). If the assertion succeeded, COMMIT
-        // is absorbed — the successful zero-width match discards
-        // the commit-on-fail effect.
-        if !body_matched && assertion_ctx.committed {
-            ctx.committed = true;
-        }
-        // `(*SKIP)` inside a FAILING assertion follows the same
-        // propagation rule. PCRE2 semantic mirrors COMMIT: once SKIP
-        // fires inside an assertion body and the body subsequently
-        // fails, the match attempt at the current start is aborted
-        // AND the scanner's next candidate position is bumped to the
-        // recorded SKIP position. A successful assertion body
-        // absorbs SKIP the same way it absorbs COMMIT. Without this
-        // propagation, `(?=b(*SKIP)a)bn|bnn` on `"bnn"` would fall
-        // through to alt 2 at pos 0 and match "bnn" — PCRE2 says no
-        // match.
-        if !body_matched {
+        // `(*COMMIT)` and `(*SKIP)` inside a FAILING **positive**
+        // assertion propagate to the outer match. PCRE2 semantic:
+        // when a positive assertion body fires COMMIT/SKIP and then
+        // fails, the assertion itself fails, which aborts the
+        // surrounding match attempt at the current position
+        // (pcre2pattern(3): "if the assertion subsequently fails,
+        // the entire matching attempt is aborted"). For SKIP, the
+        // scanner's next candidate is also bumped to the recorded
+        // SKIP position. A successful assertion body absorbs both
+        // verbs — the successful zero-width match discards the
+        // commit-on-fail / skip-on-fail effect.
+        //
+        // `propagate_captures` is set by the caller to whether the
+        // assertion is **positive** (see dispatch sites and the
+        // conditional operand helper). We reuse it to gate the verb
+        // propagation: for a **negative** assertion, body failure is
+        // the path where the assertion *succeeds*, so the verbs
+        // should be absorbed rather than leaked to the outer match.
+        if propagate_captures && !body_matched {
+            if assertion_ctx.committed {
+                ctx.committed = true;
+            }
             if let Some(skip_pos) = assertion_ctx.skip_position {
                 ctx.skip_position = Some(skip_pos);
                 ctx.committed = true;

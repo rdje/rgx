@@ -6307,6 +6307,22 @@ mod tests {
     }
 
     #[test]
+    fn skip_in_failing_negative_lookahead_absorbs_verb() {
+        // Symmetric regression pin: a negative assertion whose body
+        // fails must absorb (*SKIP), not leak it. `(?!b(*SKIP)a)bnn`
+        // on "bnn" — the negative lookahead's body matches 'b', fires
+        // (*SKIP), fails at 'a'. Since body failure = negative assertion
+        // success, the outer match proceeds. RGX should then match "bnn"
+        // via the outer literal — (*SKIP) must NOT propagate out and
+        // abort the match.
+        let re = Regex::compile(r"(?!b(*SKIP)a)bnn").unwrap();
+        let m = re
+            .find_first("bnn")
+            .expect("negative lookahead should succeed");
+        assert_eq!((m.start, m.end), (0, 3));
+    }
+
+    #[test]
     fn extended_mode_toggle_then_scoped_disable_preserves_outer() {
         // After `(?-x: ...)` exits, the outer `(?x)` mode should still
         // apply. Verify by putting literal whitespace in the tail that

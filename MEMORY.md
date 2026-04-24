@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: tighten assertion verb propagation to positive-only (semantic cleanup)
+
+- **What**: `execute_assertion_subexpr` was propagating `(*SKIP)` / `(*COMMIT)` on `!body_matched` unconditionally — correct for positive assertions, wrong for negative (where body failure = assertion success, verbs should be absorbed). Combined both propagation blocks into one gated on `propagate_captures && !body_matched`. The `propagate_captures` param IS the positive flag at every call site (verified: top-level Lookahead/LookaheadNeg dispatch sets `matches!(op, Lookahead | Lookbehind)`; conditional operand passes `positive` directly).
+- **Delta**: ratchet unchanged at 12,703 / 107. New regression pin `skip_in_failing_negative_lookahead_absorbs_verb` locks the tightened semantic — `(?!b(*SKIP)a)bnn` on "bnn" now correctly matches (SKIP absorbed), not no-match (SKIP leaked).
+- **Lookbehind follow-up attempted + reverted**: A parallel aggregation-based fix for `execute_lookbehind_assertion` (track `any_committed` / `any_skip` across failing starts, propagate after all starts fail, gated on `propagate_captures`) would close the `(?<=a(*SKIP)x)|c` top-FP case but regresses 2 other cases in the conformance corpus. Root cause not localized — needs per-case diffing with something like `RGX_CONFORMANCE_DUMP_ALL_FAILURES=1` to identify the 2 newly-failing patterns. Reverted for this commit. Natural follow-up for a future session.
+- **Next concrete action**: either (a) deep-dive the lookbehind regression to localize the 2 cases breaking and refine the fix, (b) tackle the substitute-mode "other" bucket (5 cases, investigate the `/abc/replace` two-vs-one discrepancy on "123abc456abc789"), or (c) try the top false-negative `/^(a\1?){4}$/` (capture-restoration-across-quantifier-iteration — 65-case bucket but architecturally complex).
+
 ### 2026-04-24 — VM: (*SKIP) inside failing lookahead propagates (+1, engine fix #37)
 
 - **What**: `(?=b(*SKIP)a)bn|bnn` on "bnn": lookahead body fires SKIP, fails at 'a'. `execute_assertion_subexpr` was propagating `committed` but not `skip_position`. Added parallel propagation block: on body failure, if assertion_ctx.skip_position is Some, set outer ctx.skip_position AND ctx.committed. Exact mirror of engine fix #28's COMMIT rule.
