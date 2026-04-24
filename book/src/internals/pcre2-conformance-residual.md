@@ -159,7 +159,11 @@ Pattern family: `^QUOTE ((?(?=[X])NOT_X_CHAR) | B)* QUOTE $`. The conditional as
 
 **What to change**: the VM's conditional-with-lookahead dispatch routes through `evaluate_conditional_operand` → `execute_assertion_subexpr`. The failing path is probably when the conditional's test *fails* but the alternation should fall through to the `|` branch. Needs targeted dispatch investigation.
 
-## Cluster 1F — `(?J)` dupnames + conditional + substitute (3 cases)
+## Cluster 1F — `(?J)` dupnames + conditional + substitute ✅ CLOSED 2026-04-24 (3 of 4 cases)
+
+The 3 FN cases closed via engine fix #38. Introduced a parallel `named_groups_all: HashMap<String, Vec<u32>>` map on the compiler plus new opcode `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY` that tests "is any of these group ids set." The substitute case testinput2:4953 remains — requires the same treatment in `Regex::interpolate_replacement`.
+
+Original cluster text (historical):
 
 **Difficulty**: medium. **Expected payoff**: 3 direct + 1 substitute (Bucket 4) = 4.
 

@@ -677,7 +677,12 @@ impl Compiler {
         // opcodes can read it in both the main VM and the subexpr VM.
         let newline_mode = newline_mode_from_pattern(raw_label);
         let ucp_enabled = raw_label.contains("(*UCP)");
-        let mut vm_compiler = VMCompiler::with_named_groups(named_groups.clone());
+        // Collect the multi-id dupnames map alongside the single-id map
+        // so the VM compiler can emit the "any-of" conditional opcode
+        // for `(?(<name>)...)` when multiple definitions of `name` exist.
+        let named_groups_all = Self::collect_named_groups_all(&ast);
+        let mut vm_compiler =
+            VMCompiler::with_named_groups_all(named_groups.clone(), named_groups_all);
         vm_compiler.set_newline_mode(newline_mode);
         vm_compiler.set_ucp_enabled(ucp_enabled);
         let mut program = vm_compiler.compile(&ast);
@@ -3175,6 +3180,78 @@ impl Compiler {
         let mut named_groups = std::collections::HashMap::new();
         Self::collect_named_groups_inner(ast, &mut named_groups);
         named_groups
+    }
+
+    /// Collect ALL `Vec<u32>` of group ids registered under each name
+    /// (in AST traversal order). For non-dupnames patterns each Vec has
+    /// exactly one id, identical to what `collect_named_groups` would
+    /// have emitted. For dupnames (PCRE2 `(?J)` or alternation-level
+    /// duplicates) the Vec preserves every id, which the downstream
+    /// `NamedGroupExists` codegen uses to emit the "any-of" conditional
+    /// opcode `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY`.
+    fn collect_named_groups_all(ast: &RegexAst) -> std::collections::HashMap<String, Vec<u32>> {
+        let mut named_groups_all = std::collections::HashMap::new();
+        Self::collect_named_groups_all_inner(ast, &mut named_groups_all);
+        named_groups_all
+    }
+
+    fn collect_named_groups_all_inner(
+        ast: &RegexAst,
+        named_groups_all: &mut std::collections::HashMap<String, Vec<u32>>,
+    ) {
+        match ast {
+            RegexAst::Sequence(items) | RegexAst::Alternation(items) => {
+                for item in items {
+                    Self::collect_named_groups_all_inner(item, named_groups_all);
+                }
+            }
+            RegexAst::Quantified { expr, .. }
+            | RegexAst::Lookahead { expr, .. }
+            | RegexAst::Lookbehind { expr, .. }
+            | RegexAst::FlagGroup { expr, .. } => {
+                Self::collect_named_groups_all_inner(expr, named_groups_all);
+            }
+            RegexAst::Group {
+                expr,
+                kind,
+                index,
+                name,
+            } => {
+                if matches!(kind, crate::ast::GroupKind::Capturing) {
+                    if let (Some(name), Some(group_id)) = (name, *index) {
+                        named_groups_all
+                            .entry(name.clone())
+                            .or_default()
+                            .push(group_id);
+                    }
+                }
+                Self::collect_named_groups_all_inner(expr, named_groups_all);
+            }
+            RegexAst::Conditional {
+                condition,
+                true_branch,
+                false_branch,
+            } => {
+                match condition {
+                    crate::ast::ConditionalTest::Lookahead { expr, .. }
+                    | crate::ast::ConditionalTest::Lookbehind { expr, .. } => {
+                        Self::collect_named_groups_all_inner(expr, named_groups_all);
+                    }
+                    crate::ast::ConditionalTest::GroupExists(_)
+                    | crate::ast::ConditionalTest::RelativeGroupExists(_)
+                    | crate::ast::ConditionalTest::NamedGroupExists(_)
+                    | crate::ast::ConditionalTest::RecursionAny
+                    | crate::ast::ConditionalTest::RecursionGroup(_)
+                    | crate::ast::ConditionalTest::RecursionNamed(_)
+                    | crate::ast::ConditionalTest::Define => {}
+                }
+                Self::collect_named_groups_all_inner(true_branch, named_groups_all);
+                if let Some(fb) = false_branch {
+                    Self::collect_named_groups_all_inner(fb, named_groups_all);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn collect_named_groups_inner(

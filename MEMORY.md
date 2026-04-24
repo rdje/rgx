@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: dupnames conditional checks ANY instance (+3, engine #38)
+
+- **What**: `(?:a(?<digit>[0-5])|b(?<digit>[4-7]))c(?(<digit>)d|e)` — the compiler's HashMap<String, u32> overwrote alt 1's digit id with alt 2's, so the conditional only ever checked alt 2's group. Alt 2-matching inputs worked (group set); alt 1-matching inputs failed (group unset via the overwrite).
+- **Fix**: added `named_groups_all: HashMap<String, Vec<u32>>` parallel map on `OptimizingCompiler` populated by new `Compiler::collect_named_groups_all` walker. New VM opcode `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY = 8` emitted by `NamedGroupExists` codegen when the name has multiple ids. Runtime iterates the list, true if ANY set.
+- **Delta**: 12,705 → 12,708 (+3), 105 → 102. Baselines 12,708 / 102.
+- **Follow-up**: Bucket 4 case testinput2:4953 `(?J)(?:(?<A>a)|(?<A>b))/replace=<$A>` is the same root cause in the substitute-template interpolation path — `Regex::interpolate_replacement` uses the single-id `named_groups` map and picks the unset first-defined group. Parallel fix there would close that 1 case.
+- **Next concrete action**: Cluster 1E (conditional lookahead in repeated alt, 3 cases) — similar bounded-dispatch investigation.
+
 ### 2026-04-24 — Parser: (*CRLF) . rejects both ends of \r\n pair (+2)
 
 - **What**: Engine fix #11 only handled START of CRLF (`\r` followed by `\n`). The END (`\n` preceded by `\r`) was not excluded, so `.+foo` on "\r\nfoo" matched at pos 1. Extended `dot_ast` to use `(?!\r\n|(?<=\r)\n)<any>` — the inner lookbehind in the second alternative ensures the prev-`\r` check only fires when current is `\n` (not for arbitrary chars after `\r`, which would falsely reject `d` in `c\rd`).

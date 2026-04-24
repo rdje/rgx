@@ -6307,6 +6307,29 @@ mod tests {
     }
 
     #[test]
+    fn dupnames_conditional_checks_any_definition() {
+        // `(?:a(?<digit>[0-5])|b(?<digit>[4-7]))c(?(<digit>)d|e)` on
+        // "a4cd" — PCRE2 matches "a4cd". Two `(?<digit>)` groups
+        // share the same name; the `(?(<digit>)...)` conditional
+        // must succeed iff EITHER instance captured. Before this
+        // fix RGX's HashMap<String, u32> overwrote alt 1's group
+        // id with alt 2's, so the conditional checked only alt 2's
+        // group and failed when alt 1 matched.
+        let re = Regex::compile(r"(?:a(?<digit>[0-5])|b(?<digit>[4-7]))c(?(<digit>)d|e)").unwrap();
+        let m = re
+            .find_first("a4cd")
+            .expect("dupnames conditional must see alt 1's digit group");
+        assert_eq!((m.start, m.end), (0, 4));
+        // Symmetric: alt 2 captures its digit group; conditional sees it.
+        let m = re
+            .find_first("b4cd")
+            .expect("dupnames conditional must see alt 2's digit group");
+        assert_eq!((m.start, m.end), (0, 4));
+        // Neither alt captures → no match (outer `(?:a...|b...)` fails).
+        assert!(re.find_first("xce").is_none());
+    }
+
+    #[test]
     fn dot_under_crlf_rejects_both_ends_of_pair() {
         // PCRE2 `(*CRLF)` rule: `.` matches everything EXCEPT
         //   (a) `\r` immediately followed by `\n` (start of CRLF)

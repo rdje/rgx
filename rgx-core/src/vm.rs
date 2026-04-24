@@ -311,6 +311,16 @@ const CONDITIONAL_KIND_LOOKBEHIND_NEGATIVE: u8 = 4;
 const CONDITIONAL_KIND_DEFINE_FALSE: u8 = 5;
 const CONDITIONAL_KIND_RECURSION_ANY: u8 = 6;
 const CONDITIONAL_KIND_RECURSION_GROUP: u8 = 7;
+// `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY` — conditional test for a
+// named group that has duplicate definitions (PCRE2 `(?J)` semantic or
+// dupnames across alternation). Operand layout: `count: u8` followed
+// by `count` consecutive `group_id: u8` bytes. The runtime returns
+// true iff ANY of the listed groups has completed capture. Needed
+// because with duplicate named groups (e.g. `(?J)(?:(?<A>a)|(?<A>b))`)
+// exactly one of the two groups will be set after a match; the
+// single-id form at `CONDITIONAL_KIND_GROUP_EXISTS` would miss the
+// set-one half the time.
+const CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY: u8 = 8;
 const MAX_RECURSION_DEPTH: usize = 1024;
 
 /// Reserved `BacktrackFrame.ip` value used by `(*COMMIT)` when it
@@ -6507,6 +6517,29 @@ impl RegexVM {
                 *ip += 1;
                 Some(Self::capture_group_exists(ctx, group_id))
             }
+            CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY => {
+                // Operand: count (u8) followed by `count` group_id bytes.
+                // Returns true iff any of the listed groups has completed
+                // capture. See the CONDITIONAL_KIND constant doc-comment
+                // for why this exists.
+                if *ip >= code.len() {
+                    return None;
+                }
+                let count = code[*ip] as usize;
+                *ip += 1;
+                if *ip + count > code.len() {
+                    return None;
+                }
+                let mut any_set = false;
+                for i in 0..count {
+                    let group_id = code[*ip + i] as usize;
+                    if Self::capture_group_exists(ctx, group_id) {
+                        any_set = true;
+                    }
+                }
+                *ip += count;
+                Some(any_set)
+            }
             CONDITIONAL_KIND_RECURSION_ANY => Some(!ctx.recursion_stack.is_empty()),
             CONDITIONAL_KIND_RECURSION_GROUP => {
                 if *ip >= code.len() {
@@ -7026,8 +7059,20 @@ pub struct OptimizingCompiler {
     char_classes: Vec<CompiledCharClass>,
     /// String literals for optimization
     strings: Vec<String>,
-    /// Named capture group mapping for conditional references
+    /// Named capture group mapping for conditional references.
+    /// Single-id map — for duplicate named groups (PCRE2 `(?J)`) this
+    /// is the *last-registered* id. Used by backrefs, substitute
+    /// template interpolation, and the single-id conditional path.
     named_groups: HashMap<String, u32>,
+    /// Parallel map that preserves *all* group_ids for a given name,
+    /// in registration order. Duplicate names (e.g. `(?J)(?<A>a)|(?<A>b)`
+    /// or the harness's implicit dupnames via alternation in PCRE2
+    /// testdata) end up with a `Vec` longer than one here; everywhere
+    /// else the map looks like the single-id form. `NamedGroupExists`
+    /// codegen checks this: when a name has multiple ids, it emits the
+    /// `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY` opcode that tests
+    /// "is ANY of these groups set" — which is the PCRE2 semantic.
+    named_groups_all: HashMap<String, Vec<u32>>,
     /// Group counter for captures
     group_counter: u32,
     /// Optimization flags
@@ -7173,14 +7218,41 @@ impl OptimizingCompiler {
     }
 
     /// Create new optimizing compiler with resolved named group references.
+    ///
+    /// The single-id form is derived from the multi-id form by taking
+    /// the last-registered id for each name (matching the historical
+    /// `HashMap::insert`-overwrite behaviour, which `$name` substitute
+    /// templates and `\k<name>` backrefs have depended on).
     #[must_use]
     pub fn with_named_groups(named_groups: HashMap<String, u32>) -> Self {
+        // Back-compat seed: if the caller only has the single-id map,
+        // treat each name as having one id. `collect_named_groups_all`
+        // (called by the downstream compiler) would have provided the
+        // full multi-id map when dupnames actually exist.
+        let named_groups_all: HashMap<String, Vec<u32>> = named_groups
+            .iter()
+            .map(|(k, v)| (k.clone(), vec![*v]))
+            .collect();
+        Self::with_named_groups_all(named_groups, named_groups_all)
+    }
+
+    /// Create new optimizing compiler with BOTH the single-id map
+    /// (for backref / substitute compatibility) and the full multi-id
+    /// map (for dupnames-aware conditional codegen). Pass identical
+    /// one-id-per-name content for non-dupnames patterns; pass multi-id
+    /// content where PCRE2 `(?J)` / alternation-dupname is in play.
+    #[must_use]
+    pub fn with_named_groups_all(
+        named_groups: HashMap<String, u32>,
+        named_groups_all: HashMap<String, Vec<u32>>,
+    ) -> Self {
         trace_enter!("vm", "OptimizingCompiler::new");
         let compiler = Self {
             code: Vec::new(),
             char_classes: Vec::new(),
             strings: Vec::new(),
             named_groups,
+            named_groups_all,
             group_counter: 0,
             flags: ProgramFlags {
                 simd_enabled: true,
@@ -8196,13 +8268,28 @@ impl OptimizingCompiler {
                 );
             }
             ConditionalTest::NamedGroupExists(name) => {
-                let group_id = self
-                    .named_groups
+                // For single-definition names: emit the plain
+                // `CONDITIONAL_KIND_GROUP_EXISTS <id>`. For duplicate
+                // named groups (PCRE2 `(?J)` or dupnames across
+                // alternation), emit
+                // `CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY <count> <id>...`
+                // so the runtime tests "is ANY of these groups set",
+                // matching PCRE2's semantic where the conditional
+                // succeeds iff any duplicate-named instance captured.
+                let all_ids = self
+                    .named_groups_all
                     .get(name)
-                    .copied()
                     .expect("named conditional reference should be validated before codegen");
-                self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
-                self.code.push(group_id as u8);
+                if all_ids.len() == 1 {
+                    self.code.push(CONDITIONAL_KIND_GROUP_EXISTS);
+                    self.code.push(all_ids[0] as u8);
+                } else {
+                    self.code.push(CONDITIONAL_KIND_NAMED_GROUP_EXISTS_ANY);
+                    self.code.push(all_ids.len() as u8);
+                    for id in all_ids {
+                        self.code.push(*id as u8);
+                    }
+                }
             }
             ConditionalTest::RecursionAny => {
                 self.code.push(CONDITIONAL_KIND_RECURSION_ANY);
