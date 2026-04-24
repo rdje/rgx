@@ -3240,6 +3240,17 @@ impl RegexVM {
                     }
 
                     if let Some(probe_ctx) = self.probe_subexpr(ctx, &code[expr_start..expr_end]) {
+                        // Probe-level `(*ACCEPT)` fires force-match
+                        // up to the caller. Propagate the flag to
+                        // the outer ctx and return — the rest of
+                        // the pattern is absorbed by ACCEPT.
+                        if probe_ctx.accept_forced {
+                            ctx.accept_forced = true;
+                            ctx.pos = probe_ctx.pos;
+                            ctx.captures = probe_ctx.captures;
+                            ctx.capture_trail = probe_ctx.capture_trail;
+                            return true;
+                        }
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
                             pos: probe_ctx.pos,
@@ -3274,6 +3285,13 @@ impl RegexVM {
                     let cs_mark = ctx.call_stack.len();
                     let saved_code_result = ctx.code_result.clone();
                     let matched = self.execute_subexpr(ctx, &code[expr_start..expr_end]);
+                    // `(*ACCEPT)` inside the body bubbles up: the
+                    // outer pattern is absorbed by the forced
+                    // match, so drop straight out before running
+                    // the lazy-star retry probe.
+                    if ctx.accept_forced {
+                        return true;
+                    }
                     if !matched || ctx.pos == before_pos {
                         ctx.pos = before_pos;
                         Self::undo_trail(ctx, trail_mark);
@@ -3288,10 +3306,14 @@ impl RegexVM {
                     let after_first_trail_mark = ctx.capture_trail.len();
                     let after_first_cs_mark = ctx.call_stack.len();
                     let after_first_code_result = ctx.code_result.clone();
-                    if self
-                        .probe_subexpr(ctx, &code[expr_start..expr_end])
-                        .is_some()
-                    {
+                    if let Some(probe_ctx) = self.probe_subexpr(ctx, &code[expr_start..expr_end]) {
+                        if probe_ctx.accept_forced {
+                            ctx.accept_forced = true;
+                            ctx.pos = probe_ctx.pos;
+                            ctx.captures = probe_ctx.captures;
+                            ctx.capture_trail = probe_ctx.capture_trail;
+                            return true;
+                        }
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: opcode_start,
                             pos: ctx.pos,

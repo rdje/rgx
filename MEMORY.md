@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: StarLazy/PlusLazy propagate (*ACCEPT) from probed body (+2 passes, engine fix #35)
+- **What**: `(?>.(*ACCEPT))*?5` on "abcde" returned no match. Lazy star's probe saw body succeed with accept_forced but only pushed retry frame. Added accept_forced check in StarLazy and PlusLazy — propagate flag to outer ctx, copy captures/pos, return true.
+- **Delta**: 12,699 → 12,701 (+2), 111 → 109. Baselines 12,701 / 109.
+
 ### 2026-04-24 — VM: AltScopeBegin/End opcodes track alternation's lexical scope (+3 passes, engine fix #34)
 - **What**: `^((abc|abcx)(*THEN)y|abcd)` on "abcxy" matched when it shouldn't. Inner alternation's AltSplit frame stayed on the backtrack stack after the inner group closed, so (*THEN) redirected to the wrong (inner) alternation. Added OpCode::AltScopeBegin (0x48) and AltScopeEnd (0x49) emitted around every multi-branch alternation. New ExecContext.alt_scope_marks Vec<usize> stores alt_boundaries.len() at Begin; End truncates back. Purely lexical — doesn't remove backtrack frames themselves. All three interpreters + C1 JIT (no-op there).
 - **Delta**: 12,696 → 12,699 (+3), 114 → 111. Baselines 12,699 / 111. Conformance ~99.2%.

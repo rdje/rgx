@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: `StarLazy` / `PlusLazy` propagate `(*ACCEPT)` from probed body (+2 passes, engine #35)
+
+- Scope: `(?>.(*ACCEPT))*?5` on `"abcde"` — PCRE2 matches `"a"` because the lazy star's body fires `(*ACCEPT)` on the first iteration, forcing an immediate overall match. RGX returned no match: `StarLazy`'s probe saw the body succeed with `accept_forced=true` but only pushed a retry backtrack frame and continued, so the outer dispatch never learned ACCEPT had fired. `PlusLazy` had the same structural gap after its mandatory first iteration.
+- Fix: `rgx-core/src/vm.rs` — `StarLazy` and `PlusLazy` now inspect `probe_ctx.accept_forced` (and the first-iteration `ctx.accept_forced` for `PlusLazy`) and on set propagate to the outer context, copy the probe's advanced captures/pos, and `return true` so the main dispatch's ACCEPT-short-circuit fires.
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,699 → 12,701 pass** (+2), 111 → 109 fail. Ratchet baselines bumped to `PASS_BASELINE=12_701` / `FAIL_BASELINE=109`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput2:3103 `(?>.(*ACCEPT))*?5` and testinput2:3106 `(.(*ACCEPT))*?5`. **Thirty-fifth engine fix of the session; conformance at ~99.2%**.
+
 ### 2026-04-24 - VM: new `AltScopeBegin` / `AltScopeEnd` opcodes track alternation's lexical scope for `(*THEN)` (+3 passes, engine #34)
 
 - Scope: `^((abc|abcx)(*THEN)y|abcd)` on `"abcxy"` — PCRE2 expects no match because `(*THEN)`'s innermost *lexically-enclosing* alternation is the outer `(...|abcd)`: the inner `(abc|abcx)` group has already closed by the time THEN executes. RGX matched `"abcxy"` because the inner `AltSplit` frame stayed on the backtrack stack and `ctx.alt_boundaries` still pointed at it, so THEN falsely redirected to the inner "next alt" (`abcx`) and then succeeded with `abcx+y`.
