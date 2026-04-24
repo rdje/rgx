@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - API: substitute `$name` interpolation respects dupnames (+1 pass, follow-up to engine #38)
+
+- Scope: `(?J)(?:(?<A>a)|(?<A>b))/replace=<$A>` on "[a]" — PCRE2 produces `[<a>]` (interpolates alt 1's A which is set). RGX produced `[<>]` because `push_group_by_ref` looked up `named.get("A")` in the single-id HashMap and found alt 2's id (the overwrite winner); that slot was unset, so the template expanded to empty. The engine #38 fix handled this case in conditional-evaluate but NOT in substitute-template-interpolation.
+- Fix: `rgx-core/src/lib.rs` — added `named_groups_all` field on `Program` and `Captures`, a new `push_group_by_ref_ext` / `interpolate_replacement_ext` pair that takes the multi-id map, and an `Engine::named_groups_all()` accessor. When `$name` is referenced in a template and the name has multiple definitions, the interpolator iterates every registered id and emits the first one that is actually SET. Single-id path preserved for back-compat. All 4 `Captures { ... }` construction sites + `CaptureIter` updated to carry `named_all` from the engine.
+- Validation: 1,056 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,708 → 12,709 pass** (+1 direct from testinput2:4953 substitute; the harness also reclassified 3 FN cases to pass after the multi-id map started flowing through other code paths). Baselines bumped to `PASS_BASELINE=12_709` / `FAIL_BASELINE=101`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: closes the substitute sub-case of Cluster 1F. Companion to engine fix #38 (conditional-side dupnames). 65→62 FN / 5→4 other buckets.
+
 ### 2026-04-24 - VM: dupnames conditional checks ANY instance (+3 passes, engine #38)
 
 - Scope: `(?:a(?<digit>[0-5])|b(?<digit>[4-7]))c(?(<digit>)d|e)` on "a4cd" — PCRE2 matches "a4cd". RGX returned no match. Root cause: `OptimizingCompiler.named_groups: HashMap<String, u32>` stores ONE id per name, so when two `(?<digit>)` groups are parsed, alt 2's id overwrites alt 1's. The conditional `(?(<digit>)...)` then checked only alt 2's group. For the "a4cd" path alt 1 matches (digit unset → `e` branch → fails); for "b4cd" alt 2 matches (digit set → `d` branch → succeeds). The asymmetry made alt 2-matching inputs work and alt 1-matching inputs fail. Same root cause for testinput1:4673 (`(?<quote>)` duplicated across alternation with `(?('quote')...)` conditional) and testinput1:5715 (`^ (?:(?<A>A)|(?'B'B)(?<A>A)) (?('A')x) (?(<B>)y)$`).

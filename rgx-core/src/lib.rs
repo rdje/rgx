@@ -253,6 +253,12 @@ pub struct Captures<'t> {
     text: &'t str,
     groups: Vec<Option<(usize, usize)>>,
     named: std::sync::Arc<std::collections::HashMap<String, u32>>,
+    /// Parallel multi-id named-group map (registration order). Used
+    /// by substitute template `$name` expansion to pick the first
+    /// SET duplicate when a name has multiple definitions — PCRE2
+    /// `(?J)` / alternation-dupnames semantic. For non-dupnames
+    /// patterns each Vec has exactly one id, identical to `named`.
+    named_all: std::sync::Arc<std::collections::HashMap<String, Vec<u32>>>,
     /// Name of the last `(*MARK:name)` / `(*:name)` verb hit on the
     /// winning match path, if any. Exposed to replacement templates
     /// as `${*MARK}` / `$*MARK` and to users via [`Captures::mark`].
@@ -309,10 +315,11 @@ impl<'t> Captures<'t> {
             .iter()
             .map(|slot| slot.map(|(s, e)| &self.text[s..e]))
             .collect();
-        Regex::interpolate_replacement(
+        Regex::interpolate_replacement_ext(
             replacement,
             &str_groups,
             &self.named,
+            Some(&self.named_all),
             self.last_mark.as_deref(),
             dst,
         );
@@ -575,6 +582,7 @@ impl<'r, 't> std::iter::FusedIterator for FindIter<'r, 't> {}
 pub struct CaptureIter<'r, 't> {
     inner: FindIter<'r, 't>,
     named: std::sync::Arc<std::collections::HashMap<String, u32>>,
+    named_all: std::sync::Arc<std::collections::HashMap<String, Vec<u32>>>,
 }
 
 impl<'r, 't> Iterator for CaptureIter<'r, 't> {
@@ -617,6 +625,7 @@ impl<'r, 't> Iterator for CaptureIter<'r, 't> {
                 text: self.inner.text,
                 groups: mr.groups,
                 named: self.named.clone(),
+                named_all: self.named_all.clone(),
                 last_mark: mr.last_mark,
             });
         }
@@ -1650,6 +1659,7 @@ impl Regex {
                 text,
                 groups: mr.groups,
                 named: std::sync::Arc::new(self.engine.named_groups().clone()),
+                named_all: std::sync::Arc::new(self.engine.named_groups_all().clone()),
                 last_mark: mr.last_mark,
             };
             rep.replace_append(&caps, &mut result);
@@ -1689,6 +1699,7 @@ impl Regex {
         };
         let literal = rep.no_expansion().map(|c| c.into_owned());
         let named = std::sync::Arc::new(self.engine.named_groups().clone());
+        let named_all = std::sync::Arc::new(self.engine.named_groups_all().clone());
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
         for m in matches.iter().take(effective) {
@@ -1700,6 +1711,7 @@ impl Regex {
                     text,
                     groups: m.groups.clone(),
                     named: named.clone(),
+                    named_all: named_all.clone(),
                     last_mark: m.last_mark.clone(),
                 };
                 rep.replace_append(&caps, &mut result);
@@ -1732,6 +1744,7 @@ impl Regex {
             text,
             groups: m.groups,
             named: std::sync::Arc::new(self.engine.named_groups().clone()),
+            named_all: std::sync::Arc::new(self.engine.named_groups_all().clone()),
             last_mark: m.last_mark,
         })
     }
@@ -1858,6 +1871,7 @@ impl Regex {
         CaptureIter {
             inner: self.find_iter(text),
             named: std::sync::Arc::new(self.engine.named_groups().clone()),
+            named_all: std::sync::Arc::new(self.engine.named_groups_all().clone()),
         }
     }
 
@@ -2217,6 +2231,21 @@ impl Regex {
         last_mark: Option<&str>,
         out: &mut String,
     ) {
+        Self::interpolate_replacement_ext(replacement, groups, named, None, last_mark, out);
+    }
+
+    /// Extended form of `interpolate_replacement` that threads the
+    /// multi-id named-group map through to `push_group_by_ref_ext` so
+    /// `$name` template references with dupnames (PCRE2 `(?J)`) pick
+    /// whichever definition actually captured.
+    fn interpolate_replacement_ext(
+        replacement: &str,
+        groups: &[Option<&str>],
+        named: &std::collections::HashMap<String, u32>,
+        named_all: Option<&std::collections::HashMap<String, Vec<u32>>>,
+        last_mark: Option<&str>,
+        out: &mut String,
+    ) {
         // PCRE2 accepts a leading `[N]` in a substitute template as
         // an advisory buffer-size hint (pcre2_substitute stripped it
         // from the emitted replacement). RGX has no equivalent buffer
@@ -2285,7 +2314,13 @@ impl Regex {
                                 scratch.push_str(mark);
                             }
                         } else {
-                            Self::push_group_by_ref(inner, groups, named, &mut scratch);
+                            Self::push_group_by_ref_ext(
+                                inner,
+                                groups,
+                                named,
+                                named_all,
+                                &mut scratch,
+                            );
                         }
                         push_with_case(out, &scratch, &mut case_next, case_region);
                         i = i + 2 + close;
@@ -2323,7 +2358,7 @@ impl Regex {
                     }
                     let name = &replacement[start..i];
                     let mut scratch = String::new();
-                    Self::push_group_by_ref(name, groups, named, &mut scratch);
+                    Self::push_group_by_ref_ext(name, groups, named, named_all, &mut scratch);
                     push_with_case(out, &scratch, &mut case_next, case_region);
                 } else {
                     push_with_case(out, "$", &mut case_next, case_region);
@@ -2516,11 +2551,41 @@ impl Regex {
         named: &std::collections::HashMap<String, u32>,
         out: &mut String,
     ) {
+        Self::push_group_by_ref_ext(reference, groups, named, None, out);
+    }
+
+    /// Extended form of `push_group_by_ref` that respects duplicate
+    /// named groups: when a name has multiple registered ids and the
+    /// single-id lookup returns an UNSET slot, iterate every id and
+    /// emit the first one that is actually set. Matches PCRE2
+    /// `pcre2_substitute` semantic for `(?J)` / alternation dupnames
+    /// where `$name` picks whichever definition actually captured.
+    fn push_group_by_ref_ext(
+        reference: &str,
+        groups: &[Option<&str>],
+        named: &std::collections::HashMap<String, u32>,
+        named_all: Option<&std::collections::HashMap<String, Vec<u32>>>,
+        out: &mut String,
+    ) {
         if let Ok(idx) = reference.parse::<usize>() {
             if let Some(Some(s)) = groups.get(idx) {
                 out.push_str(s);
             }
             return;
+        }
+        // Prefer the multi-id map when available: find the first set
+        // slot across all registered ids for this name. Falls back to
+        // the single-id map for back-compat.
+        if let Some(all) = named_all {
+            if let Some(ids) = all.get(reference) {
+                for &id in ids {
+                    if let Some(Some(s)) = groups.get(id as usize) {
+                        out.push_str(s);
+                        return;
+                    }
+                }
+                return;
+            }
         }
         if let Some(&group_num) = named.get(reference) {
             if let Some(Some(s)) = groups.get(group_num as usize) {

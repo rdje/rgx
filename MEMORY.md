@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — API: substitute $name dupnames (+1, follow-up to #38)
+
+- **What**: `(?J)(?:(?<A>a)|(?<A>b))/replace=<$A>` on "[a]" — PCRE2 produces `[<a>]`; RGX produced `[<>]`. Same HashMap-overwrite root cause as engine #38 but on the substitute-template-interpolation path. Added `named_groups_all` to `Program` + `Captures`, new `push_group_by_ref_ext` / `interpolate_replacement_ext` using the multi-id map, `Engine::named_groups_all()` accessor. When `$name` is referenced and the name has duplicates, iterates all ids and emits the first SET one.
+- **Delta**: 12,708 → 12,709 (+1 direct; histogram also shows 3 FN and 1 other closed as side effects of the multi-id map flowing through). Baselines 12,709 / 101.
+- **Session totals**: started at 12,702 / 107 this morning. Now at 12,709 / 101. Net +7 cases closed via 4 fixes (engine #37 lookahead SKIP, parser CRLF `.` both-ends, engine #38 conditional dupnames, API substitute dupnames) plus 1 tightening commit.
+
 ### 2026-04-24 — VM: dupnames conditional checks ANY instance (+3, engine #38)
 
 - **What**: `(?:a(?<digit>[0-5])|b(?<digit>[4-7]))c(?(<digit>)d|e)` — the compiler's HashMap<String, u32> overwrote alt 1's digit id with alt 2's, so the conditional only ever checked alt 2's group. Alt 2-matching inputs worked (group set); alt 1-matching inputs failed (group unset via the overwrite).

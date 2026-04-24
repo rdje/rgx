@@ -537,8 +537,19 @@ pub struct Program {
     pub char_classes: Vec<CompiledCharClass>,
     /// String literals extracted for SIMD matching
     pub string_literals: Vec<String>,
-    /// Named capture group mapping
+    /// Named capture group mapping (single id per name, last-defined
+    /// wins). Back-compatible with existing consumers (public API,
+    /// backref, substitute $name template default).
     pub named_groups: HashMap<String, u32>,
+    /// Parallel map carrying ALL group ids for each name (in
+    /// registration order). For single-definition names contains a
+    /// one-element Vec; for dupnames (PCRE2 `(?J)` or alternation
+    /// dupnames) the Vec preserves every id. Consumers that need
+    /// the "any-of" semantic (conditional codegen, substitute
+    /// `$name` fallback-to-set) iterate this. Populated by the
+    /// compiler's `collect_named_groups_all` walker; empty if not
+    /// populated (initialised default).
+    pub named_groups_all: HashMap<String, Vec<u32>>,
     /// Number of capture groups
     pub num_groups: u32,
     /// Optimization flags
@@ -7352,6 +7363,7 @@ impl OptimizingCompiler {
             char_classes: self.char_classes.clone(),
             string_literals: self.strings.clone(),
             named_groups: HashMap::new(),
+            named_groups_all: HashMap::new(),
             num_groups: self.group_counter,
             flags: self.flags,
             stats: self.stats,

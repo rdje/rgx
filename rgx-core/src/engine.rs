@@ -1493,6 +1493,16 @@ impl Engine {
         &self.vm.program.named_groups
     }
 
+    /// Multi-id named capture group map: for every group name the
+    /// `Vec<u32>` contains every registered id in AST order. For
+    /// non-dupnames patterns each Vec has exactly one id. Consumers
+    /// that need PCRE2 "any-of" semantics (substitute template
+    /// interpolation with dupnames, etc.) should iterate this.
+    #[must_use]
+    pub fn named_groups_all(&self) -> &std::collections::HashMap<String, Vec<u32>> {
+        &self.vm.program.named_groups_all
+    }
+
     /// Number of capture groups in the compiled program (excluding group 0).
     #[must_use]
     pub fn num_groups(&self) -> u32 {

@@ -682,11 +682,12 @@ impl Compiler {
         // for `(?(<name>)...)` when multiple definitions of `name` exist.
         let named_groups_all = Self::collect_named_groups_all(&ast);
         let mut vm_compiler =
-            VMCompiler::with_named_groups_all(named_groups.clone(), named_groups_all);
+            VMCompiler::with_named_groups_all(named_groups.clone(), named_groups_all.clone());
         vm_compiler.set_newline_mode(newline_mode);
         vm_compiler.set_ucp_enabled(ucp_enabled);
         let mut program = vm_compiler.compile(&ast);
         program.named_groups = named_groups;
+        program.named_groups_all = named_groups_all;
 
         // C2 step 1: classify the AST against the no-backtracking subset.
         // See `docs/C2_NFA_DFA_DESIGN.md` §4 and `c2::classifier`.
