@@ -335,6 +335,8 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
 
         // === Eligible: alternation tracking ===
         | OpCode::SetAlternative
+        | OpCode::AltScopeBegin
+        | OpCode::AltScopeEnd
 
         // === Eligible: termination ===
         | OpCode::Match
@@ -466,6 +468,8 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
         | OpCode::EndTextOrNL
         | OpCode::WordBoundary
         | OpCode::NonWordBoundary
+        | OpCode::AltScopeBegin
+        | OpCode::AltScopeEnd
         | OpCode::Match
         | OpCode::Fail => Some(0),
 
@@ -2075,6 +2079,12 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                     ));
                 }
                 ip += 1;
+                ops.push(JitOp::SetAlternative);
+            }
+            OpCode::AltScopeBegin | OpCode::AltScopeEnd => {
+                // Purely lexical-scope markers for `(*THEN)` in the
+                // interpreter. The JIT doesn't track `(*THEN)`
+                // (ineligible), so these are no-ops here.
                 ops.push(JitOp::SetAlternative);
             }
             OpCode::PlusGreedy => {

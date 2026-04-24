@@ -141,6 +141,23 @@ pub enum OpCode {
     /// Emitted only at alternation boundaries by the codegen; not
     /// interchangeable with plain `Split` for quantifier fallbacks.
     AltSplit = 0x47,
+    /// Alternation lexical-scope begin — records the current
+    /// `ctx.alt_boundaries.len()` on `ctx.alt_scope_marks` so the
+    /// matching `AltScopeEnd` can truncate back to it. Emitted
+    /// at the start of every multi-branch alternation. Enables
+    /// `(*THEN)` to find the innermost *lexically-enclosing*
+    /// alternation even when an inner alternation inside a closed
+    /// group has left stale alt-boundary entries on the
+    /// `alt_boundaries` stack.
+    AltScopeBegin = 0x48,
+    /// Alternation lexical-scope end — truncates
+    /// `ctx.alt_boundaries` to the matching mark from
+    /// `ctx.alt_scope_marks` and pops the mark. The backtrack
+    /// frames themselves remain on `ctx.backtrack_stack` so
+    /// subsequent failures can still roll back into a different
+    /// branch of this alternation; only the lexical-scope entry
+    /// for `(*THEN)` lookups is dropped.
+    AltScopeEnd = 0x49,
     /// Conditional jump based on lookahead
     JumpIfMatch = 0x43, // Reserved: not yet emitted by the compiler
     /// Conditional jump based on negative lookahead
@@ -676,6 +693,13 @@ pub struct ExecContext<'a> {
     /// with `backtrack_stack` — whenever a frame at index `i` is
     /// popped, any `alt_boundaries` entry `>= i` is also popped.
     pub alt_boundaries: Vec<usize>,
+    /// Lexical-scope marker stack parallel to each active
+    /// alternation. `AltScopeBegin` pushes `alt_boundaries.len()`
+    /// here; `AltScopeEnd` truncates `alt_boundaries` to the top
+    /// entry and pops it. Lets `(*THEN)` resolve to the innermost
+    /// *lexically* enclosing alternation instead of any still-on-
+    /// stack alt frame from a closed inner group.
+    pub alt_scope_marks: Vec<usize>,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -1135,6 +1159,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -1270,6 +1295,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -1342,6 +1368,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -1397,6 +1424,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         // Scan through positions looking for one that hits end-of-input.
@@ -2215,6 +2243,7 @@ impl RegexVM {
             max_recursion_depth: ctx.max_recursion_depth,
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         }
     }
 
@@ -3466,6 +3495,16 @@ impl RegexVM {
                     ctx.alt_boundaries.push(new_idx);
                 }
 
+                OpCode::AltScopeBegin => {
+                    ctx.alt_scope_marks.push(ctx.alt_boundaries.len());
+                }
+
+                OpCode::AltScopeEnd => {
+                    if let Some(mark) = ctx.alt_scope_marks.pop() {
+                        ctx.alt_boundaries.truncate(mark);
+                    }
+                }
+
                 OpCode::Jump => {
                     // Read jump offset (2 bytes, little-endian, signed).
                     // `Jump` is documented as a 16-bit signed offset so
@@ -4221,6 +4260,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         let mut matches = Vec::new();
@@ -4493,6 +4533,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -4658,6 +4699,7 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
+            alt_scope_marks: Vec::new(),
         };
 
         // Determine the CodeBlockOutcome from the callback result.
@@ -5029,6 +5071,14 @@ impl RegexVM {
                         ip = ((ip as isize) + (offset as isize)) as usize;
                     } else {
                         return false;
+                    }
+                }
+                OpCode::AltScopeBegin => {
+                    ctx.alt_scope_marks.push(ctx.alt_boundaries.len());
+                }
+                OpCode::AltScopeEnd => {
+                    if let Some(mark) = ctx.alt_scope_marks.pop() {
+                        ctx.alt_boundaries.truncate(mark);
                     }
                 }
                 OpCode::Split | OpCode::AltSplit => {
@@ -5855,6 +5905,17 @@ impl RegexVM {
                     }
                 }
 
+                OpCode::AltScopeBegin => {
+                    // Subexpr equivalent: mark the current
+                    // `local_alt_boundaries.len()` so the paired
+                    // `AltScopeEnd` can pop to it.
+                    ctx.alt_scope_marks.push(local_alt_boundaries.len());
+                }
+                OpCode::AltScopeEnd => {
+                    if let Some(mark) = ctx.alt_scope_marks.pop() {
+                        local_alt_boundaries.truncate(mark);
+                    }
+                }
                 OpCode::Split | OpCode::AltSplit => {
                     // Plain `Split` and alternation-boundary
                     // `AltSplit` both push a fallback frame to the
@@ -7438,6 +7499,13 @@ impl OptimizingCompiler {
                     return;
                 }
 
+                // Mark the alternation's lexical scope so `(*THEN)`
+                // can resolve the innermost *lexically* enclosing
+                // alternation even when a sibling group has closed
+                // but left its `AltSplit` frame on the stack. Paired
+                // with `AltScopeEnd` at `END:` below.
+                self.emit_op(OpCode::AltScopeBegin);
+
                 // For multiple alternatives, use recursive structure:
                 // Split L1
                 // SetAlternative 0
@@ -7497,7 +7565,11 @@ impl OptimizingCompiler {
                     }
                 }
 
-                // Patch all end jumps to point to the end
+                // Patch all end jumps to point to the AltScopeEnd
+                // that closes the alternation's lexical scope — we
+                // want every successful branch (including the last
+                // one) to fall through to the scope-end so the
+                // paired `AltScopeBegin` mark is popped.
                 let end_pos = self.code.len();
                 for end_jump_pos in end_jumps {
                     let jump_offset = end_pos - end_jump_pos - 2;
@@ -7505,6 +7577,7 @@ impl OptimizingCompiler {
                     self.code[end_jump_pos] = offset_bytes[0];
                     self.code[end_jump_pos + 1] = offset_bytes[1];
                 }
+                self.emit_op(OpCode::AltScopeEnd);
             }
 
             Regex::WordBoundary { positive } => {
@@ -8811,14 +8884,15 @@ impl TryFrom<u8> for OpCode {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         use OpCode::{
-            Accept, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart, Backref,
-            BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock, Commit,
-            DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump,
-            JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark,
-            Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune,
-            QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
-            SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
-            VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+            Accept, AltScopeBegin, AltScopeEnd, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart,
+            Backref, BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock,
+            Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
+            GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
+            LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
+            PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart,
+            SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
+            StartLine, StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg,
+            WordBoundary,
         };
         match value {
             0x00 => Ok(Char),
@@ -8858,6 +8932,8 @@ impl TryFrom<u8> for OpCode {
             0x44 => Ok(JumpIfNoMatch),
             0x45 => Ok(Call),
             0x47 => Ok(AltSplit),
+            0x48 => Ok(AltScopeBegin),
+            0x49 => Ok(AltScopeEnd),
             0x50 => Ok(SaveStart),
             0x51 => Ok(SaveEnd),
             0x80 => Ok(QuestionGreedy),

@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — VM: AltScopeBegin/End opcodes track alternation's lexical scope (+3 passes, engine fix #34)
+- **What**: `^((abc|abcx)(*THEN)y|abcd)` on "abcxy" matched when it shouldn't. Inner alternation's AltSplit frame stayed on the backtrack stack after the inner group closed, so (*THEN) redirected to the wrong (inner) alternation. Added OpCode::AltScopeBegin (0x48) and AltScopeEnd (0x49) emitted around every multi-branch alternation. New ExecContext.alt_scope_marks Vec<usize> stores alt_boundaries.len() at Begin; End truncates back. Purely lexical — doesn't remove backtrack frames themselves. All three interpreters + C1 JIT (no-op there).
+- **Delta**: 12,696 → 12,699 (+3), 114 → 111. Baselines 12,699 / 111. Conformance ~99.2%.
+
 ### 2026-04-24 — VM: subexpr THEN uses local alt-boundary stack (+3 passes, engine fix #33)
 - **What**: Inside a subexpr (lookahead/lookbehind/etc), AltSplit pushes to the local backtrack stack but ctx.alt_boundaries (global) didn't see it. THEN fell into the "no alt → PRUNE" branch and the lookahead body failed. New `local_alt_boundaries` Vec<usize> tracks AltSplit indices in the subexpr. THEN in subexpr now consults that first, truncates to the frame, and lets backtracking redirect to next alt.
 - **Delta**: 12,693 → 12,696 (+3), 117 → 114. Baselines 12,696 / 114. Conformance ~99.2%.

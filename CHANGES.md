@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - VM: new `AltScopeBegin` / `AltScopeEnd` opcodes track alternation's lexical scope for `(*THEN)` (+3 passes, engine #34)
+
+- Scope: `^((abc|abcx)(*THEN)y|abcd)` on `"abcxy"` — PCRE2 expects no match because `(*THEN)`'s innermost *lexically-enclosing* alternation is the outer `(...|abcd)`: the inner `(abc|abcx)` group has already closed by the time THEN executes. RGX matched `"abcxy"` because the inner `AltSplit` frame stayed on the backtrack stack and `ctx.alt_boundaries` still pointed at it, so THEN falsely redirected to the inner "next alt" (`abcx`) and then succeeded with `abcx+y`.
+- Fix: two new opcodes `OpCode::AltScopeBegin` / `AltScopeEnd` (0x48 / 0x49) emitted at the start/end of every multi-branch alternation. A new `ExecContext.alt_scope_marks: Vec<usize>` stack stores `alt_boundaries.len()` at `AltScopeBegin`; `AltScopeEnd` truncates `alt_boundaries` back to that mark, popping lexical entries for closed alternations but leaving the actual backtrack frames in place for normal rollback. `(*THEN)` now sees only the alternations that lexically enclose it. Also added to the subexpr interpreter (local alt-boundary stack) and to `execute_at_continuation`. C1 JIT routes the new opcodes through `JitOp::SetAlternative` (no-op in JIT'd code since `(*THEN)` is already ineligible there).
+- Validation: 1,052 lib tests pass. 30 rgx-cli tests pass. PCRE2 conformance **12,696 → 12,699 pass** (+3), 114 → 111 fail. Ratchet baselines bumped to `PASS_BASELINE=12_699` / `FAIL_BASELINE=111`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: Closes testinput1:5542, 5547, 5571. **Thirty-fourth engine fix of the session; conformance at ~99.2%**.
+
 ### 2026-04-24 - VM: subexpr `(*THEN)` uses a local alt-boundary stack so alternation inside lookarounds redirects correctly (+3 passes, engine #33)
 
 - Scope: `^(?!a(*THEN)b|ac)..` on `"ac"` — PCRE2 expects no match because the negative lookahead's body `a(*THEN)b|ac` successfully matches via the `ac` alternative after THEN redirects past the failing `a(*THEN)b`. RGX matched `"ac"` because inside the subexpr (lookahead clone), the `AltSplit` frame was pushed to the LOCAL backtrack stack but `ctx.alt_boundaries` (shared with the outer) didn't see it. THEN then fell into the "no alt → PRUNE" branch, cleared the local stack, and the lookahead body returned false — so the negative assertion falsely succeeded.
