@@ -36,7 +36,7 @@ cargo test -p rgx-core --features javascript
 cargo test -p rgx-core --features wasm
 cargo check -p rgx-core --features all-languages
 cargo clippy --workspace --all-targets
-cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+cargo run --bin rgx -- "cat|dog" "I have a cat"
 ```
 ## Files worth checking while working
 - `README.md` for repository navigation

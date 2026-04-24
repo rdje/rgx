@@ -17,7 +17,7 @@ Build and run a simple match:
 
 ```bash
 cargo build
-cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+cargo run --bin rgx -- "cat|dog" "I have a cat"
 ```
 
 Run tests:
@@ -34,14 +34,14 @@ cargo test -p rgx-wasm
 Basic form:
 
 ```bash
-cargo run --bin rgx-cli -- "<pattern>" "<text>"
+cargo run --bin rgx -- "<pattern>" "<text>"
 ```
 
 Examples:
 
 ```bash
-cargo run --bin rgx-cli -- "\d+" "abc123def"
-cargo run --bin rgx-cli -- "(?:cat|dog)" "pet dog"
+cargo run --bin rgx -- "\d+" "abc123def"
+cargo run --bin rgx -- "(?:cat|dog)" "pet dog"
 ```
 
 Useful CLI options for the shipped code-block slice:
@@ -53,9 +53,9 @@ Useful CLI options for the shipped code-block slice:
 Examples with code blocks:
 
 ```bash
-cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
-cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
-cargo run --bin rgx-cli --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
+cargo run --bin rgx --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
+cargo run --bin rgx --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
+cargo run --bin rgx --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
 ```
 ### Rust API
 Use the high-level API for normal matching:
@@ -229,7 +229,7 @@ For the current wasm slice, `truthy.wasm` must export `evaluate() -> i32`, where
 CLI wasm example:
 
 ```bash
-cargo run --bin rgx-cli --features wasm -- \
+cargo run --bin rgx --features wasm -- \
   --mode safe \
   --wasm-module truthy=./truthy.wasm \
   '(?{wasm:truthy:evaluate})' \

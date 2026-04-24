@@ -294,6 +294,12 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — CLI: installed binary renamed `rgx-cli` → `rgx`
+
+- **What**: closed the A8 follow-up. Added `[[bin]] name = "rgx"` to `rgx-cli/Cargo.toml`; the crate still publishes as `rgx-cli`, but the installed binary is now `rgx`. Updated user-facing doc examples in README.md, docs/CLI_GUIDE.md, docs/USER_GUIDE.md, rgx-cli/README.md, WARP.md; left historical entries in CHANGES.md / MEMORY.md alone; left crate-level refs (`-p rgx-cli`, `cargo install rgx-cli`, script invocations) unchanged because the crate name didn't change.
+- **Validation**: fresh build produces target/debug/rgx only. 1,077 lib + 30 cli tests pass. Ratchet 12,709 / 101 preserved. fmt + clippy clean. A pre-existing false positive in `scripts/check-ci-paths.sh` flags backtick-quoted strings in error messages as "absolute paths" — unrelated to this rename, worth cleaning up separately.
+- **A8 status**: this closes the rename half. The other half (PGEN path-dep on crates.io blocking `cargo publish`) still needs a user decision: (a) publish pgen to crates.io, (b) vendor pgen's generated code, or (c) make pgen-parser truly optional.
+
 ### 2026-04-24 — C2: reverse-DFA pipeline wired for find_all (track closed)
 
 - **What**: the morning find_first wiring left find_all on the per-position scan because the unbounded reverse walk would overlap with previously-consumed spans on iteration 2+. Added `LazyDfa::find_match_start_at_reverse_bounded(end, min_start)` and a `try_pipeline_find_all` driver on `Engine`. Same gate as find_first (no prefix hint). Full 3-pass pipeline per iteration with `pos`-bounded reverse walk. Advance rules match the existing scan (non-empty → end, empty adjacent → +1, empty otherwise → start+1).

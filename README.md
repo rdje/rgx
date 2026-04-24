@@ -177,7 +177,7 @@ cargo test -p rgx-cli
 cargo test -p rgx-bench
 cargo test -p rgx-wasm
 cargo test -p rgx-core vm::
-cargo run --bin rgx-cli -- "cat|dog" "I have a cat"
+cargo run --bin rgx -- "cat|dog" "I have a cat"
 ```
 
 Run the same CI checks locally before pushing:
@@ -200,16 +200,16 @@ Because `subs/pgen` is private, hosted GitHub CI may need a `RGX_SUBMODULES_TOKE
 
 Tracing examples:
 ```bash
-cargo run --bin rgx-cli -- --verbosity low --trace-log "cat|dog" "I have a cat"
-cargo run --bin rgx-cli -- --verbosity debug --trace-log "cat|dog" "I have a cat"
-cargo run --bin rgx-cli -- --quiet --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx -- --verbosity low --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx -- --verbosity debug --trace-log "cat|dog" "I have a cat"
+cargo run --bin rgx -- --quiet --trace-log "cat|dog" "I have a cat"
 ```
 
 CLI code-block examples:
 ```bash
-cargo run --bin rgx-cli --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
-cargo run --bin rgx-cli --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
-cargo run --bin rgx-cli --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
+cargo run --bin rgx --features javascript -- --mode safe --var env=prod '(?{js:vars.env === "prod"})' ""
+cargo run --bin rgx --features rhai -- --mode safe --show-details 'foo|cat(?{rhai:return 7;})' "cat"
+cargo run --bin rgx --features wasm -- --mode safe --wasm-module truthy=./truthy.wasm '(?{wasm:truthy:evaluate})' ""
 ```
 
 Legacy CLI aliases:

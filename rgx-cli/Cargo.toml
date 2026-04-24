@@ -13,6 +13,13 @@ description = "Command-line interface for the rgx regex engine — grep-like mat
 documentation = "https://docs.rs/rgx-cli"
 readme = "README.md"
 
+# Binary name is `rgx` — shorter, friendlier, and what users type.
+# The crate publishes to crates.io as `rgx-cli` (`cargo install rgx-cli`)
+# so the package name stays stable while `which rgx` returns the tool.
+[[bin]]
+name = "rgx"
+path = "src/main.rs"
+
 [features]
 default = []
 pgen-parser = ["rgx-core/pgen-parser"]

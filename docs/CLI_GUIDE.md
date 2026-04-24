@@ -1,6 +1,7 @@
 # rgx CLI User Guide
 
-The `rgx-cli` is a command-line interface for the rgx high-performance regex engine.
+The `rgx` CLI is a command-line interface for the RGX high-performance regex engine.
+It ships from the `rgx-cli` crate (`cargo install rgx-cli`) and installs as the binary `rgx`.
 It supports pattern matching against inline text, files, and entire directory trees,
 with output options ranging from simple spans to structured JSON.
 
@@ -33,19 +34,19 @@ with output options ranging from simple spans to structured JSON.
 Match a pattern against inline text:
 
 ```bash
-rgx-cli "hello" "hello world"
+rgx "hello" "hello world"
 ```
 
 Search a file for all lines containing "ERROR":
 
 ```bash
-rgx-cli --file app.log --line-mode "ERROR"
+rgx --file app.log --line-mode "ERROR"
 ```
 
 Find and replace across a codebase, printing results to stdout:
 
 ```bash
-rgx-cli --file src/ --recursive --replace "new_name" "old_name"
+rgx --file src/ --recursive --replace "new_name" "old_name"
 ```
 
 ---
@@ -55,13 +56,13 @@ rgx-cli --file src/ --recursive --replace "new_name" "old_name"
 The simplest invocation takes a pattern and input text as positional arguments:
 
 ```bash
-rgx-cli PATTERN TEXT
+rgx PATTERN TEXT
 ```
 
 This prints the byte-offset spans of each match:
 
 ```bash
-rgx-cli "cat" "the cat sat on a cat mat"
+rgx "cat" "the cat sat on a cat mat"
 # 4..7
 # 18..21
 ```
@@ -69,7 +70,7 @@ rgx-cli "cat" "the cat sat on a cat mat"
 If `TEXT` is omitted, rgx reads from standard input:
 
 ```bash
-echo "abc 123 def" | rgx-cli "[0-9]+"
+echo "abc 123 def" | rgx "[0-9]+"
 # 4..7
 ```
 
@@ -78,7 +79,7 @@ echo "abc 123 def" | rgx-cli "[0-9]+"
 Use `--count` to print only the total number of matches:
 
 ```bash
-rgx-cli --count "the" "the cat sat on the mat"
+rgx --count "the" "the cat sat on the mat"
 # 2
 ```
 
@@ -92,7 +93,7 @@ Point `--file` at a file to match against its entire contents. Byte-offset spans
 are reported relative to the start of the file:
 
 ```bash
-rgx-cli --file data.txt "pattern"
+rgx --file data.txt "pattern"
 ```
 
 ### Line mode
@@ -101,7 +102,7 @@ Add `--line-mode` to match each line independently. Output is formatted as
 `LINE_NUM: matched_text`:
 
 ```bash
-rgx-cli --file app.log --line-mode "ERROR|WARN"
+rgx --file app.log --line-mode "ERROR|WARN"
 # 14: ERROR
 # 37: WARN
 ```
@@ -111,10 +112,10 @@ rgx-cli --file app.log --line-mode "ERROR|WARN"
 Combine `--file` and `--count`:
 
 ```bash
-rgx-cli --file app.log --count "ERROR"
+rgx --file app.log --count "ERROR"
 # 42
 
-rgx-cli --file app.log --line-mode --count "ERROR"
+rgx --file app.log --line-mode --count "ERROR"
 # 42
 ```
 
@@ -131,7 +132,7 @@ skipped. Binary files are detected and excluded.
 Output is formatted as `RELATIVE_PATH:LINE_NUM: matched_text`:
 
 ```bash
-rgx-cli --file src/ --recursive "TODO|FIXME"
+rgx --file src/ --recursive "TODO|FIXME"
 # src/main.rs:12: TODO
 # src/lib.rs:45: FIXME
 # src/utils/helpers.rs:8: TODO
@@ -140,7 +141,7 @@ rgx-cli --file src/ --recursive "TODO|FIXME"
 With `--only-matching`:
 
 ```bash
-rgx-cli --file . -r -o "TODO|FIXME|HACK"
+rgx --file . -r -o "TODO|FIXME|HACK"
 # src/main.rs:12:TODO
 # tests/integration.rs:3:FIXME
 ```
@@ -149,7 +150,7 @@ Recursive mode works with all other flags: `--count`, `--json`, `--replace`,
 `--only-matching`, `--invert-match`, and `--context`.
 
 ```bash
-rgx-cli --file src/ -r --count "unwrap"
+rgx --file src/ -r --count "unwrap"
 # 37
 ```
 
@@ -165,7 +166,7 @@ of matches separated by more than N lines are divided by `--` separators.
 Matching lines are marked with `:`, context lines with `-`:
 
 ```bash
-rgx-cli --file app.log --line-mode -C 2 "ERROR"
+rgx --file app.log --line-mode -C 2 "ERROR"
 # 10-request received
 # 11-processing payload
 # 12:ERROR: null pointer exception
@@ -182,7 +183,7 @@ rgx-cli --file app.log --line-mode -C 2 "ERROR"
 Context works with recursive scanning too:
 
 ```bash
-rgx-cli --file src/ -r -C 1 "panic"
+rgx --file src/ -r -C 1 "panic"
 ```
 
 ---
@@ -194,17 +195,17 @@ rgx-cli --file src/ -r -C 1 "panic"
 Produce machine-readable JSON, suitable for piping to `jq` or other processors:
 
 ```bash
-rgx-cli --json "[0-9]+" "call 555-1234"
+rgx --json "[0-9]+" "call 555-1234"
 # [{"start":5,"end":8,"text":"555"},{"start":9,"end":13,"text":"1234"}]
 ```
 
 In line-mode or recursive mode, entries include `line` and `file` fields:
 
 ```bash
-rgx-cli --file app.log --line-mode --json "ERROR"
+rgx --file app.log --line-mode --json "ERROR"
 # [{"start":0,"end":5,"text":"ERROR","line":12}]
 
-rgx-cli --file src/ -r --json "TODO"
+rgx --file src/ -r --json "TODO"
 # [{"start":7,"end":11,"text":"TODO","line":3,"file":"src/main.rs"}]
 ```
 
@@ -213,7 +214,7 @@ rgx-cli --file src/ -r --json "TODO"
 Print just the matched text, one match per line:
 
 ```bash
-rgx-cli -o "[0-9]+" "abc 123 def 456"
+rgx -o "[0-9]+" "abc 123 def 456"
 # 123
 # 456
 ```
@@ -221,7 +222,7 @@ rgx-cli -o "[0-9]+" "abc 123 def 456"
 In file or recursive mode:
 
 ```bash
-rgx-cli --file app.log --line-mode -o "ERROR|WARN|INFO"
+rgx --file app.log --line-mode -o "ERROR|WARN|INFO"
 # ERROR
 # WARN
 # INFO
@@ -239,26 +240,26 @@ The original file is never modified.
 Inline text:
 
 ```bash
-rgx-cli --replace "dog" "cat|kitten" "I have a cat and a kitten"
+rgx --replace "dog" "cat|kitten" "I have a cat and a kitten"
 # I have a dog and a dog
 ```
 
 File replacement (prints to stdout):
 
 ```bash
-rgx-cli --file data.txt --replace "REDACTED" "[0-9]{3}-[0-9]{2}-[0-9]{4}"
+rgx --file data.txt --replace "REDACTED" "[0-9]{3}-[0-9]{2}-[0-9]{4}"
 ```
 
 Recursive replacement (only files with matches produce output):
 
 ```bash
-rgx-cli --file src/ -r --replace "new_api" "old_api"
+rgx --file src/ -r --replace "new_api" "old_api"
 ```
 
 To actually update files in place, redirect or pipe through your own tooling:
 
 ```bash
-rgx-cli --file config.yaml --replace "production" "staging" > config.yaml.new
+rgx --file config.yaml --replace "production" "staging" > config.yaml.new
 mv config.yaml.new config.yaml
 ```
 
@@ -272,7 +273,7 @@ Print lines that do NOT match the pattern. This is the complement of a normal
 search, useful for filtering out noise:
 
 ```bash
-rgx-cli --file app.log --invert-match "DEBUG"
+rgx --file app.log --invert-match "DEBUG"
 # 1:INFO: application started
 # 4:ERROR: connection failed
 # 7:WARN: retrying
@@ -281,19 +282,19 @@ rgx-cli --file app.log --invert-match "DEBUG"
 Combine with `--context` to see surrounding lines around non-matching lines:
 
 ```bash
-rgx-cli --file app.log -v -C 1 "DEBUG"
+rgx --file app.log -v -C 1 "DEBUG"
 ```
 
 Works with recursive scanning:
 
 ```bash
-rgx-cli --file src/ -r -v "test"
+rgx --file src/ -r -v "test"
 ```
 
 And with inline text:
 
 ```bash
-echo -e "keep\ndrop\nkeep" | rgx-cli -v "drop" ""
+echo -e "keep\ndrop\nkeep" | rgx -v "drop" ""
 ```
 
 ---
@@ -312,7 +313,7 @@ controls which execution backends are available:
 | `full` | Enables native callbacks in addition to sandboxed    |
 
 ```bash
-rgx-cli --mode safe '(?{lua:return 1})hello' "hello"
+rgx --mode safe '(?{lua:return 1})hello' "hello"
 ```
 
 ### Host variables (`--var`)
@@ -320,13 +321,13 @@ rgx-cli --mode safe '(?{lua:return 1})hello' "hello"
 Pass key-value pairs to code blocks:
 
 ```bash
-rgx-cli --mode full --var "env=prod" '(?{native:check_env})' ""
+rgx --mode full --var "env=prod" '(?{native:check_env})' ""
 ```
 
 Multiple variables can be specified by repeating `--var`:
 
 ```bash
-rgx-cli --mode full --var "threshold=100" --var "env=staging" 'pattern' "text"
+rgx --mode full --var "threshold=100" --var "env=staging" 'pattern' "text"
 ```
 
 ### WASM modules (`--wasm-module`)
@@ -334,7 +335,7 @@ rgx-cli --mode full --var "threshold=100" --var "env=staging" 'pattern' "text"
 Register WebAssembly modules for `(?{wasm:module:function})` patterns:
 
 ```bash
-rgx-cli --mode safe --wasm-module "validator=/path/to/validator.wasm" \
+rgx --mode safe --wasm-module "validator=/path/to/validator.wasm" \
     '(?{wasm:validator:check})data' "data"
 ```
 
@@ -343,7 +344,7 @@ rgx-cli --mode safe --wasm-module "validator=/path/to/validator.wasm" \
 Include branch numbers and code-block results in match output:
 
 ```bash
-rgx-cli --show-details --mode full 'cat|dog' "a dog"
+rgx --show-details --mode full 'cat|dog' "a dog"
 # 2..5 branch=2
 ```
 
@@ -358,8 +359,8 @@ converted to the engine's `Value` type. If JSON parsing fails, the value
 is treated as a plain string.
 
 ```bash
-rgx-cli --mode safe --var-json 'config={"threshold": 100, "strict": true}' '...' "..."
-rgx-cli --mode safe --var-json 'tags=["cat","dog"]' --var-json 'limit=42' '...' "..."
+rgx --mode safe --var-json 'config={"threshold": 100, "strict": true}' '...' "..."
+rgx --mode safe --var-json 'tags=["cat","dog"]' --var-json 'limit=42' '...' "..."
 ```
 
 This flag is repeatable, just like `--var`. Use it when code blocks need
@@ -375,7 +376,7 @@ Print structured match events to stderr as they happen. Useful for
 debugging and profiling regex execution:
 
 ```bash
-rgx-cli --events "a*b" "aaab"
+rgx --events "a*b" "aaab"
 # stderr: MatchAttemptStarted { position: 0 }
 # stderr: MatchAttemptCompleted { position: 0, matched: true }
 # stdout: 0..4
@@ -397,7 +398,7 @@ one per line. Only matches whose code block returns a `Numeric` value
 produce output:
 
 ```bash
-rgx-cli --mode safe --numeric '(?<n>\d+)(?{js:return parseInt(named.n) * 2})' "5 10 15"
+rgx --mode safe --numeric '(?<n>\d+)(?{js:return parseInt(named.n) * 2})' "5 10 15"
 # 10
 # 20
 # 30
@@ -416,7 +417,7 @@ Matches whose code block does not return a replacement payload are
 copied through unchanged:
 
 ```bash
-rgx-cli --mode safe --replace-with-code '(?<w>[a-z]+)(?{js:return named.w.toUpperCase()})' "hello world"
+rgx --mode safe --replace-with-code '(?<w>[a-z]+)(?{js:return named.w.toUpperCase()})' "hello world"
 # HELLO WORLD
 ```
 
@@ -432,7 +433,7 @@ both inline text and `--file` mode.
 Print a summary of match statistics to stderr after all output:
 
 ```bash
-rgx-cli --stats "cat|dog" "the cat sat with a dog"
+rgx --stats "cat|dog" "the cat sat with a dog"
 # 4..7
 # 19..22
 # ---
@@ -443,7 +444,7 @@ With file and recursive mode, the summary includes file counts and
 a match percentage:
 
 ```bash
-rgx-cli --file src/ -r --stats "ERROR|WARN"
+rgx --file src/ -r --stats "ERROR|WARN"
 # ... matches ...
 # ---
 # 42 matches in 10000 lines (0.4%), 15 files scanned
@@ -466,7 +467,7 @@ Control the amount of diagnostic output:
 | `debug`  | Exhaustive trace-level logging |
 
 ```bash
-rgx-cli --verbosity high "pattern" "text"
+rgx --verbosity high "pattern" "text"
 ```
 
 ### Legacy shortcuts
@@ -480,7 +481,7 @@ rgx-cli --verbosity high "pattern" "text"
 Route diagnostic output to `trace.log` instead of the terminal:
 
 ```bash
-rgx-cli --trace --trace-log "complex|pattern" "test input"
+rgx --trace --trace-log "complex|pattern" "test input"
 # (terminal shows only match results; trace.log has the diagnostics)
 ```
 
@@ -523,26 +524,26 @@ rgx-cli --trace --trace-log "complex|pattern" "test input"
 ### 1. Search log files for errors
 
 ```bash
-rgx-cli --file /var/log/app.log --line-mode "ERROR|FATAL|CRITICAL"
+rgx --file /var/log/app.log --line-mode "ERROR|FATAL|CRITICAL"
 ```
 
 ### 2. Search with context to understand error surroundings
 
 ```bash
-rgx-cli --file /var/log/app.log --line-mode -C 3 "FATAL"
+rgx --file /var/log/app.log --line-mode -C 3 "FATAL"
 ```
 
 ### 3. Find TODOs across a codebase
 
 ```bash
-rgx-cli --file src/ -r "TODO|FIXME|HACK|XXX"
+rgx --file src/ -r "TODO|FIXME|HACK|XXX"
 ```
 
 ### 4. Count TODOs per file (combine with shell tools)
 
 ```bash
 for f in $(find src -name '*.rs'); do
-    count=$(rgx-cli --file "$f" --line-mode --count "TODO|FIXME")
+    count=$(rgx --file "$f" --line-mode --count "TODO|FIXME")
     [ "$count" -gt 0 ] && echo "$f: $count"
 done
 ```
@@ -550,7 +551,7 @@ done
 ### 5. Extract all email addresses from text
 
 ```bash
-rgx-cli -o "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" "Contact us at info@example.com or support@test.org"
+rgx -o "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" "Contact us at info@example.com or support@test.org"
 # info@example.com
 # support@test.org
 ```
@@ -558,31 +559,31 @@ rgx-cli -o "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" "Contact us at info@
 ### 6. Extract URLs from a web page
 
 ```bash
-curl -s https://example.com | rgx-cli -o "https?://[a-zA-Z0-9./?=_-]+" ""
+curl -s https://example.com | rgx -o "https?://[a-zA-Z0-9./?=_-]+" ""
 ```
 
 ### 7. Extract IP addresses from logs
 
 ```bash
-rgx-cli --file access.log --line-mode -o "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
+rgx --file access.log --line-mode -o "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
 ```
 
 ### 8. Redact Social Security Numbers
 
 ```bash
-rgx-cli --file customer_data.txt --replace "XXX-XX-XXXX" "[0-9]{3}-[0-9]{2}-[0-9]{4}"
+rgx --file customer_data.txt --replace "XXX-XX-XXXX" "[0-9]{3}-[0-9]{2}-[0-9]{4}"
 ```
 
 ### 9. Redact credit card numbers
 
 ```bash
-rgx-cli --file transactions.csv --replace "****-****-****-****" "[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4}"
+rgx --file transactions.csv --replace "****-****-****-****" "[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4}"
 ```
 
 ### 10. JSON output for pipeline processing
 
 ```bash
-rgx-cli --json "[0-9]+" "order 42 has 3 items" | jq '.[].text'
+rgx --json "[0-9]+" "order 42 has 3 items" | jq '.[].text'
 # "42"
 # "3"
 ```
@@ -590,49 +591,49 @@ rgx-cli --json "[0-9]+" "order 42 has 3 items" | jq '.[].text'
 ### 11. Recursive JSON output piped to jq
 
 ```bash
-rgx-cli --file src/ -r --json "unwrap" | jq '.[] | "\(.file):\(.line)"'
+rgx --file src/ -r --json "unwrap" | jq '.[] | "\(.file):\(.line)"'
 ```
 
 ### 12. Filter out DEBUG lines from logs
 
 ```bash
-rgx-cli --file app.log --invert-match "DEBUG"
+rgx --file app.log --invert-match "DEBUG"
 ```
 
 ### 13. Filter out blank lines
 
 ```bash
-rgx-cli --file messy.txt --invert-match "^$"
+rgx --file messy.txt --invert-match "^$"
 ```
 
 ### 14. Find function definitions in Rust files
 
 ```bash
-rgx-cli --file src/ -r -o "fn [a-zA-Z_][a-zA-Z0-9_]*"
+rgx --file src/ -r -o "fn [a-zA-Z_][a-zA-Z0-9_]*"
 ```
 
 ### 15. Replace deprecated API calls
 
 ```bash
-rgx-cli --file src/ -r --replace "new_database_connect" "old_db_connect"
+rgx --file src/ -r --replace "new_database_connect" "old_db_connect"
 ```
 
 ### 16. Count matches across an entire project
 
 ```bash
-rgx-cli --file . -r --count "unsafe"
+rgx --file . -r --count "unsafe"
 ```
 
 ### 17. Find lines with multiple matches using JSON
 
 ```bash
-rgx-cli --file data.csv --line-mode --json "[0-9]+" | jq 'group_by(.line) | .[] | select(length > 1)'
+rgx --file data.csv --line-mode --json "[0-9]+" | jq 'group_by(.line) | .[] | select(length > 1)'
 ```
 
 ### 18. Validate that a pattern exists in source
 
 ```bash
-if rgx-cli --count "version = " "$(cat Cargo.toml)" | grep -q '^0$'; then
+if rgx --count "version = " "$(cat Cargo.toml)" | grep -q '^0$'; then
     echo "No version field found!"
     exit 1
 fi
@@ -641,7 +642,7 @@ fi
 ### 19. Extract key-value pairs
 
 ```bash
-rgx-cli -o "[A-Z_]+=[a-zA-Z0-9_]+" "CONFIG_MODE=release DB_HOST=localhost"
+rgx -o "[A-Z_]+=[a-zA-Z0-9_]+" "CONFIG_MODE=release DB_HOST=localhost"
 # CONFIG_MODE=release
 # DB_HOST=localhost
 ```
@@ -649,7 +650,7 @@ rgx-cli -o "[A-Z_]+=[a-zA-Z0-9_]+" "CONFIG_MODE=release DB_HOST=localhost"
 ### 20. Search with WASM-powered validation
 
 ```bash
-rgx-cli --mode safe \
+rgx --mode safe \
     --wasm-module "check=/path/to/checker.wasm" \
     '(?{wasm:check:validate})[0-9]+' \
     "test 12345"

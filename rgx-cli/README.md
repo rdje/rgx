@@ -10,24 +10,26 @@ Command-line interface for the [rgx regex engine](https://crates.io/crates/rgx-c
 cargo install rgx-cli
 ```
 
+The crate publishes as `rgx-cli` but the installed binary is named **`rgx`** — shorter to type, friendlier to muscle memory.
+
 ## Quick examples
 
 ```bash
 # Colorized match output (auto-detects terminals)
-rgx-cli --color always '\d+' "answer is 42"
+rgx --color always '\d+' "answer is 42"
 
 # Tail a log file and highlight ERROR / WARN lines in real time
-rgx-cli --file app.log --follow 'ERROR|WARN'
+rgx --file app.log --follow 'ERROR|WARN'
 
 # Recursive search with counts
-rgx-cli --recursive --count 'TODO|FIXME' src/
+rgx --recursive --count 'TODO|FIXME' src/
 
 # JSON output for pipelines
-rgx-cli --json '(?P<year>\d{4})-(?P<month>\d{2})' notes.txt
+rgx --json '(?P<year>\d{4})-(?P<month>\d{2})' notes.txt
 
 # Embedded Lua predicate (needs --features lua at install time)
 cargo install rgx-cli --features lua
-rgx-cli --mode safe --var limit=100 '(\d+)(?{lua:return tonumber(arg[1]) <= vars.limit})' input.txt
+rgx --mode safe --var limit=100 '(\d+)(?{lua:return tonumber(arg[1]) <= vars.limit})' input.txt
 ```
 
 ## Feature flags

@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - CLI: rename the installed binary from `rgx-cli` to `rgx`
+
+- Scope: the `rgx-cli` crate previously produced a binary named `rgx-cli` because no `[[bin]]` section existed in `rgx-cli/Cargo.toml` (default behaviour: binary name = crate name). Longstanding ROADMAP follow-up ("Binary rename (`rgx-cli` → `rgx`) also pending as a coordinated doc-sync follow-up") from the A8 publishing prep work 2026-04-13. Justification: `rgx` is shorter, friendlier to muscle memory, and aligns with how most shell users reach for a grep-like tool.
+- Changes:
+  - `rgx-cli/Cargo.toml` — added a `[[bin]] name = "rgx" path = "src/main.rs"` section. Crate name stays `rgx-cli` (so `cargo install rgx-cli` and `cargo test -p rgx-cli` continue to work); the produced binary is now `rgx` (so `./target/debug/rgx …` and `which rgx` after `cargo install`). Workspace member list and all `-p rgx-cli` references in scripts unchanged.
+  - User-facing docs refreshed:
+    - `README.md` — all `cargo run --bin rgx-cli --` examples updated to `cargo run --bin rgx --`.
+    - `docs/CLI_GUIDE.md` — 62 command-example invocations changed from `rgx-cli <args>` to `rgx <args>`; the intro line now explicitly notes the crate/binary distinction ("ships from the `rgx-cli` crate … installs as the binary `rgx`").
+    - `docs/USER_GUIDE.md` — all `cargo run --bin rgx-cli` blocks updated.
+    - `rgx-cli/README.md` (the crates.io README) — `Install` section gained a one-line note about the binary name; examples moved from `rgx-cli` to `rgx`.
+    - `WARP.md` — one example updated.
+    - `ROADMAP.md` — the A8 entry's "also pending" follow-up was struck and replaced with "shipped 2026-04-24" plus the list of files touched.
+  - **Not touched**: historical validation logs in `CHANGES.md` and `MEMORY.md` (old entries are records of what ran at the time, not rewriting history), crate-level refs in book internals chapters (`architecture.md`, `contributing.md`, etc. — those are about the `rgx-cli` crate, which still exists), local CI scripts (`scripts/run-local-ci.sh` uses `-p rgx-cli` which is still valid).
+- Validation: fresh `cargo build -p rgx-cli` produces `target/debug/rgx` (no `rgx-cli`); `./target/debug/rgx --version` reports `rgx 0.1.0`; `echo "hello world" | ./target/debug/rgx "hello"` → `0..5`. 1,077 lib tests + 30 rgx-cli tests pass. PCRE2 conformance ratchet preserved at **12,709 / 101**. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: closes the "coordinated doc-sync follow-up" side of A8. The remaining A8 blocker (PGEN path-dep on crates.io) still awaits a user decision. Users who `cargo install rgx-cli --force` after this lands will get the new `rgx` binary.
+
 ### 2026-04-24 - C2: wire `find_all` onto the reverse-DFA pipeline
 
 - Scope: the morning commit (`e258517`) put `find_first` on the 3-pass pipeline but left `find_all` on the per-position anchored scan because the reverse walk's leftmost-start contract was unbounded — iteration N+1 of find_all could locate a start position inside iteration N's consumed span, producing overlaps or loops. This closes the ROADMAP follow-up.
