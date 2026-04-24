@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — Parser: (*CRLF) . rejects both ends of \r\n pair (+2)
+
+- **What**: Engine fix #11 only handled START of CRLF (`\r` followed by `\n`). The END (`\n` preceded by `\r`) was not excluded, so `.+foo` on "\r\nfoo" matched at pos 1. Extended `dot_ast` to use `(?!\r\n|(?<=\r)\n)<any>` — the inner lookbehind in the second alternative ensures the prev-`\r` check only fires when current is `\n` (not for arbitrary chars after `\r`, which would falsely reject `d` in `c\rd`).
+- **Delta**: 12,703 → 12,705 (+2), 107 → 105. Baselines 12,705 / 105.
+- **Methodology note**: first attempt added a flat `(?<!\r)<any>` (no lookahead-scope) which closed the 2 target FPs but regressed `/.*/I` on `"abc\rdef"` (RGX matched only `abc\r` because `d` failed the `(?<!\r)` check). The diff via `RGX_CONFORMANCE_DUMP_CAT=""` against the baseline revealed the single regression case immediately. Refined to scope the lookbehind to `\n`-only positions.
+- **Tracing was useful**: `--verbosity debug --trace-log` showed the compiled bytecode so I could verify the AST shape (`PlusGreedy(LookaheadNeg(\r\n) ; CharClassNeg)`) before making changes.
+- **Next concrete action**: continue picking off catalogue clusters. Bucket 5 (4 too-permissive) and Cluster 2C/3C (`\K` in `{0}`) turned out deeper than estimated — both deferred. Trying Cluster 1F next (dupnames last-set tracking, 4 cases).
+
 ### 2026-04-24 — Doc: comprehensive PCRE2 conformance residual catalogue
 
 - **What**: The user asked for a surgical, per-case description of the remaining 107 PCRE2 conformance failures so that a new session could walk in cold and address them head-on. Dumped all 107 via `RGX_CONFORMANCE_DUMP_CAT=""`, classified them by the 5 harness buckets, then sub-classified each bucket into root-cause clusters with per-case pattern/subject/expected-vs-actual tables.

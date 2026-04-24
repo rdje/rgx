@@ -6307,6 +6307,31 @@ mod tests {
     }
 
     #[test]
+    fn dot_under_crlf_rejects_both_ends_of_pair() {
+        // PCRE2 `(*CRLF)` rule: `.` matches everything EXCEPT
+        //   (a) `\r` immediately followed by `\n` (start of CRLF)
+        //   (b) `\n` immediately preceded by `\r` (end of CRLF)
+        // Bare `\r`/`\n` (not part of a pair) and any other byte match.
+        // Without the lookbehind in case (b), `.+foo` on "\r\nfoo" matches
+        // starting at pos 1 (the `\n`) which PCRE2 rejects.
+        let re = Regex::compile(r"(*CRLF).+foo").unwrap();
+        assert!(re.find_first("\r\nfoo").is_none());
+
+        let re = Regex::compile(r"(*CRLF).+A").unwrap();
+        assert!(re.find_first("\r\nA").is_none());
+
+        // Bare `\r` not followed by `\n` is matched by `.`.
+        let re = Regex::compile(r"(*CRLF).*").unwrap();
+        let m = re.find_first("abc\rdef").expect("expected full match");
+        assert_eq!((m.start, m.end), (0, 7));
+
+        // Bare `\n` not preceded by `\r` is matched by `.`.
+        let re = Regex::compile(r"(*CRLF).+foo").unwrap();
+        let m = re.find_first("\nfoo").expect("expected full match");
+        assert_eq!((m.start, m.end), (0, 4));
+    }
+
+    #[test]
     fn skip_in_failing_negative_lookahead_absorbs_verb() {
         // Symmetric regression pin: a negative assertion whose body
         // fails must absorb (*SKIP), not leak it. `(?!b(*SKIP)a)bnn`

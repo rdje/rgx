@@ -502,14 +502,35 @@ impl<'a> PgenAstAdapter<'a> {
             return Regex::Dot;
         }
         // `(*CRLF)`: the newline unit is the 2-byte `\r\n` pair.
-        // PCRE2's `.` / `\N` fails only AT THE START of a `\r\n`
-        // pair; bare `\r`, bare `\n`, or the `\n` inside a pair
-        // (once past the `\r`) all match. Model this with a
-        // negative lookahead `(?!\r\n)` followed by a dotall-any.
+        // PCRE2's `.` / `\N` rejects BOTH ends of the pair:
+        //   - the leading `\r` of a `\r\n` (start of CRLF), and
+        //   - the trailing `\n` of a `\r\n` (end of CRLF).
+        // Bare `\r` not followed by `\n`, bare `\n` not preceded
+        // by `\r`, and any other byte all match.
+        //
+        // Encode the exclusion as one negative lookahead with two
+        // alternatives:
+        //   (?! \r\n             // start of CRLF: current is \r and next is \n
+        //     | (?<=\r)\n         // end of CRLF: current is \n and prev was \r
+        //   )
+        // followed by a dotall-any. The `(?<=\r)\n` form scopes
+        // the prev-byte check to the case where the current byte
+        // is `\n`, so positions like `c\r` do not falsely fail
+        // their successor (testinput2:1595 `/.*/I` on `abc\rdef`
+        // must continue matching past `\r` since `d` is not `\n`).
         if self.newline_mode == NewlineMode::Crlf {
             return Regex::Sequence(vec![
                 Regex::Lookahead {
-                    expr: Box::new(Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')])),
+                    expr: Box::new(Regex::Alternation(vec![
+                        Regex::Sequence(vec![Regex::Char('\r'), Regex::Char('\n')]),
+                        Regex::Sequence(vec![
+                            Regex::Lookbehind {
+                                expr: Box::new(Regex::Char('\r')),
+                                positive: true,
+                            },
+                            Regex::Char('\n'),
+                        ]),
+                    ])),
                     positive: false,
                 },
                 Regex::CharClass(CharClass::Custom {

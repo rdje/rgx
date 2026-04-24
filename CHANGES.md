@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - Parser: `(*CRLF)` `.` rejects BOTH ends of `\r\n` pair (+2 passes, parser fix)
+
+- Scope: `(*CRLF).+foo` on `"\r\nfoo"` and `(*CRLF).+A` on `"\r\nA"` — PCRE2 expects no match at any position. Engine fix #11 (2026-04-22) made `.` under `(*CRLF)` compile to `(?!\r\n)<any>` to reject the START of a CRLF pair (current=`\r` and next=`\n`). That was half the rule — `.` should also reject the END of a CRLF pair (current=`\n` and prev=`\r`). Without the second clause, `.+foo` on `"\r\nfoo"` matches starting at pos 1 (the `\n`) because the lookahead at pos 1 sees `\nf`, not `\r\n`.
+- Fix: `rgx-core/src/parsing.rs::dot_ast` — extended the existing negative lookahead to a 2-alternative form: `(?! \r\n | (?<=\r)\n )<any>`. The first alternative catches start-of-CRLF (current is `\r` next is `\n`); the second catches end-of-CRLF (current is `\n`, lookbehind says prev was `\r`). The `(?<=\r)\n` form scopes the prev-byte check to `\n`-only positions so bare `\r` (e.g. `c\rd`) still admits the `d` that follows it (the regression vector during development — `/.*/I` on `"abc\rdef"` must continue past `\r` because `d` is not `\n`).
+- Validation: 1,055 lib tests pass (added regression pin `dot_under_crlf_rejects_both_ends_of_pair` covering both target FPs plus two sanity cases — bare `\r` followed by non-`\n`, bare `\n` not preceded by `\r`). 30 rgx-cli tests pass. PCRE2 conformance **12,703 → 12,705 pass** (+2), 107 → 105 fail. Ratchet baselines bumped to `PASS_BASELINE=12_705` / `FAIL_BASELINE=105`. `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+- Notes/impact: closes Cluster 3B from the conformance residual catalogue. Pre-existing adversarial failure `deep_recursion_with_captures_restored_correctly` remains unchanged.
+
 ### 2026-04-24 - Doc: comprehensive PCRE2 conformance residual catalogue (both tracks)
 
 - Scope: the ratchet sits at 12,703 / 107 / 0 / 0 (~99.2%). The previous docs summarised the residual at bucket level (7 buckets from `RUST_CODEBASE_ANALYSIS.md`, ~6-item lists) but lacked a per-case actionable reference. A fresh session inheriting the work needed to re-derive the failure taxonomy from the harness output every time.

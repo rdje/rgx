@@ -1,6 +1,6 @@
 # PCRE2 Conformance Residual — the 107 Remaining Failures
 
-At the time of writing (2026-04-24, head `782f3a4`), the PCRE2 conformance ratchet sits at **12,703 pass / 107 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.2%**.
+At the time of writing the ratchet sits at **12,705 pass / 105 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.2%**. (Initial draft was at 12,703 / 107; Cluster 3B has since closed with the `(*CRLF)` `.` lookbehind fix.)
 
 This chapter is a surgical, per-case map of those 107 remaining failures. Its purpose is to let a contributor walk in cold and immediately start fixing, without having to re-discover what has already been analysed.
 
@@ -332,14 +332,9 @@ A less aggressive variant (propagate `skip_position` without `committed=true`) d
 
 See `MEMORY.md` 2026-04-24 "tighten assertion verb propagation" for the partial tightening that landed for the lookahead case (positive-only gate on `propagate_captures`). The lookbehind variant is a follow-up requiring per-iteration diagnosis.
 
-## Cluster 3B — `.+` under `/newline=...` (2 cases)
+## Cluster 3B — `.+` under `/newline=...` ✅ CLOSED 2026-04-24
 
-| testinput2:2107 | `.+foo/newline` | `\r\nfoo` | PCRE2 no match, RGX matches |
-| testinput2:2296 | `.+A/newline` | `\r\nA` | PCRE2 no match, RGX matches |
-
-The `/newline=<convention>` pcre2test modifier sets the line-break rule. Under default CRLF or ANY, `.` fails at the start of `\r\n`. RGX's `.` compiles via `(*CRLF)` only when the verb is literal in the pattern; the `/newline=` modifier path may not thread the convention through to `.`'s lookahead-for-CRLF compile step.
-
-**What to change**: harness modifier-to-start-verb translation — `/newline=crlf` should prepend `(*CRLF)` (or equivalent) before compile. Check `run_case` modifier handling.
+Both cases (testinput2:2107 `.+foo` on `\r\nfoo`, testinput2:2296 `.+A` on `\r\nA`) closed. Engine fix #11 (2026-04-22) had handled the START of a CRLF pair via `(?!\r\n)<any>` but missed the END. Extended to `(?!\r\n|(?<=\r)\n)<any>` — the inner lookbehind in the second alternative scopes the prev-`\r` check to `\n`-only positions so bare `\r` followed by non-`\n` (e.g. `c\rd`) still matches. See CHANGES.md 2026-04-24 "(*CRLF) . rejects both ends of \r\n pair (+2 passes)".
 
 ## Cluster 3C — `\K` inside `{0}` (2 cases)
 
