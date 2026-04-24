@@ -235,7 +235,7 @@ The merge condition is the PCRE2 conformance ratchet. At head `6a56509` (2026-04
 
 **PGEN-side ledger**: 72 reports filed total. Per user directive 2026-04-24, all reports are considered closed — upstream has landed every grammar/validator fix RGX asked for; the 13 YAML files still marked `status: open` on disk (0021–0053) are stale bookkeeping that can be flipped in a follow-up sweep.
 
-**Remaining 108 conformance failures — top residual buckets** (top-of-bucket examples from CHANGES.md entries):
+**Remaining 107 conformance failures — fully catalogued per-case in the Book chapter `book/src/internals/pcre2-conformance-residual.md`** (added 2026-04-24). That chapter is the authoritative next-session starting point: it sorts every failure into 5 harness buckets (65 FN / 27 SM / 6 FP / 5 other-substitute / 4 too-permissive) across 14 root-cause clusters, with per-case pattern/subject/expected-vs-actual tables, root-cause analysis for each cluster, and a prioritised session sequence (quick-win ~9 cases, mid-session +11, architectural sprint +26, capstone +24). Top residual buckets summary (for context — full detail in the Book chapter):
 
 1. **Truly-recursive palindrome patterns** — `^(.|(.)(?1)\2)$` / `^((.)(?1)\2|.?)$` and siblings. Engine fixes #29 / #30 closed the easy cases via empty-match retry frames; fully-recursive subroutine-stack reification is the remaining gap.
 2. **`(?U)`-under-explicit-atomic edge cases** — the rare cases of explicit `(?>…)` whose inner bare quantifier relies on `(?U)`-inverted greediness; accepted divergence per engine fix #26.

@@ -291,7 +291,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### C7. PCRE2 10.47 differential conformance — bug triage
 - **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13).
 - **Effort**: `medium` (each bug class is its own investigation)
-- **Status**: harness shipped and expanded to all 23 paired testinput files; **crash-class bugs fixed**; harness-side false positives cleaned up; first three real RGX parse bugs fixed (`\0`, `\NNN`-octal-fallback, `{0,0}`-with-captures); semantic-class failures still in progress.
+- **Status as of 2026-04-24, head `782f3a4`**: ratchet locked at **12,703 pass / 107 fail / 0 panic / 0 skip (~99.2%)** against the full `testinput1..29` corpus. 37 numbered engine fixes plus ~40 harness refinements have landed across 2026-04-17 → 2026-04-24. The residual 107 failures are fully catalogued per-case in the Book chapter **[PCRE2 Conformance Residual](../book/src/internals/pcre2-conformance-residual.md)** — that chapter is the authoritative next-session starting point. It organises the 107 cases into 5 harness buckets (65 FN / 27 SM / 6 FP / 5 other-substitute / 4 too-permissive) subdivided into 14 root-cause clusters with per-case pattern/subject/expected-vs-actual tables, root-cause analysis, and a recommended session sequence (quick-win, mid-session, architectural-sprint, capstone). **Start there before picking any individual case.**
 - **Timeline of pass-rate** (testinput1 only early, full corpus later):
   - 2026-04-13 commit 1 (harness, testinput1): 1061 pass / 1616 fail / 12 panic / 182 skip / 2871 parsed / 39.6% ran-pass-rate
   - 2026-04-13 commit 2 (crash fixes, testinput1): 1063 / 1626 / **0 panic** / 182 / 39.5%

@@ -60,6 +60,7 @@
 - [Sandboxing & Security](./internals/sandboxing.md)
 - [Testing Philosophy](./internals/testing-philosophy.md)
 - [Project Status & Roadmap](./internals/project-status.md)
+- [PCRE2 Conformance Residual](./internals/pcre2-conformance-residual.md)
 - [Contributing](./internals/contributing.md)
 
 ---
