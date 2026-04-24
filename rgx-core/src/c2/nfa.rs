@@ -357,6 +357,27 @@ pub struct Nfa {
     start: NfaStateId,
     accept: NfaStateId,
     num_capture_groups: u32,
+    /// States that belong to the unanchoring lazy prefix `(?s:.)*?`
+    /// synthesised by [`Nfa::build_unanchored`] /
+    /// [`Nfa::build_reverse_unanchored`]. Empty for anchored NFAs.
+    ///
+    /// DFA subset construction prunes these states from any state set
+    /// that also contains the accept state — once the body has
+    /// accepted, the lazy prefix's job (finding the leftmost match
+    /// start) is done and any surviving prefix threads would only
+    /// re-spawn new match attempts at later positions, which would
+    /// overwrite the leftmost-first end position with a later one.
+    /// Pruning them preserves leftmost-first semantics on the
+    /// forward-unanchored DFA, which is the precondition for wiring
+    /// `find_first` / `find_all` onto the reverse-DFA pipeline.
+    lazy_prefix_states: Vec<NfaStateId>,
+    /// Entry state into the body for unanchored NFAs — the state the
+    /// lazy prefix's accept state epsilon-transitions into. `None` for
+    /// anchored NFAs. Used by DFA subset construction to re-seed the
+    /// start state set when the initial closure contains the accept
+    /// state and the lazy prefix must be excluded to preserve
+    /// leftmost-first semantics.
+    body_entry: Option<NfaStateId>,
 }
 
 impl Nfa {
@@ -389,14 +410,18 @@ impl Nfa {
     #[must_use]
     pub fn build_unanchored(ast: &Regex, byte_class_map: &ByteClassMap) -> Self {
         let mut builder = NfaBuilder::new(byte_class_map);
-        let prefix = builder.build_unanchored_prefix();
+        let (prefix, prefix_states) = builder.build_unanchored_prefix_tagged();
         let body = builder.build_fragment(ast);
         builder.connect(prefix.accept, body.start, 0);
         let combined = Fragment {
             start: prefix.start,
             accept: body.accept,
         };
-        builder.into_nfa(combined)
+        let body_entry = body.start;
+        let mut nfa = builder.into_nfa(combined);
+        nfa.lazy_prefix_states = prefix_states;
+        nfa.body_entry = Some(body_entry);
+        nfa
     }
 
     /// Build an anchored **reverse** NFA from `ast` using the precomputed
@@ -428,6 +453,22 @@ impl Nfa {
     pub fn build_reverse_unanchored(ast: &Regex, byte_class_map: &ByteClassMap) -> Self {
         let reversed = reverse_ast(ast);
         Self::build_unanchored(&reversed, byte_class_map)
+    }
+
+    /// IDs of states that belong to the unanchoring lazy prefix. Empty
+    /// for anchored NFAs. Consumed by the DFA subset construction's
+    /// leftmost-first pruning step.
+    #[must_use]
+    pub fn lazy_prefix_states(&self) -> &[NfaStateId] {
+        &self.lazy_prefix_states
+    }
+
+    /// Entry state into the body for an unanchored NFA (the target of
+    /// the prefix.accept → body.start epsilon). `None` for anchored
+    /// NFAs. Used by the DFA's leftmost-first start-set re-seeding.
+    #[must_use]
+    pub fn body_entry(&self) -> Option<NfaStateId> {
+        self.body_entry
     }
 
     /// All states in the NFA.
@@ -567,6 +608,8 @@ impl<'a> NfaBuilder<'a> {
             start: fragment.start,
             accept: fragment.accept,
             num_capture_groups: self.max_capture_index,
+            lazy_prefix_states: Vec::new(),
+            body_entry: None,
         }
     }
 
@@ -1070,6 +1113,22 @@ impl<'a> NfaBuilder<'a> {
             // the body so the walker doesn't crash on a mixed AST.
             GroupKind::Atomic | GroupKind::BranchReset => self.build_fragment(expr),
         }
+    }
+
+    /// Build the unanchored prefix `(?s:.)*?` and return the fragment
+    /// along with the full list of NFA state IDs allocated for the
+    /// prefix. Those IDs are later stamped onto
+    /// [`Nfa::lazy_prefix_states`] so the DFA subset construction can
+    /// prune them from state sets that also contain the accept state
+    /// (the leftmost-first precondition for the reverse-DFA pipeline).
+    fn build_unanchored_prefix_tagged(&mut self) -> (Fragment, Vec<NfaStateId>) {
+        let first_prefix_state = u32::try_from(self.states.len())
+            .expect("NFA state count exceeds u32::MAX (impossible for any real pattern)");
+        let fragment = self.build_unanchored_prefix();
+        let last_prefix_state = u32::try_from(self.states.len())
+            .expect("NFA state count exceeds u32::MAX (impossible for any real pattern)");
+        let prefix_states: Vec<NfaStateId> = (first_prefix_state..last_prefix_state).collect();
+        (fragment, prefix_states)
     }
 
     /// Build the unanchored prefix `(?s:.)*?` — a lazy zero-or-more loop

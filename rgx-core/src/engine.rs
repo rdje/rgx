@@ -631,29 +631,52 @@ impl Engine {
     /// - `None` if the DFA isn't available or the cache exhausted —
     ///   the caller falls back to Pike-VM
     ///
-    /// C2 step 6 dispatch path. Uses per-position anchored DFA scan
-    /// (mirroring `try_dfa_is_match` plus capture recovery via
-    /// `pike_captures_at` at the matched scan position). The
-    /// per-position scan is bounded by the [`PrefixScanner`] so that
-    /// `Digit` / `Word` / `Space` / `CharClass` / `Byte` prefixes skip
-    /// non-candidate positions instead of running the DFA simulator at
-    /// every byte.
+    /// **Reverse-DFA pipeline fast path.** When both the forward-
+    /// unanchored and reverse-anchored DFAs are available, `find_first`
+    /// runs as a single forward-then-reverse sweep:
+    ///   1. forward-unanchored DFA walks `input` once to find the END
+    ///      of the leftmost match (O(n), one pass over the input)
+    ///   2. reverse-anchored DFA walks backward from that end to find
+    ///      the START of the leftmost match (O(match_length))
+    ///   3. Pike-VM `pike_captures_at` recovers capture groups over
+    ///      the known span.
     ///
-    /// **Why not the reverse-DFA pipeline here?** The forward-
-    /// unanchored DFA's `find_match_at` uses last-accept semantics
-    /// (standard leftmost-longest subset construction). For patterns
-    /// like `a` on `"xaxa"` that match at multiple positions, it
-    /// returns the end of the LAST match (pos 4), not the leftmost
-    /// (pos 2). The anchored per-position scan is the correct
-    /// algorithm for leftmost-first find_first. The forward-
-    /// unanchored DFA is used for `is_match` only (where any accept
-    /// anywhere is the right answer), and `should_dispatch_to_
-    /// forward_unanchored_dfa` remains exposed for future work on a
-    /// leftmost-first-aware unanchored DFA construction.
+    /// The forward-unanchored DFA preserves leftmost-first semantics
+    /// because the unanchoring lazy prefix `(?s:.)*?` states are
+    /// pruned from any NFA state set that also contains the accept
+    /// state (see `c2/dfa.rs::prune_lazy_prefix_if_accepting`).
+    /// Without the prune, subset construction's natural leftmost-
+    /// longest behaviour would overwrite the first match end with a
+    /// later one.
+    ///
+    /// If either DFA is unavailable (e.g., top-level alternation
+    /// blocked by dispatch eligibility, runtime flags forbid DFA
+    /// dispatch) or exhausts mid-walk, the function falls through to
+    /// the per-position anchored DFA scan with
+    /// [`crate::c2::prefix_scanner::PrefixScanner`] skip acceleration
+    /// — the pre-pipeline default path.
     #[doc(hidden)]
     pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
-        let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
+        // Reverse-DFA pipeline fast path. Only prefer it when the
+        // per-position scan has no prefix hint — otherwise the scan's
+        // memchr/byte-class skip acceleration dominates because it
+        // jumps directly to candidate positions instead of running the
+        // forward-unanchored DFA over every byte of the input.
+        if self.pipeline_dispatch_preferred(c2) {
+            if let Some(forward_mutex) = self.should_dispatch_to_forward_unanchored_dfa() {
+                if let Some(reverse_mutex) = self.should_dispatch_to_reverse_dfa() {
+                    if let Some(outcome) =
+                        self.try_pipeline_find_first(input, c2, forward_mutex, reverse_mutex)
+                    {
+                        return Some(outcome);
+                    }
+                    // Pipeline exhausted or failed to reconcile — fall
+                    // through to the per-position anchored scan below.
+                }
+            }
+        }
+        let dfa_mutex = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
         let mut dfa = dfa_mutex.lock().ok()?;
         let mut start = 0usize;
@@ -675,6 +698,104 @@ impl Engine {
             }
         }
         Some(None)
+    }
+
+    /// True when the reverse-DFA pipeline is preferred over the
+    /// per-position anchored scan for `find_first`.
+    ///
+    /// The per-position scan is O(candidate_positions * match_length)
+    /// and uses [`PrefixScanner`] + `memchr` / byte-class predicates to
+    /// jump between candidate positions. When the pattern exposes any
+    /// prefix hint (literal byte, `\d`/`\w`/`\s`, or a custom char
+    /// class) the per-position scan is close to O(match_length) per
+    /// candidate and typically faster than the pipeline's three full
+    /// DFA sweeps.
+    ///
+    /// The pipeline is an O(n) unconditional sweep — its win comes
+    /// from patterns whose prefix is unrestricted ([`PrefixFilter::None`]
+    /// and `c2_prefix_byte == None`), where the per-position scan
+    /// degenerates into running the anchored DFA at every byte.
+    fn pipeline_dispatch_preferred(&self, c2: &crate::c2::CompiledC2Program) -> bool {
+        c2.c2_prefix_byte.is_none()
+            && matches!(self.vm.prefix_filter(), crate::vm::PrefixFilter::None)
+    }
+
+    /// Reverse-DFA pipeline driver for `find_first`. Returns
+    /// `Some(Some(match))` on success, `Some(None)` when the forward
+    /// sweep confirms no match exists anywhere, or `None` to signal
+    /// the caller to fall through to the per-position scan (cache
+    /// exhausted, mutex unavailable, or a reconciliation failure).
+    ///
+    /// The pipeline runs three bounded DFA passes in sequence:
+    ///
+    /// 1. **Forward-unanchored, stop at first accept** — one O(n)
+    ///    walk returns the END of the leftmost match. Stopping at
+    ///    first accept is the leftmost-first signal; letting the
+    ///    walk continue would bias toward leftmost-longest semantics
+    ///    (subset construction's natural behaviour).
+    /// 2. **Reverse-anchored from that end** — walks backward to find
+    ///    the leftmost START position at which the pattern begins.
+    /// 3. **Forward-anchored from that start** — completes the
+    ///    greedy extension: for patterns like `a+` on `"baaab"`,
+    ///    step 1 finds the first accept at end=2, but the greedy
+    ///    `+` should extend through all three `a`s to end=4. Re-running
+    ///    the DFA anchored at the recovered start captures this
+    ///    greedy tail.
+    ///
+    /// Then Pike-VM recovers capture groups at the recovered start;
+    /// the Pike-VM's end offset serves as a cross-check against the
+    /// DFA's greedy end, and a disagreement triggers fallback rather
+    /// than a bogus span.
+    fn try_pipeline_find_first(
+        &self,
+        input: &[u8],
+        c2: &crate::c2::CompiledC2Program,
+        forward_mutex: &Mutex<LazyDfa>,
+        reverse_mutex: &Mutex<LazyDfa>,
+    ) -> Option<Option<MatchResult>> {
+        let first_accept_end = {
+            let mut forward = forward_mutex.lock().ok()?;
+            match forward.find_first_accept_at(input, 0) {
+                DfaSearchOutcome::Match(end) => end,
+                DfaSearchOutcome::NoMatch => return Some(None),
+                DfaSearchOutcome::Exhausted => return None,
+            }
+        };
+        let start = {
+            let mut reverse = reverse_mutex.lock().ok()?;
+            match reverse.find_match_start_at_reverse(input, first_accept_end) {
+                DfaSearchOutcome::Match(start) => start,
+                // Forward found a match but reverse couldn't locate the
+                // start — treat as a reconciliation failure and fall
+                // back rather than report a bogus span.
+                DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+            }
+        };
+        // Greedy-extension pass: run the forward-anchored DFA from the
+        // recovered start to find the greedy end. For patterns without
+        // greedy tails (like `\w\w`) this produces the same end as
+        // `first_accept_end`; for greedy patterns (like `a+`) it
+        // extends the match as far as the body allows.
+        let anchored_dfa = self.should_dispatch_to_dfa()?;
+        let greedy_end = {
+            let mut dfa = anchored_dfa.lock().ok()?;
+            match dfa.find_match_at(input, start) {
+                DfaSearchOutcome::Match(end) => end,
+                DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+            }
+        };
+        let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+        let mut match_result = pike_match_to_match_result(pike_match);
+        // `pike_captures_at` starts the VM at `start`; its end offset
+        // should agree with the anchored DFA's greedy end. If they
+        // disagree, fall back rather than trust either in isolation.
+        if match_result.end != greedy_end {
+            return None;
+        }
+        debug_assert_eq!(match_result.start, start);
+        match_result.start = start;
+        match_result.end = greedy_end;
+        Some(Some(match_result))
     }
 
     /// Try to answer `find_all` via the lazy DFA. Returns:

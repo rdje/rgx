@@ -8778,4 +8778,55 @@ mod tests {
         let re = Regex::compile(r"(a)(?1(1))").unwrap();
         assert!(re.is_match("aa"));
     }
+
+    // === Reverse-DFA pipeline: leftmost-first find_first ===
+
+    #[test]
+    fn pipeline_find_first_returns_leftmost_non_greedy() {
+        // `\w\w` on "abc": first match is "ab" (0, 2), NOT "bc" (1, 3).
+        let re = Regex::compile(r"\w\w").unwrap();
+        let m = re.find_first("abc").expect("should match");
+        assert_eq!((m.start, m.end), (0, 2));
+    }
+
+    #[test]
+    fn pipeline_find_first_extends_greedy_after_start_recovery() {
+        // `a+` on "baaab": first accept is after one 'a' at end=2, but
+        // greedy extension takes the match through end=4. Step 3 of
+        // the pipeline runs the forward-anchored DFA from the
+        // recovered start to produce the greedy end.
+        let re = Regex::compile(r"a+").unwrap();
+        let m = re.find_first("baaab").expect("should match");
+        assert_eq!((m.start, m.end), (1, 4));
+    }
+
+    #[test]
+    fn pipeline_find_first_handles_empty_match_at_start() {
+        // `a*` on "xay": leftmost is the empty match at position 0.
+        let re = Regex::compile(r"a*").unwrap();
+        let m = re.find_first("xay").expect("should match");
+        assert_eq!((m.start, m.end), (0, 0));
+    }
+
+    #[test]
+    fn pipeline_find_first_single_char_class_leftmost() {
+        // `\d` on "abc123": leftmost digit is '1' at position 3.
+        let re = Regex::compile(r"\d").unwrap();
+        let m = re.find_first("abc123").expect("should match");
+        assert_eq!((m.start, m.end), (3, 4));
+    }
+
+    #[test]
+    fn pipeline_find_first_repeated_literal_returns_leftmost() {
+        // Literal `a` on "xaxa": leftmost is (1, 2).
+        let re = Regex::compile("a").unwrap();
+        let m = re.find_first("xaxa").expect("should match");
+        assert_eq!((m.start, m.end), (1, 2));
+    }
+
+    #[test]
+    fn pipeline_find_first_respects_no_match() {
+        let re = Regex::compile(r"\d{4}").unwrap();
+        assert!(re.find_first("abc 123 xy").is_none());
+    }
 }

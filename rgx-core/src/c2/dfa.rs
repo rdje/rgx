@@ -380,6 +380,54 @@ impl LazyDfa {
     }
 
     /// Run the DFA simulator over `input` starting at byte position
+    /// `start` and return **at the first accept state reached**.
+    ///
+    /// Used by the reverse-DFA pipeline for `find_first`: when built
+    /// over the forward-unanchored NFA, the earliest accept during
+    /// the forward walk corresponds to the END of the leftmost
+    /// match (modulo the pending greedy-extension pass via the
+    /// forward-anchored DFA). This contract is narrower than
+    /// [`Self::find_match_at`], which walks to exhaustion to compute
+    /// leftmost-longest semantics.
+    ///
+    /// Distinctions vs `find_match_at`:
+    ///
+    /// - Returns the END byte position of the **first** accept, not
+    ///   the **latest** accept. For patterns like `\w\w` on `"abc"`
+    ///   this is end=2 (first match "ab") rather than end=3 (extended
+    ///   to "bc").
+    /// - If the DFA's start state is already accepting (pattern
+    ///   accepts empty), returns `Match(start)` immediately without
+    ///   consuming any input.
+    ///
+    /// `NoMatch` and `Exhausted` semantics match `find_match_at`.
+    pub fn find_first_accept_at(&mut self, input: &[u8], start: usize) -> DfaSearchOutcome {
+        let mut state = self.start_state();
+        if self.is_accept(state) {
+            return DfaSearchOutcome::Match(start);
+        }
+        let mut pos = start;
+        while pos < input.len() {
+            let byte = input[pos];
+            let cls = self.byte_class_map.class_of(byte);
+            match self.transition(state, cls) {
+                TransitionResult::Next(next_state) => {
+                    state = next_state;
+                    pos += 1;
+                    if self.is_accept(state) {
+                        return DfaSearchOutcome::Match(pos);
+                    }
+                }
+                TransitionResult::Dead => break,
+                TransitionResult::Exhausted => {
+                    return DfaSearchOutcome::Exhausted;
+                }
+            }
+        }
+        DfaSearchOutcome::NoMatch
+    }
+
+    /// Run the DFA simulator over `input` starting at byte position
     /// `start`. Returns a [`DfaSearchOutcome`] distinguishing match,
     /// no-match, and cache-exhausted cases.
     ///
@@ -444,33 +492,89 @@ impl LazyDfa {
     }
 
     /// Compute the start NFA state set: epsilon closure of the NFA's
-    /// start state. Sorted and deduplicated.
+    /// start state.
+    ///
+    /// For unanchored NFAs whose initial closure already contains the
+    /// accept state (pattern accepts empty at position 0, e.g. `a*`),
+    /// the closure is re-run from `nfa.body_entry()` with the lazy-
+    /// prefix states excluded from traversal. This gives the body-only
+    /// state set — the state the DFA should be in immediately after
+    /// "finding" a zero-width leftmost match at position 0, ready to
+    /// extend greedily if input allows.
     fn compute_start_set(&self) -> Vec<NfaStateId> {
         let mut set = Vec::new();
         let mut visited = vec![false; self.nfa.num_states()];
         self.epsilon_close(&mut set, &mut visited, self.nfa.start());
         set.sort_unstable();
-        set
+
+        if self.nfa.lazy_prefix_states().is_empty() || !set.contains(&self.nfa.accept()) {
+            return set;
+        }
+        let Some(body_entry) = self.nfa.body_entry() else {
+            return set;
+        };
+        self.closure_excluding_lazy_prefix(&[body_entry])
     }
 
     /// Compute the next NFA state set for `(state, cls)`: for each NFA
     /// state in the source DFA state, follow byte transitions matching
-    /// `cls`, then epsilon-close every reached target. Returned set is
-    /// sorted and deduplicated.
+    /// `cls`, then epsilon-close every reached target.
+    ///
+    /// If the first-pass closure contains the accept state (meaning
+    /// the set includes a match that has just completed), the closure
+    /// is re-computed from the byte-transition targets with the lazy-
+    /// prefix states excluded from traversal. This removes any body
+    /// states that were only reachable via the prefix's "spawn a new
+    /// match attempt" edge (like `body_start` for `\d`, whose body
+    /// has no internal back-edge); body states genuinely reachable via
+    /// body-internal epsilon loops (like `body_start` in `a+`, reached
+    /// via `body_mid → body_start` greedy loop) survive and let the
+    /// DFA greedily extend the leftmost match. The net effect is
+    /// leftmost-first-aware subset construction on the unanchored DFA.
     fn compute_transition_set(&self, state: DfaStateId, cls: u8) -> Vec<NfaStateId> {
         let nfa_states = &self.states[state as usize].nfa_states;
-        let mut next = Vec::new();
-        let mut visited = vec![false; self.nfa.num_states()];
+        let mut targets: Vec<NfaStateId> = Vec::new();
         for &nfa_state in nfa_states {
             let state_obj = &self.nfa.states()[nfa_state as usize];
             for &(transition_cls, target) in &state_obj.transitions {
                 if transition_cls == cls {
-                    self.epsilon_close(&mut next, &mut visited, target);
+                    targets.push(target);
                 }
             }
         }
+        let mut next = Vec::new();
+        let mut visited = vec![false; self.nfa.num_states()];
+        for &t in &targets {
+            self.epsilon_close(&mut next, &mut visited, t);
+        }
         next.sort_unstable();
-        next
+
+        if self.nfa.lazy_prefix_states().is_empty() || !next.contains(&self.nfa.accept()) {
+            return next;
+        }
+        self.closure_excluding_lazy_prefix(&targets)
+    }
+
+    /// Leftmost-first helper: re-run the epsilon closure starting from
+    /// `entries`, but refuse to traverse into or through any lazy-
+    /// prefix state. Entries that are themselves lazy-prefix states
+    /// are skipped. The result is the body-reachable subset of the
+    /// standard closure — states that exist in the set for a reason
+    /// other than "the lazy prefix spawned another match attempt".
+    fn closure_excluding_lazy_prefix(&self, entries: &[NfaStateId]) -> Vec<NfaStateId> {
+        let mut set = Vec::new();
+        let mut visited = vec![false; self.nfa.num_states()];
+        for &lp in self.nfa.lazy_prefix_states() {
+            visited[lp as usize] = true;
+        }
+        for &entry in entries {
+            if self.nfa.lazy_prefix_states().contains(&entry) {
+                continue;
+            }
+            self.epsilon_close(&mut set, &mut visited, entry);
+        }
+        set.sort_unstable();
+        set
     }
 
     /// Recursive epsilon closure starting from `state`. Adds every
@@ -857,6 +961,118 @@ mod tests {
         let (mut dfa, _) = try_build_reverse_dfa(r"\d+").expect("buildable");
         let outcome = dfa.find_match_start_at_reverse(b"abc12345xyz", 8);
         assert_eq!(outcome, DfaSearchOutcome::Match(3));
+    }
+
+    // ============================================================
+    // Forward-unanchored DFA: leftmost-first subset construction
+    // ============================================================
+    //
+    // These tests pin the behaviour unlocked by tagging the
+    // unanchoring lazy prefix `(?s:.)*?` on the NFA and pruning
+    // those states from any DFA state set that also contains the
+    // accept state. Without the prune, `find_match_at(input, 0)`
+    // on the forward-unanchored DFA returns the END of the LAST
+    // accept reached during the walk (leftmost-longest). With it,
+    // the walk stops spawning new match attempts after the first
+    // accept, so it returns the leftmost-first end — the
+    // precondition for wiring `find_first` / `find_all` onto the
+    // reverse-DFA pipeline.
+
+    fn try_build_forward_unanchored_dfa(pattern: &str) -> Option<(LazyDfa, CompiledC2Program)> {
+        let prog = CompiledC2Program::try_compile(pattern)?;
+        if prog.forward_unanchored.has_assertions() {
+            return None;
+        }
+        let nfa = Arc::new(prog.forward_unanchored.clone());
+        let bcm = Arc::new(prog.byte_class_map.clone());
+        let dfa = LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT).ok()?;
+        Some((dfa, prog))
+    }
+
+    #[test]
+    fn forward_unanchored_dfa_returns_leftmost_first_end_for_repeated_literal() {
+        // Pattern `a` against "xaxa" — the pre-prune DFA returns
+        // end=4 (the LAST 'a'); leftmost-first says end=2.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa("a").expect("buildable");
+        let outcome = dfa.find_match_at(b"xaxa", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(2));
+    }
+
+    #[test]
+    fn forward_unanchored_dfa_returns_end_of_first_match_for_digits() {
+        // Pattern `\d+` against "abc12xy45" — leftmost-first is
+        // end=5 (after the first run "12"), not end=9.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"\d+").expect("buildable");
+        let outcome = dfa.find_match_at(b"abc12xy45", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(5));
+    }
+
+    #[test]
+    fn forward_unanchored_dfa_greedy_star_reports_extended_end() {
+        // Pattern `a*` against "xaaax" — leftmost-first start is
+        // position 0 with the empty match, so end=0. The DFA is
+        // accepting at the start state (a* accepts empty), and
+        // pruning the lazy prefix means the first byte 'x' kills
+        // the walk without advancing. end=0 is correct.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"a*").expect("buildable");
+        let outcome = dfa.find_match_at(b"xaaax", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(0));
+    }
+
+    #[test]
+    fn forward_unanchored_dfa_empty_input_with_optional_pattern() {
+        // Pattern `a?` against "" — empty match at position 0.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"a?").expect("buildable");
+        let outcome = dfa.find_match_at(b"", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(0));
+    }
+
+    #[test]
+    fn forward_unanchored_dfa_no_match_returns_no_match() {
+        let (mut dfa, _) = try_build_forward_unanchored_dfa("abc").expect("buildable");
+        let outcome = dfa.find_match_at(b"xyz", 0);
+        assert_eq!(outcome, DfaSearchOutcome::NoMatch);
+    }
+
+    // ============================================================
+    // find_first_accept_at — leftmost-first end for the pipeline
+    // ============================================================
+
+    #[test]
+    fn find_first_accept_at_returns_end_of_leftmost_match() {
+        // `\w\w` on "abc": first accept after "ab" at end=2. The
+        // broader `find_match_at` would extend to end=3 because body
+        // states that still match word chars survive in the DFA state
+        // set; `find_first_accept_at` cuts off the walk as soon as any
+        // accept is seen.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"\w\w").expect("buildable");
+        let outcome = dfa.find_first_accept_at(b"abc", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(2));
+    }
+
+    #[test]
+    fn find_first_accept_at_returns_start_for_empty_matcher() {
+        // `a?` accepts empty at position 0.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"a?").expect("buildable");
+        let outcome = dfa.find_first_accept_at(b"xyz", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(0));
+    }
+
+    #[test]
+    fn find_first_accept_at_returns_first_position_not_greedy_end() {
+        // `a+` on "baaab": first accept after single 'a' at end=2.
+        // The greedy extension to end=4 is the anchored DFA's job in
+        // step 3 of the pipeline.
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"a+").expect("buildable");
+        let outcome = dfa.find_first_accept_at(b"baaab", 0);
+        assert_eq!(outcome, DfaSearchOutcome::Match(2));
+    }
+
+    #[test]
+    fn find_first_accept_at_handles_no_match() {
+        let (mut dfa, _) = try_build_forward_unanchored_dfa(r"\d").expect("buildable");
+        let outcome = dfa.find_first_accept_at(b"abc", 0);
+        assert_eq!(outcome, DfaSearchOutcome::NoMatch);
     }
 
     #[test]
