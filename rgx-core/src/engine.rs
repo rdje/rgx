@@ -807,17 +807,36 @@ impl Engine {
     /// Same advance rules as `pike_find_all` and the existing VM:
     /// after a non-empty match next scan starts at end, after an empty
     /// match next scan starts one byte later, and an empty match
-    /// adjacent to a previous non-empty match is dropped. The scan
-    /// loop is bounded by the [`PrefixScanner`] for skip acceleration.
+    /// adjacent to a previous non-empty match is dropped.
     ///
-    /// Uses per-position anchored DFA scan for the same reason
-    /// [`Self::try_dfa_find_first`] does — the forward-unanchored
-    /// DFA's last-accept semantics don't match the leftmost-first
-    /// find_all contract.
+    /// Uses the same reverse-DFA pipeline as [`Self::try_dfa_find_first`]
+    /// when the pattern has no prefix hint — the forward-unanchored DFA
+    /// finds each match's first-accept end in one O(n - pos) walk,
+    /// the reverse-anchored DFA locates the leftmost start bounded to
+    /// `>= pos` so the reverse walk can't report a start inside a
+    /// previously-consumed span, and the forward-anchored DFA runs
+    /// the greedy extension. For prefix-rich patterns the scan falls
+    /// through to the per-position anchored DFA scan with
+    /// [`PrefixScanner`] skip acceleration.
     #[doc(hidden)]
     pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
-        let dfa_mutex = self.should_dispatch_to_dfa()?;
         let c2 = self.vm.program.c2_program.as_ref()?;
+        // Reverse-DFA pipeline fast path for find_all. Same gate as
+        // find_first — use only when no prefix hint is available.
+        if self.pipeline_dispatch_preferred(c2) {
+            if let Some(forward_mutex) = self.should_dispatch_to_forward_unanchored_dfa() {
+                if let Some(reverse_mutex) = self.should_dispatch_to_reverse_dfa() {
+                    if let Some(results) =
+                        self.try_pipeline_find_all(input, c2, forward_mutex, reverse_mutex)
+                    {
+                        return Some(results);
+                    }
+                    // Pipeline exhausted or reconciled against itself —
+                    // fall through to the per-position scan.
+                }
+            }
+        }
+        let dfa_mutex = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte);
         let mut results = Vec::new();
         let mut start = 0usize;
@@ -846,6 +865,84 @@ impl Engine {
                 DfaSearchOutcome::NoMatch => start += 1,
                 DfaSearchOutcome::Exhausted => return None,
             }
+        }
+        Some(results)
+    }
+
+    /// Reverse-DFA pipeline driver for `find_all`. Returns
+    /// `Some(results)` on success (including an empty vec when the
+    /// pattern has no matches), or `None` to signal the caller to
+    /// fall through to the per-position scan (cache exhausted, mutex
+    /// unavailable, or a reconciliation failure).
+    ///
+    /// Each iteration runs the same 3-pass pipeline as
+    /// [`Self::try_pipeline_find_first`] but seeded at the current
+    /// scan position:
+    ///
+    /// 1. Forward-unanchored `find_first_accept_at(input, pos)` —
+    ///    first-accept end of the next leftmost match at-or-after
+    ///    `pos`. `NoMatch` means the scan is done.
+    /// 2. Reverse-anchored `find_match_start_at_reverse_bounded(
+    ///    input, first_accept_end, pos)` — the bound prevents the
+    ///    reverse walk from locating a start position inside a
+    ///    previously-consumed span.
+    /// 3. Forward-anchored `find_match_at(input, start)` — greedy end.
+    /// 4. Pike-VM `pike_captures_at(c2, input, start)` — captures.
+    ///
+    /// The find_all advance rules (non-empty → end, empty adjacent
+    /// to a previous non-empty → skip by 1, empty otherwise →
+    /// `start + 1`) are applied on each iteration. An exhaustion or
+    /// reconciliation failure at any pass aborts with `None`.
+    fn try_pipeline_find_all(
+        &self,
+        input: &[u8],
+        c2: &crate::c2::CompiledC2Program,
+        forward_mutex: &Mutex<LazyDfa>,
+        reverse_mutex: &Mutex<LazyDfa>,
+    ) -> Option<Vec<MatchResult>> {
+        let anchored_dfa = self.should_dispatch_to_dfa()?;
+        let mut results = Vec::new();
+        let mut pos = 0usize;
+        let mut prev_non_empty_end: Option<usize> = None;
+        while pos <= input.len() {
+            let first_accept_end = {
+                let mut forward = forward_mutex.lock().ok()?;
+                match forward.find_first_accept_at(input, pos) {
+                    DfaSearchOutcome::Match(end) => end,
+                    DfaSearchOutcome::NoMatch => break,
+                    DfaSearchOutcome::Exhausted => return None,
+                }
+            };
+            let start = {
+                let mut reverse = reverse_mutex.lock().ok()?;
+                match reverse.find_match_start_at_reverse_bounded(input, first_accept_end, pos) {
+                    DfaSearchOutcome::Match(start) => start,
+                    DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+                }
+            };
+            let greedy_end = {
+                let mut dfa = anchored_dfa.lock().ok()?;
+                match dfa.find_match_at(input, start) {
+                    DfaSearchOutcome::Match(end) => end,
+                    DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+                }
+            };
+            let is_empty = greedy_end == start;
+            if is_empty && Some(start) == prev_non_empty_end {
+                pos += 1;
+                continue;
+            }
+            let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+            let mut match_result = pike_match_to_match_result(pike_match);
+            if match_result.end != greedy_end {
+                return None;
+            }
+            debug_assert_eq!(match_result.start, start);
+            match_result.start = start;
+            match_result.end = greedy_end;
+            results.push(match_result);
+            prev_non_empty_end = if is_empty { None } else { Some(greedy_end) };
+            pos = if is_empty { start + 1 } else { greedy_end };
         }
         Some(results)
     }

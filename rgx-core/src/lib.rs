@@ -8829,4 +8829,73 @@ mod tests {
         let re = Regex::compile(r"\d{4}").unwrap();
         assert!(re.find_first("abc 123 xy").is_none());
     }
+
+    // === Reverse-DFA pipeline: find_all ===
+    //
+    // Pipeline iterates match-by-match: forward-unanchored
+    // find_first_accept_at(pos) → reverse-anchored bounded at `pos` →
+    // forward-anchored greedy end → Pike-VM captures. The bounded
+    // reverse walk is the key — without it the reverse DFA could
+    // locate a start inside the previously-consumed span for the
+    // second iteration onward.
+
+    #[test]
+    fn pipeline_find_all_non_greedy_non_overlapping() {
+        // `\w\w` on "abcdef": matches "ab" (0,2), "cd" (2,4), "ef" (4,6).
+        let re = Regex::compile(r"\w\w").unwrap();
+        let ms = re.find_all("abcdef");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 2), (2, 4), (4, 6)]);
+    }
+
+    #[test]
+    fn pipeline_find_all_greedy_extended_spans() {
+        // `a+` on "baaababaa": matches "aaa" (1,4), "a" (5,6), "aa" (7,9).
+        let re = Regex::compile(r"a+").unwrap();
+        let ms = re.find_all("baaababaa");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(1, 4), (5, 6), (7, 9)]);
+    }
+
+    #[test]
+    fn pipeline_find_all_single_char_class_all_digits() {
+        // `\d` on "ab12cd34ef": matches at each digit position.
+        let re = Regex::compile(r"\d").unwrap();
+        let ms = re.find_all("ab12cd34ef");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(2, 3), (3, 4), (6, 7), (7, 8)]);
+    }
+
+    #[test]
+    fn pipeline_find_all_empty_match_pattern_with_advance_rules() {
+        // `a*` on "bab": `a*` accepts empty at every position, plus the
+        // "a" in the middle. Expected matches per find_all's rules:
+        //   - empty at 0
+        //   - "a" at (1, 2)
+        //   - empty at 3 (end)
+        //   (empty at 2 is dropped because it's adjacent to the
+        //    previous non-empty match ending at 2)
+        let re = Regex::compile(r"a*").unwrap();
+        let ms = re.find_all("bab");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 0), (1, 2), (3, 3)]);
+    }
+
+    #[test]
+    fn pipeline_find_all_no_matches_returns_empty() {
+        let re = Regex::compile(r"\d{4}").unwrap();
+        assert!(re.find_all("abc 123 xy").is_empty());
+    }
+
+    #[test]
+    fn pipeline_find_all_reverse_walk_bounded_preserves_non_overlap() {
+        // Repeated-pattern regression: without bounding the reverse walk
+        // at `pos`, iteration 2 of find_all could re-locate iteration
+        // 1's match start and loop or report overlapping spans. This
+        // test pins that the bounded reverse walk advances correctly.
+        let re = Regex::compile(r"\w+").unwrap();
+        let ms = re.find_all("aa bb cc");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 2), (3, 5), (6, 8)]);
+    }
 }

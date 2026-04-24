@@ -339,24 +339,43 @@ impl LazyDfa {
     /// this method lands in a follow-up commit per the
     /// `docs/BACKLOG.md` "C2 follow-up: reverse-DFA pipeline" entry.
     pub fn find_match_start_at_reverse(&mut self, input: &[u8], end: usize) -> DfaSearchOutcome {
-        // The reverse-anchored DFA accepts at the START of the
-        // reversed pattern, which is the END of the forward pattern.
-        // Walking backward from `end` consumes input bytes from
-        // index `end - 1` downward. The latest accept seen during
-        // this walk is at the smallest forward index, which is the
-        // leftmost forward start.
+        self.find_match_start_at_reverse_bounded(input, end, 0)
+    }
+
+    /// Bounded variant of [`Self::find_match_start_at_reverse`].
+    ///
+    /// Walks the reverse-anchored DFA backward from `end`, but stops
+    /// when `pos == min_start`. The returned `Match(start)` therefore
+    /// satisfies `start >= min_start`.
+    ///
+    /// Used by the reverse-DFA pipeline's `find_all` driver: after a
+    /// previous match ends at `prev_end`, the next leftmost match
+    /// must start at `>= prev_end` (non-overlapping). Passing
+    /// `min_start = prev_end` prevents the backward walk from
+    /// reporting a start that overlaps the already-consumed span.
+    ///
+    /// `min_start = 0` recovers the original contract.
+    pub fn find_match_start_at_reverse_bounded(
+        &mut self,
+        input: &[u8],
+        end: usize,
+        min_start: usize,
+    ) -> DfaSearchOutcome {
         debug_assert!(end <= input.len(), "end out of bounds for input");
+        debug_assert!(min_start <= end, "min_start must not exceed end");
         let mut state = self.start_state();
         // The DFA could already accept the empty string at the end
         // position (e.g., for patterns like `a*` matching the empty
-        // span at any position). Record that as a tentative match.
-        let mut leftmost_start = if self.is_accept(state) {
+        // span at any position). Record that as a tentative match —
+        // but only if `end >= min_start` (the caller-supplied lower
+        // bound on valid starts).
+        let mut leftmost_start = if self.is_accept(state) && end >= min_start {
             Some(end)
         } else {
             None
         };
         let mut pos = end;
-        while pos > 0 {
+        while pos > min_start {
             pos -= 1;
             let byte = input[pos];
             let cls = self.byte_class_map.class_of(byte);

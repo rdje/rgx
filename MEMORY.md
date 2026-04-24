@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — C2: reverse-DFA pipeline wired for find_all (track closed)
+
+- **What**: the morning find_first wiring left find_all on the per-position scan because the unbounded reverse walk would overlap with previously-consumed spans on iteration 2+. Added `LazyDfa::find_match_start_at_reverse_bounded(end, min_start)` and a `try_pipeline_find_all` driver on `Engine`. Same gate as find_first (no prefix hint). Full 3-pass pipeline per iteration with `pos`-bounded reverse walk. Advance rules match the existing scan (non-empty → end, empty adjacent → +1, empty otherwise → start+1).
+- **Deltas**: 1,071 → 1,077 lib tests (+6). Ratchet 12,709 / 101 preserved. fmt + clippy clean.
+- **Regression pin worth noting**: `pipeline_find_all_reverse_walk_bounded_preserves_non_overlap` on `\w+` over "aa bb cc" — without the bounded reverse walk, iteration 2 of find_all could relocate back to (0, 2) and loop. The bound at `pos = prev_end` is load-bearing.
+- **Track status**: the ROADMAP "Tier-2 perf headroom — reverse-DFA pipeline" entry is now fully closed. Both halves of every public find path are on the pipeline for no-prefix patterns.
+- **Next concrete action**: pivot. Non-C2 candidates: A8 crate publishing (blocked on PGEN strategy), binary rename rgx-cli → rgx, PCRE2 perf gap <10x sweep. Await user direction.
+
 ### 2026-04-24 — C2: reverse-DFA pipeline wired for find_first
 
 - **What**: Closed the long-standing C2 follow-up "teach the unanchored NFA to kill its lazy-prefix threads after accept so subset construction preserves leftmost-first semantics". Tagged `lazy_prefix_states` + `body_entry` on `Nfa` (empty/None for anchored), made `LazyDfa`'s subset construction re-run epsilon closure excluding lazy-prefix states when accept is in the set, added `LazyDfa::find_first_accept_at` (stop-at-first-accept), and wired `try_dfa_find_first` as a 3-pass pipeline (forward-unanchored first-accept → reverse-anchored leftmost-start → forward-anchored greedy-end → Pike-VM captures). Gate: pipeline only preferred when `c2_prefix_byte.is_none() && PrefixFilter::None` — prefix-rich patterns stay on the per-position scan because memchr/byte-class skip wins.
