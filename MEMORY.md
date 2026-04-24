@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-24 — Doc: refresh residual catalogue to 12,709 / 101 (sprint stop)
+
+- **What**: Opening paragraph of `book/src/internals/pcre2-conformance-residual.md` was still reporting 12,705 / 105 from earlier in the sprint. Refreshed to 12,709 / 101 and added a running tally of clusters closed since the catalogue landed (Cluster 3B −2, Cluster 1F conditional −3, Cluster 1F substitute follow-up −1, total −6).
+- **Sprint summary (this session)**: start 12,702 / 107 → end 12,709 / 101. Net **+7 passes, −6 fails via 4 engine/parser/API fixes** plus 1 semantic tightening (assertion verb propagation positive-only). All ratchet moves captured in CHANGES.md.
+- **Stopping point per user directive** (":-) do what you can to get as close as you can, then we will stop chasing 100% conformance to PCRE2 test data. Then we will pivot to other aspects of RGX."): remaining clusters are architectural — Cluster 1A/2A (bounded recursion + greedy dispatch, ~24 cases), Cluster 1E/2B (empty-alt quantifier frame-dispatch, ~7 cases), Cluster 2C/3C (`\K` inside `{0}` subroutine call path, 3 cases), Bucket 5 (substitute template validation depth, 4 cases). Each is a multi-hour investigation; catalogue documents the root-cause handoff.
+- **Next session pivot**: await user direction on "other aspects of RGX". Likely candidates from ROADMAP: C1 Cranelift JIT continuation, C2 NFA/DFA hybrid extensions, API surface polishing per the fluency principle.
+
 ### 2026-04-24 — API: substitute $name dupnames (+1, follow-up to #38)
 
 - **What**: `(?J)(?:(?<A>a)|(?<A>b))/replace=<$A>` on "[a]" — PCRE2 produces `[<a>]`; RGX produced `[<>]`. Same HashMap-overwrite root cause as engine #38 but on the substitute-template-interpolation path. Added `named_groups_all` to `Program` + `Captures`, new `push_group_by_ref_ext` / `interpolate_replacement_ext` using the multi-id map, `Engine::named_groups_all()` accessor. When `$name` is referenced and the name has duplicates, iterates all ids and emits the first SET one.

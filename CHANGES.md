@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-24 - Doc: refresh residual catalogue to 12,709 / 101
+
+- Scope: `book/src/internals/pcre2-conformance-residual.md` opening paragraph still reported 12,705 / 105 / ~99.2%. After three further fixes in the same sprint (parser CRLF `.` both-ends, engine #38 dupnames conditional, API dupnames substitute follow-up) the ratchet sits at 12,709 / 101.
+- Changes: `book/src/internals/pcre2-conformance-residual.md` — updated lead paragraph with current numbers and a running tally of closed clusters since the catalogue landed (Cluster 3B −2, Cluster 1F conditional −3, Cluster 1F substitute follow-up −1, total −6).
+- Validation: doc-only change; no code touched. Live ratchet pinned via `PASS_BASELINE=12_709` / `FAIL_BASELINE=101` in `rgx-core/tests/pcre2_conformance.rs`.
+- Notes/impact: natural stopping point for the "do what you can to get as close as you can" sprint — remaining clusters are architectural (empty-alt frame-dispatch in `vm.rs:3137`, `\K`-in-`{0}` subroutine path, Bucket 5 substitute-template validation). Pivoting to other aspects of RGX next.
+
 ### 2026-04-24 - API: substitute `$name` interpolation respects dupnames (+1 pass, follow-up to engine #38)
 
 - Scope: `(?J)(?:(?<A>a)|(?<A>b))/replace=<$A>` on "[a]" — PCRE2 produces `[<a>]` (interpolates alt 1's A which is set). RGX produced `[<>]` because `push_group_by_ref` looked up `named.get("A")` in the single-id HashMap and found alt 2's id (the overwrite winner); that slot was unset, so the template expanded to empty. The engine #38 fix handled this case in conditional-evaluate but NOT in substitute-template-interpolation.

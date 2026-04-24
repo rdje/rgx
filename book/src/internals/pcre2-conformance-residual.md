@@ -1,6 +1,6 @@
 # PCRE2 Conformance Residual — the 107 Remaining Failures
 
-At the time of writing the ratchet sits at **12,705 pass / 105 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.2%**. (Initial draft was at 12,703 / 107; Cluster 3B has since closed with the `(*CRLF)` `.` lookbehind fix.)
+At the time of writing the ratchet sits at **12,709 pass / 101 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.2%**. Initial draft of this chapter was at 12,703 / 107; closed since: Cluster 3B (`(*CRLF)` `.` lookbehind, +2), Cluster 1F conditional (+3), Cluster 1F substitute follow-up (+1). Total −6 since the catalogue landed.
 
 This chapter is a surgical, per-case map of those 107 remaining failures. Its purpose is to let a contributor walk in cold and immediately start fixing, without having to re-discover what has already been analysed.
 
