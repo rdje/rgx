@@ -49,6 +49,7 @@
 
 // Core modules
 /// Abstract syntax tree types for regex patterns.
+pub mod ac;
 pub mod ast;
 /// Byte-oriented regex matching on `&[u8]` without requiring valid UTF-8.
 pub mod bytes;
@@ -1224,7 +1225,9 @@ impl Regex {
         // Pike-VM is the safety net for patterns that risk
         // catastrophic backtracking — the JIT inherits that risk
         // since it's a JIT'd backtracking VM, not an NFA simulator.
-        let matches = if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
+        let matches = if let Some(ac_result) = self.engine.try_ac_find_all(text.as_bytes()) {
+            ac_result
+        } else if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
             dfa_result
         } else if let Some(pike_result) = self.engine.try_pike_find_all(text.as_bytes()) {
             pike_result
@@ -1259,7 +1262,9 @@ impl Regex {
         // interpreter. See `find_all` for the rationale of the
         // ordering (Pike-VM before JIT because Pike-VM is the
         // safety net for nested-quantifier patterns).
-        let first = if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
+        let first = if let Some(ac_result) = self.engine.try_ac_find_first(text.as_bytes()) {
+            ac_result
+        } else if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
             dfa_result
         } else if let Some(pike_result) = self.engine.try_pike_find_first(text.as_bytes()) {
             pike_result
@@ -1502,10 +1507,14 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
-        // C1 step 5: 4-tier dispatch — DFA → Pike-VM → JIT →
-        // interpreter. See `find_all` for the rationale of the
-        // ordering.
-        let matched = if let Some(matched) = self.engine.try_dfa_is_match(text.as_bytes()) {
+        // 5-tier dispatch — AC → DFA → Pike-VM → JIT → interpreter.
+        // AC fires only for top-level alternations of pure ASCII
+        // literals (`cat|dog|bird`); the rest of the chain is
+        // unchanged. See `find_all` for the DFA → Pike-VM → JIT
+        // ordering rationale.
+        let matched = if let Some(matched) = self.engine.try_ac_is_match(text.as_bytes()) {
+            matched
+        } else if let Some(matched) = self.engine.try_dfa_is_match(text.as_bytes()) {
             matched
         } else if let Some(matched) = self.engine.try_pike_is_match(text.as_bytes()) {
             matched
@@ -8927,6 +8936,67 @@ mod tests {
     fn inner_literal_fast_fail_does_not_misfire_on_pure_class_pattern() {
         // `\d+` has no required literal byte. Fast-fail must not
         // trigger; the regular dispatch path runs.
+        let re = Regex::compile(r"\d+").unwrap();
+        let m = re.find_first("abc 42 xyz").expect("match");
+        assert_eq!(&"abc 42 xyz"[m.start..m.end], "42");
+    }
+
+    // === Aho-Corasick dispatch for literal alternation ===
+    //
+    // Top-level alternations of pure ASCII literals
+    // (`cat|dog|bird`) are handled by an AC automaton built at
+    // compile time. AC's `MatchKind::LeftmostFirst` honours PCRE2's
+    // alternation semantics; the 0-based pattern_id is mapped to
+    // the 1-based matched_branch_number that the existing API
+    // contract uses.
+
+    #[test]
+    fn ac_dispatch_finds_first_literal_in_alternation() {
+        let re = Regex::compile(r"cat|dog|bird").unwrap();
+        let m = re.find_first("the dog runs fast").expect("match");
+        assert_eq!((m.start, m.end), (4, 7));
+        assert_eq!(m.matched_branch_number, Some(2)); // dog is branch 2
+    }
+
+    #[test]
+    fn ac_dispatch_honours_leftmost_first_semantics_on_overlap() {
+        // `a|abc` — when both could match at position 0, the first
+        // branch wins (leftmost-first). PCRE2 semantics.
+        let re = Regex::compile(r"a|abc").unwrap();
+        let m = re.find_first("abc").expect("match");
+        assert_eq!((m.start, m.end), (0, 1)); // "a", not "abc"
+        assert_eq!(m.matched_branch_number, Some(1));
+    }
+
+    #[test]
+    fn ac_dispatch_finds_all_literal_matches() {
+        let re = Regex::compile(r"cat|dog").unwrap();
+        let ms = re.find_all("cat and dog and cat");
+        let spans: Vec<(usize, usize)> = ms.iter().map(|m| (m.start, m.end)).collect();
+        assert_eq!(spans, vec![(0, 3), (8, 11), (16, 19)]);
+        let branches: Vec<Option<usize>> = ms.iter().map(|m| m.matched_branch_number).collect();
+        assert_eq!(branches, vec![Some(1), Some(2), Some(1)]);
+    }
+
+    #[test]
+    fn ac_dispatch_is_match_for_literal_alternation() {
+        let re = Regex::compile(r"ERROR|WARN|FATAL").unwrap();
+        assert!(re.is_match("[2026-04-25 14:00:00] ERROR connection refused"));
+        assert!(!re.is_match("[2026-04-25 14:00:00] DEBUG everything fine"));
+    }
+
+    #[test]
+    fn ac_dispatch_no_match_returns_none() {
+        let re = Regex::compile(r"cat|dog|bird").unwrap();
+        assert!(re.find_first("only fish here").is_none());
+        assert!(re.find_all("only fish here").is_empty());
+        assert!(!re.is_match("only fish here"));
+    }
+
+    #[test]
+    fn ac_dispatch_does_not_misfire_on_non_alternation_pattern() {
+        // `\d+` is not a literal alternation — must not hit AC; the
+        // regular dispatch chain returns the right answer.
         let re = Regex::compile(r"\d+").unwrap();
         let m = re.find_first("abc 42 xyz").expect("match");
         assert_eq!(&"abc 42 xyz"[m.start..m.end], "42");

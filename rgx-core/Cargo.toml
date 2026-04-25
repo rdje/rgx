@@ -18,6 +18,11 @@ readme = "README.md"
 wide = { workspace = true }
 bytemuck = { workspace = true }
 memchr = { workspace = true }
+# Aho-Corasick automaton for top-level literal-alternation dispatch.
+# `cat|dog|bird` style patterns currently fall back to the
+# backtracking VM (top-level alternation excluded from C2 dispatch);
+# AC handles the multi-literal case in O(n) instead of O(n × m).
+aho-corasick = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

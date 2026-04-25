@@ -587,6 +587,15 @@ pub struct Program {
     /// / `find_all` through the Pike-VM when present, falling back to
     /// the existing VM otherwise. See `docs/C2_NFA_DFA_DESIGN.md` §11.
     pub c2_program: Option<crate::c2::CompiledC2Program>,
+    /// Aho-Corasick automaton for top-level literal-alternation
+    /// dispatch. `Some(ac)` iff the pattern is a top-level alternation
+    /// of pure ASCII literals (e.g. `cat|dog|bird`); `None` otherwise.
+    /// These patterns are excluded from C2 dispatch (Pike-VM doesn't
+    /// track `matched_branch_number`), so without AC they fall through
+    /// to the backtracking VM at `O(n × m)` cost. The AC automaton
+    /// matches all alternatives in a single `O(n + m)` pass.
+    /// See [`crate::ac`] for the eligibility rules.
+    pub ac_literal_set: Option<aho_corasick::AhoCorasick>,
 }
 
 /// Program optimization flags
@@ -7371,6 +7380,7 @@ impl OptimizingCompiler {
             ucp_enabled: self.ucp_enabled,
             classification: Classification::default(),
             c2_program: None,
+            ac_literal_set: None,
         };
         trace_exit!(
             "vm",

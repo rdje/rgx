@@ -597,6 +597,86 @@ impl Engine {
     /// and reports whether any match exists — O(n) instead of O(n ·
     /// candidate_positions). Falls back to the per-position anchored
     /// scan only if the unanchored cache exhausts.
+    /// Try to answer `is_match` via the Aho-Corasick literal-set
+    /// fast path. Returns `Some(true/false)` if the pattern is a
+    /// top-level alternation of pure ASCII literals and AC produced
+    /// a definitive answer, `None` otherwise (caller falls through
+    /// to the regular dispatch chain).
+    ///
+    /// O(n + m) instead of the O(n × m) cost the backtracking VM
+    /// pays for top-level literal alternations, which the C2
+    /// dispatch chain excludes (Pike-VM doesn't track
+    /// `matched_branch_number`).
+    #[doc(hidden)]
+    pub fn try_ac_is_match(&self, input: &[u8]) -> Option<bool> {
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        let ac = self.vm.program.ac_literal_set.as_ref()?;
+        Some(ac.is_match(input))
+    }
+
+    /// Try to answer `find_first` via the Aho-Corasick literal-set
+    /// fast path. Returns `Some(Some(match))` / `Some(None)` if AC
+    /// produced a definitive answer, `None` to fall through.
+    ///
+    /// AC is configured with `MatchKind::LeftmostFirst` so the
+    /// returned match honours PCRE2's alternation semantics: when
+    /// two branches could match at the same position, the first one
+    /// in source order wins. The 0-based pattern_id from AC is
+    /// translated to a 1-based `matched_branch_number` on the
+    /// returned `MatchResult`.
+    #[doc(hidden)]
+    pub fn try_ac_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        let ac = self.vm.program.ac_literal_set.as_ref()?;
+        let Some(m) = ac.find(input) else {
+            return Some(None);
+        };
+        Some(Some(MatchResult {
+            start: m.start(),
+            end: m.end(),
+            // Top-level literal alternation has no nested capture
+            // groups by construction (only `Char` and `Sequence` of
+            // `Char` are eligible — see `ac::pure_ascii_literal`),
+            // so the captures vec is just the whole-match span.
+            groups: vec![Some((m.start(), m.end()))],
+            // 1-based branch number: AC pattern_id is 0-based.
+            matched_branch_number: Some(m.pattern().as_usize() + 1),
+            code_result: None,
+            last_mark: None,
+        }))
+    }
+
+    /// Try to answer `find_all` via the Aho-Corasick literal-set
+    /// fast path. Returns `Some(matches)` if AC produced a definitive
+    /// list of all non-overlapping matches, `None` to fall through.
+    ///
+    /// AC's `find_iter` yields non-overlapping leftmost-first matches
+    /// directly. No empty-match advance rule is needed because the
+    /// eligibility check rejects empty literal branches.
+    #[doc(hidden)]
+    pub fn try_ac_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        let ac = self.vm.program.ac_literal_set.as_ref()?;
+        let results: Vec<MatchResult> = ac
+            .find_iter(input)
+            .map(|m| MatchResult {
+                start: m.start(),
+                end: m.end(),
+                groups: vec![Some((m.start(), m.end()))],
+                matched_branch_number: Some(m.pattern().as_usize() + 1),
+                code_result: None,
+                last_mark: None,
+            })
+            .collect();
+        Some(results)
+    }
+
     #[doc(hidden)]
     pub fn try_dfa_is_match(&self, input: &[u8]) -> Option<bool> {
         // Inner-literal fast-fail: if the pattern requires a specific

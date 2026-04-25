@@ -717,6 +717,21 @@ impl Compiler {
             program.c2_program.is_some()
         );
 
+        // AC literal-alternation fast path: if the pattern is a
+        // top-level alternation of pure ASCII literals (e.g.
+        // `cat|dog|bird`), build an Aho-Corasick automaton for
+        // O(n + m) dispatch. These patterns are excluded from C2
+        // (Pike-VM doesn't track `matched_branch_number`) and would
+        // otherwise fall through to the backtracking VM at O(n × m).
+        program.ac_literal_set = crate::ac::extract_literal_alternation(&ast)
+            .as_deref()
+            .and_then(crate::ac::build_aho_corasick);
+        debug_log!(
+            "compiler",
+            "  - AC literal-set dispatch: {}",
+            program.ac_literal_set.is_some()
+        );
+
         debug_log!("compiler", "Program compiled:");
         debug_log!(
             "compiler",

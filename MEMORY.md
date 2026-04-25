@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: Aho-Corasick dispatch for top-level literal alternation (closes a SOTA gap)
+
+- **What**: shipped the SOTA "Aho-Corasick for literal alternation" item from the ROADMAP. New `rgx-core/src/ac.rs` module: AST extractor + AC builder. `Program` carries `ac_literal_set: Option<AhoCorasick>`. Compiler builds it at compile time. Engine has new `try_ac_*` methods. `Regex::is_match` / `find_first` / `find_all` dispatch chain extended from 4-tier to 5-tier: **AC → DFA → Pike-VM → JIT → interpreter**. AC configured with `MatchKind::LeftmostFirst` so alternation semantics match PCRE2's first-branch-wins-on-tie rule.
+- **Eligibility**: top-level `Alternation` (walks past `Group { Capturing | NonCapturing }` wrappers; `FlagGroup` disqualifies for v1) where every branch is `Char` or `Sequence` of `Char`, ≥2 branches, no empty branches, all ASCII. Single-arm alternations correctly excluded (existing contract: `matched_branch_number = None`).
+- **Measured win** (`cat|dog|bird` on 10K, release build, 10000 iters): find_first **110 ns/iter**, find_all **923 ns/iter**, is_match **94 ns/iter**. Now competitive or faster than PCRE2 (their alternation 1K from `target/benchmark-trends/latest.md` was find_first 350ns, find_all 4854ns).
+- **Deltas**: 1090 → 1108 lib tests (+18 — 11 unit + 6 public-API + 1 single-arm regression pin). 30 cli unchanged. fmt + clippy clean. **PCRE2 conformance ratchet preserved at 12,709 / 101**.
+- **Strategic note**: the bench's `alternation` pattern class was previously a worst case for RGX (excluded from C2, fell through to backtracking VM). With AC dispatch shipped this is no longer the case. The 5-tier dispatch chain is the new canonical shape — future SOTA additions slot in front of (or after) AC depending on selectivity.
+- **Next concrete actions**: more SOTA items remain on the ROADMAP — DFA minimization, SIMD byte-class lookup, tagged DFA, multi-byte memmem prefilter, materialized DFA for small patterns. Each independently shippable. Or pivot to v2 of inner-literal prefilter (the FOUND-case memchr-jump that targets the email_basic find_first 3.7x bench gap), which is multi-day work.
+
 ### 2026-04-25 — Perf: inner-literal fast-fail (v1 of inner-literal prefilter)
 
 - **What**: ships v1 of the SOTA "inner-literal prefilter" technique. New `required_inner_byte(ast)` extractor in `c2/program.rs` walks the AST and returns the rarest single-byte literal that must appear in any match (prefers non-alphanumeric like `@`, `-`, `:` over alphanumeric for memchr selectivity). Stored as `c2_required_inner_byte: Option<u8>` on `CompiledC2Program`. Three dispatch helpers (`try_dfa_is_match`, `try_dfa_find_first`, `try_dfa_find_all`) gained a memchr-based early-return: if the input doesn't contain the required byte, no match can exist anywhere — return immediately without running the DFA.

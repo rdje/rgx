@@ -14,6 +14,29 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: Aho-Corasick dispatch for top-level literal alternation
+
+- Scope: implements the SOTA "Aho-Corasick for literal alternation" item from ROADMAP § "Likely-big wins". Patterns like `cat|dog|bird` (top-level alternation of pure literals) were previously excluded from C2 dispatch — `is_c2_dispatch_eligible` returns false because Pike-VM doesn't track `matched_branch_number`. Without an AC fast path they fell through all the way to the backtracking VM, paying O(n × m) per scan position. This commit adds an AC automaton at the front of the dispatch chain, handling the multi-literal case in O(n + m).
+- Changes:
+  - `rgx-core/src/ac.rs` — new module (~250 lines). `extract_literal_alternation(ast)` walks the top-level AST through capturing/non-capturing group wrappers (FlagGroup disqualifies for v1) and returns `Some(literal_set)` iff the result is a ≥2-branch alternation whose branches are pure ASCII literals (`Char` or `Sequence` of `Char`). `build_aho_corasick(literals)` constructs the automaton with `MatchKind::LeftmostFirst` so alternation semantics match PCRE2's first-branch-wins-on-tie rule. 13 unit tests cover the eligibility matrix (group walking, flag-group rejection, branch shape rejection, multi-byte UTF-8 rejection, empty / single-branch rejection).
+  - `rgx-core/src/vm.rs` — `Program` struct gained `ac_literal_set: Option<aho_corasick::AhoCorasick>`; default-initialized to `None` at the bytecode-emission site.
+  - `rgx-core/src/compiler.rs` — `compile_ast_with_label` builds the AC automaton via `crate::ac::extract_literal_alternation` + `build_aho_corasick` and stores it on `program.ac_literal_set` alongside the existing `program.c2_program` initialization.
+  - `rgx-core/src/engine.rs` — three new dispatch methods (`try_ac_is_match`, `try_ac_find_first`, `try_ac_find_all`) gated on `!has_event_observer()` (observer events would be silently elided otherwise). The 0-based `aho_corasick::PatternID` is translated to a 1-based `matched_branch_number` on `MatchResult`. Captures vec contains a single span (the whole match) — top-level literal alternation has no nested capture groups by construction.
+  - `rgx-core/src/lib.rs` — `Regex::is_match`, `find_first`, `find_all` extended their dispatch chain from 4-tier to 5-tier: **AC → DFA → Pike-VM → JIT → interpreter**. AC fires only for AC-eligible patterns; everything else falls through to the existing chain.
+  - `rgx-core/Cargo.toml` — explicit `aho-corasick = { workspace = true }` dependency line (already in the workspace deps from a prior commit, just not declared on rgx-core itself).
+  - `ROADMAP.md` — Aho-Corasick entry under "Likely-big wins" marked as SHIPPED with measured numbers.
+- Validation:
+  - 1108 lib tests pass (1090 + 11 unit tests in `ac::tests` + 6 public-API tests in `tests::ac_dispatch_*` + 1 single-arm-alternation regression pin).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (release build, `cat|dog|bird` over 10K input with sparse matches, 10000 iterations averaged):
+    - `find_first` — **110 ns/iter** (was on backtracking VM previously, much slower)
+    - `find_all` — **923 ns/iter**
+    - `is_match` — **94 ns/iter**
+    - For comparison, PCRE2's `alternation` 1K bench from `target/benchmark-trends/latest.md`: find_first 350ns (3K-byte input), find_all 4854ns. RGX with AC is now **competitive or faster than PCRE2** on this pattern class.
+- Notes/impact: closes the long-standing "literal alternation falls out of C2 dispatch" gap. Real win on log-grep-style workloads (`ERROR|WARN|FATAL` over GB of logs). v1 supports ASCII-only literal branches; case-insensitive `(?i)cat|dog` and Unicode-letter branches are deferred follow-ups. The 5-tier dispatch chain (AC → DFA → Pike-VM → JIT → interpreter) is now the canonical shape for `is_match` / `find_first` / `find_all`.
+
 ### 2026-04-25 - Perf: inner-literal fast-fail no-match check
 
 - Scope: groundwork for inner-literal prefilter (SOTA item from ROADMAP § "Likely-big wins"). This commit ships the simplest useful slice: a memchr-based no-match short-circuit in the dispatch helpers. For patterns where any match must contain a specific byte (e.g. `@` in `\b\w+@\w+\.\w+\b`, `-` in `\d{3}-\d{2}-\d{4}`), `is_match` / `find_first` / `find_all` now memchr the input first and return immediately if the byte is absent, skipping the DFA walk entirely. SIMD-accelerated memchr is ~10-30x faster than per-byte DFA transitions, so this is a real win on grep-like workloads where the pattern is absent from large inputs.
