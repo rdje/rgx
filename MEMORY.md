@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: cache memmem::Finder on CompiledC2Program (~5% on url_simple find_first)
+
+- **What**: small follow-up to multi-byte memmem prefilter. `PrefixScanner::new` was building a fresh `memmem::Finder` from `c2_prefix_literal` on every dispatch call. Moved construction to compile time via `Finder::new(&bytes).into_owned()` stored on `CompiledC2Program::c2_prefix_finder`. PrefixScanner now borrows the cached Finder.
+- **Measured**: `https?://\S+` on 10K — find_first 3,011 → 2,866 ns/iter (~145ns saved per call, ~5%). find_all unchanged in noise (memmem called many times per call so per-call construction was already amortized).
+- **Total session url_simple find_first improvement**: 32,483 → 2,866 ns/iter = **11.3x speedup**. Gap to PCRE2 closed from 167x to ~14.8x slower.
+- **Deltas**: 1118 lib tests unchanged. 30 cli unchanged. fmt + clippy clean. **Conformance ratchet 12,709 / 101 preserved**.
+- **Diminishing returns**: this is the last cheap win in the literal-prefix-prefilter area. Further compile-time caching of e.g. AC automaton or DFA states is already done. Remaining perf opportunities are bigger architectural items (DFA minimization, materialized DFA, tagged DFA, v2 inner-literal prefilter for the email_basic 3.7x gap).
+
 ### 2026-04-25 — Perf: short-circuit 5-tier dispatch for pure-literal patterns
 
 - **What**: when the VM has a `memmem::Finder` for the pattern, all four C2/JIT dispatch helpers gate on `has_literal_finder` and return None. The 5-tier dispatch chain (AC → DFA → Pike-VM → JIT → interpreter) was calling all four for ~100-200ns of pure overhead per call. New `Engine::has_literal_finder` accessor; lib.rs `find_first` / `find_all` / `is_match` short-circuit when true, going straight to `engine.find_first` etc. and skipping the 4 dead-end checks.

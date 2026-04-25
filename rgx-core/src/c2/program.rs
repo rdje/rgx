@@ -114,6 +114,16 @@ pub struct CompiledC2Program {
     /// node breaks the run.
     pub c2_prefix_literal: Option<Vec<u8>>,
 
+    /// Pre-built [`memchr::memmem::Finder`] for [`Self::c2_prefix_literal`].
+    /// Constructed once at compile time so dispatch helpers don't pay
+    /// the Boyer-Moore-Horspool table-construction cost on every
+    /// `find_first` / `find_all` / `is_match` call.
+    ///
+    /// `None` when the prefix literal is < 2 bytes (memmem isn't
+    /// faster than memchr for single-byte needles) or when the
+    /// pattern has no leading literal at all.
+    pub c2_prefix_finder: Option<memchr::memmem::Finder<'static>>,
+
     /// Required interior single-byte literal — a byte that **must**
     /// appear in any match span of this pattern. Distinct from
     /// [`Self::c2_prefix_byte`] (the byte at the START of the match);
@@ -177,14 +187,16 @@ impl CompiledC2Program {
         // leading literal is more than one byte (e.g. `http` for
         // `https?://`). Stored as `None` when the leading run is
         // <= 1 byte to keep the dispatch path on the cheaper memchr
-        // hot path; otherwise gives the dispatch a `Vec<u8>` it can
-        // wrap in a `memmem::Finder` per-call.
-        let c2_prefix_literal = {
+        // hot path. When ≥ 2 bytes, also pre-build the `memmem::Finder`
+        // (BM-Horspool tables) so dispatch helpers don't pay the
+        // construction cost on every call.
+        let (c2_prefix_literal, c2_prefix_finder) = {
             let bytes = leading_literal_bytes(ast);
             if bytes.len() >= 2 {
-                Some(bytes)
+                let finder = memchr::memmem::Finder::new(&bytes).into_owned();
+                (Some(bytes), Some(finder))
             } else {
-                None
+                (None, None)
             }
         };
 
@@ -211,6 +223,7 @@ impl CompiledC2Program {
             num_capture_groups,
             c2_prefix_byte,
             c2_prefix_literal,
+            c2_prefix_finder,
             c2_has_nested_quantifier,
             c2_required_inner_byte,
         }

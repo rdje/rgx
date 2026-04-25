@@ -259,14 +259,20 @@ struct PrefixScanner<'a> {
     /// present takes precedence over `filter` because memmem is
     /// strictly more selective than memchr on multi-byte fixed
     /// prefixes (e.g. `http` vs single byte `h`).
-    literal_finder: Option<memchr::memmem::Finder<'a>>,
+    ///
+    /// The Finder is **pre-built at compile time** (stored on
+    /// [`crate::c2::CompiledC2Program::c2_prefix_finder`]); we
+    /// borrow it here for the duration of the scan to avoid paying
+    /// the Boyer-Moore-Horspool table-construction cost on every
+    /// dispatch call.
+    literal_finder: Option<&'a memchr::memmem::Finder<'static>>,
 }
 
 impl<'a> PrefixScanner<'a> {
     /// Build a scanner from a VM and the C2 program's prefix hints.
     /// Resolution priority (most selective wins):
     ///
-    /// 1. `c2_prefix_literal` (multi-byte) → `memmem::Finder`
+    /// 1. `c2_prefix_finder` (pre-built memmem::Finder, multi-byte)
     /// 2. `c2_prefix_byte` (single byte) → `memchr`
     /// 3. `vm.prefix_filter()` (byte class / char class) → scalar loop
     ///
@@ -276,11 +282,8 @@ impl<'a> PrefixScanner<'a> {
     fn new(
         vm: &'a RegexVM,
         c2_prefix_byte: Option<u8>,
-        c2_prefix_literal: Option<&'a [u8]>,
+        c2_prefix_finder: Option<&'a memchr::memmem::Finder<'static>>,
     ) -> Self {
-        let literal_finder = c2_prefix_literal
-            .filter(|s| s.len() >= 2)
-            .map(memchr::memmem::Finder::new);
         let filter = match c2_prefix_byte {
             Some(byte) => PrefixFilter::Byte(byte),
             None => vm.prefix_filter(),
@@ -288,7 +291,7 @@ impl<'a> PrefixScanner<'a> {
         Self {
             filter,
             char_classes: vm.char_classes(),
-            literal_finder,
+            literal_finder: c2_prefix_finder,
         }
     }
 
@@ -804,8 +807,7 @@ impl Engine {
             }
         }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
-        let scanner =
-            PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_literal.as_deref());
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut dfa = dfa_mutex.lock().ok()?;
         let mut start = 0usize;
         while start <= input.len() {
@@ -991,8 +993,7 @@ impl Engine {
             }
         }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
-        let scanner =
-            PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_literal.as_deref());
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
@@ -1113,8 +1114,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn try_pike_is_match(&self, input: &[u8]) -> Option<bool> {
         let c2 = self.should_dispatch_to_c2()?;
-        let scanner =
-            PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_literal.as_deref());
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut start = 0usize;
         while let Some(candidate) = scanner.next_candidate(input, start) {
             if crate::c2::pike::pike_is_match_at(c2, input, candidate) {
@@ -1145,8 +1145,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn try_pike_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let c2 = self.should_dispatch_to_c2()?;
-        let scanner =
-            PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_literal.as_deref());
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut start = 0usize;
         while let Some(candidate) = scanner.next_candidate(input, start) {
             if let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, candidate) {
@@ -1174,8 +1173,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn try_pike_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let c2 = self.should_dispatch_to_c2()?;
-        let scanner =
-            PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_literal.as_deref());
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;

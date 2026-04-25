@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: cache `memmem::Finder` on `CompiledC2Program`
+
+- Scope: small constant-factor follow-up to the multi-byte memmem prefilter (`3550cd7`). `PrefixScanner::new` was constructing a fresh `memmem::Finder` per call from `c2_prefix_literal`, paying the Boyer-Moore-Horspool table-construction cost on every `find_first` / `find_all` / `is_match` invocation. The Finder is pattern-dependent but call-independent — building it once at compile time is a free win.
+- Changes:
+  - `rgx-core/src/c2/program.rs` — new `c2_prefix_finder: Option<memchr::memmem::Finder<'static>>` field on `CompiledC2Program`, built alongside `c2_prefix_literal` via `Finder::new(&bytes).into_owned()`. `'static` lifetime achieved through `into_owned()` so the Finder owns a `Cow<'static, [u8]>` of the needle.
+  - `rgx-core/src/engine.rs` — `PrefixScanner` now holds `Option<&'a memchr::memmem::Finder<'static>>` (a borrow of the cached Finder) instead of constructing one per call. `PrefixScanner::new`'s third argument changed from `Option<&'a [u8]>` to `Option<&'a memchr::memmem::Finder<'static>>`. The 5 call sites that pass C2 hints updated to pass `c2.c2_prefix_finder.as_ref()`.
+- Validation:
+  - 1118 lib tests pass (no behavioural change — same Finder, just constructed once instead of per-call).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (`https?://\S+` on 10K, release, 100000-iteration average):
+    - `find_first` — **2,866 ns/iter** (was **3,011 ns/iter** in the post-memmem-prefilter measurement). ~145 ns/call saved, ~5% speedup.
+    - `find_all` — 17,307 ns/iter (unchanged within bench noise — find_all calls memmem multiple times so per-call construction was a smaller fraction of total time).
+- Notes/impact: closes the per-call Finder-construction overhead component for multi-byte memmem-prefix patterns. Total session improvement on `url_simple find_first` 10K: 32,483 ns/iter (pre-session baseline) → 2,866 ns/iter = **11.3x speedup**. Gap to PCRE2's 194 ns now ~14.8x slower (was 167x slower at session start). Diminishing returns are setting in for further constant-factor work in this area; remaining gains require deeper architectural changes (DFA minimization, materialized DFA, tagged DFA, v2 inner-literal prefilter).
+
 ### 2026-04-25 - Perf: short-circuit dispatch chain for pure-literal patterns
 
 - Scope: when the underlying VM has a `memmem::Finder` for the pattern (i.e. the entire pattern is a literal string like `test`), all four C2/JIT dispatch helpers (`should_dispatch_to_dfa`, `should_dispatch_to_forward_unanchored_dfa`, `should_dispatch_to_reverse_dfa`, `should_use_jit`) gate on `vm.has_literal_finder()` and return `None`. The 5-tier dispatch chain (`AC → DFA → Pike-VM → JIT → interpreter`) at the top of `Regex::find_first` / `find_all` / `is_match` thus called four `try_*` methods that each immediately returned `None`, costing ~100-200ns of pure method-dispatch overhead per call before reaching the literal-finder hot path on the VM.
