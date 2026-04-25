@@ -1356,7 +1356,7 @@ impl Regex {
             "text_len={}",
             text.len()
         );
-        let outcome = self.engine.find_first_suspendable(text.as_bytes());
+        let outcome = self.engine.vm_find_first_suspendable(text);
         trace_exit!(
             "api",
             "Regex::find_first_suspendable",
@@ -1585,7 +1585,7 @@ impl Regex {
     /// Panics if `start` is not on a UTF-8 character boundary.
     #[must_use]
     pub fn find_first_at(&self, text: &str, start: usize) -> Option<MatchResult> {
-        self.engine.find_first_at(text.as_bytes(), start)
+        self.engine.vm_find_first_at(text, start)
     }
 
     /// Find all non-overlapping matches starting the scan at byte position `start`.
@@ -1596,7 +1596,7 @@ impl Regex {
     /// Panics if `start` is not on a UTF-8 character boundary.
     #[must_use]
     pub fn find_all_at(&self, text: &str, start: usize) -> Vec<MatchResult> {
-        self.engine.find_all_at(text.as_bytes(), start)
+        self.engine.vm_find_all_at(text, start)
     }
 
     /// Boolean match test starting the scan at byte position `start`.
@@ -1607,7 +1607,7 @@ impl Regex {
     /// Panics if `start` is not on a UTF-8 character boundary.
     #[must_use]
     pub fn is_match_at(&self, text: &str, start: usize) -> bool {
-        self.engine.is_match_at(text.as_bytes(), start)
+        self.engine.vm_is_match_at(text, start)
     }
 
     /// Split the input text by the pattern, returning the substrings between matches.
@@ -2008,7 +2008,7 @@ impl Regex {
     /// ```
     #[must_use]
     pub fn find_first_partial(&self, text: &str) -> PartialMatchResult {
-        self.engine.find_first_partial(text.as_bytes())
+        self.engine.vm_find_first_partial(text)
     }
 
     /// Set the match semantics.

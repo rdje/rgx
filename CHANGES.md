@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf: extend UTF-8-elimination to position-aware Engine entry points
+
+- Scope: yesterday's `vm_find_first` / `vm_find_all` / `vm_is_match` (`18f521f`) eliminated redundant `from_utf8` validation on the three primary Engine entry points. The five **position-aware** variants (`find_first_at`, `find_all_at`, `is_match_at`, `find_first_partial`, `find_first_suspendable`) still went through `&[u8]` + `from_utf8` even though their public-API callers always pass `&str`-derived bytes. This commit closes that remaining gap so every Engine entry point used from `lib.rs` skips the redundant validation pass.
+- Changes:
+  - `rgx-core/src/engine.rs` — added 5 new `pub(crate)` `&str`-taking variants on `Engine`: `vm_find_first_at`, `vm_find_all_at`, `vm_is_match_at`, `vm_find_first_partial`, `vm_find_first_suspendable`. Each delegates straight to the corresponding `vm.*` method (which already takes `&str`) and maps the result to the public type. The existing `&[u8]`-taking variants stay for callers that genuinely have raw bytes.
+  - `rgx-core/src/lib.rs` — 5 `Regex::*` methods (`find_first_at`, `find_all_at`, `is_match_at`, `find_first_partial`, `find_first_suspendable`) switched from `engine.<method>(text.as_bytes(), …)` to `engine.vm_<method>(text, …)`. No behavioural change — the `vm_*` variants reach the same VM hot path, just without re-validating bytes that came from a `&str`.
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+- Notes/impact: closes a small but real overhead on the position-aware API path. The dominant call sites (find_first / find_all / is_match) were already covered yesterday; this commit makes the win uniform across all `Regex::` entry points. No measurable bench-corpus delta because the tracked benchmarks all use the non-position-aware methods, but `find_first_at`-heavy callers (tokenizers, scanning loops driven by external state) get the same ~150-200 ns/call savings yesterday's commit measured for the primary methods.
+
 ### 2026-04-25 - Perf: skip redundant UTF-8 validation on Engine entry points (massive win)
 
 - Scope: `Regex::find_first` / `find_all` / `is_match` / `replace` in `lib.rs` were calling `engine.find_first(text.as_bytes())`, where `Engine::find_first(&self, text: &[u8])` then called `std::str::from_utf8(text)` to validate the bytes back into a `&str` for the VM. The bytes always come from a verified `&str` in the public API caller, so this is pure redundant work: SIMD-accelerated but still O(n) per call (~150-200ns on a 10K input). `Engine` already exposes `vm_find_first` / `vm_find_all` (pre-existing `pub(crate)` `&str`-taking variants used by `bytes::BytesRegex`); this commit adds a matching `vm_is_match` and switches all 8 lib.rs call sites to the `vm_*` variants.

@@ -294,6 +294,13 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf: extend UTF-8 elimination to position-aware Engine entry points
+
+- **What**: yesterday (18f521f) eliminated redundant from_utf8 validation on Regex::find_first / find_all / is_match. Today extends the same fix to the 5 position-aware variants: find_first_at, find_all_at, is_match_at, find_first_partial, find_first_suspendable. Added 5 new pub(crate) vm_*_at / vm_find_first_partial / vm_find_first_suspendable variants on Engine; lib.rs switched to use them.
+- **Win**: same per-call savings as yesterday (~150-200 ns/call on 10K input) but on the position-aware API surface. Bench-corpus tracked methods don't exercise these, so no headline number; tokenizer-style workloads using find_first_at in a loop get the win.
+- **Deltas**: 1118 lib tests unchanged. 30 cli unchanged. fmt + clippy clean. **Conformance ratchet 12,709/101 preserved**.
+- **Strategic note**: this closes the last obvious "find an input-validation step that's redundant" win. Remaining perf items are all bigger architectural changes (materialized DFA, tagged DFA, opcode fusion, v2 inner-literal prefilter).
+
 ### 2026-04-25 — Perf: skip redundant UTF-8 validation on Engine entry points (HUGE win)
 
 - **What**: Regex::find_first / find_all / is_match / replace in lib.rs were calling engine.find_first(text.as_bytes()), where Engine::find_first(&[u8]) then std::str::from_utf8'd the bytes back into &str. The bytes always come from a verified &str in the public API caller — pure redundant work. Engine had pre-existing pub(crate) vm_find_first / vm_find_all (&str-taking, used by BytesRegex); added vm_is_match, switched all 8 lib.rs call sites to the vm_* variants.

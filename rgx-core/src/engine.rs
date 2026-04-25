@@ -1719,6 +1719,51 @@ impl Engine {
         self.vm.is_match(text)
     }
 
+    /// `&str`-taking counterpart to [`Self::find_first_at`]. Skips
+    /// the redundant `from_utf8` validation since `text` already
+    /// satisfies UTF-8 by type.
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub(crate) fn vm_find_first_at(&self, text: &str, start: usize) -> Option<MatchResult> {
+        self.vm.find_first_at(text, start).map(vm_match_to_result)
+    }
+
+    /// `&str`-taking counterpart to [`Self::find_all_at`].
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub(crate) fn vm_find_all_at(&self, text: &str, start: usize) -> Vec<MatchResult> {
+        self.vm
+            .find_all_at(text, start)
+            .into_iter()
+            .map(vm_match_to_result)
+            .collect()
+    }
+
+    /// `&str`-taking counterpart to [`Self::is_match_at`].
+    ///
+    /// # Panics
+    /// Panics if `start` is not on a UTF-8 character boundary.
+    #[must_use]
+    pub(crate) fn vm_is_match_at(&self, text: &str, start: usize) -> bool {
+        self.vm.is_match_at(text, start)
+    }
+
+    /// `&str`-taking counterpart to [`Self::find_first_suspendable`].
+    #[must_use]
+    pub(crate) fn vm_find_first_suspendable(&self, text: &str) -> MatchOutcome {
+        self.vm.find_first_suspendable(text)
+    }
+
+    /// `&str`-taking counterpart to [`Self::find_first_partial`].
+    #[must_use]
+    pub(crate) fn vm_find_first_partial(&self, text: &str) -> PartialMatchResult {
+        self.vm.find_first_partial(text)
+    }
+
     /// Find the first match in the input
     #[must_use]
     pub fn find_first(&self, text: &[u8]) -> Option<MatchResult> {
