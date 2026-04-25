@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: short-circuit dispatch chain for pure-literal patterns
+
+- Scope: when the underlying VM has a `memmem::Finder` for the pattern (i.e. the entire pattern is a literal string like `test`), all four C2/JIT dispatch helpers (`should_dispatch_to_dfa`, `should_dispatch_to_forward_unanchored_dfa`, `should_dispatch_to_reverse_dfa`, `should_use_jit`) gate on `vm.has_literal_finder()` and return `None`. The 5-tier dispatch chain (`AC → DFA → Pike-VM → JIT → interpreter`) at the top of `Regex::find_first` / `find_all` / `is_match` thus called four `try_*` methods that each immediately returned `None`, costing ~100-200ns of pure method-dispatch overhead per call before reaching the literal-finder hot path on the VM.
+- Changes:
+  - `rgx-core/src/engine.rs` — new `Engine::has_literal_finder() -> bool` accessor (delegates to `vm.has_literal_finder()`). Doc-hidden, used by `lib.rs` only.
+  - `rgx-core/src/lib.rs` — `Regex::find_first`, `find_all`, `is_match` now check `engine.has_literal_finder()` first; if true, skip the 5-tier dispatch chain and call `engine.find_first` / `find_all` / `is_match` directly. The shipped trace events distinguish the `path=literal_finder` short-circuit from the regular dispatch path so trace consumers can tell them apart.
+- Validation:
+  - 1118 lib tests pass (no new tests needed — the short-circuit is observationally identical to the pre-change path because all four C2/JIT helpers were already returning `None` for these patterns; the existing regression tests cover the literal-finder path).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+- Notes/impact: closes the dispatch-overhead component of the `literal_simple find_first` 6.26x gap. The remaining gap on this pattern is likely dominated by `MatchResult` allocation overhead per call (`Vec<Option<(usize, usize)>>` for groups even when the pattern has no captures) — a deeper optimization. This commit is a free win on every pure-literal `find_first` / `find_all` / `is_match` invocation.
+
 ### 2026-04-25 - Perf: multi-byte memmem prefilter for non-pure literal-prefix patterns
 
 - Scope: the `c2_prefix_byte: Option<u8>` field on `CompiledC2Program` only captures the FIRST literal byte of a pattern. For `https?://\S+` that's `h`, dispatch memchrs every `h` in the input. PCRE2 (and the existing VM's `literal_finder` for pure-literal patterns) uses memmem over the full leading-literal run, which is vastly more selective on real inputs (one match per actual URL vs one per ~13 ASCII bytes). This commit lifts the same memmem hint into the C2 dispatch path for non-pure patterns.

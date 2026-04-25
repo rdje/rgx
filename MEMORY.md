@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: short-circuit 5-tier dispatch for pure-literal patterns
+
+- **What**: when the VM has a `memmem::Finder` for the pattern, all four C2/JIT dispatch helpers gate on `has_literal_finder` and return None. The 5-tier dispatch chain (AC → DFA → Pike-VM → JIT → interpreter) was calling all four for ~100-200ns of pure overhead per call. New `Engine::has_literal_finder` accessor; lib.rs `find_first` / `find_all` / `is_match` short-circuit when true, going straight to `engine.find_first` etc. and skipping the 4 dead-end checks.
+- **Why this is safe**: observationally identical — the C2/JIT helpers were already returning None for these patterns. Existing regression tests cover the literal-finder hot path; no new tests needed.
+- **Deltas**: 1118 lib tests unchanged; 30 cli unchanged. fmt + clippy clean. **PCRE2 conformance ratchet preserved at 12,709 / 101**.
+- **Closes**: the dispatch-overhead component of the `literal_simple find_first` 6.26x bench gap. The remaining gap is dominated by `MatchResult` allocation overhead per call (`Vec<Option<(usize, usize)>>` for groups even on captureless patterns). That's a deeper optimization for another day.
+- **Pattern of the 5-tier dispatch**: AC fires only for top-level literal alternations (`cat|dog|bird`). DFA / Pike-VM / JIT each gate on `has_literal_finder`. So for pure literals, dispatch needs zero of the C2/JIT tiers — just the VM's literal-finder hot path. Short-circuit is the right move.
+
 ### 2026-04-25 — Perf: multi-byte memmem prefilter (10.8x speedup on url_simple find_first)
 
 - **What**: extends `c2_prefix_byte: Option<u8>` (single byte, memchr) with `c2_prefix_literal: Option<Vec<u8>>` (multi-byte, memmem). New `leading_literal_bytes(ast)` extractor walks past zero-width nodes and collects consecutive ASCII `Char` literals until a non-literal node breaks the run. PrefixScanner gained a `literal_finder` field that takes priority when a multi-byte hint is available.

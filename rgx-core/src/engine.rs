@@ -1560,6 +1560,20 @@ impl Engine {
         &self.vm.program.classification
     }
 
+    /// `true` when the underlying VM has a `memmem::Finder` for the
+    /// pattern's literal — i.e. the pattern is a pure literal string
+    /// like `"hello"`. Lets the public `Regex` API skip the
+    /// AC/DFA/Pike-VM/JIT dispatch chain entirely for these patterns:
+    /// every C2/JIT dispatch helper would return `None` (each one
+    /// gates on `has_literal_finder`), so calling them is pure
+    /// overhead. Short-circuiting drops ~100-200ns of per-call
+    /// method-dispatch latency on pure-literal find / is_match.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn has_literal_finder(&self) -> bool {
+        self.vm.has_literal_finder()
+    }
+
     /// The compiled C2 program for this engine, if the pattern is
     /// **structurally** eligible for Pike-VM dispatch (classifier
     /// positive plus the C2 structural eligibility checks). This is the

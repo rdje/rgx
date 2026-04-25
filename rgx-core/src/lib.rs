@@ -1217,14 +1217,25 @@ impl Regex {
     #[must_use]
     pub fn find_all(&self, text: &str) -> Vec<MatchResult> {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
-        // C1 step 5: 4-tier dispatch — try the lazy DFA first
-        // (DFA-eligible patterns), then Pike-VM (nested-quantifier
-        // safety net), then the JIT (everything else that the JIT
-        // can lower), then the existing backtracking VM (final
-        // fallback). The JIT tier sits AFTER Pike-VM because
-        // Pike-VM is the safety net for patterns that risk
-        // catastrophic backtracking — the JIT inherits that risk
-        // since it's a JIT'd backtracking VM, not an NFA simulator.
+        // Pure-literal short-circuit (see `find_first` for rationale).
+        if self.engine.has_literal_finder() {
+            let matches = self.engine.find_all(text.as_bytes());
+            trace_exit!(
+                "api",
+                "Regex::find_all",
+                "ok=true,matches={},path=literal_finder",
+                matches.len()
+            );
+            return matches;
+        }
+        // 5-tier dispatch — AC → DFA → Pike-VM → JIT → interpreter.
+        // AC fires only for top-level alternations of pure ASCII
+        // literals (`cat|dog|bird`); the rest of the chain is the
+        // 4-tier DFA → Pike-VM → JIT → interpreter path. The JIT
+        // tier sits AFTER Pike-VM because Pike-VM is the safety net
+        // for patterns that risk catastrophic backtracking — the
+        // JIT inherits that risk since it's a JIT'd backtracking
+        // VM, not an NFA simulator.
         let matches = if let Some(ac_result) = self.engine.try_ac_find_all(text.as_bytes()) {
             ac_result
         } else if let Some(dfa_result) = self.engine.try_dfa_find_all(text.as_bytes()) {
@@ -1258,10 +1269,26 @@ impl Regex {
     #[must_use]
     pub fn find_first(&self, text: &str) -> Option<MatchResult> {
         trace_enter!("api", "Regex::find_first", "text_len={}", text.len());
-        // C1 step 5: 4-tier dispatch — DFA → Pike-VM → JIT →
-        // interpreter. See `find_all` for the rationale of the
-        // ordering (Pike-VM before JIT because Pike-VM is the
-        // safety net for nested-quantifier patterns).
+        // Pure-literal short-circuit: when the VM has a
+        // `memmem::Finder` for the pattern, all four C2/JIT
+        // dispatch helpers gate on `has_literal_finder` and return
+        // None. Calling them is pure overhead (~100-200ns/call on
+        // 32-byte inputs). Skip the chain entirely.
+        if self.engine.has_literal_finder() {
+            let first = self.engine.find_first(text.as_bytes());
+            trace_exit!(
+                "api",
+                "Regex::find_first",
+                "ok=true,found={},path=literal_finder",
+                first.is_some()
+            );
+            return first;
+        }
+        // 5-tier dispatch — AC → DFA → Pike-VM → JIT → interpreter.
+        // AC fires only for top-level alternations of pure ASCII
+        // literals (`cat|dog|bird`); the rest of the chain is the
+        // 4-tier DFA → Pike-VM → JIT → interpreter path. See
+        // `find_all` for the ordering rationale.
         let first = if let Some(ac_result) = self.engine.try_ac_find_first(text.as_bytes()) {
             ac_result
         } else if let Some(dfa_result) = self.engine.try_dfa_find_first(text.as_bytes()) {
@@ -1507,6 +1534,17 @@ impl Regex {
     #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
+        // Pure-literal short-circuit (see `find_first` for rationale).
+        if self.engine.has_literal_finder() {
+            let matched = self.engine.is_match(text.as_bytes());
+            trace_exit!(
+                "api",
+                "Regex::is_match",
+                "ok=true,matched={},path=literal_finder",
+                matched
+            );
+            return matched;
+        }
         // 5-tier dispatch — AC → DFA → Pike-VM → JIT → interpreter.
         // AC fires only for top-level alternations of pure ASCII
         // literals (`cat|dog|bird`); the rest of the chain is
