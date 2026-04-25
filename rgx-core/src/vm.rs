@@ -4085,7 +4085,14 @@ impl RegexVM {
         match_start: usize,
         match_end: usize,
     ) -> Vec<Option<(usize, usize)>> {
-        let mut groups = Vec::new();
+        // Pre-size to exact capacity. `Vec::new()` + push grows to
+        // capacity 4 on the first push (default `Vec` growth), which
+        // wastes 75% of the heap allocation for the typical
+        // num_groups == 0 (literal-pattern) case where we only ever
+        // push the group-0 whole-match span. Setting capacity = N+1
+        // matches what the JIT path already does in
+        // `engine::jit_match_to_result`.
+        let mut groups = Vec::with_capacity(self.program.num_groups as usize + 1);
 
         // Group 0 is always the overall match
         groups.push(Some((match_start, match_end)));

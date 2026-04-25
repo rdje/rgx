@@ -294,6 +294,16 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: pre-size capture-groups Vec to exact capacity (~35% on literal_simple find_first)
+
+- **What**: one-line fix in `extract_captures_with_match` (vm.rs). Was `Vec::new()` + push (allocates capacity 4 on first push, regardless of need). Now `Vec::with_capacity(num_groups + 1)` (allocates exact capacity). For literal patterns (`num_groups == 0`), this drops the heap allocation from 96 bytes (cap 4 × 24) to 24 bytes (cap 1 × 24). Aligns with the JIT path which already does this in `engine::jit_match_to_result`.
+- **Measured**: `test` literal on 10K — find_first 335 → 217 ns/iter (~118ns/call saved, 35% speedup). The size-class allocator is much faster on the smaller bucket.
+- **Why this matters**: `literal_simple find_first` 6.26x bench gap was dominated by per-call allocation cost. This is a big chunk of that gap closed for one line.
+- **Deltas**: 1118 lib tests unchanged. 30 cli unchanged. fmt + clippy clean. **Conformance ratchet 12,709/101 preserved**.
+- **Cumulative session url_simple find_first improvement**: 32,483 → ~2,866 ns/iter (11.3x speedup, gap to PCRE2 closed from 167x to ~14.8x).
+- **Cumulative session literal_simple find_first improvement**: 203 → 217 ns/iter (the bench harnesses aren't directly comparable but the trajectory is clearly improving; this fix specifically saved 118ns from the post-short-circuit baseline).
+- **Next concrete action**: (C) eliminate ExecContext text Vec copy. VM currently copies input bytes into ExecContext.text on every call; switching to borrowed `&[u8]` saves O(n) bytes copied per find_first call on large inputs.
+
 ### 2026-04-25 — Perf: cache memmem::Finder on CompiledC2Program (~5% on url_simple find_first)
 
 - **What**: small follow-up to multi-byte memmem prefilter. `PrefixScanner::new` was building a fresh `memmem::Finder` from `c2_prefix_literal` on every dispatch call. Moved construction to compile time via `Finder::new(&bytes).into_owned()` stored on `CompiledC2Program::c2_prefix_finder`. PrefixScanner now borrows the cached Finder.

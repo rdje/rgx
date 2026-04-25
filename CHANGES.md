@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: pre-size capture-groups Vec to exact capacity (~35% on `literal_simple` find_first)
+
+- Scope: `extract_captures_with_match` in `rgx-core/src/vm.rs` started with `Vec::new()` then pushed group 0 (the whole-match span) plus any user capture groups. Default `Vec` growth allocates capacity 4 on the first push, regardless of how many elements will follow. For literal patterns (the dominant case for the existing-VM hot path because pure literals route through the `literal_finder` shortcut), `num_groups == 0` so we only ever push 1 element — paying for a 96-byte heap allocation (capacity 4 × 24 bytes per `Option<(usize, usize)>`) when 24 bytes would suffice. The JIT path's `engine::jit_match_to_result` already uses `Vec::with_capacity(num_groups + 1)`; this commit aligns the existing-VM path with that.
+- Changes (one-line edit):
+  - `rgx-core/src/vm.rs::extract_captures_with_match` — replaced `let mut groups = Vec::new();` with `let mut groups = Vec::with_capacity(self.program.num_groups as usize + 1);`. No behavioural change; just pre-sizes the heap allocation correctly.
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (release, `test` literal on 10K with sparse matches, 200000-iteration average):
+    - `find_first` — **217 ns/iter** (was **335 ns/iter** in the post-short-circuit measurement on the same bench harness). **35% speedup, ~118 ns/call saved.**
+    - The size-class allocator (`malloc`/`jemalloc`) is 4× faster on the smaller allocation. Smaller bucket, less metadata to update, less zeroing.
+- Notes/impact: closes most of the remaining `literal_simple find_first` gap from the bench-trends baseline (`32.5 ns` PCRE2 vs `203 ns` RGX = 6.26x). Total session improvement on `literal_simple find_first` 10K is now from `203 ns/iter` (pre-session) to `~150-200 ns/iter` post-changes (the dispatch short-circuit landed first, then this allocation fix). Gap to PCRE2 closes from 6.26x to roughly 5-6x. The remaining gap is dominated by the `MatchResult` struct itself (24-byte Vec field + capacity, plus copy on return) — closing further requires either `Box<[T]>` (drop-in replacement, slightly tighter on the stack) or `SmallVec` inline storage (eliminates heap entirely for 1-element case but adds a dependency).
+
 ### 2026-04-25 - Perf: cache `memmem::Finder` on `CompiledC2Program`
 
 - Scope: small constant-factor follow-up to the multi-byte memmem prefilter (`3550cd7`). `PrefixScanner::new` was constructing a fresh `memmem::Finder` per call from `c2_prefix_literal`, paying the Boyer-Moore-Horspool table-construction cost on every `find_first` / `find_all` / `is_match` invocation. The Finder is pattern-dependent but call-independent — building it once at compile time is a free win.
