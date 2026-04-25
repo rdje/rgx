@@ -159,15 +159,18 @@ Live forward-looking tracker for rgx.
 - **Replacing PGEN with a hand-written regex parser** — would violate CLAUDE.md's "PGEN is the sole parser. No builtin parser fallback." policy. Ruled out by hard project rule.
 - **Altering AST simplification semantics** — any AST rewrite that could change match results is out, even if it would speed compile up.
 
-### Performance: close the PCRE2 gap to <10x
-- Status: `planned`
+### Performance: close the PCRE2 matching gap to <10x
+- Status: `partially shipped 2026-04-25`
 - Goal: reduce the matching speed gap from ~20-60x to <10x for common patterns.
-- Scope:
-  - eliminate `ExecContext.text` Vec copy (switch to borrowed `&[u8]`)
-  - pre-allocate and reuse capture and backtrack structures across match attempts
-  - compile-time eliminate trace macros behind `#[cfg(feature = "trace")]`
-  - opcode fusion for common sequences (Char+Char → string compare)
-  - reduce per-opcode bounds checking overhead
+- Verified-already-done items (audit 2026-04-25):
+  - ✅ `ExecContext.text` is `&'a [u8]` (borrowed, never copied) — confirmed at `rgx-core/src/vm.rs:640` with the explicit "borrowed, never copied" doc comment.
+  - ✅ Trace macros are compile-time elided when the `trace` feature is disabled — `trace_enter!`, `trace_exit!`, `trace_decision!`, `trace_log!` all have `#[cfg(not(feature = "trace"))]` no-op variants in `rgx-core/src/log.rs`.
+- Shipped 2026-04-25:
+  - ✅ Pre-size capture-groups Vec to exact capacity — `extract_captures_with_match` in vm.rs uses `Vec::with_capacity(num_groups + 1)` (was `Vec::new()` + push-grows-to-4). Saves 75% of the heap allocation per match-result construction. Measured 35% speedup on `literal_simple find_first` 10K (335 → 217 ns/iter). See commit `62825e6` and the corresponding CHANGES.md entry.
+- Remaining scope:
+  - **Pre-allocate and reuse capture and backtrack structures across match attempts** — every find_first call constructs a fresh `ExecContext` with empty `capture_trail`, `call_stack`, `backtrack_stack`, `recursion_stack`. For literal patterns these stay empty (no allocation). For complex patterns with backtracking, a per-engine reusable buffer (with `clear()` between calls) would amortize the grow-from-zero cycle. Needs careful state-isolation review to avoid leaking match state between calls.
+  - **Opcode fusion for common sequences** (`Char+Char` → multi-byte string compare in the bytecode) — modest win on the backtracking VM hot path.
+  - **Reduce per-opcode bounds checking overhead** — compiler-side constant-factor work on the VM dispatch loop.
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Performance target section
 
 ### SOTA algorithmic gaps not on the original C1/C2 roadmap
