@@ -95,6 +95,31 @@ pub struct CompiledC2Program {
     /// nested quantifiers benefit from Pike-VM's O(nm) bound and
     /// the per-trial overhead is justified.
     pub c2_has_nested_quantifier: bool,
+    /// Required interior single-byte literal — a byte that **must**
+    /// appear in any match span of this pattern. Distinct from
+    /// [`Self::c2_prefix_byte`] (the byte at the START of the match);
+    /// the required-interior byte is one of the bytes that must be
+    /// present somewhere in the match.
+    ///
+    /// Computed by [`required_inner_byte`] from the top-level
+    /// `Sequence` AST: walks past zero-width nodes and quantified
+    /// subtrees with `min == 0`, then returns the first single-byte
+    /// literal that must appear. Prefers ASCII non-alphanumeric bytes
+    /// (`@`, `-`, `:`, etc.) — they're typically rarer in real text
+    /// than letters or digits, so memchr-based fast-fail screens out
+    /// non-matching inputs faster.
+    ///
+    /// Used by the engine dispatch helpers as a no-match fast-fail:
+    /// if `memchr(b, input).is_none()` then no match can exist
+    /// anywhere in `input`, so `is_match` / `find_first` / `find_all`
+    /// can return immediately without running the DFA. Especially
+    /// valuable on grep-like workloads scanning large inputs for
+    /// patterns that are absent.
+    ///
+    /// `None` when the pattern has no required single-byte literal
+    /// (e.g., `\w+@\w+` has `@` as required, but `\d+\s+\w+` has none
+    /// — every component is a class, not a literal).
+    pub c2_required_inner_byte: Option<u8>,
 }
 
 impl CompiledC2Program {
@@ -135,6 +160,13 @@ impl CompiledC2Program {
         // quantifiers stay on the existing backtracking VM.
         let c2_has_nested_quantifier = has_nested_quantifier(ast);
 
+        // Inner-literal fast-fail: the rarest single-byte literal that
+        // must appear in any match span of this pattern. Used by
+        // dispatch helpers as a memchr-based no-match check before
+        // running the DFA — if the input doesn't contain this byte,
+        // no match can exist anywhere. See `required_inner_byte`.
+        let c2_required_inner_byte = required_inner_byte(ast);
+
         Self {
             byte_class_map,
             forward_anchored,
@@ -144,6 +176,7 @@ impl CompiledC2Program {
             num_capture_groups,
             c2_prefix_byte,
             c2_has_nested_quantifier,
+            c2_required_inner_byte,
         }
     }
 
@@ -580,6 +613,120 @@ fn is_zero_width_node(ast: &Regex) -> bool {
     )
 }
 
+/// Returns the rarest single-byte literal that must appear in any
+/// match of `ast`, or `None` if no required single-byte literal
+/// exists.
+///
+/// "Rarest" is approximated by preferring ASCII non-alphanumeric
+/// bytes (`@`, `-`, `:`, `.`, etc.) over alphanumeric ones — in real
+/// text those punctuation bytes are typically much rarer than letters
+/// and digits, so memchr-based fast-fail screens out non-matching
+/// inputs faster.
+///
+/// Walks the top-level AST shape conservatively:
+/// - `Regex::Char(c)` → returns the first UTF-8 byte if the codepoint
+///   is single-byte ASCII; multi-byte codepoints are skipped (the
+///   first byte alone isn't a useful memchr target — bytes from
+///   different codepoints can collide).
+/// - `Regex::Sequence` → walks children, collecting required bytes
+///   from each, then picks the rarest. Each child's required bytes
+///   are also required in the overall match.
+/// - `Regex::Group { Capturing | NonCapturing, expr, .. }` → recurse
+///   into `expr`. (`Atomic` / `BranchReset` aren't in the C2 subset.)
+/// - `Regex::FlagGroup { expr, .. }` → recurse into `expr`.
+/// - `Regex::Quantified { expr, quantifier }` → recurse iff
+///   `min >= 1` (otherwise the subtree might be skipped entirely).
+/// - `Regex::Alternation(branches)` → only bytes that appear in
+///   **every** branch are required across the whole alternation.
+///   Computes the intersection of per-branch required-byte sets.
+/// - All other nodes (`CharClass`, lookarounds, anchors, recursion,
+///   etc.) → return `None` — they don't contribute a single-byte
+///   guaranteed-present literal.
+///
+/// Because case-insensitive matches change the byte set, this only
+/// returns a byte for case-sensitive characters; mixed-case
+/// representation isn't tracked here. The compile-time `(?i)` lowering
+/// in the compiler converts case-insensitive literals into character
+/// classes, which this function correctly skips.
+#[must_use]
+pub fn required_inner_byte(ast: &Regex) -> Option<u8> {
+    let bytes = required_inner_bytes(ast);
+    pick_rarest_byte(&bytes)
+}
+
+/// Inner walker for [`required_inner_byte`]. Returns the set of
+/// single-byte ASCII literals that must appear in any match of
+/// `ast`. Empty set when no such guarantee exists.
+fn required_inner_bytes(ast: &Regex) -> Vec<u8> {
+    match ast {
+        Regex::Char(c) | Regex::WhitespaceLiteral(c) => {
+            // Only single-byte ASCII codepoints contribute a usable
+            // memchr target. Multi-byte UTF-8 leading bytes overlap
+            // with continuation bytes from other codepoints, which
+            // would produce false-positive memchr matches.
+            if c.is_ascii() {
+                vec![*c as u8]
+            } else {
+                Vec::new()
+            }
+        }
+        Regex::Sequence(items) => {
+            let mut acc = Vec::new();
+            for item in items {
+                acc.extend_from_slice(&required_inner_bytes(item));
+            }
+            acc
+        }
+        Regex::Group { kind, expr, .. } => match kind {
+            crate::ast::GroupKind::Capturing | crate::ast::GroupKind::NonCapturing => {
+                required_inner_bytes(expr)
+            }
+            _ => Vec::new(),
+        },
+        Regex::FlagGroup { expr, .. } => required_inner_bytes(expr),
+        Regex::Quantified { expr, quantifier } => {
+            let min = match quantifier {
+                crate::ast::Quantifier::OneOrMore { .. } => 1,
+                crate::ast::Quantifier::ZeroOrOne { .. }
+                | crate::ast::Quantifier::ZeroOrMore { .. } => 0,
+                crate::ast::Quantifier::Range { min, .. } => *min,
+            };
+            if min >= 1 {
+                required_inner_bytes(expr)
+            } else {
+                Vec::new()
+            }
+        }
+        Regex::Alternation(branches) => {
+            // Only bytes present in EVERY branch are required across
+            // the whole alternation. Intersect the per-branch sets.
+            let mut iter = branches.iter().map(required_inner_bytes);
+            let Some(first) = iter.next() else {
+                return Vec::new();
+            };
+            iter.fold(first, |mut acc, branch| {
+                acc.retain(|b| branch.contains(b));
+                acc
+            })
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Pick the byte from `bytes` most likely to be rare in real text.
+/// Heuristic: prefer non-alphanumeric ASCII (punctuation / control
+/// bytes are rarer than letters/digits in typical inputs); fall back
+/// to the first byte if all candidates are alphanumeric.
+fn pick_rarest_byte(bytes: &[u8]) -> Option<u8> {
+    if bytes.is_empty() {
+        return None;
+    }
+    if let Some(b) = bytes.iter().find(|b| !b.is_ascii_alphanumeric()) {
+        return Some(*b);
+    }
+    bytes.first().copied()
+}
+
 /// Returns `true` if a [`crate::ast::CharClass`] involves multi-byte
 /// UTF-8 contents — Unicode property class or any non-ASCII codepoint
 /// range.
@@ -930,6 +1077,90 @@ mod dispatch_tests {
 
         let flat = CompiledC2Program::try_compile("a+b+").expect("flat compiles");
         assert!(!flat.c2_has_nested_quantifier);
+    }
+
+    // ============================================================
+    // required_inner_byte (inner-literal fast-fail extractor)
+    // ============================================================
+
+    #[test]
+    fn required_inner_byte_picks_punctuation_over_alphanumeric() {
+        // `a@b` — `@` is required AND is non-alphanumeric, so it wins
+        // over `a` and `b` even though all three are required.
+        let ast = Regex::Sequence(vec![lit('a'), lit('@'), lit('b')]);
+        assert_eq!(required_inner_byte(&ast), Some(b'@'));
+    }
+
+    #[test]
+    fn required_inner_byte_falls_back_to_alphanumeric() {
+        // `abc` — all alphanumeric, no punctuation. First byte wins.
+        let ast = Regex::Sequence(vec![lit('a'), lit('b'), lit('c')]);
+        assert_eq!(required_inner_byte(&ast), Some(b'a'));
+    }
+
+    #[test]
+    fn required_inner_byte_for_email_like_pattern() {
+        // `\w+@\w+\.\w+` — `\w+` parts have no required byte (it's a
+        // class), but `@` and `.` are required literals. `@` wins
+        // (first non-alphanumeric encountered).
+        let prog = CompiledC2Program::try_compile(r"\w+@\w+\.\w+").expect("compiles");
+        assert_eq!(prog.c2_required_inner_byte, Some(b'@'));
+    }
+
+    #[test]
+    fn required_inner_byte_for_digit_dash_pattern() {
+        // `\d{3}-\d{2}-\d{4}` — `-` is required between digit groups.
+        let prog = CompiledC2Program::try_compile(r"\d{3}-\d{2}-\d{4}").expect("compiles");
+        assert_eq!(prog.c2_required_inner_byte, Some(b'-'));
+    }
+
+    #[test]
+    fn required_inner_byte_none_for_pure_class_pattern() {
+        // `\d+` — only character classes, no literal byte.
+        let prog = CompiledC2Program::try_compile(r"\d+").expect("compiles");
+        assert_eq!(prog.c2_required_inner_byte, None);
+    }
+
+    #[test]
+    fn required_inner_byte_none_for_optional_literal() {
+        // `(abc)?xyz` — `abc` is optional via `?`, so its bytes are
+        // NOT required. Only `xyz` contributes — and inside a
+        // sequence those are alphanumeric, so the first byte `x`
+        // wins as the required-but-alphanumeric fallback.
+        let prog = CompiledC2Program::try_compile(r"(abc)?xyz").expect("compiles");
+        assert_eq!(prog.c2_required_inner_byte, Some(b'x'));
+    }
+
+    #[test]
+    fn required_inner_byte_intersects_alternation_branches() {
+        // `a@x|b@y` — both branches contain `@`, so `@` is required
+        // across the alternation. Neither `a`/`x` nor `b`/`y` appears
+        // in both branches, so they're NOT required.
+        let prog = CompiledC2Program::try_compile(r"a@x|b@y").expect("compiles");
+        assert_eq!(prog.c2_required_inner_byte, Some(b'@'));
+    }
+
+    #[test]
+    fn required_inner_byte_none_when_alternation_has_disjoint_bytes() {
+        // `cat|dog|bird` — no single byte appears in all three branches.
+        // (Top-level alternation is excluded from C2 dispatch, but the
+        // extractor itself should still return None for correctness.)
+        let ast = Regex::Alternation(vec![
+            Regex::Sequence(vec![lit('c'), lit('a'), lit('t')]),
+            Regex::Sequence(vec![lit('d'), lit('o'), lit('g')]),
+            Regex::Sequence(vec![lit('b'), lit('i'), lit('r'), lit('d')]),
+        ]);
+        assert_eq!(required_inner_byte(&ast), None);
+    }
+
+    #[test]
+    fn required_inner_byte_skips_non_ascii_codepoints() {
+        // `α@β` — `@` is required and ASCII; `α` and `β` are
+        // multi-byte UTF-8 and not directly memchr-able (their leading
+        // bytes overlap with continuation bytes from other codepoints).
+        // Extractor should return `@` not the leading byte of `α`.
+        let ast = Regex::Sequence(vec![lit('α'), lit('@'), lit('β')]);
+        assert_eq!(required_inner_byte(&ast), Some(b'@'));
     }
 }
 

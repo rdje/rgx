@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: inner-literal fast-fail (v1 of inner-literal prefilter)
+
+- **What**: ships v1 of the SOTA "inner-literal prefilter" technique. New `required_inner_byte(ast)` extractor in `c2/program.rs` walks the AST and returns the rarest single-byte literal that must appear in any match (prefers non-alphanumeric like `@`, `-`, `:` over alphanumeric for memchr selectivity). Stored as `c2_required_inner_byte: Option<u8>` on `CompiledC2Program`. Three dispatch helpers (`try_dfa_is_match`, `try_dfa_find_first`, `try_dfa_find_all`) gained a memchr-based early-return: if the input doesn't contain the required byte, no match can exist anywhere — return immediately without running the DFA.
+- **Win**: SIMD-accelerated memchr is 10-30x faster than DFA byte-by-byte transitions. On grep-like workloads scanning large inputs for a pattern that's not present, this gives big speedups. **Doesn't close the email_basic find_first 3.7x bench gap** because that bench measures the FOUND case; v1 helps the absent case. The full prefilter (memchr-jump to candidate position, then run anchored DFA from a bounded earlier position to find match start) is multi-day work and is v2.
+- **Extractor semantics**: `required_inner_bytes` collects bytes from `Sequence` children, recurses into capturing/non-capturing groups + flag groups + `Quantified` with `min >= 1`, intersects `Alternation` branch sets (only bytes in EVERY branch are required), and skips classes / lookarounds / anchors / multi-byte UTF-8 codepoints. Tested with 9 unit tests covering each AST shape.
+- **Gating**: fast-fail is gated on `!has_event_observer()` — observer events would be silently elided on the no-match path otherwise (violates the observer contract). Runtime match limits (`max_steps`, etc.) are unaffected — fast-fail returns before counters can be touched.
+- **Deltas**: 1077 → 1090 lib tests (+13). 30 cli tests unchanged. fmt + clippy clean. **PCRE2 conformance ratchet preserved at 12,709 / 101**.
+- **Next concrete actions**: the natural follow-up is v2 (memchr-jump-to-candidate-position-then-anchored-DFA), which would close the FOUND-case bench gap. That's deeper work — needs to handle "match start might be before the candidate position" via the reverse-anchored DFA. Or pivot to a different SOTA item (Aho-Corasick for literal alternation, SIMD byte-class lookup, DFA minimization).
+
 ### 2026-04-25 — Perf: lazy artifact construction in `Engine::new` (technique #1 shipped, −27.6% compile on JIT-eligible patterns)
 
 - **What**: implemented the highest-leverage RGX-side compile-time technique from the ROADMAP. `c2_dfa`, `c2_forward_unanchored_dfa`, `c2_reverse_dfa`, `jit_program` are now `OnceLock<Option<Mutex<...>>>` wrappers. `Engine::new` does no artifact construction — defers to first dispatch via `get_or_init`. Engine struct gained an `ast: Regex` field so the lazy builders have access to the AST for eligibility checks.

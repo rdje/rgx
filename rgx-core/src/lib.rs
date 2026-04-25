@@ -8887,6 +8887,51 @@ mod tests {
         assert!(re.find_all("abc 123 xy").is_empty());
     }
 
+    // === Inner-literal fast-fail (no-match acceleration) ===
+    //
+    // For patterns whose match must contain a specific byte (e.g.,
+    // `@` for email, `-` for date), dispatch helpers memchr the
+    // input first; if the byte is absent, no match can exist and
+    // they short-circuit without running the DFA. These tests pin
+    // behavioral equivalence: same answer as the slow path, just
+    // faster on no-match inputs.
+
+    #[test]
+    fn inner_literal_fast_fail_no_match_for_email_pattern_without_at_sign() {
+        // `\w+@\w+\.\w+` requires `@`. Input has no `@` → no match.
+        let re = Regex::compile(r"\w+@\w+\.\w+").unwrap();
+        assert!(re.find_first("abcdef ghijkl").is_none());
+        assert!(!re.is_match("abcdef ghijkl"));
+        assert_eq!(re.find_all("abcdef ghijkl").len(), 0);
+    }
+
+    #[test]
+    fn inner_literal_fast_fail_still_finds_match_when_present() {
+        // Same pattern, input contains `@`. Result identical to
+        // pre-fast-fail behavior.
+        let re = Regex::compile(r"\w+@\w+\.\w+").unwrap();
+        let m = re.find_first("ping foo@bar.com pong").expect("match");
+        assert_eq!(&"ping foo@bar.com pong"[m.start..m.end], "foo@bar.com");
+    }
+
+    #[test]
+    fn inner_literal_fast_fail_for_date_pattern_without_dash() {
+        // `\d{3}-\d{2}-\d{4}` requires `-`. Input has digits but no
+        // dashes → no match.
+        let re = Regex::compile(r"\d{3}-\d{2}-\d{4}").unwrap();
+        assert!(re.find_first("123 45 6789").is_none());
+        assert!(!re.is_match("123 45 6789"));
+    }
+
+    #[test]
+    fn inner_literal_fast_fail_does_not_misfire_on_pure_class_pattern() {
+        // `\d+` has no required literal byte. Fast-fail must not
+        // trigger; the regular dispatch path runs.
+        let re = Regex::compile(r"\d+").unwrap();
+        let m = re.find_first("abc 42 xyz").expect("match");
+        assert_eq!(&"abc 42 xyz"[m.start..m.end], "42");
+    }
+
     #[test]
     fn pipeline_find_all_reverse_walk_bounded_preserves_non_overlap() {
         // Repeated-pattern regression: without bounding the reverse walk

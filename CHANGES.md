@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: inner-literal fast-fail no-match check
+
+- Scope: groundwork for inner-literal prefilter (SOTA item from ROADMAP § "Likely-big wins"). This commit ships the simplest useful slice: a memchr-based no-match short-circuit in the dispatch helpers. For patterns where any match must contain a specific byte (e.g. `@` in `\b\w+@\w+\.\w+\b`, `-` in `\d{3}-\d{2}-\d{4}`), `is_match` / `find_first` / `find_all` now memchr the input first and return immediately if the byte is absent, skipping the DFA walk entirely. SIMD-accelerated memchr is ~10-30x faster than per-byte DFA transitions, so this is a real win on grep-like workloads where the pattern is absent from large inputs.
+- Changes:
+  - `rgx-core/src/c2/program.rs` — new public `required_inner_byte(ast)` extractor and private `required_inner_bytes` walker. Walks the top-level AST collecting single-byte ASCII literals that must appear in any match: descends into `Sequence` (collecting from each child), `Group { Capturing | NonCapturing }`, `FlagGroup`, and `Quantified` with `min >= 1`; intersects per-branch sets for `Alternation`; skips multi-byte UTF-8 codepoints, classes, lookarounds, anchors, and other constructs that don't contribute a guaranteed-present single-byte literal. Picks the rarest result via `pick_rarest_byte` (prefers ASCII non-alphanumeric — punctuation is typically rarer in real text). Stored on `CompiledC2Program` as `c2_required_inner_byte: Option<u8>`, computed once at construction time alongside `c2_prefix_byte` and `c2_has_nested_quantifier`.
+  - `rgx-core/src/engine.rs` — new `Engine::required_inner_byte_for_dispatch()` helper returns the byte iff dispatch can use it (gated on `!has_event_observer()` — observer events can't be silently elided on a no-match path). Three call sites: `try_dfa_is_match`, `try_dfa_find_first`, `try_dfa_find_all` each gain a `if let Some(b) = ...required_inner_byte... { if memchr::memchr(b, input).is_none() { return early-no-match } }` block at the top, before any DFA work runs. Runtime match limits (`max_steps`, `max_backtrack_frames`, `max_recursion_depth`) are unaffected — fast-fail returns before counters can be touched, and a no-match answer is identical regardless of limits.
+- Validation:
+  - 1090 lib tests pass (1077 + 13 new — 9 unit tests covering the AST extractor's per-shape semantics including alternation intersection and multi-byte UTF-8 skip; 4 public-API tests pinning behavioral equivalence between fast-fail and slow path).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt --check` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+- Notes/impact: this is v1 of inner-literal prefilter — only the fast-fail path. The full prefilter (memchr-jump-then-anchored-DFA, the technique that closes the email_basic find_first 3.7x bench gap on the FOUND case) requires a forward+reverse DFA pipeline keyed on the candidate byte position and is multi-day work. v1 ships the no-match fast path independently; v2 (FOUND-case memchr jump) is the next step. Together they map onto the ROADMAP § "Likely-big wins" / Inner-literal prefilter entry.
+
 ### 2026-04-25 - Perf: lazy artifact construction in `Engine::new` (-27.6% compile on JIT-eligible patterns)
 
 - Scope: implements technique #1 from ROADMAP § "Performance: close the PCRE2 compile-time gap to <5x" — first independently-shippable RGX-side compile-time win after PGEN-RGX-0073 was filed. Measured Engine::new at 17-33% of compile time on JIT-eligible patterns; only one of the four constructed artifacts (anchored DFA / forward-unanchored DFA / reverse-anchored DFA / JIT program) is used per match, so eager construction wastes ~75% of that work. Lazy construction defers each artifact to its first dispatch.

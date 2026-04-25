@@ -599,6 +599,16 @@ impl Engine {
     /// scan only if the unanchored cache exhausts.
     #[doc(hidden)]
     pub fn try_dfa_is_match(&self, input: &[u8]) -> Option<bool> {
+        // Inner-literal fast-fail: if the pattern requires a specific
+        // byte to appear in any match (`@` for an email pattern, `-`
+        // for a date pattern), and the input doesn't contain that
+        // byte, no match can exist. memchr is SIMD-accelerated and
+        // ~10-30x faster than the DFA walk on bulk no-match inputs.
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(false);
+            }
+        }
         // Reverse-DFA-pipeline fast path: one O(n) walk of the
         // forward-unanchored DFA answers is_match directly.
         if let Some(forward_mutex) = self.should_dispatch_to_forward_unanchored_dfa() {
@@ -661,6 +671,12 @@ impl Engine {
     #[doc(hidden)]
     pub fn try_dfa_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         let c2 = self.vm.program.c2_program.as_ref()?;
+        // Inner-literal fast-fail (see `try_dfa_is_match` for rationale).
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(None);
+            }
+        }
         // Reverse-DFA pipeline fast path. Only prefer it when the
         // per-position scan has no prefix hint — otherwise the scan's
         // memchr/byte-class skip acceleration dominates because it
@@ -701,6 +717,26 @@ impl Engine {
             }
         }
         Some(None)
+    }
+
+    /// Returns the pattern's required-interior byte for dispatch
+    /// fast-fail, if any. The byte is taken from the C2 program's
+    /// `c2_required_inner_byte` field but is only returned when
+    /// runtime state allows the fast-fail to fire — specifically,
+    /// when no event observer is attached. (Event observers are
+    /// position-by-position callbacks; skipping the DFA walk would
+    /// silently elide every observer event from a no-match path,
+    /// which violates the observer contract.)
+    ///
+    /// Runtime match limits (`max_steps`, `max_backtrack_frames`,
+    /// `max_recursion_depth`) are unaffected — the fast-fail returns
+    /// before any of those counters could be touched, and a no-match
+    /// answer is identical regardless of the limits in force.
+    fn required_inner_byte_for_dispatch(&self) -> Option<u8> {
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        self.vm.program.c2_program.as_ref()?.c2_required_inner_byte
     }
 
     /// True when the reverse-DFA pipeline is preferred over the
@@ -824,6 +860,12 @@ impl Engine {
     #[doc(hidden)]
     pub fn try_dfa_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         let c2 = self.vm.program.c2_program.as_ref()?;
+        // Inner-literal fast-fail (see `try_dfa_is_match` for rationale).
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(Vec::new());
+            }
+        }
         // Reverse-DFA pipeline fast path for find_all. Same gate as
         // find_first — use only when no prefix hint is available.
         if self.pipeline_dispatch_preferred(c2) {
