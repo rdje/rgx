@@ -14,6 +14,34 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: lazy artifact construction in `Engine::new` (-27.6% compile on JIT-eligible patterns)
+
+- Scope: implements technique #1 from ROADMAP § "Performance: close the PCRE2 compile-time gap to <5x" — first independently-shippable RGX-side compile-time win after PGEN-RGX-0073 was filed. Measured Engine::new at 17-33% of compile time on JIT-eligible patterns; only one of the four constructed artifacts (anchored DFA / forward-unanchored DFA / reverse-anchored DFA / JIT program) is used per match, so eager construction wastes ~75% of that work. Lazy construction defers each artifact to its first dispatch.
+- Changes (`rgx-core/src/engine.rs` only):
+  - `Engine` struct: `c2_dfa`, `c2_forward_unanchored_dfa`, `c2_reverse_dfa`, and (under `feature = "jit"`) `jit_program` changed from `Option<Mutex<...>>` to `OnceLock<Option<Mutex<...>>>`. The outer `OnceLock` defers construction; the inner `Option` indicates ineligibility (pattern outside the C2/JIT subset). New field `ast: crate::ast::Regex` carries the AST clone the lazy builders need for eligibility checks (`is_c2_dfa_eligible(ast)`, `has_top_level_alternation(ast)`).
+  - `Engine::new`: shrunk from ~25 lines (eagerly building 4 artifacts + cloning execution manager + cloning program) to ~10 lines (clone AST, build VM, return). All 4 builder calls (`build_dfa_if_eligible`, `build_forward_unanchored_dfa_if_eligible`, `build_reverse_dfa_if_eligible`, `build_jit_program_if_eligible`) removed from the hot path; the builders themselves are unchanged.
+  - Dispatch helpers `should_dispatch_to_dfa`, `should_dispatch_to_forward_unanchored_dfa`, `should_dispatch_to_reverse_dfa`, `should_use_jit`: each replaced its `self.<field>.as_ref()?` opening with `self.<field>.get_or_init(|| build_*_if_eligible(...)).as_ref()?`. The runtime gate logic (event observer / runtime match limits / literal finder / recursion depth limit) is unchanged.
+  - Added `OnceLock` to the `std::sync` import line.
+- Validation:
+  - `cargo test -p rgx-core --lib` — 1077 passed (no change vs commit `b61b382`); the lazy DFA / JIT artifacts behave identically once realised.
+  - `cargo test -p rgx-cli` — 30 passed.
+  - `cargo clippy --workspace --all-targets` — clean (zero errors).
+  - `cargo fmt --check` — clean.
+  - PCRE2 conformance ratchet — preserved at **12,709 / 101 / 0 / 0** (`pass=12709 >= 12709, fail=101 <= 101, panic=0, skip=0`).
+  - **Compile-time delta** measured via `compile_phase_split.rs` re-run (1000 samples, release build, same machine):
+    | Pattern | Full compile before (ns) | After (ns) | Reduction | Engine::new before share | After share |
+    |---|---:|---:|---:|---:|---:|
+    | literal_simple  | 572,000 | 411,250 | **−28.1%** | 28.1% | 0.1% |
+    | digit_sequence  | 1,237,250 | 833,416 | **−32.7%** | 33.2% | 0.1% |
+    | character_class | 2,820,042 | 2,387,375 | **−15.3%** | 16.7% | 0.0% |
+    | capture_groups  | 1,994,667 | 1,458,458 | **−26.9%** | 25.4% | 0.1% |
+    | url_simple      | 1,344,834 | 914,708 | **−32.0%** | 32.1% | 0.2% |
+    | email_basic     | 1,568,500 | 1,090,708 | **−30.5%** | 29.4% | 0.1% |
+    | alternation     | 990,875 | 1,005,375 | noise (+1.5%) | 0.0% | 0.0% |
+    | anchor_complex  | 2,514,500 | 2,550,250 | noise (−1.4%) | 0.1% | 0.1% |
+    Average compile-time reduction on JIT-eligible patterns: **27.6%**, in the 25-30% band predicted by phase-split analysis. Patterns that already had Engine::new ~0% of compile time (alternation, anchor_complex) show no measurable change as expected.
+- Notes/impact: this is the highest-leverage of the 5 RGX-side compile-time techniques in the ROADMAP. The remaining four (#2 skip-when-unused — now mostly redundant with #1, #3 defer JIT to second match, #4 allocation cleanup, #5 trivial-pattern shortcut) target either smaller wins or are subsumed structurally by #1's lazy approach. With this commit, PGEN's parse is now 96-100% of the new compile budget — confirms PGEN-RGX-0073 remains the dominant remaining lever for closing the 1083-1971x compile gap to PCRE2. Total RGX-vs-PCRE2 gap on the bench corpus moved from ~1083-1971x slower to ~750-1450x slower; the rest of the gap closes (or doesn't) on the PGEN side.
+
 ### 2026-04-25 - Perf: phase-split `Regex::compile` and file PGEN-RGX-0073
 
 - Scope: after the C2 reverse-DFA pipeline track closed (commit `fc20629`, 2026-04-24) the next perf concern was compile-time. `target/benchmark-trends/latest.md` showed RGX 1083-1971x slower than PCRE2 at `compile`. The user accepted "<5x of PCRE2 compile-time gap" as the realistic intermediate target and asked for an instrumented measurement before any technique landed.

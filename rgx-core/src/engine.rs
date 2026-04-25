@@ -8,7 +8,7 @@ use crate::execution::{
 use crate::pattern::CompiledPattern;
 use crate::vm::{CompiledCharClass, PrefixFilter, RegexVM};
 use crate::{trace_decision, trace_enter, trace_exit};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -87,12 +87,19 @@ pub struct Engine {
     vm: RegexVM,
     /// Execution mode for this engine
     mode: ExecutionMode,
-    /// C2 lazy DFA for `is_match` dispatch (step 5b). Built in
-    /// [`Engine::new`] only when the pattern's AST is DFA-eligible
-    /// (`c2::program::is_c2_dfa_eligible`). Wrapped in `Mutex` because
-    /// the DFA's `transition` method mutates its state cache, and
-    /// public `Regex` API methods are `&self`.
-    c2_dfa: Option<Mutex<LazyDfa>>,
+    /// AST kept alongside the engine so the lazy artifact builders
+    /// (`c2_dfa`, `c2_forward_unanchored_dfa`, `c2_reverse_dfa`,
+    /// `jit_program`) can re-derive eligibility on first access. A
+    /// single owned clone, taken once at [`Engine::new`].
+    ast: crate::ast::Regex,
+    /// C2 lazy DFA for `is_match` dispatch (step 5b). Built lazily on
+    /// first access via `OnceLock` — only realised if/when the
+    /// dispatch chain actually reaches for the anchored DFA. Inner
+    /// `Option` indicates ineligibility (pattern outside the C2
+    /// subset or contains assertions the DFA can't model). Wrapped in
+    /// `Mutex` because the DFA's `transition` method mutates its
+    /// state cache and public `Regex` API methods are `&self`.
+    c2_dfa: OnceLock<Option<Mutex<LazyDfa>>>,
     /// C2 lazy DFA built over the **forward-unanchored** NFA.
     /// Companion to [`Self::c2_reverse_dfa`] in the **reverse-DFA
     /// pipeline**: a single O(n) forward sweep (via this DFA) finds
@@ -100,27 +107,25 @@ pub struct Engine {
     /// reverse DFA walks backward from that end to find the START,
     /// and finally Pike-VM recovers captures over the known span.
     /// Replaces the per-position anchored-DFA scan (which was O(n ·
-    /// candidate_positions)) on the fast path.
-    c2_forward_unanchored_dfa: Option<Mutex<LazyDfa>>,
-    /// C2 lazy DFA built over the **reverse-anchored** NFA.
-    /// The reverse half of the reverse-DFA pipeline: walks backward
-    /// from a known match-end to find the leftmost match-start in a
-    /// single bounded sweep. Built in [`Engine::new`] alongside the
-    /// other C2 DFAs for any pattern where `is_c2_dfa_eligible`
-    /// returns `true` AND the reverse NFA passes the same
-    /// construction constraints (no assertions the DFA can't model).
-    c2_reverse_dfa: Option<Mutex<LazyDfa>>,
-    /// C1 JIT-compiled program for native dispatch (step 5).
-    /// Built in [`Engine::new`] only when the pattern is
-    /// JIT-eligible per `c1::is_jit_eligible` AND the codegen
-    /// layer accepts it (`c1::compile_program_to_jit_program`).
-    /// Wrapped in `Mutex` because `cranelift_jit::JITModule`'s
-    /// internal symbol table is interior-mutable, mirroring the
-    /// `c2_dfa` pattern. The lock is held only briefly to retrieve
-    /// the function pointer; the actual JIT'd-function call
-    /// happens after the lock is released. Gated on `feature = "jit"`.
+    /// candidate_positions)) on the fast path. Lazy — built on first
+    /// access from the reverse-DFA pipeline driver.
+    c2_forward_unanchored_dfa: OnceLock<Option<Mutex<LazyDfa>>>,
+    /// C2 lazy DFA built over the **reverse-anchored** NFA. The
+    /// reverse half of the reverse-DFA pipeline: walks backward from
+    /// a known match-end to find the leftmost match-start in a single
+    /// bounded sweep. Lazy — built on first access alongside the
+    /// other C2 DFAs.
+    c2_reverse_dfa: OnceLock<Option<Mutex<LazyDfa>>>,
+    /// C1 JIT-compiled program for native dispatch (step 5). Lazy —
+    /// `JitProgram` codegen via Cranelift takes meaningful time, so
+    /// deferring it to the first match call removes the cost from
+    /// every `Regex::compile` and pays it only when the dispatch
+    /// chain actually reaches for the JIT path. Wrapped in `Mutex`
+    /// because `cranelift_jit::JITModule`'s internal symbol table is
+    /// interior-mutable, mirroring the `c2_dfa` pattern. Gated on
+    /// `feature = "jit"`.
     #[cfg(feature = "jit")]
-    jit_program: Option<Mutex<crate::c1::JitProgram>>,
+    jit_program: OnceLock<Option<Mutex<crate::c1::JitProgram>>>,
 }
 
 /// Convert a VM-level `Match` into a public `MatchResult`.
@@ -469,39 +474,26 @@ impl Engine {
             } else {
                 None
             };
-        // C2 step 5b: build the lazy DFA if the pattern is DFA-eligible.
-        // The DFA serves `is_match` dispatch via `should_dispatch_to_dfa`.
-        let c2_dfa = build_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
-
-        // C2 reverse-DFA pipeline: build the forward-unanchored and
-        // reverse-anchored DFAs. Together they replace the
-        // per-position anchored-DFA scan on the fast path with a
-        // single forward-then-reverse sweep. Same eligibility gate
-        // as the anchored forward DFA.
-        let c2_forward_unanchored_dfa =
-            build_forward_unanchored_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
-        let c2_reverse_dfa =
-            build_reverse_dfa_if_eligible(&pattern.ast, &pattern.program.c2_program);
-
-        // C1 step 5: JIT-compile the pattern if possible. On
-        // `CodegenUnsupported` (or any other error), we silently
-        // store None and the engine falls back to the existing
-        // dispatch chain (DFA → Pike-VM → interpreter). Patterns
-        // outside the JIT subset are common (anything with
-        // captures, lookaround, code blocks, etc.) so failure is
-        // expected and not an error.
-        #[cfg(feature = "jit")]
-        let jit_program = build_jit_program_if_eligible(&pattern.ast, &pattern.program);
-
+        // C2 DFA caches and the JIT program are now built lazily on
+        // first dispatch (see `should_dispatch_to_*` helpers and
+        // `should_use_jit`). Construction of those artifacts is
+        // 17-33% of total compile time on JIT-eligible patterns, and
+        // typically only one of the four (anchored DFA / forward-
+        // unanchored DFA / reverse-anchored DFA / JIT) is used per
+        // match. Eager construction wastes 75% of that work; lazy
+        // construction defers each artifact to its first need and
+        // skips the rest entirely. See ROADMAP.md "Performance:
+        // close the PCRE2 compile-time gap to <5x" technique #1.
         let vm = RegexVM::with_execution_manager(pattern.program.clone(), execution_manager);
         let engine = Self {
             vm,
             mode: pattern.mode,
-            c2_dfa,
-            c2_forward_unanchored_dfa,
-            c2_reverse_dfa,
+            ast: pattern.ast.clone(),
+            c2_dfa: OnceLock::new(),
+            c2_forward_unanchored_dfa: OnceLock::new(),
+            c2_reverse_dfa: OnceLock::new(),
             #[cfg(feature = "jit")]
-            jit_program,
+            jit_program: OnceLock::new(),
         };
         trace_exit!("engine", "Engine::new", "ok=true,mode={:?}", engine.mode);
         Ok(engine)
@@ -522,7 +514,10 @@ impl Engine {
     /// required even from `&self`.
     #[doc(hidden)]
     pub fn should_dispatch_to_dfa(&self) -> Option<&Mutex<LazyDfa>> {
-        let dfa = self.c2_dfa.as_ref()?;
+        let dfa = self
+            .c2_dfa
+            .get_or_init(|| build_dfa_if_eligible(&self.ast, &self.vm.program.c2_program))
+            .as_ref()?;
         if self.vm.has_event_observer() {
             return None;
         }
@@ -546,7 +541,12 @@ impl Engine {
     /// DFA's cache is interior-mutable.
     #[doc(hidden)]
     pub fn should_dispatch_to_forward_unanchored_dfa(&self) -> Option<&Mutex<LazyDfa>> {
-        let dfa = self.c2_forward_unanchored_dfa.as_ref()?;
+        let dfa = self
+            .c2_forward_unanchored_dfa
+            .get_or_init(|| {
+                build_forward_unanchored_dfa_if_eligible(&self.ast, &self.vm.program.c2_program)
+            })
+            .as_ref()?;
         if self.vm.has_event_observer() {
             return None;
         }
@@ -567,7 +567,10 @@ impl Engine {
     /// Same runtime gating as [`Self::should_dispatch_to_dfa`].
     #[doc(hidden)]
     pub fn should_dispatch_to_reverse_dfa(&self) -> Option<&Mutex<LazyDfa>> {
-        let dfa = self.c2_reverse_dfa.as_ref()?;
+        let dfa = self
+            .c2_reverse_dfa
+            .get_or_init(|| build_reverse_dfa_if_eligible(&self.ast, &self.vm.program.c2_program))
+            .as_ref()?;
         if self.vm.has_event_observer() {
             return None;
         }
@@ -1073,7 +1076,10 @@ impl Engine {
     #[cfg(feature = "jit")]
     #[doc(hidden)]
     pub fn should_use_jit(&self) -> Option<&Mutex<crate::c1::JitProgram>> {
-        let jit = self.jit_program.as_ref()?;
+        let jit = self
+            .jit_program
+            .get_or_init(|| build_jit_program_if_eligible(&self.ast, &self.vm.program))
+            .as_ref()?;
         if self.vm.has_event_observer() {
             return None;
         }
