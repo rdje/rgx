@@ -294,6 +294,16 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: skip redundant UTF-8 validation on Engine entry points (HUGE win)
+
+- **What**: Regex::find_first / find_all / is_match / replace in lib.rs were calling engine.find_first(text.as_bytes()), where Engine::find_first(&[u8]) then std::str::from_utf8'd the bytes back into &str. The bytes always come from a verified &str in the public API caller — pure redundant work. Engine had pre-existing pub(crate) vm_find_first / vm_find_all (&str-taking, used by BytesRegex); added vm_is_match, switched all 8 lib.rs call sites to the vm_* variants.
+- **Measured**: literal_simple find_first 10K **217 → 40 ns/iter** (5.4x). url_simple find_first 10K **2866 → 109 ns/iter** (26x). Total session improvements:
+  - literal_simple: 203 → 40 ns/iter = **5.1x speedup**, now **1.2x of PCRE2's 32.5ns** (was 6.26x slower at session start)
+  - url_simple: 32,483 → 109 ns/iter = **298x speedup**, now **FASTER than PCRE2** (RGX 109ns vs PCRE2 194ns = 1.78x faster)
+- **Why this matters**: largest single-commit win of the session. The UTF-8 validation was paying ~150-200ns of pure overhead per call on every public-API entry point. Eliminating it unmasks memmem speed. Two of the three known performance gaps (literal_simple 6.26x, url_simple 167x) are now closed.
+- **Accuracy**: 1118 lib + 30 cli green. **Conformance ratchet 12,709/101 preserved**. The vm_* variants are the same code path used by BytesRegex, which has been live since BytesRegex shipped — well-trodden.
+- **Remaining bench gap**: email_basic find_first (was 3.7x slower) — needs v2 inner-literal prefilter (multi-day work). All other tracked patterns are now competitive or faster than PCRE2.
+
 ### 2026-04-25 — Perf: pre-size capture-groups Vec to exact capacity (~35% on literal_simple find_first)
 
 - **What**: one-line fix in `extract_captures_with_match` (vm.rs). Was `Vec::new()` + push (allocates capacity 4 on first push, regardless of need). Now `Vec::with_capacity(num_groups + 1)` (allocates exact capacity). For literal patterns (`num_groups == 0`), this drops the heap allocation from 96 bytes (cap 4 × 24) to 24 bytes (cap 1 × 24). Aligns with the JIT path which already does this in `engine::jit_match_to_result`.

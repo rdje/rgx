@@ -1219,7 +1219,7 @@ impl Regex {
         trace_enter!("api", "Regex::find_all", "text_len={}", text.len());
         // Pure-literal short-circuit (see `find_first` for rationale).
         if self.engine.has_literal_finder() {
-            let matches = self.engine.find_all(text.as_bytes());
+            let matches = self.engine.vm_find_all(text);
             trace_exit!(
                 "api",
                 "Regex::find_all",
@@ -1245,7 +1245,7 @@ impl Regex {
         } else if let Some(jit_result) = jit_dispatch_find_all(&self.engine, text.as_bytes()) {
             jit_result
         } else {
-            self.engine.find_all(text.as_bytes())
+            self.engine.vm_find_all(text)
         };
         trace_decision!(
             "api",
@@ -1275,7 +1275,7 @@ impl Regex {
         // None. Calling them is pure overhead (~100-200ns/call on
         // 32-byte inputs). Skip the chain entirely.
         if self.engine.has_literal_finder() {
-            let first = self.engine.find_first(text.as_bytes());
+            let first = self.engine.vm_find_first(text);
             trace_exit!(
                 "api",
                 "Regex::find_first",
@@ -1298,7 +1298,7 @@ impl Regex {
         } else if let Some(jit_result) = jit_dispatch_find_first(&self.engine, text.as_bytes()) {
             jit_result
         } else {
-            self.engine.find_first(text.as_bytes())
+            self.engine.vm_find_first(text)
         };
         trace_decision!(
             "api",
@@ -1536,7 +1536,7 @@ impl Regex {
         trace_enter!("api", "Regex::is_match", "text_len={}", text.len());
         // Pure-literal short-circuit (see `find_first` for rationale).
         if self.engine.has_literal_finder() {
-            let matched = self.engine.is_match(text.as_bytes());
+            let matched = self.engine.vm_is_match(text);
             trace_exit!(
                 "api",
                 "Regex::is_match",
@@ -1559,7 +1559,7 @@ impl Regex {
         } else if let Some(matched) = jit_dispatch_is_match(&self.engine, text.as_bytes()) {
             matched
         } else {
-            self.engine.is_match(text.as_bytes())
+            self.engine.vm_is_match(text)
         };
         trace_decision!(
             "api",
@@ -1694,7 +1694,7 @@ impl Regex {
     /// ```
     #[must_use]
     pub fn replace<'t, R: Replacer>(&self, text: &'t str, mut rep: R) -> std::borrow::Cow<'t, str> {
-        let Some(mr) = self.engine.find_first(text.as_bytes()) else {
+        let Some(mr) = self.engine.vm_find_first(text) else {
             return std::borrow::Cow::Borrowed(text);
         };
         let mut result = String::with_capacity(text.len());
@@ -1735,7 +1735,7 @@ impl Regex {
         limit: usize,
         mut rep: R,
     ) -> std::borrow::Cow<'t, str> {
-        let matches = self.engine.find_all(text.as_bytes());
+        let matches = self.engine.vm_find_all(text);
         if matches.is_empty() {
             return std::borrow::Cow::Borrowed(text);
         }

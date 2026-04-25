@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: skip redundant UTF-8 validation on Engine entry points (massive win)
+
+- Scope: `Regex::find_first` / `find_all` / `is_match` / `replace` in `lib.rs` were calling `engine.find_first(text.as_bytes())`, where `Engine::find_first(&self, text: &[u8])` then called `std::str::from_utf8(text)` to validate the bytes back into a `&str` for the VM. The bytes always come from a verified `&str` in the public API caller, so this is pure redundant work: SIMD-accelerated but still O(n) per call (~150-200ns on a 10K input). `Engine` already exposes `vm_find_first` / `vm_find_all` (pre-existing `pub(crate)` `&str`-taking variants used by `bytes::BytesRegex`); this commit adds a matching `vm_is_match` and switches all 8 lib.rs call sites to the `vm_*` variants.
+- Changes:
+  - `rgx-core/src/engine.rs` — added `Engine::vm_is_match(&self, text: &str) -> bool` to mirror the existing `vm_find_first` / `vm_find_all` `&str`-taking helpers.
+  - `rgx-core/src/lib.rs` — 8 call sites changed: `Regex::find_first`, `find_all`, `is_match` (each in two places: the literal-finder short-circuit AND the dispatch fallback), plus `Regex::replace` and the `find_first_*_with_context` helpers. All `engine.find_first(text.as_bytes())` etc. become `engine.vm_find_first(text)`. The `&[u8]`-taking `Engine` entry points stay for callers that genuinely have raw bytes (`bytes::BytesRegex` etc.).
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (release, 10K input with sparse matches, 100000-iteration average):
+    - `literal_simple find_first` (`"test"`): **217 → 40 ns/iter** (5.4x within this commit; total session improvement vs `target/benchmark-trends/latest.md` baseline of 203 ns/iter is **5.1x faster**). RGX is now within **1.2x of PCRE2's 32.5 ns/iter** on this pattern (was 6.26x slower at session start).
+    - `url_simple find_first` (`https?://\S+`): **2866 → 109 ns/iter** (26x within this commit; total session improvement vs the 32,483 ns/iter baseline is **298x faster**). RGX is now **faster than PCRE2's 194 ns/iter** on this pattern (~0.56x — RGX 1.78x faster than PCRE2).
+- Notes/impact: largest single-commit perf win of the session. The redundant UTF-8 validation was paying ~150-200ns of pure overhead per call on every public-API entry point; eliminating it unmasks the underlying memmem-driven speed. **Functionality and accuracy are unchanged** — the conformance ratchet still passes; the `vm_*` variants are the same code path used by `bytes::BytesRegex`, which has been live since BytesRegex shipped. No breaking changes — the `&[u8]`-taking `Engine` methods remain for byte-level callers.
+
 ### 2026-04-25 - Perf: pre-size capture-groups Vec to exact capacity (~35% on `literal_simple` find_first)
 
 - Scope: `extract_captures_with_match` in `rgx-core/src/vm.rs` started with `Vec::new()` then pushed group 0 (the whole-match span) plus any user capture groups. Default `Vec` growth allocates capacity 4 on the first push, regardless of how many elements will follow. For literal patterns (the dominant case for the existing-VM hot path because pure literals route through the `literal_finder` shortcut), `num_groups == 0` so we only ever push 1 element — paying for a 96-byte heap allocation (capacity 4 × 24 bytes per `Option<(usize, usize)>`) when 24 bytes would suffice. The JIT path's `engine::jit_match_to_result` already uses `Vec::with_capacity(num_groups + 1)`; this commit aligns the existing-VM path with that.

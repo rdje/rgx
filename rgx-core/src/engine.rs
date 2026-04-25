@@ -1711,6 +1711,14 @@ impl Engine {
             .collect()
     }
 
+    /// Test whether the pattern matches anywhere in `text`, accepting
+    /// a pre-validated `&str` directly. Skips the UTF-8 validation
+    /// pass that [`Self::is_match`] performs on its `&[u8]` input.
+    #[must_use]
+    pub(crate) fn vm_is_match(&self, text: &str) -> bool {
+        self.vm.is_match(text)
+    }
+
     /// Find the first match in the input
     #[must_use]
     pub fn find_first(&self, text: &[u8]) -> Option<MatchResult> {
