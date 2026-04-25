@@ -1,0 +1,373 @@
+id: PGEN-RGX-0073
+summary: |
+  PGEN's `regex` parser is 1300-4700x slower than PCRE2's full
+  compile pipeline (parse + codegen + JIT prep) on a representative
+  set of 8 ordinary regex patterns. Median wall-clock parse time
+  ranges from 405µs (`test`) to 2.49ms (`^(\d+)\s+(?P<word>\w+)
+  \s+(?:foo|bar)$`); PCRE2-10.46 compiles the same patterns in
+  142-890ns end-to-end. PGEN's parse step alone consumes 65-99% of
+  RGX's total `Regex::compile` budget. This is the dominant
+  bottleneck for RGX's compile-time gap to PCRE2; downstream
+  optimisation work in RGX (lazy artifact construction, skip-
+  when-unused, defer-JIT, allocation cleanup) targets only the
+  remaining 1-35% of the budget and cannot meaningfully close the
+  gap without a PGEN-side perf fix.
+
+  Bug class: **pathological performance or resource usage** (per
+  `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md` §4). Parse output is
+  correct on every measured pattern; only wall-clock time is at
+  issue.
+
+status: open
+opened_at: 2026-04-25T00:00:00Z
+first_seen_at: 2026-04-25T00:00:00Z
+last_updated_at: 2026-04-25T00:00:00Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "48a9f06"          # subs/pgen HEAD at measurement
+parser_release_version: "1.1.29"           # REGEX_PARSER_RELEASE_VERSION constant
+integration_contract_version: "1.1.31"     # REGEX_PARSER_INTEGRATION_CONTRACT_VERSION constant
+parser_family: regex
+profile: regex_default
+integration_surface: pgen::embedding_api
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs::parse_pattern"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: c3104ae
+host_os: macos
+host_os_version: "Darwin Kernel 25.4.0 (arm64)"
+host_arch: aarch64
+host_cpu: "Apple M4 Pro"
+host_cpu_count: 12
+host_machine_model: "Mac16,11"
+rust_toolchain: "rustc per workspace rust-version = 1.95"
+cargo_features: "default + jit + pgen-parser"
+
+# Comparison engine for the perf claim.
+comparison_engine:
+  name: PCRE2
+  version: "10.46"
+  source: "/opt/homebrew/Cellar/pcre2/10.46 (Homebrew, macOS aarch64)"
+  build: "cc -O2 -DPCRE2_CODE_UNIT_WIDTH=8 (libpcre2-8)"
+  metric: "median ns per `pcre2_compile()` call, batched 10,000 compiles, samples averaged after 100 warmup"
+
+# Performance-related §D fields (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §D).
+performance_context:
+  bug_class: pathological_performance
+  scope: corpus_wide              # not deterministic on one sample; reproduces on all 8 patterns
+  shape: median_steady_state      # plus long-tail variance on 2/8 patterns (capture_groups, url_simple)
+  trace_disabled_for_perf_runs: true   # cargo run --release builds without `--features trace`
+  measurement_methodology: |
+    - 1000 samples per pattern after 50 warmup iterations
+    - release build (`cargo build --release`)
+    - `parsing::parse_pattern` timed in isolation via `Instant::now()`
+    - independent `Regex::compile` control measurement (also 1000 samples)
+    - PCRE2 baseline via batched 10,000-compile loop, total / N average
+  variance_observation: |
+    `capture_groups` and `url_simple` show p99/p50 ratios of 3.1× and
+    4.4× respectively, with maxes at 13.1× and 6.2× of p50. The other
+    six patterns are tightly clustered (p99/p50 < 1.3×). Suggests
+    occasional pathological branch in PGEN's parse path on these two
+    shapes — possibly allocator contention, possibly a specific grammar
+    rule with unbounded backtracking under certain inputs. Worth
+    PGEN-side flamegraph attention.
+  input_byte_sizes_per_pattern:
+    literal_simple: 4
+    digit_sequence: 17
+    character_class: 46
+    alternation: 12
+    capture_groups: 23
+    url_simple: 13
+    email_basic: 16
+    anchor_complex: 38
+  ast_dump_size_observation: |
+    `email_basic.txt` (16 input bytes) → `email_basic_ast.json`
+    of 60,506 bytes / 861 lines. Input/output size ratio ≈ 3,800×.
+    Deeply nested `Alternative`/`Sequence`/`Quantified` wrappings
+    around every leaf. Likely correlated with parse time but not
+    proven; included as a hypothesis for the perf root cause.
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  command: |
+    # RGX-side measurement (1000 samples, 50 warmup, release build):
+    cargo run --release -p rgx-core --example compile_phase_split
+
+    # PCRE2 baseline (10,000-compile batch, release):
+    cc -O2 -DPCRE2_CODE_UNIT_WIDTH=8 -I/opt/homebrew/Cellar/pcre2/10.46/include \
+       pgen-issues/artifacts/PGEN-RGX-0073/pcre2_compile_baseline.c \
+       $(pcre2-config --libs8) -o /tmp/pcre2_compile_bench2 && /tmp/pcre2_compile_bench2
+
+    # PGEN-side parseability_probe (per protocol §A):
+    PGEN_TRACE_VERBOSITY=debug \
+    subs/pgen/rust/target/release/parseability_probe \
+      --parse-dump-ast-pretty regex \
+      pgen-issues/artifacts/PGEN-RGX-0073/probe_input/email_basic.txt \
+      pgen-issues/artifacts/PGEN-RGX-0073/email_basic_ast.json \
+      --profile regex_default --trace \
+      --trace-log-file pgen-issues/artifacts/PGEN-RGX-0073/pgen_trace_email_basic.log
+  pattern: |
+    Eight representative patterns covering the standard bench corpus
+    (full list in `artifacts/PGEN-RGX-0073/patterns.tsv`):
+    - `test`                                                          (literal_simple)
+    - `\d{3}-\d{2}-\d{4}`                                             (digit_sequence)
+    - `[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`               (character_class)
+    - `cat|dog|bird`                                                  (alternation)
+    - `(\d{4})-(\d{2})-(\d{2})`                                       (capture_groups)
+    - `https?://\S+`                                                  (url_simple)
+    - `\b\w+@\w+\.\w+\b`                                              (email_basic)
+    - `^(\d+)\s+(?P<word>\w+)\s+(?:foo|bar)$`                         (anchor_complex)
+  source: |
+    Discovered by phase-splitting RGX's `Regex::compile` wall-clock
+    after the C2 reverse-DFA pipeline track closed (RGX commit
+    c3104ae, 2026-04-24). The investigation followed RGX's strategic
+    pivot from PCRE2 conformance (~99.2%) to performance work, where
+    `target/benchmark-trends/latest.md` showed RGX is 1083-1971x
+    slower than PCRE2 at `compile`. Phase-splitting confirmed PGEN
+    is the dominant component on every pattern.
+
+expected_behavior: |
+  PGEN's `regex` parser median wall-clock parse time is in the
+  10-50µs range (still 30-300x of PCRE2 — accepted as the cost of
+  PGEN's general-purpose, EBNF-driven nature — but tractable and
+  not the dominant component of consumer-tool compile budgets).
+
+  This puts PGEN parse at ~10-15% of RGX's `Regex::compile` budget
+  rather than the current 65-99%, which would let RGX's downstream
+  perf work (lazy artifact construction, skip-when-unused,
+  defer-JIT, allocation cleanup) actually close the consumer-tool
+  compile-time gap to PCRE2 to within 30-50x. Without that, the
+  best achievable RGX-vs-PCRE2 compile gap is ~700-1500x even with
+  every downstream optimisation shipped.
+
+actual_behavior: |
+  Median wall-clock per pattern (RGX side, `parsing::parse_pattern`,
+  1000 samples, 50 warmup, release build, macOS aarch64):
+
+  | pattern         | PGEN parse (ns) | RGX full compile (ns) | PGEN share |
+  |-----------------|----------------:|----------------------:|-----------:|
+  | literal_simple  |         405,875 |               572,000 |      71.0% |
+  | digit_sequence  |         813,042 |             1,237,250 |      65.7% |
+  | character_class |       2,334,208 |             2,820,042 |      82.8% |
+  | alternation     |         987,667 |               990,875 |      99.7% |
+  | capture_groups  |       1,468,666 |             1,994,667 |      73.6% |
+  | url_simple      |         884,000 |             1,344,834 |      65.7% |
+  | email_basic     |       1,093,042 |             1,568,500 |      69.7% |
+  | anchor_complex  |       2,486,375 |             2,514,500 |      98.9% |
+
+  PCRE2-10.46 baseline (full compile pipeline, 10,000-batch median):
+
+  | pattern         | PCRE2 compile (ns) |
+  |-----------------|-------------------:|
+  | literal_simple  |                142 |
+  | digit_sequence  |                268 |
+  | character_class |                890 |
+  | alternation     |                443 |
+  | capture_groups  |                615 |
+  | url_simple      |                352 |
+  | email_basic     |                331 |
+  | anchor_complex  |                714 |
+
+  Resulting slowdowns (PGEN parse alone vs PCRE2 full compile):
+
+  | pattern         | PGEN-vs-PCRE2 slowdown |
+  |-----------------|-----------------------:|
+  | literal_simple  |                 2,858x |
+  | digit_sequence  |                 3,034x |
+  | character_class |                 2,623x |
+  | alternation     |                 2,230x |
+  | capture_groups  |                 2,388x |
+  | url_simple      |                 2,512x |
+  | email_basic     |                 3,302x |
+  | anchor_complex  |                 3,482x |
+
+  Distribution of PGEN parse times for `capture_groups`
+  (1000 samples) shows a long tail (p99 = 4.90ms, max = 20.52ms vs
+  p50 = 1.56ms) — suggests an allocation- or recursion-driven
+  pathological branch. `url_simple` similar (p99 = 6.39ms, max =
+  9.05ms vs p50 = 1.45ms). The tail is not present on the smaller
+  patterns. Full distribution table in
+  `artifacts/PGEN-RGX-0073/rgx_compile_phase_split.txt`.
+
+  An AST dump for the 16-byte input `\b\w+@\w+\.\w+\b`
+  (`artifacts/PGEN-RGX-0073/email_basic_ast.json`) is **60,506
+  bytes / 861 lines** of pretty-printed JSON, deeply nested (≥10
+  levels of `Alternative`/`Sequence`/`Quantified` wrappings around
+  every leaf). This **input/output size ratio of ≈3,800×** suggests
+  the parser is producing intermediate parse-tree nodes that aren't
+  collapsed into a more compact AST shape — the grammar's
+  precedence-climbing structure is preserved verbatim instead of
+  being flattened. Output-size pressure plausibly correlates with
+  parse time (allocator pressure during construction, then walker
+  pressure during downstream consumption).
+
+reproduction: |
+  All artifacts staged in `pgen-issues/artifacts/PGEN-RGX-0073/`.
+
+  ## A. Reproduce the RGX-side phase split (1000 samples, release)
+
+  ```bash
+  cd <rgx-checkout-root>
+  git checkout c3104ae   # or any commit at-or-after this
+  git submodule update --init --recursive
+  cargo run --release -p rgx-core --example compile_phase_split
+  ```
+
+  Expected output: `artifacts/PGEN-RGX-0073/rgx_compile_phase_split.txt`
+  (median + min/p50/mean/p99/max per pattern).
+
+  Source of the example: `rgx-core/examples/compile_phase_split.rs`
+  (200-line measurement harness that calls
+  `parsing::parse_pattern`, `Compiler::compile_ast`, `Engine::new`,
+  and `Regex::compile` independently and times each).
+
+  ## B. Reproduce the PCRE2 baseline
+
+  ```bash
+  brew install pcre2  # PCRE2 10.46 on macOS aarch64
+  # Source attached as artifacts/PGEN-RGX-0073/pcre2_compile_baseline.c
+  cc -O2 -DPCRE2_CODE_UNIT_WIDTH=8 \
+     -I/opt/homebrew/Cellar/pcre2/10.46/include \
+     pgen-issues/artifacts/PGEN-RGX-0073/pcre2_compile_baseline.c \
+     $(pcre2-config --libs8) -o /tmp/pcre2_compile_bench
+  /tmp/pcre2_compile_bench
+  ```
+
+  Expected output: `artifacts/PGEN-RGX-0073/pcre2_compile_baseline.txt`.
+
+  ## C. Capture a PGEN parse trace + AST dump (per protocol §A)
+
+  ```bash
+  cd subs/pgen
+  cargo build --manifest-path rust/Cargo.toml --features generated_parsers \
+              --bin parseability_probe --release
+  PGEN_TRACE_VERBOSITY=debug \
+    rust/target/release/parseability_probe \
+      --parse-dump-ast-pretty regex \
+      ../../pgen-issues/artifacts/PGEN-RGX-0073/probe_input/email_basic.txt \
+      ../../pgen-issues/artifacts/PGEN-RGX-0073/email_basic_ast.json \
+      --profile regex_default --trace \
+      --trace-log-file ../../pgen-issues/artifacts/PGEN-RGX-0073/pgen_trace_email_basic.log
+  ```
+
+  Expected outputs:
+  - `email_basic_ast.json` (60,506 bytes, 861 lines) — already attached.
+  - `pgen_trace_email_basic.log` — capture if requested by PGEN side.
+
+  ## Artifact bundle contents (already in `artifacts/PGEN-RGX-0073/`)
+
+  Required by protocol §1-§5 + §D:
+
+  - `pgen_contract.json`                 — pretty-printed `parser_embedding_api_contract()` JSON (per §A recommendation + §5)
+  - `pgen_parse_outcomes/<name>.json`    — one `parse_grammar_profile_named` outcome per pattern (per §5)
+  - `email_basic_ast.json`               — pretty-printed AST dump (per §A recommendation; size observation in §D)
+  - `pgen_trace_email_basic.log`         — `PGEN_TRACE_VERBOSITY=debug` trace from `parseability_probe --trace` (7.1 MB, 54k lines)
+  - `probe_input/<name>.txt`             — one input file per pattern, exactly as parsed (no edits/paraphrasing per §3)
+
+  Measurement evidence (per §D):
+
+  - `rgx_compile_phase_split.txt`        — full RGX-side measurement output, 1000 samples (median + min/p50/mean/p99/max distributions)
+  - `pcre2_compile_baseline.txt`         — PCRE2-10.46 baseline output (8 patterns, 10000-batch)
+  - `pcre2_compile_baseline.c`           — bench source (committed for reproducibility)
+  - `patterns.tsv`                       — name / pattern table for the 8 inputs
+  - `contract_metadata.txt`              — readable summary of the contract (versions, profile, surface)
+  - `probe_timing.md`                    — `/usr/bin/time` wall-clock for `parseability_probe` invocations (binary-startup-dominated; included for completeness)
+
+impact: |
+  ## Direct impact on RGX
+
+  RGX's `Regex::compile` is currently 1083-1971x slower than PCRE2
+  on the standard bench corpus (`target/benchmark-trends/latest.md`
+  rows for `compile`). Phase-splitting (this report) shows that
+  reducing the post-PGEN work to *zero* would only buy a 1.2-1.5x
+  total-compile speedup, leaving RGX 700-1500x slower than PCRE2.
+  This makes any "<5x of PCRE2 compile" target unreachable by
+  RGX-side work alone.
+
+  Concretely affected RGX surfaces:
+
+  - **A8 crate publishing readiness** — the user-facing publish
+    blockers tracked in `ROADMAP.md` § Tier-2 and `docs/BACKLOG.md`
+    § A8. If `cargo install rgx-cli` users hit ~1ms compile on
+    every pattern, the experience is materially worse than `grep`.
+  - **One-shot CLI invocations** (`rgx 'pattern' input` style) —
+    the entire ~1ms is paid on every CLI call. PCRE2-backed grep
+    variants pay ~1µs.
+  - **Compilation cache hit-rate-dependent workloads** — RGX has a
+    `RegexCache` (B3, shipped) but the *first* compile cost is
+    unaffected.
+  - **Long-tail variance** — `capture_groups` p99/p50 ratio is
+    3.1× and max/p50 ratio is 13.1×; this implies a pathological
+    branch in PGEN's parse path, not just steady-state slowness.
+
+  ## Why it lands as a PGEN issue, not an RGX one
+
+  RGX's `CLAUDE.md` codifies a hard rule: `PGEN is the sole parser.
+  No builtin parser fallback.` Adding a fast-path inside RGX would
+  violate that rule and create a second source of regex-grammar
+  truth (correctness risk: two parsers that disagree on edge
+  cases). The accuracy-preserving fix space is therefore entirely
+  on the PGEN side:
+    1. Profile-guided perf work on PGEN's regex-grammar parse hot
+       path (the goal of this report).
+    2. AST-shape compaction (the 60KB-AST observation suggests
+       intermediate nodes that aren't being flattened).
+    3. Allocation reduction in the parse loop (the long-tail
+       p99/max suggests allocator pressure).
+    4. Specialised codegen for "leaf grammars" like regex (a
+       larger PGEN-side architectural change — out of scope for
+       this report, mentioned only as a reference for what a 10x
+       jump would look like).
+
+  Per the same rule, the 8 RGX-side techniques surveyed in
+  `ROADMAP.md` § "Performance: close the PCRE2 compile-time gap to
+  <5x" remain valid follow-up work even after this PGEN issue is
+  resolved — they keep the RGX-side share of total compile from
+  growing back up to dominance once PGEN improves.
+
+  ## Why this is **not** a correctness issue
+
+  - PGEN's parse output is correct on every pattern measured.
+    AST dumps match RGX's expectations; the PCRE2 conformance
+    ratchet is unaffected (`pass=12709 / fail=101 / panic=0 /
+    skip=0` at RGX commit c3104ae, captured today after the
+    measurement run).
+  - RGX's existing 1,077 lib tests + 30 cli tests all green at
+    measurement time.
+  - This is a pure **wall-clock** issue under bug class
+    "pathological performance or resource usage".
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Resolution criteria (any one):
+    1. **Primary**: PGEN regex-grammar parse median drops to
+       <50µs across the 8-pattern benchmark — that's a 8-50x
+       PGEN-side speedup, which would put PGEN at ~10-15% of
+       RGX's compile budget and make the rest of the budget
+       attackable by RGX-side techniques.
+    2. **Acceptable interim**: PGEN regex-grammar parse median
+       drops to <200µs (a 2-12x PGEN-side speedup). Would make
+       RGX-PCRE2 compile gap tractable to ~50-100x rather than
+       1000x+.
+    3. **Diagnostic outcome**: PGEN team determines the
+       general-purpose EBNF-driven architecture cannot reach
+       the targets above without specialised codegen, in which
+       case this issue is closed with a forward reference to
+       the specialised-codegen project (currently hypothetical).
+
+    Verification: re-run the bundle in
+    `artifacts/PGEN-RGX-0073/` against the new PGEN release
+    pin, attach the new measurement output here, and update
+    `RUST_CODEBASE_ANALYSIS.md` § perf section + ROADMAP entry.

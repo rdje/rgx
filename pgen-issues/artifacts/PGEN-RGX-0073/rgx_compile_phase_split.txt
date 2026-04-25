@@ -1,0 +1,45 @@
+warning: `rgx-core` (lib) generated 34 warnings (run `cargo fix --lib -p rgx-core` to apply 24 suggestions)
+warning: `pgen` (lib) generated 1935 warnings (run `cargo fix --lib -p pgen` to apply 1446 suggestions)
+    Finished `release` profile [optimized] target(s) in 1m 31s
+     Running `target/release/examples/compile_phase_split`
+# Compile-phase split — median over 1000 samples (after 50 warmup)
+
+Phases (timed individually):
+  - PGEN parse        — `parsing::parse_pattern`
+  - compile_ast       — `Compiler::new().compile_ast(ast)`
+                          (assignment passes + lower + bytecode + classifier + C2 NFAs)
+  - Engine::new       — DFA caches (×3) + JIT codegen
+  - full Regex::compile — independent end-to-end measurement (control)
+
+pattern                   pgen (ns)     ast (ns)  engine (ns) phase-sum (ns) |  full (ns)    pgen/full   ast/full    engine/full
+---------------------- ------------ ------------ ------------ -------------- | ---------- ------------ ---------- --------------
+literal_simple               405875         3459       160542         569876 |     572000        71.0%       0.6%          28.1%
+digit_sequence               813042         9541       410667        1233250 |    1237250        65.7%       0.8%          33.2%
+character_class             2334208        19209       469791        2823208 |    2820042        82.8%       0.7%          16.7%
+alternation                  987667         2041          125         989833 |     990875        99.7%       0.2%           0.0%
+capture_groups              1468666        11000       506292        1985958 |    1994667        73.6%       0.6%          25.4%
+url_simple                   884000        30750       432250        1347000 |    1344834        65.7%       2.3%          32.1%
+email_basic                 1093042        12708       461917        1567667 |    1568500        69.7%       0.8%          29.4%
+anchor_complex              2486375        18167         3167        2507709 |    2514500        98.9%       0.7%           0.1%
+
+# PGEN parse-time distribution (per-pattern)
+
+pattern                       min        p50       mean        p99        max    samples
+---------------------- ---------- ---------- ---------- ---------- ---------- ----------
+literal_simple             379458     407958     413249     516417     649708       1000
+digit_sequence             769666     819167     826375     959542    1206833       1000
+character_class           2220959    2350167    2364330    2653625    2793250       1000
+alternation                944875    1018292    1029463    1213208    1425542       1000
+capture_groups            1397375    1561041    1867971    4901416   20520166       1000
+url_simple                 911459    1448417    1969331    6394958    9053875       1000
+email_basic               1093291    1168000    1183729    1356000    1512833       1000
+anchor_complex            2577708    2702958    2723230    3009833    3192959       1000
+
+Notes:
+  - phase-sum vs full: the gap is timer overhead and any work the
+    full-compile path does that the phase-by-phase path doesn't
+    (e.g. unicode-name-escape rewriting, error wrapping).
+  - Decision rule: if PGEN >50% of `full Regex::compile`, the
+    achievable RGX-vs-PCRE2 compile gap is bounded by PGEN's own
+    parse speed and a PGEN-side fix is needed (per CLAUDE.md
+    `PGEN is the sole parser` rule, the fix lands in PGEN, not RGX).

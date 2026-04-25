@@ -113,6 +113,52 @@ Live forward-looking tracker for rgx.
 
 ## Next (near-term) — continued
 
+### Performance: close the PCRE2 compile-time gap to <5x
+- Status: `planned 2026-04-25`
+- Goal: reduce the `Regex::compile` gap from ~1000-2000x slower to **<5x** of PCRE2 (PCRE2 baseline ~300-700ns; RGX target ~1.5-3.5µs from current ~1-2ms). Accuracy-preserving — no semantic changes, no PGEN bypass, no behavioural drift. The shipped fix-set must keep 100% of the test suite green and the PCRE2 conformance ratchet unchanged.
+- Context: every technique below is mechanical / refactoring, not algorithmic. The eager construction work in `Engine::new` (4 NFAs, byte-class map, classifier, 3 DFA caches, optional JIT codegen) is the dominant cost — most patterns use only a subset of those artifacts on any given match. Source: surveyed 2026-04-25; the "within 5x" target was confirmed acceptable by the user as a realistic intermediate milestone before any compile-time-driven UX changes.
+- Bench reference: see `target/benchmark-trends/latest.md` — `compile literal_simple` 1083x slower, `compile email_basic` 1956x slower, `compile capture_groups` 1971x slower. PCRE2 is the column to close against.
+
+#### Techniques in priority order
+
+1. **Lazy artifact construction in `Engine::new`** — `speed`, ordered first because it's likely the single biggest win.
+   - **Win in what sense**: median compile latency on every pattern, not just specific shapes. Estimated **5-10x reduction** alone. Today `Engine::new` eagerly builds: forward-anchored + forward-unanchored + reverse-anchored + reverse-unanchored NFAs, the byte-class map, the classifier verdict, `c2_dfa` (anchored), `c2_forward_unanchored_dfa`, `c2_reverse_dfa`, and (when JIT-eligible) the Cranelift-codegened `JitProgram`. Most patterns use one or two of those on any given `find_first` / `find_all` / `is_match` call.
+   - **How**: wrap each artifact in `OnceLock<T>` (std::sync as of 1.95) and build on first access from the dispatch helper. The construction logic is already isolated in `build_dfa_if_eligible`, `build_forward_unanchored_dfa_if_eligible`, `build_reverse_dfa_if_eligible`, `build_jit_program_if_eligible` — wrap their call sites, don't move them. First match pays the deferred cost; subsequent matches are bit-identical to today.
+   - **Risk**: thread-safety on the `OnceLock` initialisers; needs the same `Send`/`Sync` audit the existing `Mutex<LazyDfa>` already passed.
+
+2. **Skip artifacts the dispatch path provably can't use** — `speed`, paired with #1.
+   - **Win in what sense**: 1.5-3x further reduction on top of #1 for patterns that exit the C2/JIT eligibility check. Today `Engine::new` runs `is_c2_dfa_eligible(ast)` and `has_top_level_alternation(ast)` checks but still builds the byte-class map and all four NFAs. For patterns that fail these checks (top-level alternation, lookaround, captures with backrefs, lazy quantifiers, etc.) all of that work is dead code — those patterns will run on the backtracking VM regardless.
+   - **How**: short-circuit `Engine::new` early when `is_c2_dispatch_eligible(ast)` returns false. Build only the bytecode `Program` and the existing `RegexVM`. Skip the byte-class map, NFAs, DFAs, JIT entirely. Already covered structurally by #1's lazy approach but worth an explicit early-exit so the `OnceLock`s never even fire.
+
+3. **Defer JIT to second match call** — `speed`, targets one-shot CLI workloads.
+   - **Win in what sense**: variable but big for `rgx "pat" "txt"` style invocations. Cranelift codegen takes meaningful time (a few hundred µs to a few ms depending on pattern complexity); for one-shot matches the codegen runs once and the JIT'd code runs once, so the codegen is pure overhead. Long-running services that match the same pattern repeatedly recoup the codegen on the first or second call and are unaffected after.
+   - **How**: gate JIT codegen behind a `match_count >= JIT_WARMUP_THRESHOLD` (likely 1 — codegen on second call). Until then, use the existing C2/Pike-VM/backtracking-VM dispatch. The JIT'd path is already a 4-tier fallback so removing it from the first-call hot path is cosmetic.
+   - **Note**: this could be ungated by an opt-in `RegexBuilder::eager_jit()` for callers who explicitly want zero per-call latency variance.
+
+4. **Allocation cleanup in `compiler.rs` + `vm.rs` compile path** — `speed`, long-tail.
+   - **Win in what sense**: estimated 1.2-2x compile-time reduction depending on how aggressive the cleanup. RGX's compile pipeline allocates heavily: many `Vec::push` loops without `with_capacity`, `HashMap` instead of small fixed maps, `String` where `&str` would suffice, `Box::new` on hot paths. Each allocation is a malloc; on micro-benchmarks of compile, they accumulate.
+   - **How**: profile-guided. `cargo flamegraph -p rgx-bench --bench throughput -- compile_*` to identify the hottest allocation sites. Replace `Vec` with `SmallVec` where the upper bound is small (e.g., capture-group counts), pre-size `Vec::with_capacity` where the count is known, intern repeated `String`s, use arena allocators (`bumpalo` is in the dep tree) for the AST construction phase if it's a hot site.
+   - **Risk**: low — pure refactoring, covered by the existing 1,077 lib tests + PCRE2 conformance ratchet.
+
+5. **Trivial-pattern short-circuit AFTER PGEN parses** — `speed`, targets the very-simplest patterns.
+   - **Win in what sense**: small absolute time savings on patterns like `"hello"`, `\d`, `\w+` — the kind of patterns that motivate the `literal_finder` fast path on the existing VM. Not a big win in median, but closes the worst case for one-line CLI usage.
+   - **How**: after PGEN produces the AST, run a cheap classifier (`is_pure_literal`, `is_single_char_class`, etc.). For trivially-recognisable shapes, skip NFA/DFA/JIT construction entirely and stash a compact representation that only holds what `find_first_via_literal` / `find_first_via_char_class` need. **Crucially**: PGEN still parses; this only short-circuits *downstream* work. CLAUDE.md's "PGEN is the sole parser" rule is preserved.
+   - **Risk**: medium — needs careful enumeration of "trivial" so an exotic semantic flag (e.g., `(?i)` case-insensitive) doesn't slip through and produce wrong matches. The trivial-classifier MUST be conservative; when in doubt, fall through to the full pipeline.
+
+6. **Already shipped — `RegexCache` (B3)** — bookkeeping note, not new work.
+   - The LRU compilation cache means repeated `Regex::compile(same_pattern)` calls return a cached `Engine` after the first hit. First compile still pays the cost; second-and-subsequent are O(1). Worth confirming via the cache hit/miss telemetry that real workloads benefit. Not on this critical path because the goal here is to reduce the *first* compile, not amortise.
+
+#### Validation plan
+
+- Bench delta: re-run `cargo bench -p rgx-bench --bench throughput -- compile` after each technique lands; record in `target/benchmark-trends/`.
+- Test gate: 1,077 lib tests, 30 cli tests, PCRE2 conformance ratchet (`pass=12709`, `fail=101`).
+- Regression check: ensure no `find_first` / `find_all` benchmark regresses by more than 5% against the current label (the lazy-init techniques can add first-call latency that shows up as a runtime regression in some benchmarks if measured carelessly).
+
+#### Out of scope for this entry
+
+- **Replacing PGEN with a hand-written regex parser** — would violate CLAUDE.md's "PGEN is the sole parser. No builtin parser fallback." policy. Ruled out by hard project rule.
+- **Altering AST simplification semantics** — any AST rewrite that could change match results is out, even if it would speed compile up.
+
 ### Performance: close the PCRE2 gap to <10x
 - Status: `planned`
 - Goal: reduce the matching speed gap from ~20-60x to <10x for common patterns.
@@ -123,6 +169,43 @@ Live forward-looking tracker for rgx.
   - opcode fusion for common sequences (Char+Char → string compare)
   - reduce per-opcode bounds checking overhead
 - Design: `docs/HOST_INTEGRATION_ARCHITECTURE.md` Performance target section
+
+### SOTA algorithmic gaps not on the original C1/C2 roadmap
+- Status: `surveyed 2026-04-25, not yet planned`
+- Context: as of 2026-04-24 every algorithmic improvement that was on the planned C1+C2 roadmap is shipped (NFA/DFA hybrid, JIT, Pike-VM, prefix scanner for byte classes, reverse-DFA pipeline for find_first/find_all, DFA negated-class boundary fix). The remaining benchmark gaps vs PCRE2 are not closable by constant-factor cleanup alone — they reflect SOTA algorithmic techniques that exist in RE2 / Hyperscan / PCRE2-JIT and aren't yet in RGX. This section captures those gaps so they're visible and rankable.
+- "Win in what sense" — each item below is graded by what it actually buys, measured against the current bench numbers in `target/benchmark-trends/latest.md` (RGX vs PCRE2 on `find_first` 10K: literal_simple 6.26x slower, email_basic 3.73x slower, capture_groups 1.92x faster). "Speed win" = expected reduction in median wall-clock latency on a target pattern class. "Memory win" = reduction in DFA cache pressure / steady-state RSS. None of these add features — they're pure perf.
+
+#### Likely-big wins (order-of-magnitude on a target pattern class)
+
+- **Inner-literal prefilter (RE2/Hyperscan style)** — `speed`, targets `find_first email_basic` (currently 3.73x slower) and similar.
+  - **Win in what sense**: median latency on patterns with required interior literals. For `\b\w+@\w+\.\w+\b` the `@` is a required byte anywhere in any match. Today RGX runs the DFA over the entire input. With this, RGX would `memchr('@')` and only run the DFA at those candidate positions — one DFA walk per `@` instead of one per byte. Expected 3-10x speedup on email-style patterns; closes most of the email_basic gap.
+  - **How**: extract required-literal sets from the AST during compile; pick the rarest as the prefilter (rarity estimated from byte-class entropy or measured). Reference: RE2's `Prog::PrefixAccel`, `regex-automata`'s prefilter API.
+- **Aho-Corasick for top-level literal alternation** — `speed`, targets patterns like `cat|dog|bird|fish`.
+  - **Win in what sense**: throughput on multi-literal alternations against large inputs. Today these patterns hit `has_top_level_alternation` and fall out of C2 dispatch entirely, landing on the backtracking VM at O(n × m) (n=input, m=alternatives). AC-automaton matches all m literals in a single O(n) sweep. For log-grep-style workloads (`ERROR|WARN|FATAL` over GB of logs) this is order-of-magnitude.
+  - **How**: detect "top-level alternation of pure literals" at compile, build AC automaton, dispatch through it instead of falling back. Existing crate `aho-corasick` is a known good fit and already in the ecosystem.
+- **SIMD-vectorized byte-class lookup** — `speed`, generic across all DFA-eligible patterns.
+  - **Win in what sense**: throughput on the DFA hot loop and the PrefixScanner. SIMD compares 16-64 bytes per cycle vs RGX's scalar byte-by-byte. PCRE2-JIT uses NEON on aarch64 / SSE/AVX on x86 in exactly these spots. Expected 2-4x on DFA-bound workloads. No semantic change.
+  - **How**: vectorize `PrefixFilter::Digit/Word/Space` and the byte-class lookup in `LazyDfa::transition`'s hot path. Use `std::simd` (stable in 1.95) or `wide` (already in the dep tree).
+
+#### Medium wins (steady-state speedup, not order-of-magnitude)
+
+- **Tagged DFA (Laurikari TDFA)** — `speed`, targets capture-heavy patterns.
+  - **Win in what sense**: eliminates the Pike-VM second pass. Today the reverse-DFA pipeline finds the span in three DFA walks then runs Pike-VM bounded over `[start, end]` to recover captures. A tagged DFA tracks capture positions inline during the forward walk — no second pass. Expected 1.5-2x on capturing patterns. Note: RE2 uses TDFAs partially; full TDFA support is non-trivial to retrofit onto an existing lazy DFA.
+- **Multi-byte literal prefilter via `memmem`** — `speed`, targets `find_first` on patterns with multi-byte literal prefixes.
+  - **Win in what sense**: candidate density. `c2_prefix_byte` is one byte; for `https://` we currently `memchr('h')` over the input. Switching to `memmem("https://")` (Boyer-Moore-Horspool internally) drops candidate count from "every 'h'" to "every actual literal occurrence" — typically 10-100x fewer candidates on real inputs. Could explain a sizeable chunk of the `literal_simple find_first` 6.26x gap.
+  - **How**: extend `c2_prefix_byte: Option<u8>` to `c2_prefix_literal: Option<Vec<u8>>`; pick `memmem::Finder` over `memchr` when length > 1. The VM already has `literal_finder: Option<memmem::Finder>` for the existing-VM path; the work is plumbing the same hint into the C2 dispatch.
+- **DFA minimization** — `memory + speed (cache pressure)`, targets complex patterns.
+  - **Win in what sense**: smaller cache, fewer cache-exhaustion fallbacks to Pike-VM, less RAM. RGX's lazy DFA caches every reached subset; equivalent states are not merged. Hopcroft minimization (or partition refinement on the lazy cache) would shrink state count, often 2-5x for medium-complexity patterns.
+- **Materialized DFA for small patterns** — `speed`, targets steady-state for small DFAs.
+  - **Win in what sense**: eliminates lazy-allocation overhead. Below a threshold (say, 64 states), build the full DFA upfront so the steady-state walk has zero allocation and zero locking overhead. The current lazy cache uses `Mutex<LazyDfa>` and per-byte cache lookup; a fully-materialized small DFA can be a flat lock-free array.
+
+#### Smaller / unclear wins
+
+- **Glushkov position-automaton** instead of Thompson — alternative NFA construction with smaller state count for some patterns. Whether this matters depends on input pattern shapes; needs measurement.
+- **Anchored fast-paths** — when `^pattern$` is detected, skip the unanchored-prefix construction entirely. Need to verify whether RGX already does this; if not, mechanical fix.
+- **Suffix-anchored backward scanning** — for `pattern\z`, match backward from end of input. Niche but easy when reverse-anchored DFA already exists.
+
+- Source: surveyed 2026-04-25 in conversation with the user after the reverse-DFA pipeline track closed; conversation context noted that without these, the published benchmark gaps (especially `email_basic` and `literal_simple find_first`) cannot be closed by code-tidying alone.
 
 ### Host integration Layer 6: File-Backed Matching
 - Status: `done` (core API); `tail_file` and CLI integration planned as follow-up

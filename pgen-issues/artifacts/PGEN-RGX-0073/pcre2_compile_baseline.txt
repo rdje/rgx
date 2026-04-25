@@ -1,0 +1,8 @@
+literal_simple                142 ns/compile  (10000-compile batch took 1420000 ns)
+digit_sequence                268 ns/compile  (10000-compile batch took 2682000 ns)
+character_class               890 ns/compile  (10000-compile batch took 8902000 ns)
+alternation                   443 ns/compile  (10000-compile batch took 4436000 ns)
+capture_groups                615 ns/compile  (10000-compile batch took 6159000 ns)
+url_simple                    352 ns/compile  (10000-compile batch took 3529000 ns)
+email_basic                   331 ns/compile  (10000-compile batch took 3311000 ns)
+anchor_complex                714 ns/compile  (10000-compile batch took 7148000 ns)
