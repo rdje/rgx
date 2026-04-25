@@ -95,6 +95,25 @@ pub struct CompiledC2Program {
     /// nested quantifiers benefit from Pike-VM's O(nm) bound and
     /// the per-trial overhead is justified.
     pub c2_has_nested_quantifier: bool,
+    /// Multi-byte literal prefix — the longest contiguous run of
+    /// fixed literal bytes at the start of any match. Distinct from
+    /// [`Self::c2_prefix_byte`] (one byte) — this is the **string**
+    /// version, suitable for SIMD `memchr::memmem::Finder` instead
+    /// of single-byte `memchr::memchr`. Vastly more selective on
+    /// patterns like `https?://\S+` (`Some("http")` vs `Some(b'h')`)
+    /// and `///foo bar` (whole literal vs first byte).
+    ///
+    /// `None` when the pattern has no fixed leading literal at all
+    /// or when the leading literal is exactly one byte (in which
+    /// case [`Self::c2_prefix_byte`] is the more efficient form —
+    /// memchr is faster than memmem for single-byte needles).
+    ///
+    /// Computed by [`leading_literal_bytes`] from the top-level AST,
+    /// walking past zero-width nodes (anchors, word boundaries) and
+    /// collecting consecutive `Char` literals until any non-literal
+    /// node breaks the run.
+    pub c2_prefix_literal: Option<Vec<u8>>,
+
     /// Required interior single-byte literal — a byte that **must**
     /// appear in any match span of this pattern. Distinct from
     /// [`Self::c2_prefix_byte`] (the byte at the START of the match);
@@ -153,6 +172,22 @@ impl CompiledC2Program {
         // scan acceleration in dispatch.
         let c2_prefix_byte = first_literal_byte(ast);
 
+        // Multi-byte literal prefix for memmem-based scan acceleration
+        // — strictly more selective than `c2_prefix_byte` when the
+        // leading literal is more than one byte (e.g. `http` for
+        // `https?://`). Stored as `None` when the leading run is
+        // <= 1 byte to keep the dispatch path on the cheaper memchr
+        // hot path; otherwise gives the dispatch a `Vec<u8>` it can
+        // wrap in a `memmem::Finder` per-call.
+        let c2_prefix_literal = {
+            let bytes = leading_literal_bytes(ast);
+            if bytes.len() >= 2 {
+                Some(bytes)
+            } else {
+                None
+            }
+        };
+
         // C2 step 8: precompute the nested-quantifier dispatch
         // heuristic. Patterns with nested quantifiers route through
         // Pike-VM (DFA-ineligible case) because their backtracking
@@ -175,6 +210,7 @@ impl CompiledC2Program {
             reverse_unanchored,
             num_capture_groups,
             c2_prefix_byte,
+            c2_prefix_literal,
             c2_has_nested_quantifier,
             c2_required_inner_byte,
         }
@@ -600,6 +636,103 @@ pub fn first_literal_byte(ast: &Regex) -> Option<u8> {
         }
         _ => None,
     }
+}
+
+/// Returns the longest fixed-byte literal prefix of `ast` —
+/// the contiguous run of byte literals at the start of any match.
+///
+/// Differs from [`first_literal_byte`] (which gives just the first
+/// byte) by walking the entire run: for `https?://\S+` returns
+/// `b"http"` (stops before optional `s?`); for `///foo bar` returns
+/// `b"///foo bar"`; for `\d+` returns `b""`.
+///
+/// Walks past zero-width nodes (anchors, word boundaries) at the
+/// start of a `Sequence` until it finds a non-literal node, then
+/// collects consecutive ASCII `Char` nodes until any non-literal
+/// node breaks the run. Multi-byte UTF-8 codepoints are NOT
+/// included — the leading bytes alone aren't a valid memmem target
+/// (would produce false positives where a continuation byte from a
+/// different codepoint matches the leading byte).
+///
+/// Returns an empty `Vec` when no fixed leading literal exists.
+#[must_use]
+pub fn leading_literal_bytes(ast: &Regex) -> Vec<u8> {
+    let mut out = Vec::new();
+    collect_leading_literal_bytes(ast, &mut out);
+    out
+}
+
+/// Inner walker for [`leading_literal_bytes`]. Appends bytes to
+/// `out` for as long as the prefix is fixed-byte-literal; stops at
+/// the first non-literal node. Returns `true` iff `ast` consumes at
+/// least one byte (literal or not) — used by the `Sequence` walker
+/// to know when to stop after a non-literal.
+fn collect_leading_literal_bytes(ast: &Regex, out: &mut Vec<u8>) -> ConsumesBytes {
+    match ast {
+        Regex::Char(c) | Regex::WhitespaceLiteral(c) => {
+            if c.is_ascii() {
+                out.push(*c as u8);
+            }
+            ConsumesBytes::Yes
+        }
+        Regex::Sequence(items) => {
+            for item in items {
+                if is_zero_width_node(item) {
+                    continue;
+                }
+                let consumed = collect_leading_literal_bytes(item, out);
+                if matches!(consumed, ConsumesBytes::Yes) {
+                    // The item consumed a byte. If it appended
+                    // literal bytes, our `out` buffer grew; we
+                    // continue walking to extend the run. If it
+                    // consumed but appended nothing (a non-literal
+                    // node like `\d` or `\w+`), the run ends here.
+                    //
+                    // Distinguish via the `out`'s growth: if the
+                    // recursive call signaled `Yes` but `out`
+                    // didn't grow, this item was a non-literal
+                    // byte-consumer (e.g. `\d`, `[abc]`, `.`).
+                    // Either way the run can't extend through it.
+                    let was_literal_extension =
+                        matches!(item, Regex::Char(_) | Regex::WhitespaceLiteral(_));
+                    if !was_literal_extension {
+                        return ConsumesBytes::Yes;
+                    }
+                } else {
+                    // Item didn't consume (was zero-width). Continue.
+                }
+            }
+            ConsumesBytes::Yes
+        }
+        Regex::Group { kind, expr, .. } => match kind {
+            crate::ast::GroupKind::Capturing | crate::ast::GroupKind::NonCapturing => {
+                collect_leading_literal_bytes(expr, out)
+            }
+            _ => ConsumesBytes::Yes,
+        },
+        Regex::FlagGroup { expr, .. } => collect_leading_literal_bytes(expr, out),
+        // Quantifier with min >= 1 contributes its leading literal byte
+        // ONCE — but the tail of the quantifier might or might not be
+        // there, so we can't extend past the first iteration of the
+        // body. Treat the whole quantifier as "consumed bytes, prefix
+        // ends here" (don't recurse — the recursion would over-extend
+        // for things like `a+` where we want to capture `a` but stop).
+        //
+        // For the simple case of `a+` we'd want to keep `a` as a
+        // single-byte hint, but since `c2_prefix_byte` already covers
+        // single bytes, we just stop the multi-byte run and let the
+        // single-byte path handle this case via `first_literal_byte`.
+        Regex::Quantified { .. } => ConsumesBytes::Yes,
+        _ => ConsumesBytes::Yes,
+    }
+}
+
+/// Discriminator for [`collect_leading_literal_bytes`]. Used to
+/// distinguish "consumed bytes" from "zero-width" so the `Sequence`
+/// walker knows when to terminate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsumesBytes {
+    Yes,
 }
 
 /// Returns `true` if `ast` is a zero-width node — consumes no input
@@ -1161,6 +1294,70 @@ mod dispatch_tests {
         // Extractor should return `@` not the leading byte of `α`.
         let ast = Regex::Sequence(vec![lit('α'), lit('@'), lit('β')]);
         assert_eq!(required_inner_byte(&ast), Some(b'@'));
+    }
+
+    // ============================================================
+    // leading_literal_bytes (multi-byte memmem prefix extractor)
+    // ============================================================
+
+    #[test]
+    fn leading_literal_bytes_pure_literal() {
+        let ast = Regex::Sequence(vec![lit('h'), lit('i')]);
+        assert_eq!(leading_literal_bytes(&ast), b"hi");
+    }
+
+    #[test]
+    fn leading_literal_bytes_stops_before_class() {
+        // `abc\d+` — the `\d` is a class, so the literal run is `abc`.
+        let ast = Regex::Sequence(vec![
+            lit('a'),
+            lit('b'),
+            lit('c'),
+            Regex::Quantified {
+                expr: Box::new(Regex::CharClass(crate::ast::CharClass::Digit {
+                    negated: false,
+                })),
+                quantifier: crate::ast::Quantifier::OneOrMore { lazy: false },
+            },
+        ]);
+        assert_eq!(leading_literal_bytes(&ast), b"abc");
+    }
+
+    #[test]
+    fn leading_literal_bytes_stops_before_optional_quantifier() {
+        // `https?://\S+` — the run is `http`, stops before optional `s?`.
+        let prog = CompiledC2Program::try_compile(r"https?://\S+").expect("compiles");
+        assert_eq!(prog.c2_prefix_literal.as_deref(), Some(b"http".as_ref()));
+    }
+
+    #[test]
+    fn leading_literal_bytes_walks_past_anchors() {
+        // `^http` — anchor is zero-width, run starts at `http`.
+        let prog = CompiledC2Program::try_compile(r"^http").expect("compiles");
+        assert_eq!(prog.c2_prefix_literal.as_deref(), Some(b"http".as_ref()));
+    }
+
+    #[test]
+    fn leading_literal_bytes_none_for_class_pattern() {
+        // `\d{3}-\d+` — leading is a class, no literal prefix.
+        let prog = CompiledC2Program::try_compile(r"\d{3}-\d+").expect("compiles");
+        assert_eq!(prog.c2_prefix_literal, None);
+    }
+
+    #[test]
+    fn leading_literal_bytes_none_for_single_byte_prefix() {
+        // `t` (single byte) — c2_prefix_byte covers it more efficiently
+        // than memmem; the multi-byte field stays None.
+        let prog = CompiledC2Program::try_compile(r"t\d+").expect("compiles");
+        assert_eq!(prog.c2_prefix_byte, Some(b't'));
+        assert_eq!(prog.c2_prefix_literal, None);
+    }
+
+    #[test]
+    fn leading_literal_bytes_skips_non_ascii_codepoints() {
+        // `αβγ` — multi-byte UTF-8. ASCII-only run is empty.
+        let ast = Regex::Sequence(vec![lit('α'), lit('β'), lit('γ')]);
+        assert_eq!(leading_literal_bytes(&ast), b"");
     }
 }
 

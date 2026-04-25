@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-25 — Perf: multi-byte memmem prefilter (10.8x speedup on url_simple find_first)
+
+- **What**: extends `c2_prefix_byte: Option<u8>` (single byte, memchr) with `c2_prefix_literal: Option<Vec<u8>>` (multi-byte, memmem). New `leading_literal_bytes(ast)` extractor walks past zero-width nodes and collects consecutive ASCII `Char` literals until a non-literal node breaks the run. PrefixScanner gained a `literal_finder` field that takes priority when a multi-byte hint is available.
+- **Measured win** (release, `https?://\S+` on 10K with sparse URL matches): find_first **3,011 ns/iter** down from **32,483 ns/iter** = **10.8x speedup**. Closes the gap to PCRE2 from ~167x slower to ~15x slower on this pattern.
+- **Why this works**: for `https?://\S+`, memchr looks for any `h` (~1 per 13 ASCII bytes); memmem looks for `http` (~1 per real URL). 10-100x fewer candidate positions to run the DFA at. Bench measurement confirms roughly that gain.
+- **Out of scope**: patterns without leading literals (`email_basic`'s `\b\w+@\w+\.\w+\b` is still a no-prefix case — needs full v2 inner-literal prefilter for the FOUND case). Single-byte prefixes stay on the cheaper memchr path (memmem on 1-byte needle is slower by a small constant).
+- **Deltas**: 1108 → 1118 lib tests (+10 — 7 unit + 3 public-API). 30 cli unchanged. fmt + clippy clean. **PCRE2 conformance ratchet preserved at 12,709 / 101**.
+- **Next concrete actions**: SOTA items remaining — DFA minimization, materialized DFA for small patterns, SIMD byte-class lookup, tagged DFA. Or v2 inner-literal prefilter (FOUND-case email_basic 3.7x gap closer; multi-day).
+
 ### 2026-04-25 — Perf: Aho-Corasick dispatch for top-level literal alternation (closes a SOTA gap)
 
 - **What**: shipped the SOTA "Aho-Corasick for literal alternation" item from the ROADMAP. New `rgx-core/src/ac.rs` module: AST extractor + AC builder. `Program` carries `ac_literal_set: Option<AhoCorasick>`. Compiler builds it at compile time. Engine has new `try_ac_*` methods. `Regex::is_match` / `find_first` / `find_all` dispatch chain extended from 4-tier to 5-tier: **AC → DFA → Pike-VM → JIT → interpreter**. AC configured with `MatchKind::LeftmostFirst` so alternation semantics match PCRE2's first-branch-wins-on-tie rule.

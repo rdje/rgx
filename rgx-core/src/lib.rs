@@ -9002,6 +9002,39 @@ mod tests {
         assert_eq!(&"abc 42 xyz"[m.start..m.end], "42");
     }
 
+    // === Multi-byte memmem prefilter ===
+    //
+    // For patterns whose leading run is a multi-byte literal (e.g.
+    // `http` for `https?://\S+`), the dispatch's PrefixScanner uses
+    // `memchr::memmem::Finder` instead of single-byte `memchr`.
+    // Vastly more selective on real inputs (one `h` per ~13 ASCII
+    // bytes vs one `http` per real URL).
+
+    #[test]
+    fn memmem_prefix_finds_url_match_after_skip() {
+        let re = Regex::compile(r"https?://\S+").unwrap();
+        let text = "lorem ipsum hat hot http://example.com here";
+        let m = re.find_first(text).expect("match");
+        assert_eq!(&text[m.start..m.end], "http://example.com");
+    }
+
+    #[test]
+    fn memmem_prefix_returns_none_on_no_match_input() {
+        // Input contains no `http` substring → memmem returns None,
+        // dispatch returns no-match without running the DFA.
+        let re = Regex::compile(r"https?://\S+").unwrap();
+        assert!(re.find_first("only hat hot here, no urls").is_none());
+    }
+
+    #[test]
+    fn memmem_prefix_finds_all_urls() {
+        let re = Regex::compile(r"https?://\S+").unwrap();
+        let text = "see http://a.com and https://b.com for details";
+        let ms = re.find_all(text);
+        let strs: Vec<&str> = ms.iter().map(|m| &text[m.start..m.end]).collect();
+        assert_eq!(strs, vec!["http://a.com", "https://b.com"]);
+    }
+
     #[test]
     fn pipeline_find_all_reverse_walk_bounded_preserves_non_overlap() {
         // Repeated-pattern regression: without bounding the reverse walk

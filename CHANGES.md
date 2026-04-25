@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-25 - Perf: multi-byte memmem prefilter for non-pure literal-prefix patterns
+
+- Scope: the `c2_prefix_byte: Option<u8>` field on `CompiledC2Program` only captures the FIRST literal byte of a pattern. For `https?://\S+` that's `h`, dispatch memchrs every `h` in the input. PCRE2 (and the existing VM's `literal_finder` for pure-literal patterns) uses memmem over the full leading-literal run, which is vastly more selective on real inputs (one match per actual URL vs one per ~13 ASCII bytes). This commit lifts the same memmem hint into the C2 dispatch path for non-pure patterns.
+- Changes:
+  - `rgx-core/src/c2/program.rs` — new public `leading_literal_bytes(ast)` extractor + private `collect_leading_literal_bytes` walker. Walks past zero-width nodes (anchors, word boundaries) at the start of a `Sequence`, descends into `Capturing`/`NonCapturing` `Group`s and `FlagGroup`s, and collects consecutive ASCII `Char` literals until any non-literal byte-consumer (`CharClass`, `Quantified`, etc.) breaks the run. Multi-byte UTF-8 codepoints are skipped (their leading byte alone isn't a valid memmem target — would produce false-positive matches against continuation bytes from other codepoints). Result stored on `CompiledC2Program.c2_prefix_literal: Option<Vec<u8>>`, populated only when length ≥ 2 (single-byte cases stay on the cheaper memchr path via the existing `c2_prefix_byte`).
+  - `rgx-core/src/engine.rs` — `PrefixScanner` gained a `literal_finder: Option<memchr::memmem::Finder<'a>>` field that takes priority over the existing `PrefixFilter` when a multi-byte hint is available. `PrefixScanner::new` now takes an additional `c2_prefix_literal: Option<&[u8]>` argument; the 8 call sites updated to pass `c2.c2_prefix_literal.as_deref()` (or `None` for the call sites that already passed `None` for the byte hint). `next_candidate` checks `literal_finder` first; SIMD-accelerated Two-Way / BM-Horspool internally.
+- Validation:
+  - 1118 lib tests pass (1108 + 7 unit tests for the extractor + 3 public-API behavioral pins for url-pattern dispatch).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (release build, `https?://\S+` over 10K input with sparse URL matches, 10000-iteration average):
+    - `find_first` — **3,011 ns/iter** (was **32,483 ns/iter** per `target/benchmark-trends/latest.md` row `regex_find_first/rgx_find_first/url_simple`). **10.8x speedup.**
+    - `find_all` — **17,363 ns/iter**.
+    - vs PCRE2's 194 ns: gap closes from ~167x slower to ~15x slower.
+- Notes/impact: doesn't help patterns with no leading literal (`email_basic`'s `\b\w+@\w+\.\w+\b` still has no leading run — that needs full v2 inner-literal prefilter, which is multi-day work). Patterns with single-byte leading literals (`t\d+` etc.) remain on the cheaper `c2_prefix_byte` / memchr path because memmem on a 1-byte needle is slower than memchr by a small constant. The `literal_simple` (`test`) bench was already fast via the existing VM's `literal_finder`; this commit closes the equivalent gap for non-pure patterns with multi-byte prefixes.
+
 ### 2026-04-25 - Perf: Aho-Corasick dispatch for top-level literal alternation
 
 - Scope: implements the SOTA "Aho-Corasick for literal alternation" item from ROADMAP § "Likely-big wins". Patterns like `cat|dog|bird` (top-level alternation of pure literals) were previously excluded from C2 dispatch — `is_c2_dispatch_eligible` returns false because Pike-VM doesn't track `matched_branch_number`. Without an AC fast path they fell through all the way to the backtracking VM, paying O(n × m) per scan position. This commit adds an AC automaton at the front of the dispatch chain, handling the multi-literal case in O(n + m).
