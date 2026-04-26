@@ -648,7 +648,9 @@ impl Engine {
                 );
             }
         }
-        self.pike_captures_at_cached(c2, input, start)
+        // Fallback: scratch unavailable (no c2_program) or mutex poisoned.
+        // Use the per-call alloc path so we never lose correctness.
+        crate::c2::pike::pike_captures_at(c2, input, start)
     }
 
     /// Returns the reverse-anchored lazy DFA for this engine if the

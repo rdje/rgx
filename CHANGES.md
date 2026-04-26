@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf investigation: JIT captures cache (negative result) + small bug fix in `pike_captures_at_cached` fallback
+
+- Scope: post-Pike-VM-scratch samply profiles attributed 47.9% of `email_basic.find_first` and 53.2% of `email_basic.find_all` to `libsystem_malloc`. The hypothesis: `try_jit_find_first` / `try_jit_find_all` / `try_jit_is_match` allocate a fresh `Vec<i64>` captures buffer per call via `new_capture_buffer(num_groups)` — caching it on `Engine` (mirroring the `pike_scratch` pattern) should eliminate that churn. This entry documents what we **investigated and chose not to ship**, plus a small unrelated bug fix found while in the area.
+- Investigation: implemented the cache (`Engine::jit_captures: OnceLock<Mutex<Vec<i64>>>` + `jit_captures_mutex()` helper, all three `try_jit_*` call sites switched). Built `target/profiling/examples/perf_profile_targets`, measured wall-clock + re-profiled with samply.
+  - **samply profile change (cache landed)**: `libsystem_malloc` **completely dropped out of the top-15** for both `email_basic.find_first` and `email_basic.find_all`. Profile became visibly cleaner — leaf hot-paths now reflect actual JIT work (`PrefixScanner::next_candidate` ~3%, `rgx_runtime_word_boundary_test` ~3%, `jit_match_to_result` ~2%, `RawVec::grow_one` ~1.4% for the caller-returned MatchResults Vec).
+  - **Wall-clock change (cache landed)**: `email_basic.find_first` 393 → 388 ns/iter (−1.3%, within noise); `email_basic.find_all` 119,091 → 121,475 ns/iter (+2.0%, within noise). **No real perf gain.**
+  - **Reading**: samply was over-attributing samples to `libsystem_malloc`'s hot tcache path. Small allocations show up at high sample counts because the call graph briefly traverses the allocator, but the actual time spent is below the noise floor of a 3-second wall-clock measurement. Adding a `Mutex<Vec<i64>>` would have introduced a multi-thread serialization point on `Regex::find_*` for a non-improvement on the single-thread baseline.
+  - **Decision**: **reverted** the JIT captures cache. Kept only the small bug fix (below).
+- Changes (kept):
+  - `rgx-core/src/engine.rs` — `pike_captures_at_cached` previously fell through to `self.pike_captures_at_cached(...)` (recursive self-call) when the scratch mutex was poisoned, which would have stack-overflowed. Fixed to call the free function `crate::c2::pike::pike_captures_at(c2, input, start)` instead, preserving correctness in the (extremely rare) poison-recovery path. Added a clarifying comment.
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (no new warnings, only pre-existing).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+- Notes/impact: this is a **negative result that's worth recording** so a future contributor doesn't re-run the same investigation. The samply hot-path tool is invaluable for finding real bottlenecks (the Pike-VM `ThreadSet::new` win was real and wall-clock-measurable at 3-3.6x), but allocator hot-paths can be visually dominant in profiles without being wall-clock dominant — wall-clock measurement is the merge condition, not profile hot-path attribution. The next data-driven perf target should focus on patterns where the malloc symbol is BOTH high in the profile AND the wall-clock matches the alloc rate (e.g. heavy `RawVec::grow_one` paths in find_all results accumulation, or per-match `MatchResult.groups` allocation patterns where the allocator is on the actual critical path).
+
 ### 2026-04-26 - Perf: cache Pike-VM `ThreadSet` on `Engine` (3-3.6x on Pike-dispatched patterns)
 
 - Scope: data-driven follow-up to the samply profiling workflow (`96c3daf`). Profiles showed `pike_captures_at` 90-96% inclusive on `digit_sequence` / `character_class` / `url_simple` `find_first`, with `ThreadSet::new` 13-24% inclusive — Pike-VM allocated a fresh sparse-set scratch buffer at every `PrefixScanner` candidate position. This commit caches the scratch on `Engine` and resets it between calls instead of reallocating.
