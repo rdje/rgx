@@ -68,3 +68,12 @@ strip = "symbols"
 inherits = "release"
 debug = true
 lto = "thin"
+
+# Dedicated profile for `samply` profiling. Release-fast (full LTO,
+# single codegen unit) but keeps symbols and DWARF debuginfo so the
+# sampling profiler can show meaningful function names instead of raw
+# addresses. Use via `cargo build --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"

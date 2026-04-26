@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf: samply profiling workflow + initial hot-path findings
+
+- Scope: per the user's direction, set up systematic `samply` profiling for RGX and use it to identify the next perf lever objectively rather than by inspection. Replaces guess-driven optimisation with data-driven decisions for the remaining perf work.
+- Changes:
+  - `Cargo.toml` — new `[profile.profiling]` that inherits `release` (full LTO, single codegen unit, no overflow checks) but keeps `debug = true` and `strip = "none"` so DWARF debuginfo is available for symbolication. Use via `cargo build --profile profiling`.
+  - `rgx-core/examples/perf_profile_targets.rs` — tight-loop driver for `samply record`. Selects ONE pattern × method via the `RGX_PROFILE_TARGET=<pattern>.<method>` env var (defaults `email_basic.find_first`); supports the 8-pattern bench corpus and `find_first` / `find_all` / `is_match`. Warms up the JIT/DFA caches before sampling, then loops for a fixed wall-clock budget (default 3 s, override via `RGX_PROFILE_DURATION_MS`). Batches inner iterations 256× per time check so timer overhead is <0.001% of the budget.
+  - `scripts/run-samply.sh` — profiling runner. Builds the profiling binary, then records one samply trace per `(pattern, method)` target into `target/samply-profiles/<target>.json.gz`. Default target list covers the slow patterns from the bench corpus; pass arguments to override. Uses `samply record --save-only` for non-interactive operation.
+  - `scripts/samply-hotpaths.py` — hot-path extractor. samply records raw addresses; symbolication happens at `load` time in the UI. This script does its own symbolication via `atos` (macOS) / `addr2line` (Linux) against the rgx binary, then aggregates samples into self-time and inclusive-time top-N rankings per profile. Tags non-rgx-binary addresses with their library name (`libsystem_malloc.dylib::0x...`) so allocator hot paths are visible at a glance.
+- Initial findings (release build, 10K input, 3s/profile):
+  - `email_basic find_first`: **~67% of cycles in `libsystem_malloc`** — allocation is the dominant cost.
+  - `digit_sequence` / `character_class` / `url_simple` `find_first`: **`pike_captures_at` is 90-96% inclusive**. Inside it, **`ThreadSet::new` is 13-24% inclusive** — Pike-VM allocates a fresh sparse-set scratch buffer on every PrefixScanner candidate position. For inputs with many candidates (the typical case for class-prefix patterns), this is the dominant Pike-VM overhead.
+  - `email_basic find_all`: ~50% combined libsystem (malloc family). Allocation pressure scales with match count.
+  - `literal_simple find_first`: 51% in `Regex::find_first` + 43% in `vm.find_first` (literal_finder hot path). 16% in libsystem_malloc — the per-call MatchResult.groups Vec dominates the residual overhead. Already at 18-40 ns/iter so further wins here are diminishing.
+- Validation:
+  - 1118 lib tests pass, 30 cli tests pass (no engine code touched).
+  - `cargo fmt` clean; new files conform.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0** (no engine code changed).
+  - Workflow validated end-to-end: `./scripts/run-samply.sh email_basic.find_first` produces a profile, `./scripts/samply-hotpaths.py target/samply-profiles/email_basic.find_first.json.gz` resolves `rgx_runtime_word_boundary_test`, `rgx_core::engine::PrefixScanner::next_candidate`, `rgx_core::Regex::find_first` etc.
+- Notes/impact: this commit is the **measurement infrastructure**, not a perf change. The actionable next item is concrete and quantified: cache the Pike-VM `ThreadSet` on `Engine` so it's reused across match attempts instead of allocated per-candidate. Expected 15-25% speedup on non-literal patterns (digit_sequence, character_class, url_simple find_first/find_all). That follow-up lands in a separate commit. Profile artifacts (`target/samply-profiles/*.json.gz`) are gitignored under the existing `target/` rule.
+
 ### 2026-04-26 - Perf: extend UTF-8-elimination to position-aware Engine entry points
 
 - Scope: yesterday's `vm_find_first` / `vm_find_all` / `vm_is_match` (`18f521f`) eliminated redundant `from_utf8` validation on the three primary Engine entry points. The five **position-aware** variants (`find_first_at`, `find_all_at`, `is_match_at`, `find_first_partial`, `find_first_suspendable`) still went through `&[u8]` + `from_utf8` even though their public-API callers always pass `&str`-derived bytes. This commit closes that remaining gap so every Engine entry point used from `lib.rs` skips the redundant validation pass.

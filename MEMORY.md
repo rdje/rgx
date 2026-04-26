@@ -294,6 +294,18 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf: samply profiling workflow + data-driven findings
+
+- **What**: per user direction, replaced guess-driven perf decisions with samply-based profiling. New `[profile.profiling]` Cargo profile (release-fast with debuginfo), `rgx-core/examples/perf_profile_targets.rs` (tight-loop driver picking pattern×method via `RGX_PROFILE_TARGET`), `scripts/run-samply.sh` (records the bench-corpus targets), `scripts/samply-hotpaths.py` (symbolicates via atos/addr2line + ranks self-time and inclusive-time top-N).
+- **Findings (release, 10K input)**:
+  - `email_basic find_first`: **~67% in libsystem_malloc** — allocation dominates this pattern.
+  - `digit_sequence` / `character_class` / `url_simple` `find_first`: **`pike_captures_at` is 90-96% inclusive**, and inside it **`ThreadSet::new` is 13-24% inclusive** — Pike-VM allocates a fresh sparse-set on every PrefixScanner candidate position.
+  - `email_basic find_all`: ~50% libsystem (combined malloc family).
+  - `literal_simple find_first`: already at 18-40 ns/iter; residual cost is the per-call `MatchResult.groups` Vec.
+- **Strategic impact**: confirms the next perf lever is **buffer reuse** in Pike-VM dispatch, not algorithmic change. Cache the `ThreadSet` on `Engine` so it's reset between candidates instead of allocated per-call. Expected 15-25% on non-literal patterns. Task #49 captures this.
+- **Workflow durability**: the profiling stack is reusable. Each future perf change can be measured by `./scripts/run-samply.sh <target>` followed by `./scripts/samply-hotpaths.py target/samply-profiles/*.json.gz` to compare before/after hot paths. Removes guesswork from "did this commit actually help?".
+- **Deltas**: 1118 lib + 30 cli unchanged (no engine code touched). fmt clean. **PCRE2 conformance ratchet 12,709/101 preserved**.
+
 ### 2026-04-26 — Perf: extend UTF-8 elimination to position-aware Engine entry points
 
 - **What**: yesterday (18f521f) eliminated redundant from_utf8 validation on Regex::find_first / find_all / is_match. Today extends the same fix to the 5 position-aware variants: find_first_at, find_all_at, is_match_at, find_first_partial, find_first_suspendable. Added 5 new pub(crate) vm_*_at / vm_find_first_partial / vm_find_first_suspendable variants on Engine; lib.rs switched to use them.
