@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf investigation: DFA `transition` inline (negative result — third in series)
+
+- Scope: capture_groups.find_first/find_all profile attributed `LazyDfa::transition` at 25-31% self-time. capture_groups goes through the DFA dispatch path (not Pike-VM), so this is a fresh hot-path target distinct from the Pike-VM `epsilon_closure_with_captures` from the prior investigation. Hypothesis: `#[inline]` on `LazyDfa::transition` and `LazyDfa::is_accept` could let LLVM more aggressively specialise the hot DFA scan loop body inside `find_match_at` / `find_first_accept_at`.
+- Investigation: applied `#[inline]` to both methods. 3-run wall-clock against baseline:
+  - `capture_groups.find_first`: baseline 117K (±0.5%) → post-opt 120K (consistently +2.2% slower across all 3 runs, outside noise)
+  - `capture_groups.find_all`: baseline 140K → post-opt 139K (within 1% noise; net flat)
+- Net: not faster, slightly **worse** on find_first. Reverted.
+- Reading: with `cargo build --profile profiling` (full LTO + 1 codegen unit), the DFA hot loop is already inlined and optimised by LLVM. Adding explicit `#[inline]` hints conflicts with whatever heuristic LLVM was using for register allocation and instruction selection in the inlined-into context, producing slightly worse codegen. **Same lesson, third confirmation**: the `profiling` profile's LTO already wins the micro-game; explicit annotations on hot-path tiny methods are net-zero or net-negative.
+- Validation: 1118 lib + 30 cli pass. fmt + clippy clean (revert is no-op vs HEAD).
+- Notes/impact: this is the **third negative-result perf swing in a row** (after the JIT captures cache and the Pike-VM ThreadSet inline + skip-redundant-contains experiments). All three followed the same pattern: high samply self-time attribution, plausible micro-fix hypothesis, neutral or slightly negative wall-clock. The first two CHANGES.md entries already captured the lesson; this third confirmation tightens it. **Conclusion**: micro-optimizations on already-LTO-inlined hot paths are exhausted. The next data-driven perf wins now require structural changes — flat-table DFA transition layout (replace `Vec<DfaState> { transitions: Vec<DfaStateId> }` two-level indirection with a single `Vec<DfaStateId>` indexed `state * num_classes + cls`), the C2 design's lazy DFA cache step 5/6 work that lets the DFA skip Pike-VM entirely on hot states, or pattern-specific specializations layered above the existing dispatch chain. Pausing the autonomous data-driven micro-fix loop pending direction on which structural lever to pull next.
+
 ### 2026-04-26 - Perf investigation: ThreadSet inline annotations + skip redundant `contains` (negative result)
 
 - Scope: post-Pike-VM-scratch + post-JIT-investigation samply profiles attributed `epsilon_closure_with_captures` at 32.4% / 24.6% self-time on `character_class.find_first` / `url_simple.find_first`. The closure does `if set.contains(state) { return; } set.add(state, captures);` and `set.add` itself does another `contains` check — a doubled sparse-array probe per recursive call. Hypothesis: `#[inline]` on the 4 hot `ThreadSet` methods (`add`, `position_of`, `state_at`, `captures_at`) plus eliminating the redundant `contains` (move responsibility to caller via `debug_assert`) should shave cycles in the hottest Pike-VM function.

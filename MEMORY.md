@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf investigation: DFA transition inline (negative — third in row, loop paused)
+
+- **What**: capture_groups profile (a fresh target — DFA-dispatched, not Pike-VM) attributed LazyDfa::transition at 25-31% self-time. Tried `#[inline]` on `LazyDfa::transition` + `LazyDfa::is_accept`. 3-run wall-clock: capture_groups.find_first 117K → 120K (+2.2%, consistent), find_all 140K → 139K (flat).
+- **Result**: not faster, slightly worse on find_first. **Third negative-result swing in a row.** Reverted.
+- **Loop conclusion**: micro-fixes on LTO-inlined hot paths are exhausted. Profiling profile (release + full LTO + debug=true) has already done the easy inlining. Pattern: high self-time in samply → plausible micro-fix → wall-clock neutral-or-negative.
+- **What still moves wall-clock**: structural changes (flat-table DFA transitions, lazy DFA cache step 5/6 from C2 design, pattern specializations) — not micro-fixes.
+- **Pausing autonomous loop**. The next perf lever is bigger than a 5-minute change; needs user direction between (a) flat-table DFA refactor, (b) advance C2 step 5/6 lazy-DFA-cache work, or (c) a different perf surface entirely.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet unchanged.
+
 ### 2026-04-26 — Perf investigation: ThreadSet inline + skip redundant contains (negative result)
 
 - **What**: samply showed `epsilon_closure_with_captures` at 32.4% / 24.6% self-time on character_class / url_simple find_first. Closure does `if contains return; add(state, captures)` and `add` re-checks `contains` — doubled sparse-array probe. Tried `#[inline]` on 4 hot ThreadSet methods + merging add+contains into single add with caller-side contract.
