@@ -126,6 +126,18 @@ pub struct Engine {
     /// `feature = "jit"`.
     #[cfg(feature = "jit")]
     jit_program: OnceLock<Option<Mutex<crate::c1::JitProgram>>>,
+    /// Reusable Pike-VM scratch buffers (`current` / `next`
+    /// `ThreadSet`s + initial-captures buffer). Lazy — only
+    /// allocated when `try_pike_*` first dispatches through this
+    /// engine. samply profiling 2026-04-26 showed `ThreadSet::new`
+    /// at 13-24% inclusive on non-literal patterns because Pike-VM
+    /// was allocating a fresh sparse-set scratch on every
+    /// `PrefixScanner` candidate position. Caching it at the engine
+    /// level eliminates that alloc cycle for the dispatch path
+    /// while keeping the free-function `pike_captures_at` /
+    /// `pike_captures_all` APIs (which allocate per call) intact
+    /// for tests and other one-off callers.
+    pike_scratch: OnceLock<Option<Mutex<crate::c2::PikeScratch>>>,
 }
 
 /// Convert a VM-level `Match` into a public `MatchResult`.
@@ -525,6 +537,7 @@ impl Engine {
             c2_reverse_dfa: OnceLock::new(),
             #[cfg(feature = "jit")]
             jit_program: OnceLock::new(),
+            pike_scratch: OnceLock::new(),
         };
         trace_exit!("engine", "Engine::new", "ok=true,mode={:?}", engine.mode);
         Ok(engine)
@@ -588,6 +601,54 @@ impl Engine {
             return None;
         }
         Some(dfa)
+    }
+
+    /// Returns the engine's cached Pike-VM scratch buffer, lazily
+    /// initialised on first dispatch. Call sites lock the returned
+    /// `Mutex<PikeScratch>` only for the duration of one
+    /// `pike_captures_at_with_scratch` / `pike_captures_all_with_scratch`
+    /// call so the buffers stay attached to the engine while the
+    /// inner ThreadSet contents reset between calls.
+    ///
+    /// Returns `None` for engines without a `c2_program` (the scratch
+    /// has nothing to size against). Callers fall through to the
+    /// non-scratch helpers in that case.
+    fn pike_scratch_mutex(&self) -> Option<&Mutex<crate::c2::PikeScratch>> {
+        self.pike_scratch
+            .get_or_init(|| {
+                self.vm
+                    .program
+                    .c2_program
+                    .as_ref()
+                    .map(|c2| Mutex::new(crate::c2::PikeScratch::new(c2)))
+            })
+            .as_ref()
+    }
+
+    /// `pike_captures_at` wrapper that uses the engine-cached
+    /// scratch when available, falling back to the per-call alloc
+    /// path when (a) the engine has no `c2_program` (no Pike-VM
+    /// dispatch eligible anyway) or (b) the scratch mutex is
+    /// poisoned. Centralises the scratch-or-fallback decision so
+    /// every Pike-VM call site reads as a single line.
+    #[inline]
+    fn pike_captures_at_cached(
+        &self,
+        c2: &crate::c2::CompiledC2Program,
+        input: &[u8],
+        start: usize,
+    ) -> Option<crate::c2::PikeMatch> {
+        if let Some(scratch_mutex) = self.pike_scratch_mutex() {
+            if let Ok(mut scratch) = scratch_mutex.lock() {
+                return crate::c2::pike::pike_captures_at_with_scratch(
+                    c2,
+                    input,
+                    start,
+                    &mut scratch,
+                );
+            }
+        }
+        self.pike_captures_at_cached(c2, input, start)
     }
 
     /// Returns the reverse-anchored lazy DFA for this engine if the
@@ -820,7 +881,7 @@ impl Engine {
                     // DFA confirms a match starts at this position.
                     // Recover captures via Pike-VM at this exact start.
                     drop(dfa);
-                    let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+                    let pike_match = self.pike_captures_at_cached(c2, input, start)?;
                     return Some(Some(pike_match_to_match_result(pike_match)));
                 }
                 DfaSearchOutcome::NoMatch => start += 1,
@@ -934,7 +995,7 @@ impl Engine {
                 DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
             }
         };
-        let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+        let pike_match = self.pike_captures_at_cached(c2, input, start)?;
         let mut match_result = pike_match_to_match_result(pike_match);
         // `pike_captures_at` starts the VM at `start`; its end offset
         // should agree with the anchored DFA's greedy end. If they
@@ -1013,7 +1074,7 @@ impl Engine {
                         start += 1;
                         continue;
                     }
-                    let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+                    let pike_match = self.pike_captures_at_cached(c2, input, start)?;
                     results.push(pike_match_to_match_result(pike_match));
                     prev_non_empty_end = if is_empty { None } else { Some(end) };
                     start = if is_empty { start + 1 } else { end };
@@ -1088,7 +1149,7 @@ impl Engine {
                 pos += 1;
                 continue;
             }
-            let pike_match = crate::c2::pike::pike_captures_at(c2, input, start)?;
+            let pike_match = self.pike_captures_at_cached(c2, input, start)?;
             let mut match_result = pike_match_to_match_result(pike_match);
             if match_result.end != greedy_end {
                 return None;
@@ -1148,7 +1209,7 @@ impl Engine {
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
         let mut start = 0usize;
         while let Some(candidate) = scanner.next_candidate(input, start) {
-            if let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, candidate) {
+            if let Some(pike_match) = self.pike_captures_at_cached(c2, input, candidate) {
                 return Some(Some(pike_match_to_match_result(pike_match)));
             }
             start = candidate + 1;
@@ -1156,7 +1217,7 @@ impl Engine {
         // For zero-width patterns the scanner stops one byte short of
         // input.len(). Re-try the trailing position with `PrefixFilter::None`.
         if matches!(scanner.filter, PrefixFilter::None) {
-            if let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, input.len()) {
+            if let Some(pike_match) = self.pike_captures_at_cached(c2, input, input.len()) {
                 return Some(Some(pike_match_to_match_result(pike_match)));
             }
         }
@@ -1190,7 +1251,7 @@ impl Engine {
                 }
             };
             start = candidate;
-            let Some(pike_match) = crate::c2::pike::pike_captures_at(c2, input, start) else {
+            let Some(pike_match) = self.pike_captures_at_cached(c2, input, start) else {
                 start += 1;
                 continue;
             };

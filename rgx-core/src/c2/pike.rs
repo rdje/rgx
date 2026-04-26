@@ -519,6 +519,61 @@ impl ThreadSet {
     }
 }
 
+/// Reusable scratch buffers for the capture-tracking Pike-VM
+/// simulator. Allocated once per `CompiledC2Program` and reset
+/// between calls so the simulator never allocates `ThreadSet`s on
+/// the hot path.
+///
+/// Profiles taken 2026-04-26 (`scripts/run-samply.sh
+/// digit_sequence.find_first` etc.) showed `ThreadSet::new` at
+/// 13-24% inclusive across non-literal patterns — Pike-VM was
+/// allocating a fresh sparse-set scratch buffer at every
+/// `PrefixScanner` candidate position. Caching the buffer at the
+/// engine level and `clear()`ing it between calls eliminates that
+/// alloc cycle without touching the algorithm.
+///
+/// Keeps the `dense_captures` row Vecs allocated (capacity =
+/// `num_states`); only `len` is reset, mirroring [`ThreadSet::clear`].
+#[derive(Debug)]
+pub struct PikeScratch {
+    current: ThreadSet,
+    next: ThreadSet,
+    /// Initial capture buffer (all `None`) reused across calls.
+    initial_captures: Vec<Option<usize>>,
+    num_states: usize,
+    num_slots: usize,
+}
+
+impl PikeScratch {
+    /// Allocate scratch sized for `program`'s capture-tracking
+    /// simulation. Sized once; reused indefinitely.
+    #[must_use]
+    pub fn new(program: &CompiledC2Program) -> Self {
+        let num_states = program.forward_anchored.num_states();
+        let num_slots = slot_count(program);
+        Self {
+            current: ThreadSet::new(num_states, num_slots),
+            next: ThreadSet::new(num_states, num_slots),
+            initial_captures: vec![None; num_slots],
+            num_states,
+            num_slots,
+        }
+    }
+
+    /// Reset for a fresh match attempt. Keeps allocated buffers; just
+    /// rewinds the lengths.
+    fn reset(&mut self) {
+        self.current.clear();
+        self.next.clear();
+        // initial_captures must always read as all-None for the next
+        // call. Reset to match. This is a single contiguous write
+        // and stays in cache.
+        for slot in &mut self.initial_captures {
+            *slot = None;
+        }
+    }
+}
+
 /// Apply a capture tag to a buffer at the given position.
 ///
 /// `slot_for_tag` maps a capture group number to its start/end slot
@@ -597,21 +652,21 @@ fn pike_match_at_with_captures(
     input: &[u8],
     start: usize,
     num_slots: usize,
+    scratch: &mut PikeScratch,
 ) -> Option<(usize, Vec<Option<usize>>)> {
-    let num_states = nfa.num_states();
-    let mut current = ThreadSet::new(num_states, num_slots);
-    let mut next = ThreadSet::new(num_states, num_slots);
-    let initial_captures = vec![None; num_slots];
+    debug_assert_eq!(scratch.num_states, nfa.num_states());
+    debug_assert_eq!(scratch.num_slots, num_slots);
+    scratch.reset();
+    // Disjoint field borrows: `current` and `next` are independent
+    // `ThreadSet`s on the `scratch` struct; `initial_captures` is a
+    // shared read of a third field. Rust's split-borrow rule allows
+    // this because no two borrows alias.
+    let current: &mut ThreadSet = &mut scratch.current;
+    let next: &mut ThreadSet = &mut scratch.next;
+    let initial_captures: &[Option<usize>] = &scratch.initial_captures;
     let mut matched: Option<(usize, Vec<Option<usize>>)> = None;
 
-    epsilon_closure_with_captures(
-        &mut current,
-        nfa,
-        nfa.start(),
-        &initial_captures,
-        start,
-        input,
-    );
+    epsilon_closure_with_captures(current, nfa, nfa.start(), initial_captures, start, input);
 
     let mut pos = start;
     loop {
@@ -641,15 +696,26 @@ fn pike_match_at_with_captures(
 
         for i in 0..limit {
             let state_id = current.state_at(i);
-            let state_captures = current.captures_at(i).to_vec();
+            // Borrow the captures buffer directly from `current` —
+            // `epsilon_closure_with_captures` reads it as `&[…]` and
+            // its own `set.add` already does `copy_from_slice` into
+            // `next`'s storage. The previous `.to_vec()` here was a
+            // redundant per-thread heap allocation: in profiles
+            // taken 2026-04-26 (`pike_captures_at` 90-96% inclusive
+            // on non-literal patterns) it accounted for a
+            // measurable share of the libsystem_malloc time. The
+            // borrow checker accepts this because `current` and
+            // `next` are distinct `ThreadSet`s; the only mutation
+            // path goes through `&mut next`.
+            let state_captures = current.captures_at(i);
             let state_obj = &nfa.states()[state_id as usize];
             for &(transition_cls, target) in &state_obj.transitions {
                 if transition_cls == cls {
                     epsilon_closure_with_captures(
-                        &mut next,
+                        next,
                         nfa,
                         target,
-                        &state_captures,
+                        state_captures,
                         pos + 1,
                         input,
                     );
@@ -657,7 +723,11 @@ fn pike_match_at_with_captures(
             }
         }
 
-        std::mem::swap(&mut current, &mut next);
+        // Swap the `ThreadSet`s held behind the two mutable
+        // references. `std::mem::swap` rotates the values in place;
+        // the underlying allocations stay attached to `scratch` and
+        // are reused for the next iteration.
+        std::mem::swap(current, next);
         pos += 1;
     }
 
@@ -703,6 +773,7 @@ pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMa
     let bcm = &program.byte_class_map;
     let num_slots = slot_count(program);
     let prefix = program.c2_prefix_byte;
+    let mut scratch = PikeScratch::new(program);
     let mut start = 0usize;
     while start <= input.len() {
         // C2 step 7: literal prefix skip via memchr.
@@ -716,7 +787,7 @@ pub fn pike_captures(program: &CompiledC2Program, input: &[u8]) -> Option<PikeMa
             }
         }
         if let Some((end, mut caps)) =
-            pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
+            pike_match_at_with_captures(nfa, bcm, input, start, num_slots, &mut scratch)
         {
             // Populate the overall match span (group 0) from the
             // scan position and the simulator's matched end.
@@ -752,12 +823,28 @@ pub fn pike_captures_at(
     input: &[u8],
     start: usize,
 ) -> Option<PikeMatch> {
+    let mut scratch = PikeScratch::new(program);
+    pike_captures_at_with_scratch(program, input, start, &mut scratch)
+}
+
+/// Variant of [`pike_captures_at`] that takes a caller-owned
+/// [`PikeScratch`] so the same buffers are reused across many
+/// calls. Engine dispatch holds a cached scratch and passes it here
+/// for every `try_pike_find_first` / `try_pike_find_all` call,
+/// eliminating per-candidate `ThreadSet` allocation that profiling
+/// (see CHANGES.md 2026-04-26) showed was 13-24% inclusive on
+/// non-literal patterns.
+#[must_use]
+pub fn pike_captures_at_with_scratch(
+    program: &CompiledC2Program,
+    input: &[u8],
+    start: usize,
+    scratch: &mut PikeScratch,
+) -> Option<PikeMatch> {
     let nfa = &program.forward_anchored;
     let bcm = &program.byte_class_map;
     let num_slots = slot_count(program);
-    let (end, mut caps) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots)?;
-    // Populate the overall match span (slots 0 and 1) from the known
-    // start position and the simulator's matched end.
+    let (end, mut caps) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots, scratch)?;
     caps[0] = Some(start);
     caps[1] = Some(end);
     Some(PikeMatch {
@@ -777,6 +864,20 @@ pub fn pike_captures_at(
 /// dropped.
 #[must_use]
 pub fn pike_captures_all(program: &CompiledC2Program, input: &[u8]) -> Vec<PikeMatch> {
+    let mut scratch = PikeScratch::new(program);
+    pike_captures_all_with_scratch(program, input, &mut scratch)
+}
+
+/// Variant of [`pike_captures_all`] that takes a caller-owned
+/// [`PikeScratch`] so the simulator never allocates fresh
+/// [`ThreadSet`]s. Used by [`crate::engine::Engine::try_pike_find_all`]
+/// with an engine-cached scratch buffer.
+#[must_use]
+pub fn pike_captures_all_with_scratch(
+    program: &CompiledC2Program,
+    input: &[u8],
+    scratch: &mut PikeScratch,
+) -> Vec<PikeMatch> {
     let nfa = &program.forward_anchored;
     let bcm = &program.byte_class_map;
     let num_slots = slot_count(program);
@@ -795,7 +896,8 @@ pub fn pike_captures_all(program: &CompiledC2Program, input: &[u8]) -> Vec<PikeM
                 None => break,
             }
         }
-        let Some((end, mut caps)) = pike_match_at_with_captures(nfa, bcm, input, start, num_slots)
+        let Some((end, mut caps)) =
+            pike_match_at_with_captures(nfa, bcm, input, start, num_slots, scratch)
         else {
             start += 1;
             continue;

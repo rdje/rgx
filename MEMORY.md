@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf: cache Pike-VM ThreadSet (data-driven, 3-3.6x on Pike-dispatched patterns)
+
+- **What**: data-driven follow-up to yesterday's samply workflow. Profile said ThreadSet::new was 13-24% inclusive on Pike-dispatched patterns; Pike-VM was allocating fresh ThreadSets per candidate position. New PikeScratch struct holds the two ThreadSets + initial_captures, lazy-cached on Engine via `OnceLock<Option<Mutex<PikeScratch>>>`. Internal pike_match_at_with_captures takes `&mut PikeScratch`; new public pike_captures_at_with_scratch / pike_captures_all_with_scratch wrap it. Engine.pike_captures_at_cached() helper centralises lookup; all 7 dispatch call sites in engine.rs switched.
+- **Bonus inner-loop fix**: removed `state_captures = current.captures_at(i).to_vec()` clone in the Pike-VM step. epsilon_closure_with_captures reads the slice and copies internally — the .to_vec() was redundant per-thread-per-position allocation. Rust split-borrow lets us pass the direct borrow.
+- **Measured**: digit_sequence find_first **1294 → 361 ns/iter (3.6x)**. character_class find_first **2967 → 983 ns/iter (3.0x)**. email_basic find_first 472 → 389 ns/iter (1.2x — email's profile showed broad libsystem_malloc, not just ThreadSet::new specifically). url_simple varies by input shape.
+- **Process win**: the samply workflow paid off immediately. Profile → identified bottleneck → fixed → measured 3x improvement on target patterns. No guesswork. Future perf decisions can follow the same `./scripts/run-samply.sh` → `./scripts/samply-hotpaths.py` → diagnose → fix loop.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. **Conformance ratchet 12,709/101 preserved**.
+- **Next concrete action**: re-profile to confirm ThreadSet::new is gone from the hot path and identify what's now dominant. May reveal another targeted win on email_basic (where libsystem_malloc was broader than ThreadSet alone).
+
 ### 2026-04-26 — Perf: samply profiling workflow + data-driven findings
 
 - **What**: per user direction, replaced guess-driven perf decisions with samply-based profiling. New `[profile.profiling]` Cargo profile (release-fast with debuginfo), `rgx-core/examples/perf_profile_targets.rs` (tight-loop driver picking pattern×method via `RGX_PROFILE_TARGET`), `scripts/run-samply.sh` (records the bench-corpus targets), `scripts/samply-hotpaths.py` (symbolicates via atos/addr2line + ranks self-time and inclusive-time top-N).

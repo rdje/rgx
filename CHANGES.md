@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf: cache Pike-VM `ThreadSet` on `Engine` (3-3.6x on Pike-dispatched patterns)
+
+- Scope: data-driven follow-up to the samply profiling workflow (`96c3daf`). Profiles showed `pike_captures_at` 90-96% inclusive on `digit_sequence` / `character_class` / `url_simple` `find_first`, with `ThreadSet::new` 13-24% inclusive — Pike-VM allocated a fresh sparse-set scratch buffer at every `PrefixScanner` candidate position. This commit caches the scratch on `Engine` and resets it between calls instead of reallocating.
+- Changes:
+  - `rgx-core/src/c2/pike.rs` — new public `PikeScratch` struct holding the two `current` / `next` `ThreadSet`s and the `initial_captures` buffer, sized once via `PikeScratch::new(program)`. New private `reset()` zeros the in-flight state; the `dense_captures` row Vecs stay allocated. Added scratch-aware variants `pike_captures_at_with_scratch` and `pike_captures_all_with_scratch` taking `&mut PikeScratch`. Refactored internal `pike_match_at_with_captures` to take `&mut PikeScratch` instead of allocating two ThreadSets locally; the existing `pike_captures_at` / `pike_captures_all` / `pike_captures` free functions remain (each allocates a fresh scratch internally) for backward compat with tests and one-off callers.
+  - Inner-loop allocation removed: `state_captures = current.captures_at(i).to_vec()` was a redundant `.to_vec()` clone on every `(position × state)` step inside `pike_match_at_with_captures`. `epsilon_closure_with_captures` reads the slice as `&[…]` and its own `set.add` already does `copy_from_slice` into `next`'s storage. Rust's split-borrow rule accepts the direct borrow because `current` and `next` are distinct `ThreadSet`s. Each Pike-VM step now does N fewer allocations where N is the count of active threads at that step.
+  - `rgx-core/src/c2/mod.rs` — re-exported `PikeScratch`, `pike_captures_at_with_scratch`, `pike_captures_all_with_scratch`.
+  - `rgx-core/src/engine.rs` — `Engine` gained `pike_scratch: OnceLock<Option<Mutex<PikeScratch>>>` (lazy-initialised on first dispatch, mirrors the `c2_dfa` pattern). New `Engine::pike_scratch_mutex()` accessor and `pike_captures_at_cached()` helper. All 7 `pike_captures_at` call sites in dispatch helpers (`try_pike_find_first`, `try_pike_find_all`, the reverse-DFA pipeline's capture-recovery passes, and the per-position anchored DFA scan's capture recovery) switched to the cached helper.
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean.
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (release, 10K input with sparse matches, 100000-iteration average):
+    - `digit_sequence find_first` (`\d{3}-\d{2}-\d{4}`): **1,294 → 361 ns/iter** = **3.6x speedup**.
+    - `character_class find_first` (`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`): **2,967 → 983 ns/iter** = **3.0x speedup**.
+    - `email_basic find_first` (`\b\w+@\w+\.\w+\b`): **472 → 389 ns/iter** = **1.2x speedup** (smaller because email_basic's profile showed `libsystem_malloc` dominating broadly, not just `ThreadSet::new` — most of the malloc churn is elsewhere on this pattern).
+    - `url_simple find_first`: 1,224 ns/iter on dense-match input shape; comparison to baseline depends on input structure (memmem prefix path partly bypasses Pike-VM).
+- Notes/impact: data-driven win — the samply profile pointed at the exact bottleneck and the fix landed clean. The new `PikeScratch` API is opt-in: free functions keep allocating per-call for correctness against existing tests and external callers; engine dispatch goes through the cached path. The `state_captures.to_vec()` removal compounds with scratch caching: scratch saves the outer per-call allocation, the borrow saves the inner per-thread-per-position allocation. Together they nearly eliminate Pike-VM's malloc overhead.
+
 ### 2026-04-26 - Perf: samply profiling workflow + initial hot-path findings
 
 - Scope: per the user's direction, set up systematic `samply` profiling for RGX and use it to identify the next perf lever objectively rather than by inspection. Replaces guess-driven optimisation with data-driven decisions for the remaining perf work.
