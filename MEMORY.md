@@ -294,6 +294,19 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-27 — Perf: skip Pike-VM capture-recovery for 0-capture-group patterns (4-11x)
+
+- **What**: profile attributed 73-88% inclusive on pike_captures_at_with_scratch for character_class/url_simple find_first/find_all. These patterns have ZERO capture groups but still ran Pike-VM per match purely to "recover" capture positions that don't exist — every set.add doing per-state 16-byte copy_from_slice of all-None buffer. New `Engine::recover_match_for_dfa_span` synthesises MatchResult directly from DFA's (start, end) when num_capture_groups==0; falls back to pike_captures_at_cached otherwise. Wired into 4 dispatch sites: try_dfa_find_first per-position, try_dfa_find_all, try_pipeline_find_first (also drops the Pike-VM cross-check — DFA's leftmost-longest equals Pike-VM's leftmost-first-greedy on C2-eligible patterns by construction), try_pipeline_find_all.
+- **Result** (3-run mean, post-flat-table baseline):
+  - digit_sequence find_first 231→58 (**-75%, 4.0x**), find_all 133K→67K (-50%, 2.0x)
+  - character_class find_first 905→186 (**-79%, 4.9x**), find_all 310K→70K (**-77%, 4.4x**)
+  - url_simple find_first 1212→109 (**-91%, 11.1x**), find_all 201K→19K (**-90%, 10.4x**)
+  - capture_groups (HAS captures, fast-path doesn't apply): -5% / -7% residual codegen
+- **Lesson once more**: structural changes win. The pattern was "engine X computes answer; engine Y re-runs as defensive cross-check with no useful work to do" — and for 0-capture patterns Y's cross-check has nothing to compare. Eliminating Y entirely for them removes a per-state 16-byte memcpy workload that LLVM couldn't optimize away (the buffer copy is semantically observable, just useless).
+- **Cumulative session win on no-capture patterns**: combined with flat-table DFA, character_class.find_all 318K → 70K (4.5x); url_simple.find_first 1264 → 109 (11.6x). All 4 negative-result micro-fix swings + 2 structural commits delivered measurable wins.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet 12,709/101 preserved.
+- **Next concrete action**: more structural opportunities surfaced — pipeline path now traversed only for capturing patterns; consider whether DFA-only fast-path can absorb more dispatch decisions. Or pivot to other surfaces (compile time, JIT path, etc).
+
 ### 2026-04-26 — Perf: flat-table DFA transitions (structural; ~2-5% across 8 patterns)
 
 - **What**: after three negative-result micro-fix swings, pivoted to a structural change. Replaced the two-level `Vec<DfaState>{ transitions: Vec<DfaStateId> }` layout with a single flat `LazyDfa.transitions: Vec<DfaStateId>` indexed by `state * num_classes + cls`. One Vec deref + one indexed load per byte, mirrors `regex-automata::dfa::dense`.

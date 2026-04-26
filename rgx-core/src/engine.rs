@@ -653,6 +653,46 @@ impl Engine {
         crate::c2::pike::pike_captures_at(c2, input, start)
     }
 
+    /// Build a [`MatchResult`] for a span the DFA already located.
+    ///
+    /// For patterns with **zero capture groups** the Pike-VM
+    /// capture-recovery pass has nothing to recover — the DFA's
+    /// `(start, end)` is the entire match — so we skip the Pike-VM
+    /// run entirely and synthesise the result with just group 0.
+    /// samply 2026-04-26 attributed 30-50% inclusive on
+    /// `pike_captures_at_with_scratch` for `character_class.find_all`
+    /// (zero capture groups) — re-running Pike-VM per match to
+    /// recover zero capture positions, with each `set.add` performing
+    /// a per-state 16-byte `copy_from_slice` of an all-`None`
+    /// captures buffer. This fast path elides that entirely.
+    ///
+    /// For patterns with one or more capture groups, falls back to
+    /// `pike_captures_at_cached` to recover the per-group spans.
+    /// The DFA's `end` is unused on this path — the Pike-VM's `end`
+    /// is the source of truth and matches the DFA's leftmost-longest
+    /// end for C2-eligible patterns by construction.
+    #[inline]
+    fn recover_match_for_dfa_span(
+        &self,
+        c2: &crate::c2::CompiledC2Program,
+        input: &[u8],
+        start: usize,
+        end: usize,
+    ) -> Option<MatchResult> {
+        if c2.num_capture_groups == 0 {
+            return Some(MatchResult {
+                start,
+                end,
+                groups: vec![Some((start, end))],
+                matched_branch_number: None,
+                code_result: None,
+                last_mark: None,
+            });
+        }
+        let pike_match = self.pike_captures_at_cached(c2, input, start)?;
+        Some(pike_match_to_match_result(pike_match))
+    }
+
     /// Returns the reverse-anchored lazy DFA for this engine if the
     /// pattern is DFA-eligible. The reverse half of the reverse-DFA
     /// pipeline: walks backward from a known match-end to find the
@@ -879,12 +919,13 @@ impl Engine {
             };
             start = candidate;
             match dfa.find_match_at(input, start) {
-                DfaSearchOutcome::Match(_) => {
+                DfaSearchOutcome::Match(end) => {
                     // DFA confirms a match starts at this position.
-                    // Recover captures via Pike-VM at this exact start.
+                    // Recover captures via Pike-VM at this exact start
+                    // — or skip Pike-VM entirely for 0-capture patterns
+                    // (the DFA's `end` is the full match by construction).
                     drop(dfa);
-                    let pike_match = self.pike_captures_at_cached(c2, input, start)?;
-                    return Some(Some(pike_match_to_match_result(pike_match)));
+                    return Some(self.recover_match_for_dfa_span(c2, input, start, end));
                 }
                 DfaSearchOutcome::NoMatch => start += 1,
                 DfaSearchOutcome::Exhausted => return None,
@@ -997,6 +1038,22 @@ impl Engine {
                 DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
             }
         };
+        // For 0-capture patterns the Pike-VM cross-check has nothing
+        // useful to compare against — the DFA's `greedy_end` IS the
+        // entire match span, and the engines must agree on it for
+        // C2-eligible (non-lazy) patterns by construction. Skip the
+        // Pike-VM run, which on character_class find_first was 75%
+        // inclusive purely for "recovery" of zero capture groups.
+        if c2.num_capture_groups == 0 {
+            return Some(Some(MatchResult {
+                start,
+                end: greedy_end,
+                groups: vec![Some((start, greedy_end))],
+                matched_branch_number: None,
+                code_result: None,
+                last_mark: None,
+            }));
+        }
         let pike_match = self.pike_captures_at_cached(c2, input, start)?;
         let mut match_result = pike_match_to_match_result(pike_match);
         // `pike_captures_at` starts the VM at `start`; its end offset
@@ -1076,8 +1133,8 @@ impl Engine {
                         start += 1;
                         continue;
                     }
-                    let pike_match = self.pike_captures_at_cached(c2, input, start)?;
-                    results.push(pike_match_to_match_result(pike_match));
+                    let match_result = self.recover_match_for_dfa_span(c2, input, start, end)?;
+                    results.push(match_result);
                     prev_non_empty_end = if is_empty { None } else { Some(end) };
                     start = if is_empty { start + 1 } else { end };
                 }
@@ -1151,14 +1208,31 @@ impl Engine {
                 pos += 1;
                 continue;
             }
-            let pike_match = self.pike_captures_at_cached(c2, input, start)?;
-            let mut match_result = pike_match_to_match_result(pike_match);
-            if match_result.end != greedy_end {
-                return None;
-            }
-            debug_assert_eq!(match_result.start, start);
-            match_result.start = start;
-            match_result.end = greedy_end;
+            // Same fast path as `try_pipeline_find_first`: when the
+            // pattern has zero capture groups the Pike-VM cross-check
+            // is pure overhead — the DFA's `greedy_end` is the full
+            // match span and the engines agree on it for C2-eligible
+            // (non-lazy) patterns.
+            let match_result = if c2.num_capture_groups == 0 {
+                MatchResult {
+                    start,
+                    end: greedy_end,
+                    groups: vec![Some((start, greedy_end))],
+                    matched_branch_number: None,
+                    code_result: None,
+                    last_mark: None,
+                }
+            } else {
+                let pike_match = self.pike_captures_at_cached(c2, input, start)?;
+                let mut match_result = pike_match_to_match_result(pike_match);
+                if match_result.end != greedy_end {
+                    return None;
+                }
+                debug_assert_eq!(match_result.start, start);
+                match_result.start = start;
+                match_result.end = greedy_end;
+                match_result
+            };
             results.push(match_result);
             prev_non_empty_end = if is_empty { None } else { Some(greedy_end) };
             pos = if is_empty { start + 1 } else { greedy_end };

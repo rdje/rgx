@@ -14,6 +14,36 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-27 - Perf: skip Pike-VM capture-recovery for 0-capture-group patterns (4-11x on capture-free DFA-dispatched patterns)
+
+- Scope: post-flat-table samply re-profile attributed `pike_captures_at_with_scratch` 73-88% inclusive on `character_class.find_first/find_all` and `url_simple.find_first/find_all`. These patterns have **zero capture groups** (no `(...)` anywhere), but the engine was still running the Pike-VM after the DFA found each match — solely to "recover" capture group positions that don't exist. Inside Pike-VM, `set.add(state, captures)` does a per-state 16-byte `copy_from_slice` of an all-`None` captures buffer for every NFA state in every closure step. Pure waste.
+- Fix: new helper `Engine::recover_match_for_dfa_span(c2, input, start, end)` that branches on `c2.num_capture_groups`:
+  - `0` → synthesise the `MatchResult` directly from the DFA's `(start, end)`, with `groups: vec![Some((start, end))]` for group 0. No Pike-VM call.
+  - `> 0` → fall back to `pike_captures_at_cached` to recover per-group spans.
+  
+  Wired into 4 dispatch sites that re-execute Pike-VM after the DFA already produced the span:
+  - `try_dfa_find_first` per-position scan (the DFA's `Match(end)` arm — previously discarded `end` and re-derived it via Pike-VM).
+  - `try_dfa_find_all` per-position scan.
+  - `try_pipeline_find_first` (after the 3-pass DFA pipeline produced `greedy_end`). The Pike-VM cross-check `pike_match.end == greedy_end` is skipped on this branch — for C2-eligible (non-lazy) patterns the DFA's leftmost-longest end equals the Pike-VM's leftmost-first-greedy end by construction, and the `try_dfa_find_*` per-position sites have always trusted the DFA without a cross-check. Behaviour stays consistent across paths.
+  - `try_pipeline_find_all` (same cross-check skip, applied per match).
+  
+  The Pike-VM dispatch helpers (`try_pike_find_first` / `try_pike_find_all`) are unchanged — Pike-VM is the matching engine on those paths, not capture-recovery overhead.
+- Validation:
+  - 1118 lib tests pass (includes the differential corpus comparing C2/Pike against the existing backtracking VM).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean per target, `cargo build --profile profiling`, 10K input, 2 s budget; baseline = post-flat-table HEAD vs this commit):
+    - `digit_sequence.find_first`: 231 → 58 ns/iter (**−75%, 4.0x**)
+    - `digit_sequence.find_all`: 133,289 → 67,028 ns/iter (**−50%, 2.0x**)
+    - `character_class.find_first`: 905 → 186 ns/iter (**−79%, 4.9x**)
+    - `character_class.find_all`: 309,621 → 70,457 ns/iter (**−77%, 4.4x**)
+    - `url_simple.find_first`: 1,212 → 109 ns/iter (**−91%, 11.1x**)
+    - `url_simple.find_all`: 200,987 → 19,303 ns/iter (**−90%, 10.4x**)
+    - `capture_groups.find_first`: 115,986 → 110,232 ns/iter (−5.0%, residual codegen win)
+    - `capture_groups.find_all`: 137,964 → 128,681 ns/iter (−6.7%, residual codegen win)
+- Notes/impact: textbook structural win. The pattern is "engine X computes the answer, then engine Y is run purely as a defensive cross-check with no useful recovery work to do" — and for 0-capture patterns the cross-check has nothing to compare. The per-state 16-byte `copy_from_slice` inside Pike-VM's `set.add` was the dominant cost on these patterns; eliminating Pike-VM altogether for them removes that entire workload. Aggregate session result on the no-capture half of the bench corpus: **2-11x speedups** entirely from structural changes (flat-table DFA + skip-Pike-recovery), where 3 prior micro-fix swings (annotations, redundant-call removal) had moved nothing. Continues to validate the lesson: structural changes that change what work the CPU does move wall-clock; LLVM micro-optimization annotations don't.
+
 ### 2026-04-26 - Perf: flat-table DFA transitions (structural; ~2-5% across 8 DFA-touching targets)
 
 - Scope: after three negative-result micro-fix swings (JIT cache, Pike-VM ThreadSet inline, DFA `transition` inline), the lesson was clear — LTO already wins the micro-game. The next lever had to be structural. samply attributed 25-31% self-time to `LazyDfa::transition` on `capture_groups`; the previous layout used a two-level `Vec<DfaState> { transitions: Vec<DfaStateId> }` indirection — one Vec deref to get the state, another to read its transition row. This commit replaces the per-state `Vec<DfaStateId>` row with a single flat `LazyDfa.transitions: Vec<DfaStateId>` indexed by `state * num_classes + cls`. One Vec deref + one bounds-checked load per byte instead of two. Mirrors the layout used by `regex-automata::dfa::dense`.
