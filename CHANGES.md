@@ -14,6 +14,33 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf: flat-table DFA transitions (structural; ~2-5% across 8 DFA-touching targets)
+
+- Scope: after three negative-result micro-fix swings (JIT cache, Pike-VM ThreadSet inline, DFA `transition` inline), the lesson was clear — LTO already wins the micro-game. The next lever had to be structural. samply attributed 25-31% self-time to `LazyDfa::transition` on `capture_groups`; the previous layout used a two-level `Vec<DfaState> { transitions: Vec<DfaStateId> }` indirection — one Vec deref to get the state, another to read its transition row. This commit replaces the per-state `Vec<DfaStateId>` row with a single flat `LazyDfa.transitions: Vec<DfaStateId>` indexed by `state * num_classes + cls`. One Vec deref + one bounds-checked load per byte instead of two. Mirrors the layout used by `regex-automata::dfa::dense`.
+- Changes:
+  - `rgx-core/src/c2/dfa.rs` —
+    - `struct DfaState`: removed the `transitions: Vec<DfaStateId>` field. Now carries only the cold metadata (`is_accept`, `nfa_states`).
+    - `struct LazyDfa`: added `transitions: Vec<DfaStateId>` (flat). Invariant: `transitions.len() == states.len() * num_classes`, with `DEAD_STATE` as the lazy-fill sentinel.
+    - `LazyDfa::new`: initialises `transitions: Vec::new()`. The first `allocate_state` call grows it to `num_classes`.
+    - `allocate_state`: pushes a fresh `DEAD_STATE` row onto `transitions` via `resize` (one allocation instead of `vec![DEAD_STATE; num_classes]` per state — same total work, slightly better amortisation as states accumulate). Drops the per-`DfaState` row construction.
+    - `transition`: hot path is now `let cached = self.transitions[state * num_classes + cls]` followed by the existing `cached != DEAD_STATE` early-return. Both the dead-write (after `compute_transition_set` returns empty) and the success-write (after a target is allocated or fetched) target the flat table.
+- Validation:
+  - 1118 lib tests pass (includes the in-module DFA differential corpus against Pike-VM).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean per target, `cargo build --profile profiling`, 10K input, 2 s budget; same-process baseline vs flat-table):
+    - `capture_groups.find_first`: 123,642 → 119,935 ns/iter (**−3.0%**)
+    - `capture_groups.find_all`: 144,892 → 142,740 ns/iter (**−1.5%**)
+    - `digit_sequence.find_first`: 250 → 242 ns/iter (**−3.2%**)
+    - `digit_sequence.find_all`: 138,722 → 136,444 ns/iter (**−1.6%**)
+    - `character_class.find_first`: 920 → 898 ns/iter (**−2.4%**)
+    - `character_class.find_all`: 323,552 → 307,855 ns/iter (**−4.9%**)
+    - `url_simple.find_first`: 1,264 → 1,221 ns/iter (**−3.4%**)
+    - `url_simple.find_all`: 203,371 → 202,528 ns/iter (**−0.4%**)
+  - All 8 targets improved; direction unanimous; mean across patterns ≈ **−2.5%**.
+- Notes/impact: confirms the takeaway from the three preceding negative-result entries — **structural changes move wall-clock; micro-fixes don't**. Each `find_match_at` / `find_first_accept_at` / `find_match_start_at_reverse_bounded` byte step now reads one Vec pointer + one indexed load instead of two-levels-deep, with better cache locality (transitions for adjacent states are contiguous in memory). The biggest wins land on the heaviest patterns (`character_class.find_all` at −4.9%, where the DFA scan dominates a 300+ µs/iter pattern). Smallest wins land where the DFA is a small fraction of total work (`url_simple.find_all` at −0.4% — memmem prefix scan dominates). This refactor unblocks further structural DFA work (e.g. start-of-state-row alignment for SIMD, packed-state representations, or the C2 design's step 5/6 lazy-DFA-cache wiring) that would compound on top of the cleaner flat layout.
+
 ### 2026-04-26 - Perf investigation: DFA `transition` inline (negative result — third in series)
 
 - Scope: capture_groups.find_first/find_all profile attributed `LazyDfa::transition` at 25-31% self-time. capture_groups goes through the DFA dispatch path (not Pike-VM), so this is a fresh hot-path target distinct from the Pike-VM `epsilon_closure_with_captures` from the prior investigation. Hypothesis: `#[inline]` on `LazyDfa::transition` and `LazyDfa::is_accept` could let LLVM more aggressively specialise the hot DFA scan loop body inside `find_match_at` / `find_first_accept_at`.

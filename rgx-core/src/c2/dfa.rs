@@ -133,17 +133,18 @@ enum TransitionResult {
     Exhausted,
 }
 
-/// A single DFA state. Stores its transition table indexed by byte
-/// class plus a precomputed `is_accept` flag for the simulation hot
-/// path. The `nfa_states` field is the NFA state set this DFA state
-/// represents (sorted, deduplicated); kept on the state itself rather
-/// than only in the cache so the transition computation can read it
-/// without a reverse cache lookup.
+/// A single DFA state's metadata. Transitions live on `LazyDfa` in a
+/// single flat `Vec<DfaStateId>` so the hot scan loop walks one Vec
+/// indirection per byte instead of two. samply 2026-04-26 attributed
+/// 25-31% self-time on `capture_groups.find_first` / `find_all` to
+/// `LazyDfa::transition`; the previous two-level layout
+/// (`Vec<DfaState> { transitions: Vec<DfaStateId> }`) cost an extra
+/// pointer chase + bounds-check per byte. Compare with the equivalent
+/// design in `regex-automata::dfa::dense`. The `nfa_states` field is
+/// kept on the state itself rather than only in the cache so the
+/// transition computation can read it without a reverse cache lookup.
 #[derive(Debug, Clone)]
 struct DfaState {
-    /// `transitions[byte_class] = next DFA state ID`, or `DEAD_STATE`
-    /// for "no transition / dead". Length is `LazyDfa.num_classes`.
-    transitions: Vec<DfaStateId>,
     /// True iff the NFA's accept state is in `nfa_states`. Cached so
     /// the simulation loop doesn't have to scan the set on every step.
     is_accept: bool,
@@ -174,9 +175,18 @@ struct DfaStateKey {
 pub struct LazyDfa {
     nfa: Arc<Nfa>,
     byte_class_map: Arc<ByteClassMap>,
-    /// All allocated DFA states. Index is the `DfaStateId`. The start
-    /// state is always at index 0.
+    /// All allocated DFA states' metadata (accept flag + NFA state set).
+    /// Index is the `DfaStateId`. The start state is always at index 0.
+    /// Transitions live in `transitions` to keep the hot scan loop a
+    /// single Vec dereference; this Vec only carries the cold metadata.
     states: Vec<DfaState>,
+    /// Flat transition table: `transitions[state * num_classes + cls]`
+    /// is the target `DfaStateId` for `(state, byte_class)`, or
+    /// `DEAD_STATE` if no transition has been computed yet (lazy fill)
+    /// or the transition is genuinely dead (cached). Length is always
+    /// `states.len() * num_classes`. Allocating a new state grows this
+    /// by `num_classes` `DEAD_STATE` entries.
+    transitions: Vec<DfaStateId>,
     /// Maps NFA state sets to allocated DFA state IDs. Used by
     /// `transition` to deduplicate state allocation.
     cache: HashMap<DfaStateKey, DfaStateId>,
@@ -226,6 +236,7 @@ impl LazyDfa {
             nfa,
             byte_class_map,
             states: Vec::new(),
+            transitions: Vec::new(),
             cache: HashMap::new(),
             state_limit,
             num_classes,
@@ -273,7 +284,8 @@ impl LazyDfa {
         if state == DEAD_STATE {
             return TransitionResult::Dead;
         }
-        let cached = self.states[state as usize].transitions[cls as usize];
+        let trans_idx = (state as usize) * self.num_classes + (cls as usize);
+        let cached = self.transitions[trans_idx];
         if cached != DEAD_STATE {
             return TransitionResult::Next(cached);
         }
@@ -283,8 +295,10 @@ impl LazyDfa {
         let next_set = self.compute_transition_set(state, cls);
         if next_set.is_empty() {
             // Genuinely dead — record DEAD_STATE in the transition
-            // table so future lookups skip the recomputation.
-            self.states[state as usize].transitions[cls as usize] = DEAD_STATE;
+            // table so future lookups skip the recomputation. (No-op
+            // since DEAD_STATE was already there, but keep the explicit
+            // write so the contract is obvious to readers.)
+            self.transitions[trans_idx] = DEAD_STATE;
             return TransitionResult::Dead;
         }
         // Look up or allocate the target DFA state.
@@ -300,7 +314,7 @@ impl LazyDfa {
             }
             self.allocate_state(next_set)
         };
-        self.states[state as usize].transitions[cls as usize] = target_id;
+        self.transitions[trans_idx] = target_id;
         TransitionResult::Next(target_id)
     }
 
@@ -496,15 +510,21 @@ impl LazyDfa {
     // ============================================================
 
     /// Allocate a fresh DFA state for the given NFA state set and
-    /// register it in the cache. Returns the new state's ID.
+    /// register it in the cache. Returns the new state's ID. Grows the
+    /// flat `transitions` table by `num_classes` `DEAD_STATE` slots so
+    /// the new state's row is fully addressable.
     fn allocate_state(&mut self, nfa_states: Vec<NfaStateId>) -> DfaStateId {
         let id = self.states.len() as DfaStateId;
         let is_accept = nfa_states.contains(&self.nfa.accept());
         self.states.push(DfaState {
-            transitions: vec![DEAD_STATE; self.num_classes],
             is_accept,
             nfa_states: nfa_states.clone(),
         });
+        // Append a fresh row of DEAD_STATE entries for this state's
+        // outgoing transitions. The flat-table invariant is
+        // `transitions.len() == states.len() * num_classes`.
+        self.transitions
+            .resize(self.transitions.len() + self.num_classes, DEAD_STATE);
         let key = DfaStateKey { nfa_states };
         self.cache.insert(key, id);
         id

@@ -294,6 +294,19 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf: flat-table DFA transitions (structural; ~2-5% across 8 patterns)
+
+- **What**: after three negative-result micro-fix swings, pivoted to a structural change. Replaced the two-level `Vec<DfaState>{ transitions: Vec<DfaStateId> }` layout with a single flat `LazyDfa.transitions: Vec<DfaStateId>` indexed by `state * num_classes + cls`. One Vec deref + one indexed load per byte, mirrors `regex-automata::dfa::dense`.
+- **Result**: 3-run mean across 8 DFA-touching targets:
+  - capture_groups.find_first −3.0%, find_all −1.5%
+  - digit_sequence.find_first −3.2%, find_all −1.6%
+  - character_class.find_first −2.4%, find_all **−4.9%** (biggest absolute win — heavy pattern)
+  - url_simple.find_first −3.4%, find_all −0.4%
+  - **All 8 improved; direction unanimous; mean ≈ −2.5%**.
+- **Lesson confirmed**: structural changes move wall-clock; micro-fixes don't. The `cargo build --profile profiling` LTO has already done the easy inlining work; deeper wins require touching what work the CPU actually does (one indirection vs two, contiguous vs scattered transitions).
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean (zero errors). Conformance ratchet 12,709/101 preserved.
+- **Next concrete action**: this unblocks further structural DFA work — start-of-row alignment for SIMD scan acceleration, packed-state representations, or the C2 design step 5/6 lazy-DFA-cache wiring. Each would compound on top of the cleaner flat layout.
+
 ### 2026-04-26 — Perf investigation: DFA transition inline (negative — third in row, loop paused)
 
 - **What**: capture_groups profile (a fresh target — DFA-dispatched, not Pike-VM) attributed LazyDfa::transition at 25-31% self-time. Tried `#[inline]` on `LazyDfa::transition` + `LazyDfa::is_accept`. 3-run wall-clock: capture_groups.find_first 117K → 120K (+2.2%, consistent), find_all 140K → 139K (flat).
