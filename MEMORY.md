@@ -294,6 +294,15 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-26 — Perf investigation: ThreadSet inline + skip redundant contains (negative result)
+
+- **What**: samply showed `epsilon_closure_with_captures` at 32.4% / 24.6% self-time on character_class / url_simple find_first. Closure does `if contains return; add(state, captures)` and `add` re-checks `contains` — doubled sparse-array probe. Tried `#[inline]` on 4 hot ThreadSet methods + merging add+contains into single add with caller-side contract.
+- **Result**: 3 runs × 3 patterns. ALL +0.9% mean within ~1.5% noise floor. **Neutral on wall-clock.** Reverted.
+- **Reading**: with `cargo build --profile profiling` (full LTO + 1 codegen unit), LLVM already inlines and CSEs the doubled probe. Explicit annotations don't move the needle. The 32.4% self-time is the actual algorithmic cost of the closure (set ops + edge iteration), not avoidable micro-overhead.
+- **Lesson confirmed twice**: profile-attributed hot path ≠ wall-clock-improvable hot path. Wall-clock measurement is the merge condition. Two negative-result swings in a row (JIT cache + this) → real Pike-VM wins now likely require lazy DFA cache (C2 step 5-6) which skips Pike-VM for hot states, or pattern-specific specializations.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet unchanged.
+- **Next concrete action**: pause perf micro-optimization on Pike-VM. Either (a) advance C2 step 5-6 (lazy DFA cache), or (b) move to a different perf surface (e.g. compile-time gap closure, or matching on inputs that haven't been benched yet).
+
 ### 2026-04-26 — Perf investigation: JIT captures cache (negative result) + small bug fix
 
 - **What**: investigated whether caching the JIT captures buffer on `Engine` (mirroring `pike_scratch`) would close the 47.9% / 53.2% libsystem_malloc shown by samply on `email_basic.find_first` / `find_all`. Implemented the cache (`Engine::jit_captures: OnceLock<Mutex<Vec<i64>>>`, helper `jit_captures_mutex()`, all 3 `try_jit_*` call sites switched), measured both samply and wall-clock against baseline.

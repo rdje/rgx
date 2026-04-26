@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-26 - Perf investigation: ThreadSet inline annotations + skip redundant `contains` (negative result)
+
+- Scope: post-Pike-VM-scratch + post-JIT-investigation samply profiles attributed `epsilon_closure_with_captures` at 32.4% / 24.6% self-time on `character_class.find_first` / `url_simple.find_first`. The closure does `if set.contains(state) { return; } set.add(state, captures);` and `set.add` itself does another `contains` check — a doubled sparse-array probe per recursive call. Hypothesis: `#[inline]` on the 4 hot `ThreadSet` methods (`add`, `position_of`, `state_at`, `captures_at`) plus eliminating the redundant `contains` (move responsibility to caller via `debug_assert`) should shave cycles in the hottest Pike-VM function.
+- Investigation: implemented the change (single `add()` with caller-side contains contract; `#[inline]` on 4 methods). 3-run wall-clock measurement vs baseline:
+  - `character_class.find_first`: baseline 921 ± 13 → post-opt 929 ± 22 (within noise; +0.9% mean)
+  - `url_simple.find_first`: baseline 1190 ± 17 → post-opt 1201 ± 7 (within noise; +0.9% mean)
+  - `digit_sequence.find_first`: baseline 231 ± 1.5 → post-opt 233 ± 1.5 (within noise; +0.9% mean)
+- All three patterns showed the **same direction (+0.9% mean)** in the same noise-floor band. **No measurable wall-clock signal in either direction.** Reverted.
+- Reading: with `cargo build --profile profiling` (inherits release: full LTO + single codegen unit), LLVM already inlines `ThreadSet::contains` and `add`, and CSEs the doubled sparse-array probe across them. Explicit `#[inline]` and merging the two methods doesn't move the codegen needle. The 32.4% self-time attribution in samply reflects the algorithmic cost of running the NFA closure (per-state set ops + edge iteration), not redundant micro-work.
+- Validation: 1118 lib + 30 cli pass. fmt + clippy clean (revert is no-op vs HEAD). PCRE2 conformance ratchet unchanged.
+- Notes/impact: documenting this so a future contributor doesn't re-run the same investigation. Two negative-result perf swings in a row (this + JIT captures cache) point at the same lesson, now confirmed twice: **wall-clock measurement is the merge condition**; sample attribution alone (whether it's libsystem_malloc dominance or algorithmic-leaf self-time) is a hint, not a verdict. Real Pike-VM wall-clock wins now likely require either (a) the lazy DFA cache (C2 design steps 5-6) which skips Pike-VM entirely for hot states, or (b) pattern-specific specializations layered on top of the existing dispatch chain.
+
 ### 2026-04-26 - Perf investigation: JIT captures cache (negative result) + small bug fix in `pike_captures_at_cached` fallback
 
 - Scope: post-Pike-VM-scratch samply profiles attributed 47.9% of `email_basic.find_first` and 53.2% of `email_basic.find_all` to `libsystem_malloc`. The hypothesis: `try_jit_find_first` / `try_jit_find_all` / `try_jit_is_match` allocate a fresh `Vec<i64>` captures buffer per call via `new_capture_buffer(num_groups)` — caching it on `Engine` (mirroring the `pike_scratch` pattern) should eliminate that churn. This entry documents what we **investigated and chose not to ship**, plus a small unrelated bug fix found while in the area.
