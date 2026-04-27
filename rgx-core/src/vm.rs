@@ -9061,82 +9061,96 @@ impl Default for OptimizingCompiler {
     }
 }
 
+/// Per-byte lookup table mapping VM bytecode bytes to their `OpCode`
+/// variant (or `None` for unassigned/reserved bytes). The hot VM loop
+/// decodes one opcode byte per step via `OpCode::try_from(b)`; the
+/// previous shape compiled to a sparse 50+ arm match. samply 2026-04-27
+/// attributed 9.3% self-time to that match on `anchor_complex.find_all`
+/// — sparse arms inhibit LLVM's jump-table optimisation, leaving an
+/// O(log N) compare-tree. A direct 256-entry lookup is one indexed
+/// load + one branch on `Option`'s discriminant. Total table size:
+/// 256 * sizeof(Option<OpCode>) = 512 bytes, fits in 8 cache lines.
+static OPCODE_TABLE: [Option<OpCode>; 256] = build_opcode_table();
+
+const fn build_opcode_table() -> [Option<OpCode>; 256] {
+    use OpCode::{
+        Accept, AltScopeBegin, AltScopeEnd, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart,
+        Backref, BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock, Commit,
+        DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump,
+        JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark,
+        Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune,
+        QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
+        SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
+        VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+    };
+    let mut t: [Option<OpCode>; 256] = [None; 256];
+    t[0x00] = Some(Char);
+    t[0x01] = Some(Any);
+    t[0x05] = Some(AnyDotAll);
+    t[0x06] = Some(MatchReset);
+    t[0x07] = Some(PreviousMatchEnd);
+    t[0x08] = Some(GraphemeCluster);
+    t[0x10] = Some(DigitAscii);
+    t[0x11] = Some(DigitAsciiNeg);
+    t[0x12] = Some(WordAscii);
+    t[0x13] = Some(WordAsciiNeg);
+    t[0x14] = Some(SpaceAscii);
+    t[0x15] = Some(SpaceAsciiNeg);
+    t[0x16] = Some(CharClass);
+    t[0x17] = Some(CharClassNeg);
+    t[0x30] = Some(StartLine);
+    t[0x31] = Some(EndLine);
+    t[0x32] = Some(StartText);
+    t[0x33] = Some(EndText);
+    t[0x34] = Some(EndTextOrNL);
+    t[0x35] = Some(WordBoundary);
+    t[0x36] = Some(NonWordBoundary);
+    t[0x40] = Some(Jump);
+    t[0x41] = Some(Split);
+    t[0x42] = Some(SplitLazy);
+    t[0x43] = Some(JumpIfMatch);
+    t[0x44] = Some(JumpIfNoMatch);
+    t[0x45] = Some(Call);
+    t[0x47] = Some(AltSplit);
+    t[0x48] = Some(AltScopeBegin);
+    t[0x49] = Some(AltScopeEnd);
+    t[0x50] = Some(SaveStart);
+    t[0x51] = Some(SaveEnd);
+    t[0x60] = Some(Lookahead);
+    t[0x61] = Some(LookaheadNeg);
+    t[0x62] = Some(Lookbehind);
+    t[0x63] = Some(LookbehindNeg);
+    t[0x64] = Some(AtomicStart);
+    t[0x65] = Some(AtomicEnd);
+    t[0x66] = Some(Backref);
+    t[0x67] = Some(CodeBlock);
+    t[0x68] = Some(BackrefCaseInsensitive);
+    t[0x80] = Some(QuestionGreedy);
+    t[0x81] = Some(QuestionLazy);
+    t[0x82] = Some(StarGreedy);
+    t[0x83] = Some(StarLazy);
+    t[0x84] = Some(PlusGreedy);
+    t[0x85] = Some(PlusLazy);
+    t[0x90] = Some(SetAlternative);
+    t[0xA0] = Some(Commit);
+    t[0xA1] = Some(Prune);
+    t[0xA2] = Some(VerbSkip);
+    t[0xA3] = Some(Then);
+    t[0xA4] = Some(Mark);
+    t[0xA5] = Some(VerbSkipNamed);
+    t[0xF0] = Some(Match);
+    t[0xF1] = Some(Fail);
+    t[0xF2] = Some(Accept);
+    t
+}
+
 // Implement TryFrom for OpCode to safely convert from u8
 impl TryFrom<u8> for OpCode {
     type Error = ();
 
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        use OpCode::{
-            Accept, AltScopeBegin, AltScopeEnd, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart,
-            Backref, BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock,
-            Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
-            GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
-            LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
-            PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart,
-            SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
-            StartLine, StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg,
-            WordBoundary,
-        };
-        match value {
-            0x00 => Ok(Char),
-            0x01 => Ok(Any),
-            0x05 => Ok(AnyDotAll),
-            0x06 => Ok(MatchReset),
-            0x07 => Ok(PreviousMatchEnd),
-            0x08 => Ok(GraphemeCluster),
-            0x10 => Ok(DigitAscii),
-            0x11 => Ok(DigitAsciiNeg),
-            0x12 => Ok(WordAscii),
-            0x13 => Ok(WordAsciiNeg),
-            0x14 => Ok(SpaceAscii),
-            0x15 => Ok(SpaceAsciiNeg),
-            0x16 => Ok(CharClass),
-            0x17 => Ok(CharClassNeg),
-            0x30 => Ok(StartLine),
-            0x31 => Ok(EndLine),
-            0x32 => Ok(StartText),
-            0x33 => Ok(EndText),
-            0x34 => Ok(EndTextOrNL),
-            0x35 => Ok(WordBoundary),
-            0x36 => Ok(NonWordBoundary),
-            0x60 => Ok(Lookahead),
-            0x61 => Ok(LookaheadNeg),
-            0x62 => Ok(Lookbehind),
-            0x63 => Ok(LookbehindNeg),
-            0x64 => Ok(AtomicStart),
-            0x65 => Ok(AtomicEnd),
-            0x66 => Ok(Backref),
-            0x67 => Ok(CodeBlock),
-            0x68 => Ok(BackrefCaseInsensitive),
-            0x40 => Ok(Jump),
-            0x41 => Ok(Split),
-            0x42 => Ok(SplitLazy),
-            0x43 => Ok(JumpIfMatch),
-            0x44 => Ok(JumpIfNoMatch),
-            0x45 => Ok(Call),
-            0x47 => Ok(AltSplit),
-            0x48 => Ok(AltScopeBegin),
-            0x49 => Ok(AltScopeEnd),
-            0x50 => Ok(SaveStart),
-            0x51 => Ok(SaveEnd),
-            0x80 => Ok(QuestionGreedy),
-            0x81 => Ok(QuestionLazy),
-            0x82 => Ok(StarGreedy),
-            0x83 => Ok(StarLazy),
-            0x84 => Ok(PlusGreedy),
-            0x85 => Ok(PlusLazy),
-            0x90 => Ok(SetAlternative),
-            0xA0 => Ok(Commit),
-            0xA1 => Ok(Prune),
-            0xA2 => Ok(VerbSkip),
-            0xA3 => Ok(Then),
-            0xA4 => Ok(Mark),
-            0xA5 => Ok(VerbSkipNamed),
-            0xF0 => Ok(Match),
-            0xF1 => Ok(Fail),
-            0xF2 => Ok(Accept),
-            _ => Err(()),
-        }
+        OPCODE_TABLE[value as usize].ok_or(())
     }
 }
 

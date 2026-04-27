@@ -294,6 +294,16 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-27 — Perf: 256-entry lookup table for OpCode::try_from (-9% on anchor_complex.find_first)
+
+- **What**: post-emit-fix profile attributed 9.3% self-time to TryFrom<u8>::try_from. Sparse 50-arm match (discriminants 0x00, 0x05-0x08, 0x10-0x17, 0x30-0x36, …) inhibited LLVM jump-table optimization. Replaced with `static OPCODE_TABLE: [Option<OpCode>; 256]` filled by `const fn build_opcode_table()`. try_from becomes single indexed load + Option discriminant branch.
+- **Result** (3-run mean):
+  - anchor_complex.find_first 354→322 (**-9.0%**); cumulative across emit-fix + table = 376→322 (**-14%**)
+  - anchor_complex.find_all 73.7K→71.6K (-2.8%)
+  - email_basic / capture_groups / alternation: flat or noise-only (those paths don't reach try_from)
+- **Lesson recap**: another structural-change win. The table change actually changes what work the CPU does (1 load vs ~6 compares); LLVM was emitting suboptimal codegen for the sparse discriminant set. Different from the failed inline annotation experiment — that hint left the same compare-tree generated.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet 12,709/101 preserved.
+
 ### 2026-04-27 — Perf: AtomicBool fast-path for emit_event (1.43x on anchor_complex.find_all)
 
 - **What**: samply showed emit_event 3.4% self-time on anchor_complex; took RwLock::read() per call to discover Option::None (the common no-observer case). Cached presence in `RegexVM::has_observer: AtomicBool`; fast path is single Acquire load + branch, RwLock short-circuited.

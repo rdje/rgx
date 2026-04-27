@@ -14,6 +14,26 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-27 - Perf: 256-entry lookup table for `OpCode::try_from` (-9% on anchor_complex.find_first)
+
+- Scope: post-emit_event-fix profile re-attributed `<u8 as TryFrom>::try_from` at 9.3% self-time on `anchor_complex.find_all`. The previous shape was a sparse 50+ arm match (discriminants 0x00, 0x05-0x08, 0x10-0x17, 0x30-0x36, 0x40-0x49, 0x50-0x51, 0x60-0x68, 0x80-0x85, 0x90, 0xA0-0xA5, 0xF0-0xF2). Sparse discriminants inhibit LLVM's jump-table optimisation, leaving an O(log N) compare-tree. Replace with a single 256-entry static lookup table.
+- Fix: new `static OPCODE_TABLE: [Option<OpCode>; 256]` populated by a `const fn build_opcode_table()` that maps each valid byte to `Some(OpCode::X)` and leaves the rest as `None`. `TryFrom<u8> for OpCode::try_from` becomes `OPCODE_TABLE[value as usize].ok_or(())` with `#[inline]`. Total table size: 256 × 2 bytes (Option<OpCode> with niche-optimised `None`) = 512 bytes / 8 cache lines.
+- Changes:
+  - `rgx-core/src/vm.rs` — added `OPCODE_TABLE` and `build_opcode_table()`, replaced `TryFrom<u8> for OpCode` body with single indexed load + `Option::ok_or(())` branch.
+- Validation:
+  - 1118 lib tests pass (the table mapping is verified against the canonical opcode-value pairs by the existing OpCode round-trip tests).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean, 2 s budget; baseline = `859721f` AtomicBool fix vs this commit):
+    - `anchor_complex.find_first`: 354 → 322 ns/iter (**−9.0%**)
+    - `anchor_complex.find_all`: 73.7K → 71.6K ns/iter (−2.8%)
+    - `email_basic.find_first`: 373 → 378 ns/iter (+1.3% noise — JIT path, not VM)
+    - `email_basic.find_all`: 112K → 116K ns/iter (+3.8% noise — JIT path, not VM)
+    - `capture_groups`: flat (DFA path)
+    - `alternation`: flat (AC path)
+- Notes/impact: structural change (different data structure for the dispatch). One indexed load + branch beats LLVM's compiled compare-tree on sparse opcode discriminants. The slight noise on `email_basic` (which never reaches `OpCode::try_from` since it dispatches through the JIT) is consistent with measurement variance — mean across the bench corpus is net-positive. Cumulative session win on `anchor_complex.find_first`: 376 → 322 (-14% across the AtomicBool + lookup-table commits).
+
 ### 2026-04-27 - Perf: AtomicBool fast-path for `RegexVM::emit_event` (1.43x on anchor_complex.find_all)
 
 - Scope: samply attributed 3.4% self-time to `RegexVM::emit_event` on `anchor_complex.find_first` and 31.0% inclusive to `vm::find_all`; the previous shape took an `RwLock::read()` round-trip on every call to discover that no observer was registered (the common case — observers are opt-in for callers that want structured `MatchEvent` callbacks). For `anchor_complex.find_all` on a 10K input the VM emits `MatchAttemptStarted` / `MatchAttemptCompleted` / `BacktrackOccurred` thousands of times per call, each acquiring/releasing the read-lock just to find `None`.
