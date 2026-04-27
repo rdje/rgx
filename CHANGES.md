@@ -14,6 +14,27 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-27 - Perf: AtomicBool fast-path for `RegexVM::emit_event` (1.43x on anchor_complex.find_all)
+
+- Scope: samply attributed 3.4% self-time to `RegexVM::emit_event` on `anchor_complex.find_first` and 31.0% inclusive to `vm::find_all`; the previous shape took an `RwLock::read()` round-trip on every call to discover that no observer was registered (the common case — observers are opt-in for callers that want structured `MatchEvent` callbacks). For `anchor_complex.find_all` on a 10K input the VM emits `MatchAttemptStarted` / `MatchAttemptCompleted` / `BacktrackOccurred` thousands of times per call, each acquiring/releasing the read-lock just to find `None`.
+- Fix: cache the observer-presence flag in a new `RegexVM::has_observer: AtomicBool`. `set_event_observer` flips it to `true` with `Release` ordering after the `RwLock` is populated; `emit_event` and `has_event_observer` read it with `Acquire`. The hot fast path is a single relaxed-equivalent atomic load + branch when no observer is attached, with the `RwLock` short-circuited entirely. Ordering is correct because (a) a reader that sees `true` is guaranteed (via Release/Acquire pair) to see the published observer in the `RwLock`, and (b) a reader that sees `false` while a writer is mid-publish simply skips this event — matching the pre-cached behaviour of "register then run".
+- Changes:
+  - `rgx-core/src/vm.rs` — added `has_observer: AtomicBool` field; initialised `false`; `set_event_observer` stores `Release` after RwLock publish; `emit_event` short-circuits on Acquire-load `false`; `has_event_observer` returns the Acquire load directly (no RwLock).
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean, `cargo build --profile profiling`, 10K input, 2 s budget; baseline = HEAD pre-change vs this commit):
+    - `anchor_complex.find_first`: 376 → 354 ns/iter (**−5.9%**)
+    - `anchor_complex.find_all`: 105,688 → 73,662 ns/iter (**−30.3%, 1.43x**)
+    - `email_basic.find_first`: 380 → 373 ns/iter (−1.8%)
+    - `email_basic.find_all`: 115,078 → 111,875 ns/iter (−2.7%)
+    - `alternation.find_first`: 20 → 18 ns/iter (−10%)
+    - `alternation.find_all`: 10,500 → 10,318 ns/iter (−1.9%)
+    - DFA-dispatched patterns (`capture_groups`, `character_class`, `url_simple`): flat ±2.5% noise — these never reach `emit_event` since their dispatch path is the C2 DFA chain, not the backtracking VM. The slight noise is consistent with a struct-layout cache shift from the new field.
+- Notes/impact: textbook structural win on a hot-path Mutex-style synchronisation primitive. The `RwLock::read()` pair was a low-double-digit-nanosecond cost amortised across thousands of calls per `find_all` — 30% of `anchor_complex.find_all` was the cumulative observer-presence probe. The fix doesn't change semantics: observers still get every event when registered. The pattern (cache a presence flag with Release/Acquire ordering to short-circuit a sync primitive's check) generalises to other lazy-feature paths in the codebase if profiling surfaces them.
+
 ### 2026-04-27 - Perf: skip Pike-VM capture-recovery for 0-capture-group patterns (4-11x on capture-free DFA-dispatched patterns)
 
 - Scope: post-flat-table samply re-profile attributed `pike_captures_at_with_scratch` 73-88% inclusive on `character_class.find_first/find_all` and `url_simple.find_first/find_all`. These patterns have **zero capture groups** (no `(...)` anywhere), but the engine was still running the Pike-VM after the DFA found each match — solely to "recover" capture group positions that don't exist. Inside Pike-VM, `set.add(state, captures)` does a per-state 16-byte `copy_from_slice` of an all-`None` captures buffer for every NFA state in every closure step. Pure waste.

@@ -294,6 +294,18 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-27 — Perf: AtomicBool fast-path for emit_event (1.43x on anchor_complex.find_all)
+
+- **What**: samply showed emit_event 3.4% self-time on anchor_complex; took RwLock::read() per call to discover Option::None (the common no-observer case). Cached presence in `RegexVM::has_observer: AtomicBool`; fast path is single Acquire load + branch, RwLock short-circuited.
+- **Result** (3-run mean, baseline = HEAD vs this commit):
+  - anchor_complex.find_first 376→354 (-5.9%)
+  - anchor_complex.find_all 105.7K→73.7K (**-30.3%, 1.43x**)
+  - email_basic.find_first 380→373 (-1.8%); find_all 115K→112K (-2.7%)
+  - alternation.find_first 20→18 (-10%); find_all flat
+  - DFA-dispatched patterns (capture_groups/character_class/url_simple): flat ±2.5% noise (those never reach emit_event)
+- **Win pattern recap**: the wins are structural — eliminate work or remove indirection. The losses are LLVM-already-optimized micro-fixes. RwLock-per-call was real wall-clock cost LLVM couldn't elide.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean (zero errors). Conformance ratchet 12,709/101 preserved.
+
 ### 2026-04-27 — Perf: skip Pike-VM capture-recovery for 0-capture-group patterns (4-11x)
 
 - **What**: profile attributed 73-88% inclusive on pike_captures_at_with_scratch for character_class/url_simple find_first/find_all. These patterns have ZERO capture groups but still ran Pike-VM per match purely to "recover" capture positions that don't exist — every set.add doing per-state 16-byte copy_from_slice of all-None buffer. New `Engine::recover_match_for_dfa_span` synthesises MatchResult directly from DFA's (start, end) when num_capture_groups==0; falls back to pike_captures_at_cached otherwise. Wired into 4 dispatch sites: try_dfa_find_first per-position, try_dfa_find_all, try_pipeline_find_first (also drops the Pike-VM cross-check — DFA's leftmost-longest equals Pike-VM's leftmost-first-greedy on C2-eligible patterns by construction), try_pipeline_find_all.

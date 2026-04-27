@@ -850,6 +850,17 @@ pub struct RegexVM {
     literal_finder: Option<memchr::memmem::Finder<'static>>,
     /// Optional event observer for structured match events.
     event_observer: RwLock<Option<EventObserver>>,
+    /// Cached presence flag for `event_observer`. The hot VM path emits
+    /// many `emit_event` calls per match attempt (MatchAttemptStarted /
+    /// MatchAttemptCompleted / BacktrackOccurred etc.), and each one
+    /// previously took an `RwLock::read()` round-trip just to discover
+    /// that no observer was registered (the common case). An atomic
+    /// boolean lets `emit_event` short-circuit on a single relaxed load
+    /// when no observer is attached, skipping the `RwLock` entirely.
+    /// Set to `true` after the `RwLock` is populated by
+    /// `set_event_observer`; never cleared (observers can be replaced
+    /// but not removed via the current API).
+    has_observer: std::sync::atomic::AtomicBool,
     /// Match semantics: leftmost-first (PCRE2 default) or leftmost-longest (POSIX).
     match_semantics: std::sync::atomic::AtomicU8,
     /// Maximum opcode steps per match attempt. 0 = unlimited (default).
@@ -914,6 +925,7 @@ impl RegexVM {
             prefix_filter: PrefixFilter::None,
             literal_finder: None,
             event_observer: RwLock::new(None),
+            has_observer: std::sync::atomic::AtomicBool::new(false),
             match_semantics: std::sync::atomic::AtomicU8::new(0), // 0 = LeftmostFirst
             max_steps: std::sync::atomic::AtomicU64::new(0),
             max_backtrack_frames: std::sync::atomic::AtomicU64::new(0),
@@ -1018,6 +1030,14 @@ impl RegexVM {
         F: Fn(&MatchEvent) + Send + Sync + 'static,
     {
         *self.event_observer.write().unwrap() = Some(Arc::new(observer));
+        // Order matters: publish the observer first, then flip the
+        // cache flag. A reader that sees `has_observer = true` will then
+        // read-lock and find `Some(...)` for sure. (The reverse race —
+        // reader sees `false` while the writer is mid-publish — is
+        // benign: the reader simply skips this event, which matches
+        // the pre-cached behaviour of "register then run".)
+        self.has_observer
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     /// Emit a structured match event to the registered observer (if any).
@@ -1027,6 +1047,17 @@ impl RegexVM {
     /// overhead.
     #[inline]
     fn emit_event(&self, event: &MatchEvent) {
+        // Fast path: a single relaxed atomic load + branch when no
+        // observer is registered. samply 2026-04-27 attributed 3.4%
+        // self-time to `emit_event` on `anchor_complex.find_first` —
+        // the previous shape took an `RwLock::read()` round-trip on
+        // every call (typically thousands per `find_all` call) just to
+        // confirm `Option::None`. An `Acquire` load pairs with the
+        // `Release` store in `set_event_observer` so a reader that
+        // sees `true` is guaranteed to see the published observer.
+        if !self.has_observer.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         if let Some(ref observer) = *self.event_observer.read().unwrap() {
             observer(event);
         }
@@ -1071,10 +1102,7 @@ impl RegexVM {
     /// VM.
     #[doc(hidden)]
     pub fn has_event_observer(&self) -> bool {
-        self.event_observer
-            .read()
-            .map(|o| o.is_some())
-            .unwrap_or(false)
+        self.has_observer.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Returns `true` if any of the runtime safety limits
