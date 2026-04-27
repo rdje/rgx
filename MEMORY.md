@@ -294,6 +294,18 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-27 — Perf: cache dead transitions in LazyDfa — **2.5x on capture_groups, 1.9x on digit_sequence**
+
+- **What**: instrumentation showed compute_transition_set firing ~6K times per capture_groups.find_all call during the TIMED phase. Root cause: single DEAD_STATE sentinel for both "uncached" and "computed dead". Every dead-transition lookup recomputed. Split into UNCACHED (u32::MAX, table init) vs DEAD_STATE (u32::MAX-1, cached-dead). Three-way branch in transition().
+- **Result** (3-run mean):
+  - capture_groups.find_first 117K→45K (**-61.6%**, **2.6x**); find_all 121K→47.5K (**-60.7%**, **2.5x**)
+  - digit_sequence.find_first 58→45 (-22%); find_all 65K→34K (**-47.5%**, **1.9x**)
+  - character_class -9% / -11%; url_simple -10% / -14%
+  - VM/JIT-dispatched (anchor_complex, email_basic): within noise
+- **The find**: instrumentation is the SOTA tool. samply attribution can't distinguish "compute_transition_set fired in cold path" from "transition's self-time" because LLVM inlines the cold path. An AtomicU64 counter gated by `RGX_DFA_COLD_TRACE` env var revealed the recomputation-per-call rate empirically. **Symbol-only profiling can hide structural bugs that instrumentation surfaces in 2 minutes.**
+- **Latent since C2 step 5a** (initial lazy DFA). Cache hit-rate was misleadingly OK because the fast-path (cached-non-dead) worked correctly; the silent cost was the cached-dead path.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet 12,709/101 preserved.
+
 ### 2026-04-27 — Perf: hoist DFA mutex out of try_dfa_find_all loop (-8.4% on capture_groups.find_all)
 
 - **What**: try_dfa_find_all locked Mutex<LazyDfa> per scan candidate (5K+ times per find_all on capture_groups). Single hoist out of the loop. find_first path already had this; making find_all consistent.

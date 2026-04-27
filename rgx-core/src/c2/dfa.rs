@@ -95,9 +95,24 @@ use std::sync::Arc;
 /// State identifier in the lazy DFA. The start state is always `0`.
 pub type DfaStateId = u32;
 
-/// Sentinel value for "no transition" / "dead state" in DFA transition
-/// tables. The simulator stops on entry to the dead state.
-const DEAD_STATE: DfaStateId = u32::MAX;
+/// Sentinel for "computed dead transition" in the cached transitions
+/// table — a `(state, byte_class)` pair that was looked up and found
+/// to have no NFA-reachable target. The simulator stops on entry to
+/// the dead state. `transition()` returns `TransitionResult::Dead` in
+/// this case **without** re-running `compute_transition_set`.
+const DEAD_STATE: DfaStateId = u32::MAX - 1;
+
+/// Sentinel for "uncached transition slot" — the initial value for
+/// every cell in `LazyDfa.transitions` until that `(state, byte_class)`
+/// pair is first looked up. Distinct from `DEAD_STATE` so cached-dead
+/// lookups can short-circuit without re-running the cold computation.
+///
+/// History: 2026-04-27 instrumentation showed `compute_transition_set`
+/// firing ~6,000 times per `capture_groups.find_all` call because the
+/// transitions table used a single sentinel for both "uncached" and
+/// "computed dead". Every dead-transition lookup hit the cold path. The
+/// two-sentinel design is the SOTA fix; matches `regex-automata::dfa`.
+const UNCACHED: DfaStateId = u32::MAX;
 
 /// Outcome of a single-position DFA match attempt.
 ///
@@ -286,18 +301,29 @@ impl LazyDfa {
         }
         let trans_idx = (state as usize) * self.num_classes + (cls as usize);
         let cached = self.transitions[trans_idx];
-        if cached != DEAD_STATE {
+        // Real DFA state IDs are 0..states.len() — strictly less than
+        // both sentinels (`DEAD_STATE = u32::MAX - 1`, `UNCACHED = u32::MAX`).
+        // The fast path is one compare + branch, identical in cost to the
+        // previous shape; the difference is what falls through.
+        if cached < DEAD_STATE {
             return TransitionResult::Next(cached);
         }
-        // No cached transition. Compute the next NFA state set by
-        // following byte transitions for `cls` from every NFA state in
-        // the source DFA state, then epsilon-closing the targets.
+        if cached == DEAD_STATE {
+            // Cached-dead — return immediately without recomputing.
+            // Without this check, dead transitions hit `compute_transition_set`
+            // on every lookup; instrumentation 2026-04-27 measured ~6K
+            // recomputations per `capture_groups.find_all` call.
+            return TransitionResult::Dead;
+        }
+        debug_assert_eq!(cached, UNCACHED);
+        // Uncached. Compute the next NFA state set by following byte
+        // transitions for `cls` from every NFA state in the source
+        // DFA state, then epsilon-closing the targets.
         let next_set = self.compute_transition_set(state, cls);
         if next_set.is_empty() {
             // Genuinely dead — record DEAD_STATE in the transition
-            // table so future lookups skip the recomputation. (No-op
-            // since DEAD_STATE was already there, but keep the explicit
-            // write so the contract is obvious to readers.)
+            // table so future lookups short-circuit at the dead-cache
+            // check above instead of recomputing.
             self.transitions[trans_idx] = DEAD_STATE;
             return TransitionResult::Dead;
         }
@@ -520,11 +546,14 @@ impl LazyDfa {
             is_accept,
             nfa_states: nfa_states.clone(),
         });
-        // Append a fresh row of DEAD_STATE entries for this state's
+        // Append a fresh row of UNCACHED entries for this state's
         // outgoing transitions. The flat-table invariant is
-        // `transitions.len() == states.len() * num_classes`.
+        // `transitions.len() == states.len() * num_classes`. UNCACHED
+        // (distinct from DEAD_STATE) lets `transition()` distinguish
+        // "never looked up" from "computed dead and cached" so dead
+        // lookups don't recompute every call.
         self.transitions
-            .resize(self.transitions.len() + self.num_classes, DEAD_STATE);
+            .resize(self.transitions.len() + self.num_classes, UNCACHED);
         let key = DfaStateKey { nfa_states };
         self.cache.insert(key, id);
         id

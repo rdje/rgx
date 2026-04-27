@@ -14,6 +14,42 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-27 - Perf: cache dead transitions in `LazyDfa` (UNCACHED vs DEAD_STATE sentinels) — **2.5x on capture_groups, 1.9x on digit_sequence**
+
+- Scope: instrumentation 2026-04-27 revealed `LazyDfa::compute_transition_set` firing **~6,000 times per `capture_groups.find_all` call** during the timed bench phase — orders of magnitude more than the "cold path runs only on cache miss" intuition. Root cause: a single sentinel value (`DEAD_STATE = u32::MAX`) was used for both **(a) "uncached transition slot"** (initial value of every cell in `LazyDfa.transitions`) and **(b) "computed dead transition"** (cached after `compute_transition_set` returns the empty set). Every dead-transition lookup tested `cached != DEAD_STATE` → false → **recomputed** the empty set on every call. Classic textbook bug in lazy-DFA cache design.
+- Fix: split into two sentinels.
+  - `UNCACHED = u32::MAX` — table init value, slot has never been looked up.
+  - `DEAD_STATE = u32::MAX - 1` — cached "computed dead", short-circuit return.
+  
+  `transition()` becomes:
+  
+  ```rust
+  let cached = self.transitions[trans_idx];
+  if cached < DEAD_STATE {  return TransitionResult::Next(cached); }
+  if cached == DEAD_STATE { return TransitionResult::Dead; }   // cached-dead fast return
+  // cached == UNCACHED → cold path
+  ```
+  
+  Real DFA state IDs are 0..states.len(), strictly less than both sentinels — fast path is one compare + branch, identical in cost to the previous shape. The difference is what falls through: cached-dead now short-circuits without recomputing.
+- Changes:
+  - `rgx-core/src/c2/dfa.rs` — added `UNCACHED` constant (`u32::MAX`); changed `DEAD_STATE` to `u32::MAX - 1`; `transition()` distinguishes the three cases with `< DEAD_STATE` / `== DEAD_STATE` / fall-through-to-compute; `allocate_state` initialises new transition rows with `UNCACHED` instead of `DEAD_STATE`. The simulator-state checks (`is_accept`, `transition` entry) still treat `state == DEAD_STATE` as "dead state"; UNCACHED is only ever stored in the cache, never returned as an engine state.
+- Validation:
+  - 1118 lib tests pass (the differential corpus comparing C2 against the existing backtracking VM is now a much stronger ratchet for this fix).
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean, 2 s budget; baseline = `de78029` hoist commit vs this commit):
+    - `capture_groups.find_first`: 117K → 44.9K ns/iter (**−61.6%**, **2.6x**)
+    - `capture_groups.find_all`: 121K → 47.5K ns/iter (**−60.7%**, **2.5x**)
+    - `digit_sequence.find_first`: 58 → 45 ns/iter (**−22.4%**)
+    - `digit_sequence.find_all`: 65K → 34.1K ns/iter (**−47.5%**, **1.9x**)
+    - `character_class.find_first`: 186 → 166 ns/iter (**−10.8%**)
+    - `character_class.find_all`: 71K → 64.7K ns/iter (**−8.9%**)
+    - `url_simple.find_first`: 109 → 94 ns/iter (**−13.8%**)
+    - `url_simple.find_all`: 19K → 17K ns/iter (**−10.5%**)
+    - VM/JIT-dispatched patterns (`anchor_complex`, `email_basic`): within noise — those paths don't touch `LazyDfa::transition`.
+- Notes/impact: largest single perf win this session by an order of magnitude. The bug had been latent since the lazy DFA was introduced (C2 step 5a) — never surfaced in profiles before because samply attributed the recomputed-dead time to `LazyDfa::transition`'s self-time, not to a separate "wasted recomputation" symbol. The instrumentation that found it (a temporary `RGX_DFA_COLD_TRACE` env-gated counter) is now removed; if surfaced again, the cache should fire `compute_transition_set` ≈ once per `(state, byte_class)` pair encountered, period. Closes the gap between RGX's lazy DFA and `regex-automata::dfa::dense::DFA`, which uses an equivalent two-sentinel design.
+
 ### 2026-04-27 - Perf: hoist single DFA mutex lock out of `try_dfa_find_all` per-candidate loop (-8.4% on capture_groups.find_all)
 
 - Scope: `try_dfa_find_all`'s per-position scan acquired and released the `Mutex<LazyDfa>` once for **every** scan candidate. For prefix-rich patterns with many candidates (e.g., `capture_groups` = `(\d{4})-(\d{2})-(\d{2})` on a 10K input where many bytes are digits), that's thousands of `lock()` + `unlock()` round-trips per `find_all` call — pure synchronisation overhead since the `DFA` is already conceptually owned by this engine for the duration of the scan.
