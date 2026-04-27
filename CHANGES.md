@@ -14,6 +14,23 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-04-27 - Perf: hoist single DFA mutex lock out of `try_dfa_find_all` per-candidate loop (-8.4% on capture_groups.find_all)
+
+- Scope: `try_dfa_find_all`'s per-position scan acquired and released the `Mutex<LazyDfa>` once for **every** scan candidate. For prefix-rich patterns with many candidates (e.g., `capture_groups` = `(\d{4})-(\d{2})-(\d{2})` on a 10K input where many bytes are digits), that's thousands of `lock()` + `unlock()` round-trips per `find_all` call — pure synchronisation overhead since the `DFA` is already conceptually owned by this engine for the duration of the scan.
+- Fix: lock the `Mutex<LazyDfa>` once at the top of the per-position scan loop and reuse the `MutexGuard` for every `dfa.find_match_at(input, start)` call inside. The body's only re-entrant code path is `recover_match_for_dfa_span`, which either (a) synthesises directly from `(start, end)` for 0-capture patterns or (b) locks the **separate** `pike_scratch_mutex`. Consistent lock order DFA → Pike-scratch is preserved across all dispatch paths, so no deadlock risk. Distinct from the earlier `try_pipeline_find_all` hoist experiment that regressed: that path locked **three** DFA mutexes plus re-entered Pike-VM, whereas this path is single-DFA + simple-recovery.
+- Changes:
+  - `rgx-core/src/engine.rs` — `try_dfa_find_all`: hoist `dfa_mutex.lock()` to once per call (instead of once per candidate); replace per-candidate `let outcome = { let mut dfa = ...; dfa.find_match_at(...) };` block with a direct `dfa.find_match_at(...)` call on the long-lived guard.
+- Validation:
+  - 1118 lib tests pass.
+  - 30 rgx-cli tests pass.
+  - `cargo fmt` + `cargo clippy --workspace --all-targets` clean (zero errors).
+  - PCRE2 conformance ratchet preserved at **12,709 / 101 / 0 / 0**.
+  - **Measured perf** (3-run mean, 2 s budget; baseline = `9de2fd4` lookup-table fix vs this commit):
+    - `capture_groups.find_all`: 132K → 121K ns/iter (**−8.4%**)
+    - `digit_sequence.find_all`: 67K → 65K ns/iter (−3.4%)
+    - `capture_groups.find_first`: ~117K (within noise vs baseline; same code path was already hoisted in `try_dfa_find_first`)
+- Notes/impact: classic structural fix for an interior-mutable shared resource on the per-call hot path. Mutex acquisition on macOS arm64 is ~10-20 ns uncontended; multiplied by thousands of candidates per `find_all` it becomes a measurable share of total wall-clock. Holding the lock for the duration trades single-thread bench wins for slightly worse multi-thread contention on the same `Regex`, but (a) the dispatch path was already serialised behind this same mutex per call so contention was already paying the same cost, and (b) the `try_dfa_find_first` path already hoists this lock for the same reason — this commit makes the two paths consistent. The earlier `try_pipeline_find_all` hoist regressed (different path: 3 mutexes + Pike-VM re-entry); the lesson is that hoist wins are path-specific.
+
 ### 2026-04-27 - Perf: 256-entry lookup table for `OpCode::try_from` (-9% on anchor_complex.find_first)
 
 - Scope: post-emit_event-fix profile re-attributed `<u8 as TryFrom>::try_from` at 9.3% self-time on `anchor_complex.find_all`. The previous shape was a sparse 50+ arm match (discriminants 0x00, 0x05-0x08, 0x10-0x17, 0x30-0x36, 0x40-0x49, 0x50-0x51, 0x60-0x68, 0x80-0x85, 0x90, 0xA0-0xA5, 0xF0-0xF2). Sparse discriminants inhibit LLVM's jump-table optimisation, leaving an O(log N) compare-tree. Replace with a single 256-entry static lookup table.

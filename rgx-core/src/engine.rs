@@ -1114,6 +1114,18 @@ impl Engine {
         }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
+        // Hoist the DFA mutex lock out of the per-candidate loop. The
+        // earlier shape locked-then-unlocked once per scan candidate;
+        // for prefix-rich patterns with many candidates (e.g.,
+        // `capture_groups` with `\d` prefix on a 10K input full of
+        // digits) that's thousands of lock+unlock pairs per `find_all`
+        // call. Holding the lock across the whole scan is safe — this
+        // is the only DFA mutex we touch in this path, and the inner
+        // body (`scanner.next_candidate` + `recover_match_for_dfa_span`)
+        // doesn't re-enter into DFA dispatch. Distinct from the
+        // pipeline find_all path (which locks three DFAs and re-enters
+        // pike_captures_at_cached); that path stays per-iteration.
+        let mut dfa = dfa_mutex.lock().ok()?;
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
@@ -1122,10 +1134,7 @@ impl Engine {
                 break;
             };
             start = candidate;
-            let outcome = {
-                let mut dfa = dfa_mutex.lock().ok()?;
-                dfa.find_match_at(input, start)
-            };
+            let outcome = dfa.find_match_at(input, start);
             match outcome {
                 DfaSearchOutcome::Match(end) => {
                     let is_empty = end == start;

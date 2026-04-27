@@ -294,6 +294,14 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-04-27 — Perf: hoist DFA mutex out of try_dfa_find_all loop (-8.4% on capture_groups.find_all)
+
+- **What**: try_dfa_find_all locked Mutex<LazyDfa> per scan candidate (5K+ times per find_all on capture_groups). Single hoist out of the loop. find_first path already had this; making find_all consistent.
+- **Result** (3-run mean): capture_groups.find_all 132K→121K (**-8.4%**); digit_sequence.find_all 67K→65K (-3.4%); find_first within noise.
+- **Distinct from earlier try_pipeline_find_all hoist** (which regressed): pipeline path locks 3 mutexes + re-enters Pike-VM. try_dfa_find_all is single-mutex + simple recovery — different topology, different result. Hoist wins are path-specific.
+- **Lock-order discipline**: DFA → Pike-scratch preserved across all paths.
+- **Deltas**: 1118 lib + 30 cli green. fmt + clippy clean. Conformance ratchet 12,709/101 preserved.
+
 ### 2026-04-27 — Perf: 256-entry lookup table for OpCode::try_from (-9% on anchor_complex.find_first)
 
 - **What**: post-emit-fix profile attributed 9.3% self-time to TryFrom<u8>::try_from. Sparse 50-arm match (discriminants 0x00, 0x05-0x08, 0x10-0x17, 0x30-0x36, …) inhibited LLVM jump-table optimization. Replaced with `static OPCODE_TABLE: [Option<OpCode>; 256]` filled by `const fn build_opcode_table()`. try_from becomes single indexed load + Option discriminant branch.
