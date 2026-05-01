@@ -3255,3 +3255,89 @@ The user flagged that single-digit ratchet moves were painful — this commit wa
 - Dig into the new "50 other" bucket: substitute tests where RGX's replace output genuinely differs from PCRE2 (template-syntax edge cases, empty-match replacement-iteration quirks). Each could be a focused engine/replace fix.
 - Or the still-open RGX-side tracks: `([a]*?)*` residual, `(a\1?){4}` recursive backref, `(?(?=.*b)b|^)` lookaround-conditional.
 - The `replace=a$++` / `replace=a$bad` malformed-template cases (testinput2:4205+ area) may need parser-side work for PCRE2's extended substitute syntax too.
+
+## 2026-04-19 → 2026-04-27 sessions — gap-period summary (backfill on 2026-05-01)
+
+### What this entry is
+This is a **summary backfill**. The detailed per-commit history for the 2026-04-19 → 2026-04-27 sessions lives in `CHANGES.md` (the engineering-fix #29-#38 push, the reverse-DFA pipeline wiring for `find_first` / `find_all`, the CLI binary rename `rgx-cli` → `rgx`, and the massive 2026-04-25 → 2026-04-27 perf sprint). MEMORY.md was not appended through that period — discovered during the 2026-05-01 session bootstrap. Recording this entry so the chronology stays explicit; full details remain in `CHANGES.md`.
+
+### Coarse-grained shape of the gap period
+- **2026-04-19 → 2026-04-24**: engine fixes #29 (Call empty-match retry frame) through #38 (`(?J)` dupnames conditional checks ANY instance), plus PRUNE/COMMIT/SKIP/THEN interaction work, lookbehind-body must-end-at and full-subject-visibility fixes, alt-scope tracking opcodes (`AltSplit`/`AltScopeBegin`/`AltScopeEnd`), `(?U)` ungreedy + atomic-group suppression, subroutine-call flag-scope rewrap, `(*PRUNE)` clearing pending `(*COMMIT)` / `(*SKIP)` marks. Conformance ratchet moved 12,673 → 12,702.
+- **2026-04-24 (afternoon)**: reverse-DFA pipeline for `find_first` (`e258517`) and `find_all` (`fc20629`); CLI binary renamed `rgx-cli` → `rgx` via `[[bin]] name = "rgx"` (`c3104ae`); ratchet snapshot taken at 12,709 / 101 in the residual catalogue book chapter (`book/src/internals/pcre2-conformance-residual.md`).
+- **2026-04-25**: PGEN-RGX-0073 filed (compile-time perf — PGEN parse is 65-99% of total `Regex::compile` wall-clock time). Lazy artifact construction in `Engine::new` (-27.6% compile). Allocation cleanups (pre-size capture-groups Vec — 35% on `literal_simple find_first`). Inner-literal fast-fail. Aho-Corasick dispatch for top-level literal alternation. Multi-byte memmem prefilter (10.8x on `https?://\S+`). Pure-literal short-circuit. memmem::Finder cache. UTF-8 validation skip on Engine entry points (5.4x on `literal_simple find_first`, 26x on `url_simple find_first`).
+- **2026-04-26**: samply profiling workflow (`scripts/run-samply.sh` + `scripts/samply-hotpaths.py`). PikeScratch cache (3-3.6x on Pike-dispatched patterns). Three negative-result micro-fix swings (JIT captures cache, ThreadSet inline annotations, DFA `transition` inline) — confirmed lesson: profiling-profile LTO already wins the micro-game. Flat-table DFA transitions (structural; 2.5% mean across 8 targets).
+- **2026-04-27**: skip Pike-VM capture-recovery for 0-capture patterns (4-11x on capture-free DFA-dispatched patterns). AtomicBool fast-path for `RegexVM::emit_event` (1.43x on `anchor_complex.find_all`). 256-entry `OPCODE_TABLE` for `OpCode::try_from` (-9% on `anchor_complex.find_first`). Hoist DFA mutex out of `try_dfa_find_all` per-candidate loop. Two-sentinel cache in `LazyDfa` (UNCACHED vs DEAD_STATE) — 2.5x on `capture_groups`, 1.9x on `digit_sequence`.
+
+### Why MEMORY.md drifted
+The 2026-04-25 → 2026-04-27 perf sprint was high-velocity and mostly micro-commit-level. Each commit got a CHANGES.md entry but MEMORY.md (the session-narrative track) was skipped. Per `CLAUDE.md` and `COMMIT.md` Step 3, both tracks should be updated; this gap is recorded here so the discipline is restored.
+
+### Next concrete action
+The next session has all the prior context restored in this entry plus the 2026-05-01 entry that follows.
+
+## 2026-05-01 session — typed-shape adapter refactor + PGEN 1.1.29 → 1.1.40 cycle (PGEN-RGX-0074, 0075, 0076, 0077)
+
+### Scope
+Major adapter refactor in `rgx-core/src/parsing.rs` to consume PGEN's new typed-Json AST shapes (introduced in PGEN's slice 9-onwards typed-rule annotation campaign). Five PGEN releases absorbed in one session (`1.1.30` → `1.1.40` across the day), four PGEN-RGX reports filed and closed upstream during the same session, 13 stale earlier YAMLs flipped to `closed` with resolution notes, all walker arms updated to current per-rule typed shapes.
+
+### What landed in PGEN (consumed during the session, in order)
+- **PGEN 1.1.29 / contract 1.1.31** (entry pin) → **PGEN 1.1.30 / contract 1.1.32** (PGEN-RGX-0073 perf-closure release; introduced typed-`digits`, then typed-`quant_suffix`, etc.; new cold-clone `make regex_parser_bootstrap` / `regex_parser_fresh` Make targets).
+- **PGEN 1.1.31 / contract 1.1.33**: PGEN-RGX-0074 fix for `\Q...\E quantifier?` attachment + new `**` flatten-spread primitive in the return-annotation language.
+- **PGEN 1.1.32 / 1.1.33 / 1.1.34**: quantifier-subtree slices 1-2 (typed `digits`, typed `quant_suffix`).
+- **PGEN 1.1.34 / contract 1.1.36**: PGEN-RGX-0075 fix for multi-piece concatenation (single-`captured_var` Quantified peel-arm removed in `ast_return_transform.rs`; compensating `regex = pattern -> ...` rule change).
+- **PGEN 1.1.35 / contract 1.1.37**: quantifier-subtree slice 6 (closure) — `quantifier` rule fully typed `{type, min, max, greediness}`; `quant_base` per-branch `-> {min, max}`.
+- **PGEN 1.1.36 / contract 1.1.38**: atom subtree slice 7 — typed `anchor` shape `{type:"anchor", kind:"<stable-name>"}`.
+- **PGEN 1.1.37 / contract 1.1.39**: PGEN-RGX-0076 fix for typed `posix_class` shape `{type, name, negated}` + latent `BooleanLiteral` / `NumberLiteral` codegen fix.
+- **PGEN 1.1.38 / contract 1.1.40**: atom subtree slice 9 — typed `posix_word_boundary_alias` (closes anchor family with `posix_word_start` / `posix_word_end` kinds).
+- **PGEN 1.1.39 / contract 1.1.41**: atom subtree slice 10 — typed `backreference` shape `{type:"backreference", kind, ...}` (4 forms: numeric, named, named_braced, subroutine).
+- **PGEN 1.1.40 / contract 1.1.42** (final pin): PGEN-RGX-0077 fix for `[$1**]` flatten-spread peeling `Alternative` (recovers the `\Q...\E quantifier?` flat-piece shape).
+
+### What landed in RGX
+**`rgx-core/src/parsing.rs`** — major rewrite of the typed-shape walker:
+- New `PgenAstContent::Json(serde_json::Value)` variant + `collapse_to_json` helper (mirrors PGEN's `to_json_value()` byte-equivalence contract per the regex_parser_book's `parse-content-variants.md` mapping table).
+- New top-level dispatch: when the deserialised `PgenAstNode` root content is `Json(_)`, route to a new `convert_typed_regex` walker that walks the unified `serde_json::Value` tree directly. Legacy recursive-envelope walker kept as a defensive fallback for non-Json roots.
+- Full typed-shape coverage:
+  - `regex` / `pattern` / `concatenation` / `piece` (the closed-by-0075 path): top-level walker navigates the 2-element `pattern[<first_alt>, <rest>]` array, the alternative's Quantified-? carrier, and the flat concatenation array.
+  - `quantifier`: typed object `{type, min, max, greediness}` (slice 6 closure). `[]` empty slot for un-matched `quantifier?`.
+  - `anchor`: typed object `{type:"anchor", kind:<stable-name>}` (slice 7 + slice 9). 11 stable kind names: `start_of_line`, `end_of_line`, `start_of_input`, `end_of_input_or_before_last_newline`, `end_of_input`, `word_boundary`, `non_word_boundary`, `match_start`, `keep_out`, `posix_word_start`, `posix_word_end`.
+  - `posix_class`: typed object `{type, name, negated}` (PGEN-RGX-0076 fix). `negated:true` or `[]` (mapped to false).
+  - `backreference`: typed object `{type, kind, ...}` (slice 10). 4 kinds; `numeric` carries typed `index` integer, `named` / `named_braced` / `subroutine` carry raw `ref` shape pending later slice typing. `\g<>` / `\g'…'` → Recursion subroutine call; `\g{}` / bare `\gN` → back-reference (PCRE2 bracket-form semantic preserved).
+- All un-annotated atom kinds dispatched by structural prefix per the regex_parser_book Identification table: char_class, capturing_group, noncapturing_group, named_group, python_named_group, atomic_group, branch_reset_group, lookarounds (4 forms + 2 non-atomic), conditional (incl. VERSION compile-time short-circuit + alpha-condition assertion `(?(*pla:...)...)`), code_block, comment_group, callout, extended_class, alpha-prefixed `(*…)` family (atomic, scs/scan_substring, sr/script_run/asr/atomic_script_run, alpha lookaround, directive_verb), question-prefixed `(?…)` family (inline_modifiers, scoped_inline_modifiers, subroutine_call).
+- `WhitespaceLiteral` for unescaped whitespace chars so the compiler can strip them under `(?x:...)` extended mode.
+- Bare `\E` outside `\Q\E` lowered to empty Sequence (no-op per PCRE2).
+- Counted_quantifier_body Object form `{min, max}` (slice 4-5 typed); `max: null` for unbounded `{n,}`.
+
+### Reports filed during the session
+- **PGEN-RGX-0074** (filed 2026-04-27, before this session) — `\Q...\E` quantifier attachment. Closed by PGEN 1.1.31.
+- **PGEN-RGX-0075** (filed 2026-05-01) — multi-piece concatenation drop. Closed by PGEN 1.1.34. Reproducer helper `rgx-core/examples/pgen_concat_dump.rs`.
+- **PGEN-RGX-0076** (filed 2026-05-01) — `posix_class -> $1` name-loss. Closed by PGEN 1.1.37. Reproducer helper `rgx-core/examples/pgen_posix_class_dump.rs`.
+- **PGEN-RGX-0077** (filed 2026-05-01) — `[$1**]` flatten-spread Alternative-peel regression on `piece_quoted_run_quantified` array spread. Closed by PGEN 1.1.40. Reproducer helper `rgx-core/examples/pgen_quoted_run_dump.rs`.
+
+### Bookkeeping cleanup
+13 stale `PGEN-RGX-002[1-3]/0027/0028/003[3-9]/0053.yaml` files (closed by user directive on 2026-04-24 but never flipped to `status: closed` on disk) flipped during this session with generic closed-by-directive resolution notes. **Only `PGEN-RGX-0073` remains genuinely open.** Live measurement at PGEN pin `056f6784` (1.1.40), Apple M-series, release build, 2026-05-01:
+
+| Pattern | PGEN parse p50 | PCRE2 full compile | PGEN/PCRE2 |
+|---|---:|---:|---:|
+| literal_simple | 93,542 ns | 132 ns | **708x** |
+| digit_sequence | 230,875 ns | 264 ns | **875x** |
+| character_class | 290,833 ns | 592 ns | **491x** |
+| alternation | 130,000 ns | 287 ns | **453x** |
+| capture_groups | 284,459 ns | 449 ns | **634x** |
+| url_simple | 213,250 ns | 258 ns | **827x** |
+| email_basic | 233,833 ns | 287 ns | **815x** |
+| anchor_complex | 410,208 ns | 614 ns | **668x** |
+
+**Geomean ~660x slower.** That's PGEN parse alone vs PCRE2's full compile pipeline (parse + codegen + JIT prep) — before any RGX-side codegen, Engine::new, or JIT prep is added. PGEN's release `1.1.30` "perf closure" was declared against PGEN's own PRIMARY <50µs target; 0073 was logged for THIS comparison (PGEN parse vs PCRE2 compile), and PGEN's PRIMARY target doesn't close it. ROADMAP "<5x of PCRE2 compile" goal needs PGEN parse to drop to ~50-200ns — a 1000-2000x speedup from current numbers. The 0073 YAML was briefly mis-framed as `pgen-side-closed-rgx-side-pending` mid-session and then corrected back to `unresolved` after I re-ran the right comparison; status convention now matches the integration goal directly.
+
+### Validation
+- **Lib tests**: 1118/1118 pass (was 1118/1119 baseline, +1 = pre-existing ignored test count). Started at 0/787 (every test failing on the `Json` variant deserialisation error from the initial PGEN bump); recovered progressively as walker coverage expanded.
+- **rgx-cli tests**: pass (no changes in rgx-cli).
+- **PCRE2 conformance**: 12,693 / 101 ratchet baseline 12,709. **-16 cases** vs baseline — residual semantic gap from the typed-walker refactor; not blocking. Buckets: 70 FN / 29 SM / 6 RGX-permissive / 5 FP / 4 other / 3 compile-other. Triage in a follow-up session.
+- **`cargo run --bin rgx -- 'abc' 'abc'`**: matches `0..3` (was `0..1` before fix). Compile + match end-to-end functional.
+
+### PGEN's release-engineering pivot (project memory)
+PGEN's slice 5 (`0ed2b2ad`, "stop tracking generated/* in git") removed the vendored generated parsers from version control. Downstream consumers MUST regenerate locally via `make -C subs/pgen/rust regex_parser_bootstrap` (idempotent, single command) or `make regex_parser_fresh` (clean+rebuild). The cold-clone bootstrap target was added in PGEN `6e5b0f23` to break the circular dependency between `ast_pipeline` (which compiles `generated/ebnf.rs` into itself) and `generated/ebnf.rs` (which is produced by `ast_pipeline`). New `cfg(has_generated_ebnf_parser)` flag in PGEN's `build.rs` gates the include, with the hand-written EBNF frontend as the bootstrap backstop.
+
+### Next concrete action
+- Triage the 16-case conformance regression: compare buckets against `book/src/internals/pcre2-conformance-residual.md` baseline counts, identify which cases are new (regression introduced by typed-walker refactor) vs pre-existing baseline residuals. Walker bugs go to RGX; PGEN-side bugs get a PGEN-RGX-0078 report.
+- One known walker gap: conditional callout-prefix assertion `(?(?C99)(?=...)...)` — typed condition has shape `[<callout_arg>, "(", "?=", <pattern>]` that my walker doesn't dispatch yet. Treat as a walker shape extension (legitimate), not a workaround.
+- Optional: consider whether to bump the PCRE2 conformance ratchet baseline downward to 12,693 (capture the new shape state) or hold at 12,709 (force the triage to recover ground). Hold at 12,709 — the gap is small, the buckets are well-defined, and the triage is the right next move.

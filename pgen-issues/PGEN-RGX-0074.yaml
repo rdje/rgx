@@ -1,0 +1,286 @@
+id: PGEN-RGX-0074
+summary: |
+  PGEN's `regex` parser binds a quantifier following `\Q...\E` to the
+  ENTIRE quoted block, but PCRE2 (and Perl, and the documented
+  `\Q...\E` semantics they share) bind the quantifier to the **last
+  character** of the literal sequence only.
+
+  As a family the bug fires for every quantifier shape — `?`, `*`,
+  `+`, `*?`, `+?`, `{n}`, `{n,}`, `{n,m}`, lazy and possessive
+  variants — wherever the quoted block contains MORE THAN ONE
+  literal character. Single-character `\Qx\E{n}` cases happen to
+  produce the right runtime match by accident, because "quantify
+  the whole block" degenerates to "quantify the only char" when
+  the block has length 1; this hides the bug from a single-pattern
+  reproducer and is why the issue has lurked.
+
+  PCRE2 reference (pcre2pattern(3) §"Backslash"):
+
+  > A quantifier following \Q...\E applies only to the last
+  > character of the literal sequence, not to the whole sequence.
+
+  Bug class: **parses but returns the wrong AST/dump** (per
+  `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md` §4). Compile succeeds;
+  the AST attaches the quantifier to the wrong subtree, producing
+  semantically wrong matches at runtime.
+
+status: closed
+opened_at: 2026-04-27T00:00:00Z
+first_seen_at: 2026-04-27T00:00:00Z
+last_updated_at: 2026-04-27T00:00:00Z
+
+# === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
+parser_backend: pgen
+parser_backend_version: "48a9f06"          # subs/pgen HEAD at measurement
+parser_release_version: "1.1.29"           # contract.regex_parser_release_version
+integration_contract_version: "1.1.31"     # contract.regex_integration_contract_version
+parser_family: regex
+profile: regex_default
+integration_surface: pgen::embedding_api
+generated_artifact: "PGEN submodule subs/pgen, embedded via rgx-core/src/parsing.rs::parse_pattern"
+
+# === Host project identity (per protocol §2) ===
+host_project: rgx
+rgx_commit: 6c9766c
+host_os: macos
+host_os_version: "Darwin Kernel 25.4.0 (arm64)"
+host_arch: aarch64
+rust_toolchain: "rustc 1.95.0"
+cargo_features: "default + jit + pgen-parser"
+
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+
+# === Reproduction context ===
+context:
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs (`parse_pattern` → PGEN `parse_grammar_profile_named` / `parse_grammar_profile_ast_dump_named`)
+  command: |
+    cargo build -p rgx-core --example pgen_qe_dump
+    target/debug/examples/pgen_qe_dump
+  notes: |
+    Surfaces from PCRE2 conformance test corpus — testinput1:6794
+    `/\Qab*\E{2,}/` on subject `"ab***z"` expected match `"ab***"`
+    (PCRE2 ratchet category "false negative"). After triage, the
+    same root cause is also responsible for the runtime divergences
+    we observe on `\Qab*\E{2}`, `\Qab*\E?`, `\Qab*\E+`, `\Qab*\E*`,
+    `\Qab*\E*?`, `\Qab*\E{1,3}`, `\Qab*\E{2,}?`, `\Qabc\E{2}`,
+    `\Qab\E{3}`, etc.
+
+# === Family expected vs actual behavior ===
+expected_behavior: |
+  PGEN's `regex_default` profile should produce an AST in which a
+  quantifier following `\Q…\E` quantifies ONLY the last character of
+  the quoted run. Equivalent rewriting (each row is what PCRE2
+  parses these patterns as):
+
+  | source                     | semantically-equivalent       |
+  |----------------------------|--------------------------------|
+  | `\Qab*\E{2,}`             | `a` `b` `\*{2,}`              |
+  | `\Qab*\E{2}`              | `a` `b` `\*{2}`               |
+  | `\Qab*\E?`                | `a` `b` `\*?`                 |
+  | `\Qab*\E+`                | `a` `b` `\*+`                 |
+  | `\Qab*\E*`                | `a` `b` `\**`                 |
+  | `\Qab*\E*?`               | `a` `b` `\**?`                |
+  | `\Qab*\E{1,3}`            | `a` `b` `\*{1,3}`             |
+  | `\Qab*\E{2,}?`            | `a` `b` `\*{2,}?`             |
+  | `\Qabc\E{2}`              | `a` `b` `c{2}`                |
+  | `\Qab\E{3}`               | `a` `b{3}`                    |
+  | `\Qa\E{3}`                | `a{3}`           (degenerate)  |
+  | `\Q\E{2}`                 | empty                          |
+
+  Equivalently in tree form — the quantifier should attach to a
+  **single-character node** that is the last char of the quoted
+  run, not to the run as a whole.
+
+actual_behavior: |
+  PGEN parses `\Qabc\E{2}` (and the rest of the family) as if the
+  quantifier wraps the entire `\Q…\E` literal sequence as a single
+  unit. The AST dump (attached as artifact) shows the quantifier
+  attached at the run-level, not the last-char level. Downstream
+  RGX VM execution then either:
+
+  - matches the literal text once and treats the quantifier as
+    applying to the whole literal (so `\Qab*\E{2}` would need
+    `ab*ab*` which never occurs in `"ab**z"`, hence "no match"),
+  - or matches the literal once and ignores the quantifier on the
+    repeat (so `\Qab*\E+` returns `"ab*"` instead of `"ab***"`),
+  - or for lazy/zero-width quantifiers, returns an empty match
+    (`\Qab*\E?` → `""`, `\Qab*\E*?` → `""`).
+
+  Single-char `\Qa\E{n}` cases produce the right runtime behaviour
+  by **accident**: "quantify the whole 1-char block" degenerates to
+  "quantify the only char". This is the smoking gun that the bug is
+  in the AST shape, not the runtime.
+
+# === Reproduction (parse-output evidence) ===
+reproduction: |
+  ## Family table (RGX runtime behaviour, all running on PGEN parses)
+
+  | Pattern             | Subject     | RGX result      | PCRE2 expected |
+  |---------------------|-------------|-----------------|----------------|
+  | `\Qab*\E{2,}`       | `ab***z`    | `None`          | `"ab***"`      |
+  | `\Qab*\E{2}`        | `ab**z`     | `None`          | `"ab**"`       |
+  | `\Qab*\E?`          | `abz`       | `""`            | `"ab"`         |
+  | `\Qab*\E+`          | `ab***z`    | `"ab*"`         | `"ab***"`      |
+  | `\Qab*\E*`          | `ab***z`    | `"ab*"`         | `"ab***"`      |
+  | `\Qab*\E*?`         | `ab***z`    | `""`            | `"ab"`         |
+  | `\Qab*\E{1,3}`      | `ab***z`    | `"ab*"`         | `"ab***"`      |
+  | `\Qab*\E{2,}?`      | `ab***z`    | `None`          | `"ab**"`       |
+  | `\Qabc\E{2}`        | `abccz`     | `None`          | `"abcc"`       |
+  | `\Qab\E{3}`         | `abbbz`     | `None`          | `"abbb"`       |
+  | `\Q.\E{2}`          | `..z`       | `".."` ✅       | `".."`         |
+  | `\Qa\E{3}`          | `aaab`      | `"aaa"` ✅      | `"aaa"`        |
+  | `\Q\E{2}`           | `anything`  | `""` ✅         | `""`           |
+  | `ab\*{2,}` (control)| `ab***z`    | `"ab***"` ✅    | `"ab***"`      |
+
+  - Rows with ✅ are the degenerate cases (single-char or empty
+    `\Q…\E` runs) that produce correct output by accident.
+  - The control pattern `ab\*{2,}` is what PCRE2 effectively rewrites
+    `\Qab*\E{2,}` to. RGX matches it correctly, confirming the VM
+    handles last-char quantifiers right and the bug is parser-side.
+
+  ## Smallest single failing input
+  pattern  : `\Qab*\E{2,}`
+  subject  : `ab***z`
+  expected : match span `"ab***"` (positions 0..5)
+  actual   : no match
+
+  ## Reproducer commands
+
+  ### Embedding-API path (matches the protocol's §B "downstream-only")
+  ```bash
+  cargo build -p rgx-core --example pgen_qe_dump
+  target/debug/examples/pgen_qe_dump > /tmp/pgen_qe.json
+  ```
+  Output is the contract JSON + 5 `(outcome, ast_dump)` pairs:
+  three buggy multi-char `\Q…\E` forms, one manual-control rewrite,
+  one single-char degenerate case.
+
+  ### `parseability_probe` path (matches the protocol's §A)
+  ```bash
+  echo -n '\Qab*\E{2,}' > /tmp/qe_repro.txt
+  PGEN_TRACE_VERBOSITY=debug \
+    subs/pgen/rust/target/release/parseability_probe \
+      --parse-dump-ast-pretty regex /tmp/qe_repro.txt /tmp/qe_ast.json \
+      --profile regex_default \
+      --trace --trace-log-file /tmp/qe_trace.log
+  ```
+
+  ## Structured PGEN artifacts (committed under `pgen-issues/artifacts/PGEN-RGX-0074/`)
+
+  - `pgen-outcome.json` — `parser_embedding_api_contract()`
+    + 5 `(outcome, ast_dump)` pairs from the embedding API path.
+  - `ast-dump.json` — `parseability_probe` `--parse-dump-ast-pretty`
+    for the smallest failing input `\Qab*\E{2,}`. Shows the buggy
+    AST shape with `\Q` as a `Terminal` and the entire `\Q…\E`
+    block wrapped under `Quantified`.
+  - `ast-dump-3char.json` — same probe for `\Qabc\E{2}`
+    (3-char body, multi-char-block bug surfaces here too).
+  - `ast-dump-control.json` — same probe for the manual-rewrite
+    control `ab\*{2,}`. Diff this against `ast-dump.json` to see
+    exactly where the buggy and the correct parses diverge — both
+    should produce the same final shape (literal `a`, literal `b`,
+    then `Quantified(literal *, {2,})`).
+  - `trace.log` — full `PGEN_TRACE_VERBOSITY=debug` parser trace
+    for the smallest failing input. ~3.4 MB; useful for tracing the
+    production rules that mis-attribute the quantifier.
+  - `host_call_site.md` — short note documenting where RGX
+    consumes the bad AST.
+
+  Status fields in the outcome JSON for every bug-class input are
+  `status: "success"` with `diagnostic: null` — the parse succeeds,
+  it just produces the wrong AST.
+
+# === Suggested fix direction (for PGEN-side analysis) ===
+fix_direction: |
+  Two equivalent ways to land the fix in the parser:
+
+  **Option A — Decompose `\Q…\E` at lex time.**
+  Have the lexer emit one literal-char token per character inside
+  `\Q…\E`, with an empty `\Q\E` emitting zero tokens. The
+  quantifier-attachment grammar rule then attaches to the trailing
+  literal as it would for any explicit literal sequence. This is
+  the RE2 / Rust-`regex_syntax` shape and matches PCRE2's behaviour
+  by construction.
+
+  **Option B — Keep the `\Q…\E` AST node but split it on quantifier
+  attachment.** When a `Quantified` rule reduces with a `LiteralRun`
+  child, peel the last character off the run, leaving the prefix as
+  a sequence and binding the quantifier to the peeled-off
+  trailing-char node. Empty literal runs produce an empty quantified
+  group (matches PCRE2: `\Q\E{2}` matches empty zero-width, the
+  current degenerate case).
+
+  Option A is simpler from the grammar side and makes the bug
+  unrepresentable downstream. Option B keeps `\Q…\E` as a first-class
+  node for any future tooling that wants to recognise quoted runs
+  (e.g. literal-prefix optimisations) but adds a minor special case
+  to the `Quantified` reduction.
+
+  The cross-engine reference here is RE2 / Rust `regex_syntax`,
+  which both treat `\Q…\E` as a desugaring of individual literal
+  chars; their parsed AST for `\Qab*\E{2}` contains three Char
+  nodes plus a `Quantified(Char(*), {2})` node, exactly matching
+  PCRE2's runtime behaviour.
+
+  Either fix should also make these implicit cases consistent:
+  - `\Qab*\E*` / `\Qab*\E+` / `\Qab*\E?`  (greedy)
+  - `\Qab*\E*?` / `\Qab*\E+?` / `\Qab*\E??` (lazy)
+  - `\Qab*\E*+` / `\Qab*\E++` / `\Qab*\E?+` (possessive, where supported)
+  - `\Qab*\E{n}` / `\Qab*\E{n,}` / `\Qab*\E{n,m}` (and lazy/possessive)
+
+  All twelve+ shapes reduce to the same root: "the last literal
+  inside `\Q…\E` is the operand of any trailing quantifier".
+
+impact: |
+  Material to PCRE2 conformance: the family above currently
+  contributes false-negative ratchet cases. The first concrete one
+  surfaced by the corpus is testinput1:6794 `/\Qab*\E{2,}/` on
+  `"ab***"` (expected match, RGX returns no match). Beyond
+  conformance, the bug silently produces wrong matches for any
+  user who uses `\Q…\E` to quote a multi-char literal that they
+  intended to repeat — a common idiom for "match this verbatim N
+  times" that this construct is supposed to express compactly.
+
+  No correctness escape hatch exists in RGX-side: the AST is
+  consumed verbatim from PGEN. Per `CLAUDE.md`, parser bugs are
+  fixed in PGEN, not patched around in RGX.
+
+resolution:
+  status: unresolved
+  fixed_in_pgen_commit: null
+  verified_at: null
+  verification_notes: |
+    On fix:
+      - PGEN regenerates the regex parser
+      - subs/pgen submodule bumps to the fix commit
+      - rerun `target/debug/examples/pgen_qe_dump` and confirm
+        the AST attaches quantifiers to the last char only
+      - rerun the PCRE2 conformance ratchet:
+        `cargo test -p rgx-core --test pcre2_conformance --release -- --ignored --nocapture`
+      - expect a +N pass-count bump (N ≥ 1 from testinput1:6794;
+        more if the family has additional corpus coverage we haven't
+        enumerated)
+
+resolution:
+  status: fixed-upstream
+  fixed_in_pgen_release: "1.1.31"
+  fixed_in_pgen_commit: "c78956d8"
+  fixed_in_rgx_commit: null
+  verified_at: 2026-05-01T00:00:00Z
+  verification_notes: |
+    PGEN 1.1.31 (`c78956d8`) "PGEN-RGX-0074: \\Q...\\E quantifier
+    attachment + new ** flatten-spread" introduced a new
+    `piece_quoted_run_quantified` rule plus a `**` flatten-spread
+    primitive in the return-annotation language, ensuring quantifiers
+    following `\\Q...\\E` bind only to the last character of the quoted
+    run per pcre2pattern(3). Family-table proof in the release notes
+    confirms `\\Qab*\\E{2,}` -> 3 pieces (a, b, *{2,}) and the rest of
+    the quantifier-shape table. Verified end-to-end via the
+    `pgen_quoted_run_dump.rs` family probe. RGX integration carried
+    via the major typed-shape adapter refactor in
+    `rgx-core/src/parsing.rs` (this session).

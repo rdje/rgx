@@ -1,0 +1,450 @@
+{
+  "content": {
+    "Quantified": [
+      [
+        {
+          "content": {
+            "Alternative": {
+              "content": {
+                "Alternative": {
+                  "content": {
+                    "Sequence": [
+                      {
+                        "content": {
+                          "Alternative": {
+                            "content": {
+                              "Quantified": [
+                                [
+                                  {
+                                    "content": {
+                                      "Alternative": {
+                                        "content": {
+                                          "Quantified": [
+                                            [
+                                              {
+                                                "content": {
+                                                  "Alternative": {
+                                                    "content": {
+                                                      "Sequence": [
+                                                        {
+                                                          "content": {
+                                                            "Alternative": {
+                                                              "content": {
+                                                                "Alternative": {
+                                                                  "content": {
+                                                                    "Sequence": [
+                                                                      {
+                                                                        "content": {
+                                                                          "Terminal": "\\Q"
+                                                                        },
+                                                                        "rule_name": "element_0",
+                                                                        "span": {
+                                                                          "end": 2,
+                                                                          "start": 0
+                                                                        }
+                                                                      },
+                                                                      {
+                                                                        "content": {
+                                                                          "Quantified": [
+                                                                            [
+                                                                              {
+                                                                                "content": {
+                                                                                  "Alternative": {
+                                                                                    "content": {
+                                                                                      "Alternative": {
+                                                                                        "content": {
+                                                                                          "Terminal": "a"
+                                                                                        },
+                                                                                        "rule_name": "letter",
+                                                                                        "span": {
+                                                                                          "end": 3,
+                                                                                          "start": 2
+                                                                                        }
+                                                                                      }
+                                                                                    },
+                                                                                    "rule_name": "quoted_literal_char",
+                                                                                    "span": {
+                                                                                      "end": 3,
+                                                                                      "start": 2
+                                                                                    }
+                                                                                  }
+                                                                                },
+                                                                                "rule_name": "quantified",
+                                                                                "span": {
+                                                                                  "end": 0,
+                                                                                  "start": 0
+                                                                                }
+                                                                              },
+                                                                              {
+                                                                                "content": {
+                                                                                  "Alternative": {
+                                                                                    "content": {
+                                                                                      "Alternative": {
+                                                                                        "content": {
+                                                                                          "Terminal": "b"
+                                                                                        },
+                                                                                        "rule_name": "letter",
+                                                                                        "span": {
+                                                                                          "end": 4,
+                                                                                          "start": 3
+                                                                                        }
+                                                                                      }
+                                                                                    },
+                                                                                    "rule_name": "quoted_literal_char",
+                                                                                    "span": {
+                                                                                      "end": 4,
+                                                                                      "start": 3
+                                                                                    }
+                                                                                  }
+                                                                                },
+                                                                                "rule_name": "quantified",
+                                                                                "span": {
+                                                                                  "end": 0,
+                                                                                  "start": 0
+                                                                                }
+                                                                              },
+                                                                              {
+                                                                                "content": {
+                                                                                  "Alternative": {
+                                                                                    "content": {
+                                                                                      "Alternative": {
+                                                                                        "content": {
+                                                                                          "Terminal": "c"
+                                                                                        },
+                                                                                        "rule_name": "letter",
+                                                                                        "span": {
+                                                                                          "end": 5,
+                                                                                          "start": 4
+                                                                                        }
+                                                                                      }
+                                                                                    },
+                                                                                    "rule_name": "quoted_literal_char",
+                                                                                    "span": {
+                                                                                      "end": 5,
+                                                                                      "start": 4
+                                                                                    }
+                                                                                  }
+                                                                                },
+                                                                                "rule_name": "quantified",
+                                                                                "span": {
+                                                                                  "end": 0,
+                                                                                  "start": 0
+                                                                                }
+                                                                              }
+                                                                            ],
+                                                                            "*"
+                                                                          ]
+                                                                        },
+                                                                        "rule_name": "element_1",
+                                                                        "span": {
+                                                                          "end": 5,
+                                                                          "start": 2
+                                                                        }
+                                                                      },
+                                                                      {
+                                                                        "content": {
+                                                                          "Terminal": "\\E"
+                                                                        },
+                                                                        "rule_name": "element_2",
+                                                                        "span": {
+                                                                          "end": 7,
+                                                                          "start": 5
+                                                                        }
+                                                                      }
+                                                                    ]
+                                                                  },
+                                                                  "rule_name": "quoted_literal",
+                                                                  "span": {
+                                                                    "end": 7,
+                                                                    "start": 0
+                                                                  }
+                                                                }
+                                                              },
+                                                              "rule_name": "atom",
+                                                              "span": {
+                                                                "end": 7,
+                                                                "start": 0
+                                                              }
+                                                            }
+                                                          },
+                                                          "rule_name": "element_0",
+                                                          "span": {
+                                                            "end": 7,
+                                                            "start": 0
+                                                          }
+                                                        },
+                                                        {
+                                                          "content": {
+                                                            "Alternative": {
+                                                              "content": {
+                                                                "Sequence": [
+                                                                  {
+                                                                    "content": {
+                                                                      "Alternative": {
+                                                                        "content": {
+                                                                          "Alternative": {
+                                                                            "content": {
+                                                                              "Sequence": [
+                                                                                {
+                                                                                  "content": {
+                                                                                    "Terminal": "{"
+                                                                                  },
+                                                                                  "rule_name": "element_0",
+                                                                                  "span": {
+                                                                                    "end": 8,
+                                                                                    "start": 7
+                                                                                  }
+                                                                                },
+                                                                                {
+                                                                                  "content": {
+                                                                                    "Sequence": []
+                                                                                  },
+                                                                                  "rule_name": "element_1",
+                                                                                  "span": {
+                                                                                    "end": 8,
+                                                                                    "start": 8
+                                                                                  }
+                                                                                },
+                                                                                {
+                                                                                  "content": {
+                                                                                    "Alternative": {
+                                                                                      "content": {
+                                                                                        "Sequence": [
+                                                                                          {
+                                                                                            "content": {
+                                                                                              "Alternative": {
+                                                                                                "content": {
+                                                                                                  "Quantified": [
+                                                                                                    [
+                                                                                                      {
+                                                                                                        "content": {
+                                                                                                          "Alternative": {
+                                                                                                            "content": {
+                                                                                                              "Terminal": "2"
+                                                                                                            },
+                                                                                                            "rule_name": "digit",
+                                                                                                            "span": {
+                                                                                                              "end": 9,
+                                                                                                              "start": 8
+                                                                                                            }
+                                                                                                          }
+                                                                                                        },
+                                                                                                        "rule_name": "quantified",
+                                                                                                        "span": {
+                                                                                                          "end": 0,
+                                                                                                          "start": 0
+                                                                                                        }
+                                                                                                      }
+                                                                                                    ],
+                                                                                                    "+"
+                                                                                                  ]
+                                                                                                },
+                                                                                                "rule_name": "digits",
+                                                                                                "span": {
+                                                                                                  "end": 9,
+                                                                                                  "start": 8
+                                                                                                }
+                                                                                              }
+                                                                                            },
+                                                                                            "rule_name": "element_0",
+                                                                                            "span": {
+                                                                                              "end": 9,
+                                                                                              "start": 8
+                                                                                            }
+                                                                                          },
+                                                                                          {
+                                                                                            "content": {
+                                                                                              "Sequence": []
+                                                                                            },
+                                                                                            "rule_name": "element_1",
+                                                                                            "span": {
+                                                                                              "end": 9,
+                                                                                              "start": 9
+                                                                                            }
+                                                                                          },
+                                                                                          {
+                                                                                            "content": {
+                                                                                              "Sequence": []
+                                                                                            },
+                                                                                            "rule_name": "element_2",
+                                                                                            "span": {
+                                                                                              "end": 9,
+                                                                                              "start": 9
+                                                                                            }
+                                                                                          }
+                                                                                        ]
+                                                                                      },
+                                                                                      "rule_name": "counted_quantifier_body",
+                                                                                      "span": {
+                                                                                        "end": 9,
+                                                                                        "start": 8
+                                                                                      }
+                                                                                    }
+                                                                                  },
+                                                                                  "rule_name": "element_2",
+                                                                                  "span": {
+                                                                                    "end": 9,
+                                                                                    "start": 8
+                                                                                  }
+                                                                                },
+                                                                                {
+                                                                                  "content": {
+                                                                                    "Sequence": []
+                                                                                  },
+                                                                                  "rule_name": "element_3",
+                                                                                  "span": {
+                                                                                    "end": 9,
+                                                                                    "start": 9
+                                                                                  }
+                                                                                },
+                                                                                {
+                                                                                  "content": {
+                                                                                    "Terminal": "}"
+                                                                                  },
+                                                                                  "rule_name": "element_4",
+                                                                                  "span": {
+                                                                                    "end": 10,
+                                                                                    "start": 9
+                                                                                  }
+                                                                                }
+                                                                              ]
+                                                                            },
+                                                                            "rule_name": "counted_quantifier",
+                                                                            "span": {
+                                                                              "end": 10,
+                                                                              "start": 7
+                                                                            }
+                                                                          }
+                                                                        },
+                                                                        "rule_name": "quant_base",
+                                                                        "span": {
+                                                                          "end": 10,
+                                                                          "start": 7
+                                                                        }
+                                                                      }
+                                                                    },
+                                                                    "rule_name": "element_0",
+                                                                    "span": {
+                                                                      "end": 10,
+                                                                      "start": 7
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "content": {
+                                                                      "Sequence": []
+                                                                    },
+                                                                    "rule_name": "element_1",
+                                                                    "span": {
+                                                                      "end": 10,
+                                                                      "start": 10
+                                                                    }
+                                                                  }
+                                                                ]
+                                                              },
+                                                              "rule_name": "quantifier",
+                                                              "span": {
+                                                                "end": 10,
+                                                                "start": 7
+                                                              }
+                                                            }
+                                                          },
+                                                          "rule_name": "element_1",
+                                                          "span": {
+                                                            "end": 10,
+                                                            "start": 7
+                                                          }
+                                                        }
+                                                      ]
+                                                    },
+                                                    "rule_name": "piece",
+                                                    "span": {
+                                                      "end": 10,
+                                                      "start": 0
+                                                    }
+                                                  }
+                                                },
+                                                "rule_name": "quantified",
+                                                "span": {
+                                                  "end": 0,
+                                                  "start": 0
+                                                }
+                                              }
+                                            ],
+                                            "+"
+                                          ]
+                                        },
+                                        "rule_name": "concatenation",
+                                        "span": {
+                                          "end": 10,
+                                          "start": 0
+                                        }
+                                      }
+                                    },
+                                    "rule_name": "quantified",
+                                    "span": {
+                                      "end": 0,
+                                      "start": 0
+                                    }
+                                  }
+                                ],
+                                "?"
+                              ]
+                            },
+                            "rule_name": "alternative",
+                            "span": {
+                              "end": 10,
+                              "start": 0
+                            }
+                          }
+                        },
+                        "rule_name": "element_0",
+                        "span": {
+                          "end": 10,
+                          "start": 0
+                        }
+                      },
+                      {
+                        "content": {
+                          "Quantified": [
+                            [],
+                            "*"
+                          ]
+                        },
+                        "rule_name": "element_1",
+                        "span": {
+                          "end": 10,
+                          "start": 10
+                        }
+                      }
+                    ]
+                  },
+                  "rule_name": "alternation",
+                  "span": {
+                    "end": 10,
+                    "start": 0
+                  }
+                }
+              },
+              "rule_name": "pattern",
+              "span": {
+                "end": 10,
+                "start": 0
+              }
+            }
+          },
+          "rule_name": "quantified",
+          "span": {
+            "end": 0,
+            "start": 0
+          }
+        }
+      ],
+      "?"
+    ]
+  },
+  "rule_name": "regex",
+  "span": {
+    "end": 10,
+    "start": 0
+  }
+}

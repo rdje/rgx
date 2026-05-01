@@ -1,0 +1,2 @@
+parse_full passed for grammar 'regex' on 'repro_input.txt'
+parse_full passed for grammar 'regex' on 'repro_input.txt' (AST dump: pgen_ast_dump.json)

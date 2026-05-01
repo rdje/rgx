@@ -1,0 +1,13 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "success",
+  "diagnostic": null,
+  "ast_dump": {
+    "dump_json": "{\n  \"content\": {\n    \"Json\": {\n      \"pattern\": [\n        [\n          [\n            {\n              \"atom\": \"h\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"t\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"t\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"p\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"s\",\n              \"quantifier\": {\n                \"greediness\": [],\n                \"max\": 1,\n                \"min\": 0,\n                \"type\": \"quantifier\"\n              },\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \":\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"/\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": \"/\",\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            },\n            {\n              \"atom\": [\n                \"\\\\\",\n                \"S\"\n              ],\n              \"quantifier\": {\n                \"greediness\": [],\n                \"max\": null,\n                \"min\": 1,\n                \"type\": \"quantifier\"\n              },\n              \"type\": \"piece\"\n            }\n          ]\n        ],\n        []\n      ],\n      \"type\": \"regex\"\n    }\n  },\n  \"rule_name\": \"regex\",\n  \"span\": {\n    \"end\": 12,\n    \"start\": 0\n  }\n}",
+    "truncated": false,
+    "full_bytes": 1615,
+    "emitted_bytes": 1615
+  }
+}

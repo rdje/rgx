@@ -1,0 +1,13 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "success",
+  "diagnostic": null,
+  "ast_dump": {
+    "dump_json": "{\n  \"content\": {\n    \"Json\": {\n      \"pattern\": [\n        [\n          [\n            [\n              {\n                \"atom\": \"a\",\n                \"quantifier\": [],\n                \"type\": \"piece\"\n              },\n              {\n                \"atom\": \"b\",\n                \"quantifier\": [],\n                \"type\": \"piece\"\n              },\n              {\n                \"atom\": \"c\",\n                \"quantifier\": [],\n                \"type\": \"piece\"\n              },\n              {\n                \"atom\": \"d\",\n                \"quantifier\": [],\n                \"type\": \"piece\"\n              },\n              {\n                \"atom\": \"e\",\n                \"quantifier\": [],\n                \"type\": \"piece\"\n              },\n              {\n                \"atom\": \"f\",\n                \"quantifier\": {\n                  \"greediness\": [],\n                  \"max\": null,\n                  \"min\": 1,\n                  \"type\": \"quantifier\"\n                },\n                \"type\": \"piece\"\n              }\n            ]\n          ]\n        ],\n        []\n      ],\n      \"type\": \"regex\"\n    }\n  },\n  \"rule_name\": \"regex\",\n  \"span\": {\n    \"end\": 11,\n    \"start\": 0\n  }\n}",
+    "truncated": false,
+    "full_bytes": 1165,
+    "emitted_bytes": 1165
+  }
+}

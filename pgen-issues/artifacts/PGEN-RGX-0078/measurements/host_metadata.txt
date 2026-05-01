@@ -1,0 +1,12 @@
+Darwin 25.4.0 arm64
+Apple M4 Pro
+12 cores
+PCRE2: 10.46
+Rust: rustc 1.95.0 (59807616e 2026-04-14)
+PGEN pin: 056f67842955dd4271cbf6fc6158f9cb9c64002e
+PGEN parser_release: pub const REGEX_PARSER_RELEASE_VERSION: &str = "1.1.29";
+PGEN integration_contract: pub const REGEX_PARSER_INTEGRATION_CONTRACT_VERSION: &str = "1.1.31";
+Allocator: macOS system libmalloc (default; not mimalloc)
+Methodology: cargo run --release, 5000 samples per pattern, 200-sample warmup discarded
+Trace: disabled (PGEN_TRACE_VERBOSITY unset)
+Slowdown character: corpus-wide, deterministic, weakly size-correlated

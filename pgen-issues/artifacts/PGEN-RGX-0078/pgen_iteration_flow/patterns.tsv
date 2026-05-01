@@ -1,0 +1,8 @@
+literal_simple	test
+digit_sequence	\d{3}-\d{2}-\d{4}
+character_class	[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+alternation	cat|dog|bird
+capture_groups	(\d{4})-(\d{2})-(\d{2})
+url_simple	https?://\S+
+email_basic	\b\w+@\w+\.\w+\b
+anchor_complex	^(\d+)\s+(?P<word>\w+)\s+(?:foo|bar)$

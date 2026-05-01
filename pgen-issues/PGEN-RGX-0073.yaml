@@ -349,25 +349,64 @@ impact: |
 resolution:
   status: unresolved
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-05-01T00:00:00Z
   verification_notes: |
-    Resolution criteria (any one):
-    1. **Primary**: PGEN regex-grammar parse median drops to
-       <50µs across the 8-pattern benchmark — that's a 8-50x
-       PGEN-side speedup, which would put PGEN at ~10-15% of
-       RGX's compile budget and make the rest of the budget
-       attackable by RGX-side techniques.
-    2. **Acceptable interim**: PGEN regex-grammar parse median
-       drops to <200µs (a 2-12x PGEN-side speedup). Would make
-       RGX-PCRE2 compile gap tractable to ~50-100x rather than
-       1000x+.
-    3. **Diagnostic outcome**: PGEN team determines the
-       general-purpose EBNF-driven architecture cannot reach
-       the targets above without specialised codegen, in which
-       case this issue is closed with a forward reference to
-       the specialised-codegen project (currently hypothetical).
+    **0073 is still genuinely open.** The closure criterion is the
+    integration-side comparison this report was filed for — PGEN
+    regex-grammar parse time vs PCRE2's FULL compile pipeline (parse
+    + codegen + JIT prep) on the same 8-pattern bench corpus, on the
+    same host, on the same build profile (release).
 
-    Verification: re-run the bundle in
-    `artifacts/PGEN-RGX-0073/` against the new PGEN release
-    pin, attach the new measurement output here, and update
+    Live measurement on 2026-05-01 at PGEN pin `056f6784` (1.1.40),
+    Apple M-series, release build:
+      - PGEN parse p50: `rgx-core/examples/compile_phase_split.rs`
+        (default allocator, 1000 samples / 50 warmup).
+      - PCRE2 full compile p50: `artifacts/PGEN-RGX-0073/pcre2_compile_baseline.c`
+        (libpcre2-8 from Homebrew, 10000-compile batch).
+
+      pattern              PGEN parse        PCRE2 compile     PGEN/PCRE2
+      literal_simple             93,542 ns           132 ns       708x
+      digit_sequence            230,875 ns           264 ns       875x
+      character_class           290,833 ns           592 ns       491x
+      alternation               130,000 ns           287 ns       453x
+      capture_groups            284,459 ns           449 ns       634x
+      url_simple                213,250 ns           258 ns       827x
+      email_basic               233,833 ns           287 ns       815x
+      anchor_complex            410,208 ns           614 ns       668x
+
+    Geomean: ~660x slower. Range: 453x-875x. **PGEN parse alone
+    is ~660x slower than PCRE2's FULL compile pipeline** —
+    before any RGX-side codegen, Engine::new, or JIT prep is added
+    on top.
+
+    **PGEN's release-note "perf closure" at release `1.1.30`** was
+    declared against PGEN's own PRIMARY <50µs target, which is
+    NOT the right closure criterion for the RGX integration. Even
+    at PGEN's claimed 1.1.30 p50s (literal_simple 13µs through
+    anchor_complex 76µs), the floor would be 30-500x slower than
+    PCRE2. PGEN's PRIMARY target is satisfiable without closing
+    the gap that 0073 was logged for.
+
+    **The ROADMAP's "<5x of PCRE2 compile" target** translates to
+    PGEN parse needing to drop to ~50-200ns on this corpus. That's
+    a 1000-2000x speedup from the current 100s of µs — far beyond
+    what allocator tuning or methodology alignment would deliver.
+    A specialised-codegen path for the regex grammar (mentioned as
+    "long-term" elsewhere in PGEN's tracking) is the most plausible
+    route; the general-purpose EBNF-driven architecture has
+    constant-factor overhead that the bench corpus exposes.
+
+    Resolution criteria (any one closes 0073):
+    1. **Primary**: PGEN regex-grammar parse median drops to <5x
+       of PCRE2's full compile per pattern on the same host /
+       same build profile (i.e. PGEN <2.5µs for fast patterns,
+       <10µs for complex ones). Geomean PGEN/PCRE2 ratio under 5x.
+    2. **Diagnostic outcome**: PGEN team determines the
+       general-purpose EBNF-driven architecture cannot reach
+       criterion 1 without specialised codegen. 0073 then closes
+       with a forward reference to the specialised-codegen project.
+
+    Verification on closure: re-run the bundle in
+    `artifacts/PGEN-RGX-0073/` against the new PGEN release pin,
+    attach the new measurement output here, and update
     `RUST_CODEBASE_ANALYSIS.md` § perf section + ROADMAP entry.

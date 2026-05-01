@@ -372,9 +372,48 @@ struct PgenAstSpan {
 enum PgenAstContent {
     Terminal(String),
     TransformedTerminal(String),
+    /// Typed structured carrier — added in PGEN regex parser release 1.1.30
+    /// (slice 9+ of task #40's annotation campaign). Annotated rules
+    /// emit their typed shape directly as a `serde_json::Value` instead
+    /// of a recursive `Sequence` / `Alternative` envelope. Currently
+    /// covers `regex`, `pattern`, `concatenation`, `piece`,
+    /// `piece_quoted_run_quantified`, `quoted_run_inner_piece`,
+    /// `quant_suffix`, `digits`, `posix_class`. See
+    /// `subs/pgen/docs/regex_parser_book/src/json-carrier.md`.
+    Json(serde_json::Value),
     Sequence(Vec<PgenAstNode>),
     Alternative(Box<PgenAstNode>),
     Quantified((Vec<PgenAstNode>, String)),
+}
+
+/// Collapse a `PgenAstContent` tree into the unified `serde_json::Value`
+/// shape per PGEN's `to_json_value()` contract:
+///
+/// - `Terminal(s)` → `String(s)`.
+/// - `TransformedTerminal(s)` → `serde_json::from_str(s).unwrap_or(String(s))`.
+/// - `Json(v)` → `v.clone()`.
+/// - `Sequence(nodes)` → `Array([collapse(n.content) for n in nodes])`.
+/// - `Alternative(node)` → `collapse(node.content)` (transparent unwrap).
+/// - `Quantified(nodes, _)` → `Array([collapse(n.content) for n in nodes])`.
+///
+/// This mirrors `pgen::ast_pipeline::ParseContent::to_json_value()` exactly,
+/// preserving the byte-equivalence guarantee documented in the regex parser
+/// book's `parse-content-variants.md` chapter, "Special interaction 1".
+#[cfg(feature = "pgen-parser")]
+fn collapse_to_json(content: &PgenAstContent) -> serde_json::Value {
+    match content {
+        PgenAstContent::Terminal(s) => serde_json::Value::String(s.clone()),
+        PgenAstContent::TransformedTerminal(s) => serde_json::from_str::<serde_json::Value>(s)
+            .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
+        PgenAstContent::Json(value) => value.clone(),
+        PgenAstContent::Sequence(nodes) => {
+            serde_json::Value::Array(nodes.iter().map(|n| collapse_to_json(&n.content)).collect())
+        }
+        PgenAstContent::Alternative(node) => collapse_to_json(&node.content),
+        PgenAstContent::Quantified((nodes, _marker)) => {
+            serde_json::Value::Array(nodes.iter().map(|n| collapse_to_json(&n.content)).collect())
+        }
+    }
 }
 
 #[cfg(feature = "pgen-parser")]
@@ -583,7 +622,2052 @@ impl<'a> PgenAstAdapter<'a> {
         let root: PgenAstNode = serde::Deserialize::deserialize(deserializer).map_err(|err| {
             RgxError::compile(format!("failed to decode pgen regex AST dump JSON: {err}"))
         })?;
+        // PGEN regex parser release 1.1.30+ emits the typed-Json shape at
+        // the top level (and at every annotated-rule boundary). The new
+        // walker collapses any remaining envelope subtrees via
+        // `to_json_value()`-equivalent flattening, then walks the unified
+        // `serde_json::Value` tree per the shapes documented in
+        // `subs/pgen/docs/regex_parser_book/src/`. The legacy walker
+        // (`convert_root`) is kept only for the rare failure-path case
+        // where deserialisation succeeds with a non-Json root content.
+        if matches!(root.content, PgenAstContent::Json(_)) {
+            let unified = collapse_to_json(&root.content);
+            return self.convert_typed_regex(&unified);
+        }
         self.convert_root(&root)
+    }
+
+    /// Top-level entry for the typed-Json shape. The root `regex` rule's
+    /// annotation produces `{type: "regex", pattern: <pattern-content>}`.
+    fn convert_typed_regex(&self, value: &serde_json::Value) -> Result<Regex> {
+        let map = value.as_object().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed regex object, got {}",
+                json_kind(value)
+            ))
+        })?;
+        let kind = map.get("type").and_then(|v| v.as_str());
+        if kind != Some("regex") {
+            return Err(self.contract_error(&format!(
+                "expected typed regex object with type=\"regex\", got type={kind:?}"
+            )));
+        }
+        let pattern = map.get("pattern").ok_or_else(|| {
+            self.contract_error("typed regex object is missing the 'pattern' field")
+        })?;
+        self.convert_typed_pattern(pattern)
+    }
+
+    /// `pattern` field shape: 2-element array `[<first_alternative>, <rest>]`.
+    /// `<first_alternative>` is a 1-element-Quantified-? carrier wrapping the
+    /// concatenation array (or `[]` when the alternative is empty).
+    /// `<rest>` is `[]` (no `|`) or `[["|", <alt>], ...]` (per `|`-separated branch).
+    fn convert_typed_pattern(&self, value: &serde_json::Value) -> Result<Regex> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed pattern array, got {}",
+                json_kind(value)
+            ))
+        })?;
+
+        // Empty pattern (input was zero-length): `pattern[0]` is the
+        // Quantified-? slot which can be `[]` when no concatenation
+        // matched at all. Produce an empty sequence.
+        if arr.is_empty() {
+            return Ok(Regex::Sequence(Vec::new()));
+        }
+
+        let mut alternative_pieces: Vec<Vec<Regex>> = Vec::new();
+
+        // First alternative.
+        let first_slot = &arr[0];
+        alternative_pieces.push(self.convert_typed_alternative(first_slot)?);
+
+        // Remaining alternatives — walk pairs of ["|", <alternative>].
+        if let Some(rest) = arr.get(1).and_then(|v| v.as_array()) {
+            for pair in rest {
+                let pair_arr = pair.as_array().ok_or_else(|| {
+                    self.contract_error(&format!(
+                        "typed pattern alternation rest entry is not an array: {}",
+                        json_kind(pair)
+                    ))
+                })?;
+                if pair_arr.len() < 2 {
+                    return Err(self.contract_error(
+                        "typed pattern alternation rest entry is missing a branch payload",
+                    ));
+                }
+                alternative_pieces.push(self.convert_typed_alternative(&pair_arr[1])?);
+            }
+        }
+
+        // Walk branches with the bare-flag-directive carry-forward semantics
+        // documented in the legacy `convert_alternation` (engine fix #6,
+        // 2026-04-17). PCRE2 propagates an unscoped `(?flags)` toggle from
+        // one branch into all subsequent branches.
+        let mut carried: Option<String> = None;
+        let mut branches: Vec<Regex> = Vec::with_capacity(alternative_pieces.len());
+        for pieces in alternative_pieces {
+            let trailing = last_unscoped_flag(&pieces);
+            let body = apply_bare_flag_directives(pieces);
+            let wrapped = if let Some(ref flags) = carried {
+                Regex::FlagGroup {
+                    flags: flags.clone(),
+                    expr: Box::new(body),
+                }
+            } else {
+                body
+            };
+            branches.push(wrapped);
+            if let Some(flags) = trailing {
+                carried = Some(flags);
+            }
+        }
+        Ok(pack_alternation(branches))
+    }
+
+    /// `<alternative>` shape (un-annotated `Quantified-?` carrier): a 0- or
+    /// 1-element array. When empty, the alternative is empty (e.g. the
+    /// trailing branch of `a|`). When 1-element, the inner is the
+    /// `concatenation` array (a flat list of piece objects).
+    fn convert_typed_alternative(&self, value: &serde_json::Value) -> Result<Vec<Regex>> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed alternative array, got {}",
+                json_kind(value)
+            ))
+        })?;
+        if arr.is_empty() {
+            return Ok(Vec::new());
+        }
+        // arr[0] is the concatenation — a flat array of piece objects per
+        // the `concatenation = piece+ -> [$1**]` annotation.
+        self.convert_typed_concatenation(&arr[0])
+    }
+
+    /// Walk a `concatenation` typed array — a flat list of piece objects.
+    fn convert_typed_concatenation(&self, value: &serde_json::Value) -> Result<Vec<Regex>> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed concatenation array, got {}",
+                json_kind(value)
+            ))
+        })?;
+        let mut pieces = Vec::with_capacity(arr.len());
+        for piece in arr {
+            pieces.push(self.convert_typed_piece(piece)?);
+        }
+        Ok(pieces)
+    }
+
+    /// Walk a piece object `{type: "piece", atom: <atom>, quantifier: <quantifier>}`.
+    /// Per slice 6 (post-1.1.35), the `quantifier` slot is either:
+    ///   - `[]` (empty array — un-matched `quantifier?` slot, no quantifier)
+    ///   - A typed object `{type: "quantifier", min, max, greediness}`.
+    fn convert_typed_piece(&self, value: &serde_json::Value) -> Result<Regex> {
+        let map = value.as_object().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed piece object, got {}",
+                json_kind(value)
+            ))
+        })?;
+        let kind = map.get("type").and_then(|v| v.as_str());
+        if kind != Some("piece") {
+            return Err(self.contract_error(&format!(
+                "expected typed piece object with type=\"piece\", got type={kind:?}"
+            )));
+        }
+        let atom = map
+            .get("atom")
+            .ok_or_else(|| self.contract_error("typed piece object is missing the 'atom' field"))?;
+        let expr = self.convert_typed_atom(atom)?;
+
+        let quantifier_slot = map
+            .get("quantifier")
+            .ok_or_else(|| self.contract_error("typed piece object is missing 'quantifier'"))?;
+        // Empty array → no quantifier matched.
+        if matches!(quantifier_slot, serde_json::Value::Array(a) if a.is_empty()) {
+            return Ok(expr);
+        }
+        let (quantifier, possessive) = self.convert_typed_quantifier_object(quantifier_slot)?;
+        Ok(Self::wrap_quantified(expr, quantifier, possessive))
+    }
+
+    /// Dispatch on the atom field's structural shape per the
+    /// "Identification table" in `rules-atom.md`. Per slice 7
+    /// (post-1.1.36), `anchor` atoms are typed objects
+    /// `{"type":"anchor","kind":"<name>"}`. Other typed atoms may
+    /// follow as the atom-subtree campaign progresses (task #40).
+    fn convert_typed_atom(&self, value: &serde_json::Value) -> Result<Regex> {
+        match value {
+            serde_json::Value::String(s) => self.convert_typed_atom_string(s),
+            serde_json::Value::Array(arr) => self.convert_typed_atom_array(arr),
+            serde_json::Value::Object(map) => self.convert_typed_atom_object(map),
+            other => Err(self.contract_error(&format!(
+                "unexpected atom shape: {} = {}",
+                json_kind(other),
+                other
+            ))),
+        }
+    }
+
+    /// Dispatch on a typed atom object — anchor (slice 7+9), backreference
+    /// (slice 10), and future typed atom kinds as they land.
+    fn convert_typed_atom_object(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Regex> {
+        let kind = map.get("type").and_then(|v| v.as_str());
+        match kind {
+            Some("anchor") => {
+                let anchor_kind = map
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| self.contract_error("typed anchor missing 'kind'"))?;
+                self.convert_typed_anchor_kind(anchor_kind)
+            }
+            Some("backreference") => self.convert_typed_backreference_object(map),
+            Some(other) => {
+                Err(self.contract_error(&format!("unrecognised typed atom: type={other:?}")))
+            }
+            None => Err(self.contract_error("typed atom object missing 'type' discriminator")),
+        }
+    }
+
+    /// Convert a typed `backreference` object per slice-10 (post-1.1.38):
+    ///
+    /// - `numeric`: `{kind:"numeric", index:<int>}` (typed integer)
+    /// - `named`: `{kind:"named", ref:<raw name_ref>}`
+    /// - `named_braced`: `{kind:"named_braced", ref:<raw braced_name_ref>}`
+    /// - `subroutine`: `{kind:"subroutine", ref:<raw subroutine_ref>}`
+    ///
+    /// PCRE2 distinguishes by source bracket form for `\g`-prefixed
+    /// references: angle/apostrophe forms (`\g<…>`/`\g'…'`) are
+    /// subroutine calls (Recursion), while braced (`\g{…}`) and bare
+    /// (`\gN`) forms are back-references. RGX preserves that
+    /// distinction by inspecting the `ref` shape's first element.
+    fn convert_typed_backreference_object(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Regex> {
+        let kind = map
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| self.contract_error("typed backreference missing 'kind'"))?;
+        match kind {
+            "numeric" => {
+                let index = map.get("index").and_then(|v| v.as_u64()).ok_or_else(|| {
+                    self.contract_error("typed numeric backreference missing 'index'")
+                })?;
+                #[allow(clippy::cast_possible_truncation)]
+                Ok(Regex::Backreference(index as u32))
+            }
+            "named" | "named_braced" => {
+                let raw_ref = map.get("ref").ok_or_else(|| {
+                    self.contract_error("typed named backreference missing 'ref'")
+                })?;
+                let name = self.extract_name_from_ref_shape(raw_ref)?;
+                Ok(Regex::NamedBackreference(name))
+            }
+            "subroutine" => {
+                let raw_ref = map.get("ref").ok_or_else(|| {
+                    self.contract_error("typed subroutine backreference missing 'ref'")
+                })?;
+                self.classify_g_subroutine_ref(raw_ref)
+            }
+            other => {
+                Err(self
+                    .contract_error(&format!("unrecognised typed backreference kind: {other:?}")))
+            }
+        }
+    }
+
+    /// Classify the `ref` shape of a `\g…` typed backreference, preserving
+    /// PCRE2's bracket-form-determines-semantic rule:
+    ///   - `\g<N>` / `\g<name>` / `\g'…'` → subroutine call (Recursion)
+    ///   - `\g{N}` / `\g{name}` → back-reference
+    ///   - `\gN` (bare signed_digits) → back-reference
+    fn classify_g_subroutine_ref(&self, value: &serde_json::Value) -> Result<Regex> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected \\g subroutine_ref array, got {}",
+                json_kind(value)
+            ))
+        })?;
+        let head = arr.first().and_then(|v| v.as_str());
+        match head {
+            Some("<") | Some("'") => {
+                // Angle/apostrophe form → subroutine call.
+                let inner = arr
+                    .get(1)
+                    .ok_or_else(|| self.contract_error("\\g<…>/'…' subroutine ref missing body"))?;
+                self.subroutine_ref_to_recursion(inner)
+            }
+            Some("{") => {
+                // Braced form → back-reference.
+                let inner = arr
+                    .get(2)
+                    .ok_or_else(|| self.contract_error("\\g{…} backreference missing body"))?;
+                self.subroutine_ref_to_backreference(inner)
+            }
+            // Bare signed_digits `\gN` / `\g+N` / `\g-N` — back-reference.
+            _ => self.subroutine_ref_to_backreference(value),
+        }
+    }
+
+    /// Map an anchor's stable `kind` identifier to the corresponding
+    /// `Regex` AST node. Mirror of the legacy `convert_anchor` mapping.
+    /// Per slice 9 (post-1.1.37), the `posix_word_boundary_alias` rule
+    /// joins the typed anchor family with kinds `posix_word_start` and
+    /// `posix_word_end`. They're zero-width assertions per pcre2pattern(3):
+    /// `[[:<:]]` ≡ `\b(?=\w)`, `[[:>:]]` ≡ `(?<=\w)\b`.
+    fn convert_typed_anchor_kind(&self, kind: &str) -> Result<Regex> {
+        match kind {
+            "start_of_line" => Ok(Regex::Anchor(AnchorType::Start)),
+            "end_of_line" => Ok(Regex::Anchor(AnchorType::End)),
+            "start_of_input" => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            "end_of_input_or_before_last_newline" => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            "end_of_input" => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+            "word_boundary" => Ok(Regex::WordBoundary { positive: true }),
+            "non_word_boundary" => Ok(Regex::WordBoundary { positive: false }),
+            "match_start" => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
+            "keep_out" => Ok(Regex::MatchReset),
+            "posix_word_start" => Ok(Regex::Sequence(vec![
+                Regex::WordBoundary { positive: true },
+                Regex::Lookahead {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                },
+            ])),
+            "posix_word_end" => Ok(Regex::Sequence(vec![
+                Regex::Lookbehind {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                },
+                Regex::WordBoundary { positive: true },
+            ])),
+            other => {
+                Err(self.contract_error(&format!("unrecognised typed anchor kind: {other:?}")))
+            }
+        }
+    }
+
+    /// String-shaped atom: literal, dot, anchor, or POSIX word-boundary alias.
+    fn convert_typed_atom_string(&self, s: &str) -> Result<Regex> {
+        match s {
+            "." => Ok(self.dot_ast()),
+            "^" => Ok(Regex::Anchor(AnchorType::Start)),
+            "$" => Ok(Regex::Anchor(AnchorType::End)),
+            "\\A" => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            "\\Z" => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            "\\z" => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+            "\\G" => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
+            "\\b" => Ok(Regex::WordBoundary { positive: true }),
+            "\\B" => Ok(Regex::WordBoundary { positive: false }),
+            "\\K" => Ok(Regex::MatchReset),
+            "\\R" => Ok(self.newline_sequence_ast()),
+            "\\N" => Ok(self.dot_ast()),
+            "\\X" => Ok(Regex::GraphemeCluster),
+            "[[:<:]]" => Ok(Regex::Sequence(vec![
+                Regex::WordBoundary { positive: true },
+                Regex::Lookahead {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                },
+            ])),
+            "[[:>:]]" => Ok(Regex::Sequence(vec![
+                Regex::Lookbehind {
+                    expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
+                    positive: true,
+                },
+                Regex::WordBoundary { positive: true },
+            ])),
+            // Single literal char (ASCII non-special or non-ASCII).
+            other if other.chars().count() == 1 => {
+                let ch = other.chars().next().unwrap();
+                // Per `whitespace = /([ \t\n\r\f\v])/`, unescaped whitespace
+                // atoms carry the dedicated `WhitespaceLiteral` AST variant
+                // so the compiler can strip them inside `(?x:...)` extended-mode
+                // groups. Escaped whitespace arrives via `escape` and is
+                // lowered to a plain `Char` upstream.
+                if matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{0C}' | '\u{0B}') {
+                    Ok(Regex::WhitespaceLiteral(ch))
+                } else {
+                    Ok(Regex::Char(ch))
+                }
+            }
+            other => {
+                Err(self.contract_error(&format!("unrecognised string-atom shape: {other:?}")))
+            }
+        }
+    }
+
+    /// Array-shaped atom — backreference, escape, char_class, group, lookaround,
+    /// quoted_literal, conditional, etc. Dispatch on the first element's prefix
+    /// per the "Identification table" in `rules-atom.md`.
+    fn convert_typed_atom_array(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.is_empty() {
+            return Err(self.contract_error("empty array atom"));
+        }
+        let head = arr[0].as_str().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected string head for array atom, got {} = {}",
+                json_kind(&arr[0]),
+                arr[0]
+            ))
+        })?;
+        match head {
+            "\\" => self.convert_typed_backslash_atom(arr),
+            "\\k" => self.convert_typed_named_backref_k(arr),
+            "\\g" => self.convert_typed_g_backref(arr),
+            "\\Q" => self.convert_typed_quoted_literal(arr),
+            "[" => self.convert_typed_char_class(arr),
+            "(" => self.convert_typed_capturing_group(arr),
+            "(?:" => self.convert_typed_noncapturing_group(arr),
+            "(?<" => self.convert_typed_named_group(arr, ">"),
+            "(?'" => self.convert_typed_named_group(arr, "'"),
+            "(?P<" => self.convert_typed_python_named_group(arr),
+            "(?P=" => self.convert_typed_python_named_backreference(arr),
+            "(?>" => self.convert_typed_atomic_group(arr),
+            "(?|" => self.convert_typed_branch_reset_group(arr),
+            "(?=" => self.convert_typed_lookaround(arr, true, true),
+            "(?!" => self.convert_typed_lookaround(arr, true, false),
+            "(?<=" => self.convert_typed_lookaround(arr, false, true),
+            "(?<!" => self.convert_typed_lookaround(arr, false, false),
+            "(?*" => self.convert_typed_lookaround(arr, true, true),
+            "(?<*" => self.convert_typed_lookaround(arr, false, true),
+            "(?(" => self.convert_typed_conditional(arr),
+            "(?C" => self.convert_typed_callout(arr),
+            "(?{" => self.convert_typed_code_block(arr),
+            "(?#" => self.convert_typed_comment_group(arr),
+            "(?[" => self.convert_typed_extended_class(arr),
+            "(*" => self.convert_typed_alpha_prefixed(arr),
+            "(?" => self.convert_typed_question_prefixed(arr),
+            // Atomic-alpha prefix `(*atomic:...)` — dedicated long-prefix
+            // shape distinct from `(*atomic`-as-directive-name.
+            other if other.starts_with("(*atomic:") => {
+                let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+                Ok(Regex::Group {
+                    expr: Box::new(inner),
+                    kind: GroupKind::Atomic,
+                    index: None,
+                    name: None,
+                })
+            }
+            // Scan-substring forms `(*scs:...)`, `(*scan_substring:...)`
+            // — pass the body through (RGX has no dedicated AST node yet).
+            other if other.starts_with("(*scs:") || other.starts_with("(*scan_substring:") => {
+                self.convert_typed_optional_pattern(arr.get(1))
+            }
+            // Script-run forms `(*sr:...)`, `(*script_run:...)`,
+            // `(*asr:...)`, `(*atomic_script_run:...)` — body passes through.
+            other
+                if other.starts_with("(*sr:")
+                    || other.starts_with("(*script_run:")
+                    || other.starts_with("(*asr:")
+                    || other.starts_with("(*atomic_script_run:") =>
+            {
+                self.convert_typed_optional_pattern(arr.get(1))
+            }
+            other => {
+                Err(self.contract_error(&format!("unrecognised array atom prefix: {other:?}")))
+            }
+        }
+    }
+
+    /// Walk a typed `quantifier` object per slice-6 closure (post-1.1.35):
+    ///
+    /// ```json
+    /// {"type": "quantifier", "min": <usize>, "max": <usize | null>,
+    ///  "greediness": "lazy" | "possessive" | []}
+    /// ```
+    ///
+    /// `greediness: []` is the un-matched `quant_suffix?` slot and
+    /// corresponds to PCRE2's "greedy" default.
+    fn convert_typed_quantifier_object(
+        &self,
+        value: &serde_json::Value,
+    ) -> Result<(Quantifier, bool)> {
+        let map = value.as_object().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed quantifier object, got {}",
+                json_kind(value)
+            ))
+        })?;
+        let kind = map.get("type").and_then(|v| v.as_str());
+        if kind != Some("quantifier") {
+            return Err(self.contract_error(&format!(
+                "expected typed quantifier object with type=\"quantifier\", got type={kind:?}"
+            )));
+        }
+        let min = map
+            .get("min")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| self.contract_error("typed quantifier missing 'min'"))?;
+        let max = match map.get("max") {
+            Some(serde_json::Value::Null) | None => None,
+            Some(serde_json::Value::Number(n)) => n.as_u64(),
+            Some(other) => {
+                return Err(self.contract_error(&format!(
+                    "typed quantifier 'max' has unexpected shape: {}",
+                    json_kind(other)
+                )));
+            }
+        };
+        let (lazy, possessive) = match map.get("greediness") {
+            Some(serde_json::Value::Array(a)) if a.is_empty() => (false, false),
+            Some(serde_json::Value::String(s)) if s == "lazy" => (true, false),
+            Some(serde_json::Value::String(s)) if s == "possessive" => (false, true),
+            Some(other) => {
+                return Err(self.contract_error(&format!(
+                    "typed quantifier 'greediness' has unexpected shape: {} = {}",
+                    json_kind(other),
+                    other
+                )));
+            }
+            None => (false, false), // defensive default — treat missing field as greedy
+        };
+
+        #[allow(clippy::cast_possible_truncation)]
+        let min_u32 = min as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let max_u32 = max.map(|n| n as u32);
+
+        let quantifier = match (min_u32, max_u32) {
+            (0, None) => Quantifier::ZeroOrMore { lazy },
+            (1, None) => Quantifier::OneOrMore { lazy },
+            (0, Some(1)) => Quantifier::ZeroOrOne { lazy },
+            (lo, hi) => Quantifier::Range {
+                min: lo,
+                max: hi,
+                lazy,
+            },
+        };
+        Ok((quantifier, possessive))
+    }
+
+    // ============================================================
+    // Typed-shape array atom converters. Each takes the raw atom
+    // array (e.g. `["[", neg, init, body, "]"]`) and returns a
+    // Regex AST node. Inner patterns are recursed via
+    // `convert_typed_pattern` since group bodies follow the same
+    // 2-element [first_alt, rest] shape as the top-level pattern field.
+    // ============================================================
+
+    fn convert_typed_capturing_group(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::Capturing,
+            index: None,
+            name: None,
+        })
+    }
+
+    fn convert_typed_noncapturing_group(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::NonCapturing,
+            index: None,
+            name: None,
+        })
+    }
+
+    fn convert_typed_named_group(
+        &self,
+        arr: &[serde_json::Value],
+        _close_marker: &str,
+    ) -> Result<Regex> {
+        // Shape: ["(?<", <name>, ">", <pattern?>, ")"] OR ["(?'", <name>, "'", <pattern?>, ")"]
+        let name = self.extract_typed_name(arr.get(1))?;
+        let inner = self.convert_typed_optional_pattern(arr.get(3))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::Capturing,
+            index: None,
+            name: Some(name),
+        })
+    }
+
+    fn convert_typed_python_named_group(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["(?P<", <name>, ">", <pattern?>, ")"]
+        let name = self.extract_typed_name(arr.get(1))?;
+        let inner = self.convert_typed_optional_pattern(arr.get(3))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::Capturing,
+            index: None,
+            name: Some(name),
+        })
+    }
+
+    fn convert_typed_python_named_backreference(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["(?P=", <name>, ")"]
+        let name = self.extract_typed_name(arr.get(1))?;
+        Ok(Regex::NamedBackreference(name))
+    }
+
+    fn convert_typed_atomic_group(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["(?>", <pattern?>, ")"]
+        let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::Atomic,
+            index: None,
+            name: None,
+        })
+    }
+
+    fn convert_typed_branch_reset_group(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["(?|", <pattern?>, ")"]
+        let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+        Ok(Regex::Group {
+            expr: Box::new(inner),
+            kind: GroupKind::BranchReset,
+            index: None,
+            name: None,
+        })
+    }
+
+    fn convert_typed_lookaround(
+        &self,
+        arr: &[serde_json::Value],
+        is_lookahead: bool,
+        positive: bool,
+    ) -> Result<Regex> {
+        // Shape: ["<prefix>", <pattern?>, ")"]
+        let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+        if is_lookahead {
+            Ok(Regex::Lookahead {
+                expr: Box::new(inner),
+                positive,
+            })
+        } else {
+            Ok(Regex::Lookbehind {
+                expr: Box::new(inner),
+                positive,
+            })
+        }
+    }
+
+    /// Convert a `<pattern?>` slot. The `pattern` rule is annotated with
+    /// `-> $1` (transparent passthrough), so a matched `pattern?` emits
+    /// the pattern's typed content directly — the 2-element
+    /// `[<first_alt>, <rest>]` array — and an unmatched `pattern?` emits
+    /// `[]` (empty array). Same disambiguation as the top-level dispatch.
+    fn convert_typed_optional_pattern(&self, slot: Option<&serde_json::Value>) -> Result<Regex> {
+        let slot = match slot {
+            Some(s) => s,
+            None => return Ok(Regex::Empty),
+        };
+        let arr = slot.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected typed optional-pattern array, got {}",
+                json_kind(slot)
+            ))
+        })?;
+        if arr.is_empty() {
+            return Ok(Regex::Empty);
+        }
+        // Matched: the slot IS the pattern (2-element [first_alt, rest]).
+        self.convert_typed_pattern(slot)
+    }
+
+    /// Extract a name string from a `<name>` shape. The `name` rule is
+    /// `name_start name_continue*` — emits `[<first-char>, <Quantified of rest>]`.
+    fn extract_typed_name(&self, slot: Option<&serde_json::Value>) -> Result<String> {
+        let value = slot.ok_or_else(|| self.contract_error("typed group missing name"))?;
+        // The `name` shape is a 2-element array: [<first-char>, <Quantified of remaining>].
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!("expected name array, got {}", json_kind(value)))
+        })?;
+        let mut out = String::new();
+        for elem in arr {
+            walk_json_terminal_chars(elem, &mut out);
+        }
+        if out.is_empty() {
+            return Err(self.contract_error("typed name was empty"));
+        }
+        Ok(out)
+    }
+
+    /// Convert a `\` escape atom: `["\\", <unit>]`. The unit is either
+    /// a single-char string (simple escape, single_byte_escape) or an
+    /// array (hex/unicode/octal/control/property/backreference).
+    fn convert_typed_backslash_atom(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.len() < 2 {
+            return Err(self.contract_error("backslash atom missing escape unit"));
+        }
+        let unit = &arr[1];
+        match unit {
+            serde_json::Value::String(s) if s == "C" => {
+                // \C — match one code unit; lower to "any single codepoint"
+                Ok(Regex::CharClass(CharClass::Custom {
+                    ranges: vec![CharRange::range('\0', char::MAX)],
+                    negated: false,
+                    ci_override_ranges: None,
+                }))
+            }
+            serde_json::Value::String(s) => {
+                // Single-char simple_escape: \d, \w, \., \\, etc., or
+                // single-digit backreference \1..\9.
+                self.convert_typed_simple_escape_char(s, false)
+            }
+            serde_json::Value::Array(inner) => self.convert_typed_escape_unit_array(inner),
+            other => Err(self.contract_error(&format!(
+                "unrecognised escape unit shape: {}",
+                json_kind(other)
+            ))),
+        }
+    }
+
+    fn convert_typed_escape_unit_array(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.is_empty() {
+            return Err(self.contract_error("empty escape unit array"));
+        }
+        // Distinguish `backreference_digits` (= `nonzero_digit digit*`,
+        // 2-element `[<digit-string>, <Quantified-*-array>]`) from
+        // `octal_escape \NNN` (= `octal_digit octal_digit? octal_digit?`,
+        // 3-element `[<oct>, <oct?>, <oct?>]`) by structural shape.
+        // Backref shape is 2-element with arr[1] as an Array (the
+        // Quantified-* of remaining digits); octal is 3-element.
+        if arr.len() == 2 {
+            if let (Some(first), serde_json::Value::Array(_)) = (arr[0].as_str(), &arr[1]) {
+                if first.len() == 1 && first.chars().all(|c| c.is_ascii_digit()) {
+                    return self.convert_typed_numeric_backref(arr);
+                }
+            }
+        }
+        // Dispatch on first element.
+        match &arr[0] {
+            serde_json::Value::String(s) => match s.as_str() {
+                "x" | "x{" => self.convert_typed_hex_escape(arr),
+                "u{" => self.convert_typed_unicode_escape(arr),
+                "o{" => self.convert_typed_octal_braced(arr),
+                "c" => self.convert_typed_control_escape(arr),
+                "p{" => self.convert_typed_property_braced(arr, false),
+                "P{" => self.convert_typed_property_braced(arr, true),
+                "p" => self.convert_typed_property_short(arr, false),
+                "P" => self.convert_typed_property_short(arr, true),
+                // Octal NNN form: 1-3 octal digits as direct strings; 3-element
+                // shape with each slot string-or-empty-array (from Quantified-?).
+                d if d.len() == 1 && d.chars().all(|c| c.is_digit(8)) => {
+                    self.convert_typed_octal_digits(arr)
+                }
+                other => {
+                    Err(self
+                        .contract_error(&format!("unrecognised escape unit array head: {other:?}")))
+                }
+            },
+            // Nested array (e.g. backreference_digits is itself a Quantified
+            // of digit terminals → nested array).
+            serde_json::Value::Array(_) => self.convert_typed_numeric_backref(arr),
+            other => Err(self.contract_error(&format!(
+                "unrecognised escape unit array head shape: {}",
+                json_kind(other)
+            ))),
+        }
+    }
+
+    /// Convert a simple-escape char (the catch-all `\<X>` where X is
+    /// any single character). `in_class_context` toggles class-context
+    /// semantics (e.g. `\b` becomes BS instead of word-boundary).
+    fn convert_typed_simple_escape_char(&self, s: &str, in_class_context: bool) -> Result<Regex> {
+        let mut chars = s.chars();
+        let ch = chars
+            .next()
+            .ok_or_else(|| self.contract_error("empty simple_escape"))?;
+        if chars.next().is_some() {
+            return Err(
+                self.contract_error(&format!("simple_escape expected single char, got {s:?}"))
+            );
+        }
+        // Mirror the legacy `convert_simple_escape` mapping for the
+        // shorthand-class and metachar cases.
+        match ch {
+            'd' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: ucp_posix_class_ranges("digit").unwrap_or_default(),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Digit { negated: false }
+            })),
+            'D' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: complement_ranges(&ucp_posix_class_ranges("digit").unwrap_or_default()),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Digit { negated: true }
+            })),
+            'w' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: ucp_posix_class_ranges("word").unwrap_or_default(),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Word { negated: false }
+            })),
+            'W' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: complement_ranges(&ucp_posix_class_ranges("word").unwrap_or_default()),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Word { negated: true }
+            })),
+            's' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: ucp_posix_class_ranges("space").unwrap_or_default(),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Space { negated: false }
+            })),
+            'S' => Ok(Regex::CharClass(if self.ucp_enabled {
+                CharClass::Custom {
+                    ranges: complement_ranges(&ucp_posix_class_ranges("space").unwrap_or_default()),
+                    negated: false,
+                    ci_override_ranges: None,
+                }
+            } else {
+                CharClass::Space { negated: true }
+            })),
+            'h' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: horizontal_whitespace_ranges(),
+                negated: false,
+                ci_override_ranges: None,
+            })),
+            'H' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: complement_ranges(&horizontal_whitespace_ranges()),
+                negated: false,
+                ci_override_ranges: None,
+            })),
+            'v' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vertical_whitespace_ranges(),
+                negated: false,
+                ci_override_ranges: None,
+            })),
+            'V' => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: complement_ranges(&vertical_whitespace_ranges()),
+                negated: false,
+                ci_override_ranges: None,
+            })),
+            'R' => Ok(self.newline_sequence_ast()),
+            'N' => Ok(self.dot_ast()),
+            'X' => Ok(Regex::GraphemeCluster),
+            'b' => {
+                if in_class_context {
+                    Ok(Regex::Char('\u{08}'))
+                } else {
+                    Ok(Regex::WordBoundary { positive: true })
+                }
+            }
+            'B' => Ok(Regex::WordBoundary { positive: false }),
+            'A' => Ok(Regex::Anchor(AnchorType::AbsStart)),
+            'Z' => Ok(Regex::Anchor(AnchorType::AbsEnd)),
+            'z' => Ok(Regex::Anchor(AnchorType::AbsEndNoNL)),
+            'G' => Ok(Regex::Anchor(AnchorType::PreviousMatchEnd)),
+            'K' => Ok(Regex::MatchReset),
+            // Common literal-escape characters.
+            'n' => Ok(Regex::Char('\n')),
+            't' => Ok(Regex::Char('\t')),
+            'r' => Ok(Regex::Char('\r')),
+            'a' => Ok(Regex::Char('\u{07}')),
+            'e' => Ok(Regex::Char('\u{1B}')),
+            'f' => Ok(Regex::Char('\u{0C}')),
+            '0' => Ok(Regex::Char('\u{00}')),
+            // Bare `\E` outside `\Q...\E` is a PCRE2 no-op. Lower to
+            // an empty Sequence so the compiler elides it.
+            'E' => Ok(Regex::Sequence(vec![])),
+            // Single-digit backref — only when group exists.
+            // For now treat as backreference; the compiler validates.
+            d if d.is_ascii_digit() && d != '0' =>
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                Ok(Regex::Backreference((d as u8 - b'0') as u32))
+            }
+            // Catch-all: literal character.
+            other => Ok(Regex::Char(other)),
+        }
+    }
+
+    fn convert_typed_hex_escape(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Two shapes:
+        //   ["x", <hex_digit>, <hex_digit?>]  — \xNN
+        //   ["x{", <ws?>, <hex_digits>, <ws?>, "}"]  — \x{...}
+        let head = arr[0].as_str().unwrap_or("");
+        let mut digits = String::new();
+        if head == "x{" {
+            // Index 2 is hex_digits.
+            if let Some(d) = arr.get(2) {
+                walk_json_terminal_chars(d, &mut digits);
+            }
+        } else {
+            // \xNN form: arr[1] and arr[2] are hex_digit terminals.
+            for elem in arr.iter().skip(1) {
+                walk_json_terminal_chars(elem, &mut digits);
+            }
+        }
+        let n = u32::from_str_radix(&digits, 16)
+            .map_err(|_| self.contract_error(&format!("invalid hex escape '{digits}'")))?;
+        let ch = char::from_u32(n).ok_or_else(|| {
+            self.contract_error(&format!("hex escape U+{n:X} is not a valid codepoint"))
+        })?;
+        Ok(Regex::Char(ch))
+    }
+
+    fn convert_typed_unicode_escape(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["u{", <hex_digits>, "}"]
+        let mut digits = String::new();
+        if let Some(d) = arr.get(1) {
+            walk_json_terminal_chars(d, &mut digits);
+        }
+        let n = u32::from_str_radix(&digits, 16)
+            .map_err(|_| self.contract_error(&format!("invalid unicode escape '{digits}'")))?;
+        let ch = char::from_u32(n).ok_or_else(|| {
+            self.contract_error(&format!("unicode escape U+{n:X} is not a valid codepoint"))
+        })?;
+        Ok(Regex::Char(ch))
+    }
+
+    fn convert_typed_octal_braced(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["o{", <ws?>, <octal_digits>, <ws?>, "}"]
+        let mut digits = String::new();
+        if let Some(d) = arr.get(2) {
+            walk_json_terminal_chars(d, &mut digits);
+        }
+        let n = u32::from_str_radix(&digits, 8)
+            .map_err(|_| self.contract_error(&format!("invalid octal escape '{digits}'")))?;
+        let ch = char::from_u32(n).ok_or_else(|| {
+            self.contract_error(&format!("octal escape O{digits} is not a valid codepoint"))
+        })?;
+        Ok(Regex::Char(ch))
+    }
+
+    fn convert_typed_octal_digits(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: [<octal_digit>, <octal_digit?>, <octal_digit?>] — bare \NNN form.
+        let mut digits = String::new();
+        for elem in arr {
+            walk_json_terminal_chars(elem, &mut digits);
+        }
+        let n = u32::from_str_radix(&digits, 8)
+            .map_err(|_| self.contract_error(&format!("invalid octal escape '\\{digits}'")))?;
+        let ch = char::from_u32(n).ok_or_else(|| {
+            self.contract_error(&format!("octal escape \\{digits} is not a valid codepoint"))
+        })?;
+        Ok(Regex::Char(ch))
+    }
+
+    fn convert_typed_control_escape(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["c", <any_char>]
+        let ch_text = arr
+            .get(1)
+            .ok_or_else(|| self.contract_error("control escape missing target char"))?;
+        let mut buf = String::new();
+        walk_json_terminal_chars(ch_text, &mut buf);
+        let ctrl = buf
+            .chars()
+            .next()
+            .ok_or_else(|| self.contract_error("control escape has empty target"))?;
+        // PCRE2 10.47: uppercase if lowercase, then XOR 0x40.
+        let upper = ctrl.to_ascii_uppercase();
+        let code = (upper as u32) ^ 0x40;
+        let result = char::from_u32(code).ok_or_else(|| {
+            self.contract_error(&format!("control escape produced invalid codepoint {code}"))
+        })?;
+        Ok(Regex::Char(result))
+    }
+
+    fn convert_typed_property_braced(
+        &self,
+        arr: &[serde_json::Value],
+        negated: bool,
+    ) -> Result<Regex> {
+        // Shape: ["p{", <prop_name>, "}"] OR ["P{", <prop_name>, "}"]
+        let mut name = String::new();
+        if let Some(n) = arr.get(1) {
+            walk_json_terminal_chars(n, &mut name);
+        }
+        Ok(Regex::UnicodeClass {
+            name: name.trim().to_string(),
+            negated,
+        })
+    }
+
+    fn convert_typed_property_short(
+        &self,
+        arr: &[serde_json::Value],
+        negated: bool,
+    ) -> Result<Regex> {
+        // Shape: ["p", <short_prop_letter>] OR ["P", <short_prop_letter>]
+        let mut name = String::new();
+        if let Some(n) = arr.get(1) {
+            walk_json_terminal_chars(n, &mut name);
+        }
+        Ok(Regex::UnicodeClass {
+            name: name.trim().to_string(),
+            negated,
+        })
+    }
+
+    fn convert_typed_named_backref_k(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // Shape: ["k", <name_ref or braced_name_ref>]
+        // name_ref shape: ["<", <name>, ">"] OR ["'", <name>, "'"]
+        // braced_name_ref shape: ["{", <ws?>, <name>, <ws?>, "}"]
+        let payload = arr
+            .get(1)
+            .ok_or_else(|| self.contract_error("\\k missing name reference"))?;
+        let name = self.extract_name_from_ref_shape(payload)?;
+        Ok(Regex::NamedBackreference(name))
+    }
+
+    fn convert_typed_g_backref(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // PCRE2 distinguishes by bracket form:
+        //   `\g<N>`, `\g<name>`, `\g<+N>`, `\g<-N>`, `\g'...'`  → subroutine call (Recursion)
+        //   `\g{N}`, `\g{+N}`, `\g{-N}`, `\g{name}`, `\gN`     → back-reference
+        //
+        // Top-level shape: ["\\g", <subroutine_ref>]
+        // subroutine_ref alternatives:
+        //   - braced_subroutine_ref: ["{", ws?, <signed_digits_or_name>, ws?, "}"]
+        //   - ["<", <signed_digits_or_name>, ">"]
+        //   - ["'", <signed_digits_or_name>, "'"]
+        //   - bare <signed_digits>: [<sign?>, <int>]
+        let payload = arr
+            .get(1)
+            .ok_or_else(|| self.contract_error("\\g missing subroutine reference"))?;
+        let parr = payload.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "\\g subroutine ref must be array, got {}",
+                json_kind(payload)
+            ))
+        })?;
+        let first = parr
+            .first()
+            .ok_or_else(|| self.contract_error("\\g subroutine ref is empty"))?;
+        let first_str = first.as_str();
+        match first_str {
+            Some("<") | Some("'") => {
+                // Angle/apostrophe form → subroutine call.
+                let inner = parr
+                    .get(1)
+                    .ok_or_else(|| self.contract_error("\\g subroutine ref missing body"))?;
+                self.subroutine_ref_to_recursion(inner)
+            }
+            Some("{") => {
+                // Braced form → back-reference.
+                let inner = parr
+                    .get(2)
+                    .ok_or_else(|| self.contract_error("\\g{} backreference missing body"))?;
+                self.subroutine_ref_to_backreference(inner)
+            }
+            // Bare signed_digits form `\gN` / `\g+N` / `\g-N` → back-reference.
+            _ => self.subroutine_ref_to_backreference(payload),
+        }
+    }
+
+    /// Convert a `signed_digits_or_name` value into a `Regex::Recursion`
+    /// (subroutine call). Used for the angle/apostrophe `\g<>` form.
+    fn subroutine_ref_to_recursion(&self, value: &serde_json::Value) -> Result<Regex> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected subroutine ref shape, got {}",
+                json_kind(value)
+            ))
+        })?;
+        if arr.len() == 2 {
+            if let Some(n) = arr[1].as_u64() {
+                let sign = arr[0].as_str();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                return Ok(match sign {
+                    Some("+") => Regex::Recursion {
+                        target: RecursionTarget::RelativeGroup(n as i32),
+                    },
+                    Some("-") => Regex::Recursion {
+                        target: RecursionTarget::RelativeGroup(-(n as i32)),
+                    },
+                    _ => Regex::Recursion {
+                        target: RecursionTarget::Group(n as u32),
+                    },
+                });
+            }
+        }
+        // Fall through: name-shaped reference.
+        let name = self.extract_typed_name(Some(value))?;
+        Ok(Regex::Recursion {
+            target: RecursionTarget::NamedGroup(name),
+        })
+    }
+
+    /// Convert a `signed_digits_or_name` value into a back-reference.
+    /// Used for the braced `\g{}` form and bare `\gN`.
+    fn subroutine_ref_to_backreference(&self, value: &serde_json::Value) -> Result<Regex> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected subroutine ref shape, got {}",
+                json_kind(value)
+            ))
+        })?;
+        if arr.len() == 2 {
+            if let Some(n) = arr[1].as_u64() {
+                let sign = arr[0].as_str();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                return Ok(match sign {
+                    Some("+") => Regex::RelativeBackreference(n as i32),
+                    Some("-") => Regex::RelativeBackreference(-(n as i32)),
+                    _ => Regex::Backreference(n as u32),
+                });
+            }
+        }
+        let name = self.extract_typed_name(Some(value))?;
+        Ok(Regex::NamedBackreference(name))
+    }
+
+    fn convert_typed_numeric_backref(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // arr is the backreference_digits shape — a Quantified-+ of digit
+        // terminals, OR a sequence-shape from the legacy fallback.
+        let mut digits = String::new();
+        for elem in arr {
+            walk_json_terminal_chars(elem, &mut digits);
+        }
+        let n: u32 = digits
+            .parse()
+            .map_err(|_| self.contract_error(&format!("invalid backreference '{digits}'")))?;
+        Ok(Regex::Backreference(n))
+    }
+
+    fn extract_name_from_ref_shape(&self, value: &serde_json::Value) -> Result<String> {
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected name_ref array, got {}",
+                json_kind(value)
+            ))
+        })?;
+        // Determine whether it's a braced ref (5-element) or angle/apos (3-element).
+        let inner_idx = if arr.len() == 5 { 2 } else { 1 };
+        let name_value = arr
+            .get(inner_idx)
+            .ok_or_else(|| self.contract_error("name_ref missing name body"))?;
+        self.extract_typed_name(Some(name_value))
+    }
+
+    fn subroutine_ref_to_regex(&self, value: &serde_json::Value) -> Result<Regex> {
+        // signed_digits_or_name: either signed_digits [<sign?>, <int>] or name
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "expected subroutine ref shape, got {}",
+                json_kind(value)
+            ))
+        })?;
+        // Try signed_digits: arr should be [<sign?>, <int>] where sign is "+", "-", or [].
+        if arr.len() == 2 {
+            let sign = &arr[0];
+            let digits = &arr[1];
+            if let Some(n) = digits.as_u64() {
+                let sign_str = sign.as_str();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                return match sign_str {
+                    Some("+") => Ok(Regex::RelativeBackreference(n as i32)),
+                    Some("-") => Ok(Regex::RelativeBackreference(-(n as i32))),
+                    _ => Ok(Regex::Backreference(n as u32)),
+                };
+            }
+            // sign-empty form: arr[0] is "[]" and arr[1] is digits int
+            if matches!(sign, serde_json::Value::Array(_)) {
+                if let Some(n) = digits.as_u64() {
+                    return Ok(Regex::Backreference(n as u32));
+                }
+            }
+        }
+        // Fall through: attempt name extraction.
+        let name = self.extract_typed_name(Some(value))?;
+        Ok(Regex::NamedBackreference(name))
+    }
+
+    /// Convert a `\Q...\E` quoted_literal atom: `["\\Q", <chars-Quantified>, "\\E"]`.
+    fn convert_typed_quoted_literal(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        let mut text = String::new();
+        if let Some(chars) = arr.get(1) {
+            walk_json_terminal_chars(chars, &mut text);
+        }
+        let chars: Vec<Regex> = text.chars().map(Regex::Char).collect();
+        Ok(Regex::Sequence(chars))
+    }
+
+    /// Convert a char_class atom: `["[", <neg?>, <init_close?>, <body>, "]"]`.
+    fn convert_typed_char_class(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.len() < 5 {
+            return Err(self.contract_error(&format!(
+                "char_class expected 5 elements, got {}",
+                arr.len()
+            )));
+        }
+
+        // Negation slot: `"^"` (string) when matched; `[]` (empty array)
+        // when not present.
+        let negated = matches!(&arr[1], serde_json::Value::String(s) if s == "^");
+
+        let mut ranges: Vec<CharRange> = Vec::new();
+        // class_initial_close: literal `]` as the first class member.
+        if matches!(&arr[2], serde_json::Value::String(s) if s == "]") {
+            ranges.push(CharRange::single(']'));
+        }
+
+        let body = arr[3].as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "char_class body must be array, got {}",
+                json_kind(&arr[3])
+            ))
+        })?;
+        for item in body {
+            self.convert_typed_class_item(item, &mut ranges)?;
+        }
+
+        Ok(Regex::CharClass(CharClass::Custom {
+            ranges,
+            negated,
+            ci_override_ranges: None,
+        }))
+    }
+
+    /// Convert a single class_item, appending its expanded ranges to `ranges`.
+    /// Per PGEN-RGX-0076 fix (post-1.1.36): `posix_class` is now a typed
+    /// `{type:"posix_class", name, negated}` object instead of a bare `"[:"`.
+    fn convert_typed_class_item(
+        &self,
+        item: &serde_json::Value,
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        match item {
+            serde_json::Value::String(s) => {
+                if s == "\\E" {
+                    // stray_class_end_quote: zero-width marker, no range.
+                    return Ok(());
+                }
+                if s.chars().count() == 1 {
+                    let ch = s.chars().next().unwrap();
+                    ranges.push(CharRange::single(ch));
+                    return Ok(());
+                }
+                Err(self.contract_error(&format!("unrecognised class_item string: {s:?}")))
+            }
+            serde_json::Value::Array(arr) => self.convert_typed_class_item_array(arr, ranges),
+            serde_json::Value::Object(map) => self.convert_typed_class_item_object(map, ranges),
+            other => Err(self.contract_error(&format!(
+                "unrecognised class_item shape: {}",
+                json_kind(other)
+            ))),
+        }
+    }
+
+    /// Convert a typed-object class_item — currently `posix_class`,
+    /// extensible to future typed class-item shapes.
+    fn convert_typed_class_item_object(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        let kind = map.get("type").and_then(|v| v.as_str());
+        match kind {
+            Some("posix_class") => {
+                let name = map
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| self.contract_error("typed posix_class missing 'name'"))?;
+                // `negated`: typed boolean `true` when matched, empty array `[]` otherwise.
+                let negated = matches!(map.get("negated"), Some(serde_json::Value::Bool(true)));
+                let resolved = if self.ucp_enabled {
+                    ucp_posix_class_ranges(name).or_else(|| posix_class_ranges(name))
+                } else {
+                    posix_class_ranges(name)
+                };
+                let mut class_ranges = resolved.ok_or_else(|| {
+                    self.contract_error(&format!("unknown POSIX class name '{name}'"))
+                })?;
+                if negated {
+                    class_ranges = complement_ranges(&class_ranges);
+                }
+                ranges.extend(class_ranges);
+                Ok(())
+            }
+            Some(other) => {
+                Err(self.contract_error(&format!("unrecognised typed class_item: type={other:?}")))
+            }
+            None => {
+                Err(self.contract_error("typed class_item object missing 'type' discriminator"))
+            }
+        }
+    }
+
+    fn convert_typed_class_item_array(
+        &self,
+        arr: &[serde_json::Value],
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        if arr.is_empty() {
+            return Ok(());
+        }
+        // Dispatch on first element's prefix.
+        if let Some(head) = arr[0].as_str() {
+            match head {
+                "[:" => return self.convert_typed_posix_class(arr, ranges),
+                "\\Q" => return self.convert_typed_quoted_class_literal(arr, ranges),
+                "\\" => return self.convert_typed_class_escape(arr, ranges),
+                _ => {}
+            }
+        }
+        // class_range: 5-element [<class_atom>, <Quantified zero-width>, "-",
+        //                          <Quantified zero-width>, <class_atom>].
+        if arr.len() == 5 && matches!(&arr[2], serde_json::Value::String(s) if s == "-") {
+            return self.convert_typed_class_range(arr, ranges);
+        }
+        Err(self.contract_error(&format!(
+            "unrecognised class_item array shape: {}",
+            serde_json::Value::Array(arr.to_vec())
+        )))
+    }
+
+    fn convert_typed_posix_class(
+        &self,
+        arr: &[serde_json::Value],
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        // Shape: ["[:", <negation?>, <name>, ":]"]
+        let neg_slot = arr.get(1);
+        let posix_negated = matches!(neg_slot, Some(serde_json::Value::String(s)) if s == "^");
+        let name_slot = arr
+            .get(2)
+            .ok_or_else(|| self.contract_error("posix_class missing name"))?;
+        let mut name = String::new();
+        walk_json_terminal_chars(name_slot, &mut name);
+        let resolved = if self.ucp_enabled {
+            ucp_posix_class_ranges(&name).or_else(|| posix_class_ranges(&name))
+        } else {
+            posix_class_ranges(&name)
+        };
+        let mut class_ranges = resolved
+            .ok_or_else(|| self.contract_error(&format!("unknown POSIX class name '{name}'")))?;
+        if posix_negated {
+            class_ranges = complement_ranges(&class_ranges);
+        }
+        ranges.extend(class_ranges);
+        Ok(())
+    }
+
+    fn convert_typed_quoted_class_literal(
+        &self,
+        arr: &[serde_json::Value],
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        // Shape: ["\\Q", <chars>, "\\E"]. <chars> is a Quantified-* of
+        // quoted_class_literal_char terminals (after collapse: array of strings
+        // OR an empty array).
+        let chars_slot = arr.get(1);
+        let mut text = String::new();
+        if let Some(slot) = chars_slot {
+            walk_json_terminal_chars(slot, &mut text);
+        }
+        for ch in text.chars() {
+            ranges.push(CharRange::single(ch));
+        }
+        Ok(())
+    }
+
+    fn convert_typed_class_escape(
+        &self,
+        arr: &[serde_json::Value],
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        // Shape: ["\\", <escape_unit>] — same as a top-level escape, but
+        // resolved in class context (e.g. `\b` becomes BS instead of
+        // word-boundary).
+        let regex = if let Some(unit) = arr.get(1) {
+            match unit {
+                serde_json::Value::String(s) if s == "C" => Regex::CharClass(CharClass::Custom {
+                    ranges: vec![CharRange::range('\0', char::MAX)],
+                    negated: false,
+                    ci_override_ranges: None,
+                }),
+                serde_json::Value::String(s) => self.convert_typed_simple_escape_char(s, true)?,
+                serde_json::Value::Array(inner) => self.convert_typed_escape_unit_array(inner)?,
+                other => {
+                    return Err(self.contract_error(&format!(
+                        "unrecognised class_escape unit shape: {}",
+                        json_kind(other)
+                    )))
+                }
+            }
+        } else {
+            return Err(self.contract_error("class_escape missing escape unit"));
+        };
+        extend_ranges_from_regex(regex, ranges, |msg| {
+            self.contract_error(&format!("class_escape: {msg}"))
+        })
+    }
+
+    fn convert_typed_class_range(
+        &self,
+        arr: &[serde_json::Value],
+        ranges: &mut Vec<CharRange>,
+    ) -> Result<()> {
+        // Shape: [<class_atom>, <Quantified zw>, "-", <Quantified zw>, <class_atom>]
+        let start_ch = self.typed_class_atom_to_char(&arr[0])?;
+        let end_ch = self.typed_class_atom_to_char(&arr[4])?;
+        if start_ch > end_ch {
+            return Err(self.contract_error(&format!(
+                "class_range out of order: {start_ch:?} > {end_ch:?}"
+            )));
+        }
+        ranges.push(CharRange::range(start_ch, end_ch));
+        Ok(())
+    }
+
+    /// Resolve a class_atom (used as range endpoint) to a single character.
+    fn typed_class_atom_to_char(&self, value: &serde_json::Value) -> Result<char> {
+        match value {
+            serde_json::Value::String(s) if s.chars().count() == 1 => Ok(s.chars().next().unwrap()),
+            serde_json::Value::Array(arr) if !arr.is_empty() => {
+                if let Some(head) = arr[0].as_str() {
+                    match head {
+                        "\\Q" => {
+                            // quoted_class_range_atom: ["\\Q", <single-char>, "\\E"]
+                            let mut text = String::new();
+                            if let Some(slot) = arr.get(1) {
+                                walk_json_terminal_chars(slot, &mut text);
+                            }
+                            text.chars().next().ok_or_else(|| {
+                                self.contract_error("quoted_class_range_atom is empty")
+                            })
+                        }
+                        "\\" => {
+                            // class_range_escape: ["\\", <unit>]
+                            let unit = arr.get(1).ok_or_else(|| {
+                                self.contract_error("class_range_escape missing unit")
+                            })?;
+                            let regex = match unit {
+                                serde_json::Value::String(s) => {
+                                    self.convert_typed_simple_escape_char(s, true)?
+                                }
+                                serde_json::Value::Array(inner) => {
+                                    self.convert_typed_escape_unit_array(inner)?
+                                }
+                                _ => {
+                                    return Err(
+                                        self.contract_error("unsupported class_range_escape unit")
+                                    )
+                                }
+                            };
+                            match regex {
+                                Regex::Char(ch) => Ok(ch),
+                                _ => Err(self.contract_error(
+                                    "class_range endpoint escape did not resolve to a single char",
+                                )),
+                            }
+                        }
+                        _ => Err(self.contract_error(&format!(
+                            "unsupported class_range endpoint head: {head:?}"
+                        ))),
+                    }
+                } else {
+                    Err(self.contract_error("class_range endpoint array head is non-string"))
+                }
+            }
+            other => Err(self.contract_error(&format!(
+                "unsupported class_range endpoint shape: {}",
+                json_kind(other)
+            ))),
+        }
+    }
+
+    /// Convert a conditional atom: `["(?(", <cond>, ")", <yes>, <no?>, ")"]`.
+    /// Yes/no branches are arrays of piece objects (concatenation-flat).
+    /// VERSION conditionals are evaluated at parse time and short-circuit.
+    fn convert_typed_conditional(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.len() < 5 {
+            return Err(self.contract_error(&format!(
+                "conditional expected ≥5 elements, got {}",
+                arr.len()
+            )));
+        }
+
+        let yes_pieces = arr[3]
+            .as_array()
+            .ok_or_else(|| self.contract_error("conditional yes branch must be array"))?;
+        let yes_branch = self.pieces_to_sequence(yes_pieces)?;
+
+        // arr[4] is optional ("|" no_branch) pair, OR ")" closer if no else.
+        let no_branch = match arr.get(4) {
+            Some(serde_json::Value::Array(pair_arr))
+                if pair_arr
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == "|")
+                    .unwrap_or(false) =>
+            {
+                let no_pieces = pair_arr.get(1).and_then(|v| v.as_array()).ok_or_else(|| {
+                    self.contract_error("conditional no-branch missing piece array")
+                })?;
+                Some(self.pieces_to_sequence(no_pieces)?)
+            }
+            _ => None,
+        };
+
+        // A13: VERSION conditional short-circuit at parse time.
+        // Reconstruct the condition text and check via parse_version_conditional.
+        let mut cond_text = String::new();
+        walk_json_terminal_chars(&arr[1], &mut cond_text);
+        if let Some(matches) = parse_version_conditional(&cond_text) {
+            return Ok(if matches {
+                yes_branch
+            } else {
+                no_branch.unwrap_or(Regex::Empty)
+            });
+        }
+
+        let condition = self.convert_typed_condition(&arr[1])?;
+        Ok(Regex::Conditional {
+            condition,
+            true_branch: Box::new(yes_branch),
+            false_branch: no_branch.map(Box::new),
+        })
+    }
+
+    /// Convert a typed condition. Possible shapes per `rules-misc.md`:
+    /// - `"DEFINE"` (string)
+    /// - `["VERSION", <op>, <ver>]` (array)
+    /// - `[<sign?>, <int>]` for signed_digits
+    /// - `<int>` for plain digits
+    /// - `["?C", ...]` callout-condition
+    /// - `["?=", ...]` etc. condition_assertion
+    /// - `["*", <name>, ":", <pattern>]` alpha condition assertion
+    /// - `[<first_char>, <Quantified rest>]` for name (looks like signed_digits but with strings)
+    /// - `["R", <int?>]` or `["R&", <name>]` recursion_condition
+    /// - name_ref `["<", <name>, ">"]` etc.
+    fn convert_typed_condition(&self, value: &serde_json::Value) -> Result<ConditionalTest> {
+        if let Some(s) = value.as_str() {
+            if s == "DEFINE" {
+                return Ok(ConditionalTest::Define);
+            }
+            // A bare name string for backwards-compat (rare).
+            return Ok(ConditionalTest::NamedGroupExists(s.to_string()));
+        }
+        if let Some(n) = value.as_u64() {
+            return Ok(ConditionalTest::GroupExists(n as u32));
+        }
+        let arr = value.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "unsupported condition shape: {}",
+                json_kind(value)
+            ))
+        })?;
+        if arr.is_empty() {
+            return Err(self.contract_error("empty condition array"));
+        }
+        // Try VERSION: ["VERSION", <op>, <version_number>]
+        if let Some(head) = arr[0].as_str() {
+            if head == "VERSION" && arr.len() >= 3 {
+                // Reconstruct the text and pass through parse_version_conditional
+                // for compile-time evaluation.
+                let mut buf = String::from("VERSION");
+                if let Some(op) = arr.get(1).and_then(|v| v.as_str()) {
+                    buf.push_str(op);
+                }
+                let ver = arr.get(2);
+                if let Some(ver_val) = ver {
+                    let mut tmp = String::new();
+                    walk_json_terminal_chars(ver_val, &mut tmp);
+                    buf.push_str(&tmp);
+                }
+                // VERSION shouldn't reach here — handled by short-circuit
+                // at the conditional level. Fall through if unrecognised.
+                let _ = parse_version_conditional(&buf);
+                return Err(self.contract_error(&format!("unsupported VERSION condition: {buf}")));
+            }
+            // Recursion condition: ["R", <digits?>] or ["R&", <name>]
+            if head == "R" {
+                // optional digits at arr[1]
+                if let Some(digits_slot) = arr.get(1) {
+                    // Slot is Quantified-? carrier: `[]` or `[<digits-int>]`
+                    if let Some(slot_arr) = digits_slot.as_array() {
+                        if slot_arr.is_empty() {
+                            return Ok(ConditionalTest::RecursionAny);
+                        }
+                        if let Some(n) = slot_arr.first().and_then(|v| v.as_u64()) {
+                            return Ok(ConditionalTest::RecursionGroup(n as u32));
+                        }
+                    }
+                    // Maybe digits is direct integer (slice 36 may have changed shape).
+                    if let Some(n) = digits_slot.as_u64() {
+                        return Ok(ConditionalTest::RecursionGroup(n as u32));
+                    }
+                }
+                return Ok(ConditionalTest::RecursionAny);
+            }
+            if head == "R&" {
+                let name = self.extract_typed_name(arr.get(1))?;
+                return Ok(ConditionalTest::RecursionNamed(name));
+            }
+            // Lookaround condition: ["?=", <pattern>] etc.
+            match head {
+                "?=" => {
+                    let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+                    return Ok(ConditionalTest::Lookahead {
+                        expr: Box::new(inner),
+                        positive: true,
+                    });
+                }
+                "?!" => {
+                    let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+                    return Ok(ConditionalTest::Lookahead {
+                        expr: Box::new(inner),
+                        positive: false,
+                    });
+                }
+                "?<=" => {
+                    let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+                    return Ok(ConditionalTest::Lookbehind {
+                        expr: Box::new(inner),
+                        positive: true,
+                    });
+                }
+                "?<!" => {
+                    let inner = self.convert_typed_optional_pattern(arr.get(1))?;
+                    return Ok(ConditionalTest::Lookbehind {
+                        expr: Box::new(inner),
+                        positive: false,
+                    });
+                }
+                _ => {}
+            }
+            // name_ref: ["<", <name>, ">"] or ["'", <name>, "'"]
+            if head == "<" || head == "'" {
+                let name = self.extract_typed_name(arr.get(1))?;
+                return Ok(ConditionalTest::NamedGroupExists(name));
+            }
+            // alpha_condition_assertion: ["*", <alpha_lookaround_name>, ":", <pattern?>]
+            if head == "*" && arr.len() >= 4 {
+                let mut name = String::new();
+                if let Some(n) = arr.get(1) {
+                    walk_json_terminal_chars(n, &mut name);
+                }
+                let inner = self.convert_typed_optional_pattern(arr.get(3))?;
+                let placeholder = match name.as_str() {
+                    "pla" | "positive_lookahead" => Some(ConditionalTest::Lookahead {
+                        expr: Box::new(inner),
+                        positive: true,
+                    }),
+                    "nla" | "negative_lookahead" => Some(ConditionalTest::Lookahead {
+                        expr: Box::new(inner),
+                        positive: false,
+                    }),
+                    "plb" | "positive_lookbehind" => Some(ConditionalTest::Lookbehind {
+                        expr: Box::new(inner),
+                        positive: true,
+                    }),
+                    "nlb" | "negative_lookbehind" => Some(ConditionalTest::Lookbehind {
+                        expr: Box::new(inner),
+                        positive: false,
+                    }),
+                    "napla" => Some(ConditionalTest::Lookahead {
+                        expr: Box::new(inner),
+                        positive: true,
+                    }),
+                    "naplb" => Some(ConditionalTest::Lookbehind {
+                        expr: Box::new(inner),
+                        positive: true,
+                    }),
+                    _ => None,
+                };
+                if let Some(test) = placeholder {
+                    return Ok(test);
+                }
+            }
+        }
+        // signed_digits: [<sign?>, <int>] OR plain name
+        if arr.len() == 2 {
+            let sign = &arr[0];
+            let payload = &arr[1];
+            if let Some(n) = payload.as_u64() {
+                let sign_str = sign.as_str();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                return Ok(match sign_str {
+                    Some("+") => ConditionalTest::RelativeGroupExists(n as i32),
+                    Some("-") => ConditionalTest::RelativeGroupExists(-(n as i32)),
+                    _ => ConditionalTest::GroupExists(n as u32),
+                });
+            }
+            // Try as name shape: [<first-char>, <Quantified rest>]
+            if let Some(_first) = sign.as_str() {
+                let mut name = String::new();
+                walk_json_terminal_chars(value, &mut name);
+                if !name.is_empty() {
+                    return Ok(ConditionalTest::NamedGroupExists(name));
+                }
+            }
+        }
+        // Last resort: try to extract a name from concatenated terminals.
+        let mut name = String::new();
+        walk_json_terminal_chars(value, &mut name);
+        if !name.is_empty() {
+            return Ok(ConditionalTest::NamedGroupExists(name));
+        }
+        Err(self.contract_error(&format!("unsupported condition shape: {}", value)))
+    }
+
+    fn pieces_to_sequence(&self, pieces: &[serde_json::Value]) -> Result<Regex> {
+        let mut converted = Vec::with_capacity(pieces.len());
+        for p in pieces {
+            converted.push(self.convert_typed_piece(p)?);
+        }
+        Ok(apply_bare_flag_directives(converted))
+    }
+
+    /// Convert a callout atom: `["(?C", <arg?>, ")"]`.
+    /// `<arg?>` is one of:
+    ///   - `[]` (no argument — defaults to callout 0)
+    ///   - integer (numeric callout)
+    ///   - delimited callout_string array (string callout — treated as 0
+    ///     since RGX's match semantics for unregistered string callouts
+    ///     are identical to numeric 0)
+    fn convert_typed_callout(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        let arg_slot = arr.get(1);
+        let number: u32 = match arg_slot {
+            None => 0,
+            Some(serde_json::Value::Array(a)) if a.is_empty() => 0,
+            Some(serde_json::Value::Array(_)) => 0, // string callout — see comment
+            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0) as u32,
+            Some(other) => {
+                return Err(self.contract_error(&format!(
+                    "unexpected callout arg shape: {}",
+                    json_kind(other)
+                )))
+            }
+        };
+        Ok(Regex::Callout(number))
+    }
+
+    /// Convert a code_block atom.
+    /// Plain shape: `["(?{", <content>, "})"]` (3 elements)
+    /// Lang shape: `["(?{", <lang>, ":", <ws?>, <content>, "})"]` (6 elements)
+    fn convert_typed_code_block(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.len() == 3 {
+            // Plain: no lang prefix. Lang stored as empty string per AST.
+            let mut content = String::new();
+            if let Some(c) = arr.get(1) {
+                walk_json_terminal_chars(c, &mut content);
+            }
+            return Ok(Regex::CodeBlock {
+                lang: String::new(),
+                code: content,
+            });
+        }
+        if arr.len() >= 6 {
+            let mut lang = String::new();
+            if let Some(l) = arr.get(1) {
+                walk_json_terminal_chars(l, &mut lang);
+            }
+            let mut content = String::new();
+            if let Some(c) = arr.get(4) {
+                walk_json_terminal_chars(c, &mut content);
+            }
+            return Ok(Regex::CodeBlock {
+                lang,
+                code: content,
+            });
+        }
+        Err(self.contract_error(&format!(
+            "unsupported code_block shape with {} elements",
+            arr.len()
+        )))
+    }
+
+    /// Convert a comment_group atom: `["(?#", <text?>, ")"]` — no runtime effect.
+    fn convert_typed_comment_group(&self, _arr: &[serde_json::Value]) -> Result<Regex> {
+        Ok(Regex::Empty)
+    }
+
+    /// Convert an extended_class atom: `["(?[", <content>, "])"]`.
+    fn convert_typed_extended_class(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        // For now, surface this through the existing ExtendedCharClass node
+        // by reconstructing the source text and letting the compiler
+        // dispatch. Future slices will add typed extended-class shapes.
+        let mut content = String::new();
+        if let Some(c) = arr.get(1) {
+            walk_json_terminal_chars(c, &mut content);
+        }
+        Ok(Regex::ExtendedCharClass { content })
+    }
+
+    /// Convert an `(*...)`-prefixed atom — alpha_lookaround, scan_substring,
+    /// script_run, atomic_group (alpha form), or directive_verb.
+    /// Possible shapes:
+    ///   directive_verb: `["(*", <body>, ")"]` — body is the directive_named or mark_shorthand
+    ///   alpha_lookaround: `["(*", <name-string>, ":", <pattern?>, ")"]`
+    ///   atomic_group (alpha): `["(*atomic:", <pattern?>, ")"]` (5-letter prefix; typically dispatched separately)
+    fn convert_typed_alpha_prefixed(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.is_empty() {
+            return Err(self.contract_error("empty (*...) atom"));
+        }
+        // Distinguish by presence of a `:` separator at index 2.
+        let has_colon = matches!(arr.get(2), Some(serde_json::Value::String(s)) if s == ":");
+        if has_colon && arr.len() >= 5 {
+            // Could be alpha_lookaround `(*pla:...)` etc., or scan_substring/script_run.
+            let mut name = String::new();
+            if let Some(n) = arr.get(1) {
+                walk_json_terminal_chars(n, &mut name);
+            }
+            let pattern_slot = arr.get(3);
+            let inner = self.convert_typed_optional_pattern(pattern_slot)?;
+            // Try alpha_lookaround name resolution first.
+            if let Some(regex) = regex_from_alpha_lookaround_name(&name, inner.clone()) {
+                return Ok(regex);
+            }
+            // scs / sr / script_run / atomic alpha forms — pass body through.
+            // For atomic-alpha (`(*atomic:...)`), wrap as atomic group.
+            if name == "atomic" {
+                return Ok(Regex::Group {
+                    expr: Box::new(inner),
+                    kind: GroupKind::Atomic,
+                    index: None,
+                    name: None,
+                });
+            }
+            // Other named groups (scs/sr/asr/etc.) — pass body through unchanged.
+            return Ok(inner);
+        }
+        // 3-element directive_verb shape: `["(*", <body>, ")"]`.
+        if arr.len() == 3 {
+            return self.convert_typed_directive_verb(&arr[1]);
+        }
+        Err(self.contract_error(&format!(
+            "unsupported (* prefixed atom shape with {} elements",
+            arr.len()
+        )))
+    }
+
+    fn convert_typed_directive_verb(&self, body: &serde_json::Value) -> Result<Regex> {
+        // body shapes:
+        //   directive_named: [<directive_name>, <suffix?>]
+        //   mark_shorthand: [":", <payload>]  → produces empty name
+        // directive_name is `[<first_char>, <Quantified rest>]` after collapse.
+        // suffix is empty `[]` or `[":", <payload>]` or `["=", <payload>]`.
+        let arr = body.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "directive_verb body must be array, got {}",
+                json_kind(body)
+            ))
+        })?;
+        // Detect mark_shorthand: arr[0] is the literal `":"` instead of a name.
+        if matches!(arr.first(), Some(serde_json::Value::String(s)) if s == ":") {
+            let mut payload = String::new();
+            for elem in arr.iter().skip(1) {
+                walk_json_terminal_chars(elem, &mut payload);
+            }
+            return Ok(Regex::Mark(payload));
+        }
+        let mut name = String::new();
+        if let Some(n) = arr.first() {
+            walk_json_terminal_chars(n, &mut name);
+        }
+        let suffix = arr.get(1);
+        let payload_text = match suffix {
+            Some(serde_json::Value::Array(s_arr)) if !s_arr.is_empty() => {
+                let mut p = String::new();
+                for elem in s_arr.iter().skip(1) {
+                    walk_json_terminal_chars(elem, &mut p);
+                }
+                Some(p)
+            }
+            _ => None,
+        };
+
+        // Mirror the legacy `convert_directive_verb` mapping.
+        match name.as_str() {
+            "FAIL" | "F" => Ok(Regex::CharClass(CharClass::Custom {
+                ranges: vec![],
+                negated: false,
+                ci_override_ranges: None,
+            })),
+            "ACCEPT" => Ok(Regex::Accept),
+            "COMMIT" => Ok(Regex::Commit),
+            "PRUNE" => Ok(Regex::Prune),
+            "THEN" => Ok(Regex::Then),
+            "SKIP" => Ok(Regex::Skip(payload_text)),
+            "MARK" => Ok(Regex::Mark(payload_text.unwrap_or_default())),
+            "UTF" | "UTF8" | "UTF16" | "UTF32" | "UCP" | "CR" | "LF" | "CRLF" | "ANY"
+            | "ANYCRLF" | "NUL" | "BSR_ANYCRLF" | "BSR_UNICODE" => Ok(Regex::Empty),
+            "NOTEMPTY" | "NOTEMPTY_ATSTART" | "NO_START_OPT" | "NO_AUTO_POSSESS"
+            | "NO_DOTSTAR_ANCHOR" | "NO_JIT" | "LIMIT_HEAP" | "LIMIT_MATCH" | "LIMIT_DEPTH"
+            | "LIMIT_RECURSION" | "TURKISH_CASING" | "CASELESS_RESTRICT" | "ALT_BSUX"
+            | "ALT_EXTENDED_CLASS" | "ALT_CIRCUMFLEX" | "ALT_VERBNAMES" => Ok(Regex::Empty),
+            other => Err(RgxError::compile(format!(
+                "unsupported backtracking verb '(*{other})'"
+            ))),
+        }
+    }
+
+    /// Convert a `(?...)`-prefixed atom that didn't match a more specific
+    /// prefix — inline_modifiers, scoped_inline_modifiers, or subroutine_call.
+    /// Shapes:
+    ///   inline_modifiers: `["(?", <modifier_spec?>, ")"]` (3 elements)
+    ///   scoped_inline_modifiers: `["(?", <modifier_spec>, ":", <pattern?>, ")"]` (5 elements)
+    ///   subroutine_call: `["(?", <subroutine_target>, ")"]` (3 elements)
+    fn convert_typed_question_prefixed(&self, arr: &[serde_json::Value]) -> Result<Regex> {
+        if arr.len() == 5 && matches!(arr.get(2), Some(serde_json::Value::String(s)) if s == ":") {
+            // Scoped inline modifiers.
+            let flags = self.collect_typed_modifier_flags(&arr[1]);
+            let inner = self.convert_typed_optional_pattern(arr.get(3))?;
+            return Ok(Regex::FlagGroup {
+                flags,
+                expr: Box::new(inner),
+            });
+        }
+        if arr.len() == 3 {
+            // Distinguish inline_modifiers from subroutine_call by inspecting
+            // arr[1]. Modifier spec contains modifier_item arrays / `-` /
+            // ascii_restrict letters; subroutine target is "R", `[...,int]`,
+            // `["+",...]`, `["-",...]`, `["&",...]`, `["P>",...]`, etc.
+            let target = &arr[1];
+            // Subroutine target heuristics:
+            if let Some(s) = target.as_str() {
+                if s == "R" {
+                    return Ok(Regex::Recursion {
+                        target: RecursionTarget::Entire,
+                    });
+                }
+            }
+            if let Some(t_arr) = target.as_array() {
+                if !t_arr.is_empty() {
+                    // ["&", <name>] — named subroutine
+                    if matches!(t_arr.first(), Some(serde_json::Value::String(s)) if s == "&") {
+                        let name = self.extract_typed_name(t_arr.get(1))?;
+                        return Ok(Regex::Recursion {
+                            target: RecursionTarget::NamedGroup(name),
+                        });
+                    }
+                    // ["P>", <name>] — Python named subroutine
+                    if matches!(t_arr.first(), Some(serde_json::Value::String(s)) if s == "P>") {
+                        let name = self.extract_typed_name(t_arr.get(1))?;
+                        return Ok(Regex::Recursion {
+                            target: RecursionTarget::NamedGroup(name),
+                        });
+                    }
+                    // signed_digits: [<sign?>, <int>]
+                    if t_arr.len() == 2 {
+                        if let Some(n) = t_arr[1].as_u64() {
+                            let sign = t_arr[0].as_str();
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                            return Ok(match sign {
+                                Some("+") => Regex::Recursion {
+                                    target: RecursionTarget::RelativeGroup(n as i32),
+                                },
+                                Some("-") => Regex::Recursion {
+                                    target: RecursionTarget::RelativeGroup(-(n as i32)),
+                                },
+                                _ => Regex::Recursion {
+                                    target: RecursionTarget::Group(n as u32),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+            // Fall back to inline_modifiers.
+            let flags = self.collect_typed_modifier_flags(target);
+            return Ok(Regex::FlagGroup {
+                flags,
+                expr: Box::new(Regex::Empty),
+            });
+        }
+        Err(self.contract_error(&format!(
+            "unsupported (? prefixed atom shape with {} elements",
+            arr.len()
+        )))
+    }
+
+    /// Walk a modifier_spec value and assemble its flag string.
+    fn collect_typed_modifier_flags(&self, value: &serde_json::Value) -> String {
+        let mut out = String::new();
+        self.walk_typed_modifier_spec(value, &mut out);
+        out
+    }
+
+    fn walk_typed_modifier_spec(&self, value: &serde_json::Value, out: &mut String) {
+        match value {
+            serde_json::Value::String(s) => {
+                if s == "-" {
+                    out.push('-');
+                } else {
+                    for ch in s.chars() {
+                        out.push(ch);
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    self.walk_typed_modifier_spec(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Extract `(min, max)` from a `counted_quantifier_body` typed shape.
+    /// Mirrors the reference `extract_count_bounds` in `rules-quantifier.md`.
+    fn extract_typed_count_bounds(&self, body: &serde_json::Value) -> Result<(u32, Option<u32>)> {
+        let arr = body.as_array().ok_or_else(|| {
+            self.contract_error(&format!(
+                "typed counted_quantifier_body must be array, got {}",
+                json_kind(body)
+            ))
+        })?;
+        // Branch detection by first element: String "," → branch 1 ({,m});
+        // Number → branch 0 ({n}, {n,}, or {n,m}).
+        if matches!(arr.first(), Some(serde_json::Value::String(s)) if s == ",") {
+            let max = arr
+                .get(2)
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| self.contract_error("typed {,m} body missing max digits"))?;
+            return Ok((0, Some(max as u32)));
+        }
+        let min = arr.first().and_then(|v| v.as_u64()).ok_or_else(|| {
+            self.contract_error("typed counted_quantifier_body missing min digits")
+        })? as u32;
+        let sub = match arr.get(2) {
+            Some(s) => s,
+            None => return Ok((min, Some(min))),
+        };
+        // Sub is the (",", ws?, digits?)? optional sub-group: empty array
+        // means {n}; non-empty means {n,} or {n,m}.
+        let sub_arr = match sub.as_array() {
+            Some(a) => a,
+            None => return Ok((min, Some(min))),
+        };
+        if sub_arr.is_empty() {
+            return Ok((min, Some(min)));
+        }
+        // sub_arr is [",", ws?, digits?] — index 2 is the optional digits slot.
+        let inner_digits_slot = sub_arr.get(2);
+        let inner_arr = match inner_digits_slot.and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return Ok((min, None)),
+        };
+        if inner_arr.is_empty() {
+            return Ok((min, None));
+        }
+        let max = inner_arr
+            .first()
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| self.contract_error("typed {n,m} max digits missing"))?
+            as u32;
+        Ok((min, Some(max)))
     }
 
     fn convert_root(&self, node: &PgenAstNode) -> Result<Regex> {
@@ -2719,6 +4803,10 @@ impl<'a> PgenAstAdapter<'a> {
                     .iter()
                     .find_map(|child| self.find_first_terminal_text(child))
             }
+            // Json content carries a typed `serde_json::Value` payload; the
+            // legacy walker can't recurse into a non-PgenAstNode value.
+            // The new typed-shape walker handles these subtrees directly.
+            PgenAstContent::Json(_) => None,
         }
     }
 
@@ -2758,6 +4846,13 @@ impl<'a> PgenAstAdapter<'a> {
                     self.collect_all_terminal_chars(child, out);
                 }
             }
+            PgenAstContent::Json(value) => {
+                // Best-effort terminal extraction from typed-Json shapes:
+                // strings contribute directly; arrays recurse; numbers/bools
+                // are stringified; objects are skipped (caller should be
+                // walking the typed shape, not relying on terminal collection).
+                walk_json_terminal_chars(value, out);
+            }
         }
     }
 
@@ -2792,6 +4887,7 @@ impl<'a> PgenAstAdapter<'a> {
                     .iter()
                     .any(|child| self.has_terminal_text(child, target))
             }
+            PgenAstContent::Json(value) => json_contains_string(value, target),
         }
     }
 
@@ -2865,6 +4961,13 @@ impl<'a> PgenAstAdapter<'a> {
             PgenAstContent::Terminal(text) | PgenAstContent::TransformedTerminal(text) => {
                 text.is_empty()
             }
+            PgenAstContent::Json(value) => match value {
+                serde_json::Value::Null => true,
+                serde_json::Value::Array(arr) => arr.is_empty(),
+                serde_json::Value::Object(map) => map.is_empty(),
+                serde_json::Value::String(s) => s.is_empty(),
+                serde_json::Value::Bool(_) | serde_json::Value::Number(_) => false,
+            },
         }
     }
 
@@ -2976,7 +5079,59 @@ impl PgenAstNode {
                 children.iter().collect()
             }
             PgenAstContent::Alternative(child) => vec![child.as_ref()],
+            // Json content has no PgenAstNode children — it's a typed
+            // serde_json::Value. The new typed-shape walker handles it.
+            PgenAstContent::Json(_) => Vec::new(),
         }
+    }
+}
+
+/// Stringify a `serde_json::Value`'s top-level kind for error messages.
+#[cfg(feature = "pgen-parser")]
+fn json_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Walk a `serde_json::Value` from a `Json` content variant and append
+/// any string-shaped terminals encountered. Used as a fall-back for the
+/// legacy envelope walker's `collect_all_terminal_chars`; the new typed
+/// walker handles annotated subtrees directly without going through this.
+#[cfg(feature = "pgen-parser")]
+fn walk_json_terminal_chars(value: &serde_json::Value, out: &mut String) {
+    match value {
+        serde_json::Value::String(s) => out.push_str(s),
+        serde_json::Value::Number(n) => out.push_str(&n.to_string()),
+        serde_json::Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        serde_json::Value::Null => {}
+        serde_json::Value::Array(items) => {
+            for item in items {
+                walk_json_terminal_chars(item, out);
+            }
+        }
+        // Skip object shapes — typed objects aren't terminal-text-equivalent;
+        // the typed walker should be used for those.
+        serde_json::Value::Object(_) => {}
+    }
+}
+
+/// Return true if a `serde_json::Value` from a `Json` content variant
+/// contains any string equal to `target` (recursively). Used by the
+/// legacy envelope walker's `has_terminal_text` for the rare case where
+/// it crosses a Json boundary.
+#[cfg(feature = "pgen-parser")]
+fn json_contains_string(value: &serde_json::Value, target: &str) -> bool {
+    match value {
+        serde_json::Value::String(s) => s == target,
+        serde_json::Value::Array(items) => items.iter().any(|v| json_contains_string(v, target)),
+        serde_json::Value::Object(map) => map.values().any(|v| json_contains_string(v, target)),
+        _ => false,
     }
 }
 

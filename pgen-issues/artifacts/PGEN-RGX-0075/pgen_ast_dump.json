@@ -1,0 +1,24 @@
+{
+  "content": {
+    "Json": {
+      "pattern": [
+        [
+          [
+            {
+              "atom": "a",
+              "quantifier": [],
+              "type": "piece"
+            }
+          ]
+        ],
+        []
+      ],
+      "type": "regex"
+    }
+  },
+  "rule_name": "regex",
+  "span": {
+    "end": 2,
+    "start": 0
+  }
+}

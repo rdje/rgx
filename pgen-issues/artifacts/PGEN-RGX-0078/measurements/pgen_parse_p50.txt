@@ -1,0 +1,12 @@
+# PGEN regex parser parse-time p50, in nanoseconds.
+# Methodology: cargo run --release, default allocator,
+# 5000 samples per pattern, 200 warmup samples discarded.
+# Format: <name>\t<p50_ns>\t<min_ns>\t<mean_ns>\t<p99_ns>\t<max_ns>
+literal_simple	92042	75875	93677	119625	918792
+digit_sequence	216833	195500	218195	256250	456417
+character_class	266584	241083	268241	316917	489708
+alternation	119709	101708	120817	154416	317250
+capture_groups	265000	237583	266711	319959	495125
+url_simple	196292	173667	196282	232458	417875
+email_basic	213292	190000	213644	247417	442875
+anchor_complex	377209	339542	378636	436917	643916

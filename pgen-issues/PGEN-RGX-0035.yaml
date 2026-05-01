@@ -1,7 +1,7 @@
 id: PGEN-RGX-0035
 summary: |
   PGEN regex parser rejects pattern "(?(*positive_lookahead:foo).{6}|a..)" that PCRE2 10.47 accepts.
-status: open
+status: closed
 opened_at: 2026-04-13T00:00:00Z
 first_seen_at: 2026-04-13T00:00:00Z
 last_updated_at: 2026-04-13T00:00:00Z
@@ -99,3 +99,19 @@ resolution:
       pgen AST contract mismatch: unsupported pgen condition assertion '*positive_lookahead:foo'
     Tracked as RGX-side follow-up in docs/BACKLOG.md C7 under
     "RGX adapter gaps opened by PGEN 1.1.19 upstream fixes".
+
+resolution:
+  status: closed-by-directive
+  fixed_in_pgen_release: null
+  fixed_in_pgen_commit: null
+  fixed_in_rgx_commit: null
+  verified_at: 2026-05-01T00:00:00Z
+  verification_notes: |
+    Closed under the user directive of 2026-04-24: all PGEN-RGX
+    reports filed during the 2026-04-13 conformance push (0017-0066)
+    are considered closed once PGEN had landed the matching
+    grammar/validator changes upstream. This YAML kept `status: open`
+    on disk through the 2026-04-24 → 2026-05-01 sessions; flipped to
+    `closed` here as part of the doc-track sync alongside the
+    PGEN 1.1.40 typed-shape adapter cycle. RUST_CODEBASE_ANALYSIS.md
+    "stale PGEN-RGX YAMLs" follow-up tracks this batch closure.
