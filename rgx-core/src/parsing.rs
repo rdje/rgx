@@ -2170,6 +2170,21 @@ impl<'a> PgenAstAdapter<'a> {
         if arr.is_empty() {
             return Err(self.contract_error("empty condition array"));
         }
+        // condition_callout_assertion: [<condition_callout>, "(", <condition_assertion>]
+        // The condition_callout sub-array starts with the string "?C"; the
+        // separator "(" sits at arr[1]; the assertion follows at arr[2].
+        // The callout itself is a parser-level checkpoint with no effect on
+        // the conditional test — RGX dispatches on the embedded assertion.
+        if arr.len() >= 3 && matches!(arr.get(1), Some(serde_json::Value::String(s)) if s == "(") {
+            if let Some(callout_arr) = arr[0].as_array() {
+                if matches!(callout_arr.first(), Some(serde_json::Value::String(s)) if s == "?C") {
+                    let assertion = arr.get(2).ok_or_else(|| {
+                        self.contract_error("condition_callout_assertion missing assertion")
+                    })?;
+                    return self.convert_typed_condition(assertion);
+                }
+            }
+        }
         // Try VERSION: ["VERSION", <op>, <version_number>]
         if let Some(head) = arr[0].as_str() {
             if head == "VERSION" && arr.len() >= 3 {

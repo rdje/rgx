@@ -105,25 +105,20 @@ fn main() {
     p50_lines.push_str("# PGEN regex parser parse-time p50, in nanoseconds.\n");
     p50_lines.push_str("# Methodology: cargo run --release, default allocator,\n");
     p50_lines.push_str("# 5000 samples per pattern, 200 warmup samples discarded.\n");
-    p50_lines.push_str("# Format: <name>\\t<p50_ns>\\t<min_ns>\\t<mean_ns>\\t<p99_ns>\\t<max_ns>\n");
+    p50_lines
+        .push_str("# Format: <name>\\t<p50_ns>\\t<min_ns>\\t<mean_ns>\\t<p99_ns>\\t<max_ns>\n");
 
     for (name, pattern) in PATTERNS {
         // Warmup.
         for _ in 0..WARMUP {
-            let _ = pgen::embedding_api::parse_grammar_profile_named(
-                "regex",
-                "regex_default",
-                pattern,
-            );
+            let _ =
+                pgen::embedding_api::parse_grammar_profile_named("regex", "regex_default", pattern);
         }
         let mut samples = Vec::with_capacity(ITERATIONS);
         for _ in 0..ITERATIONS {
             let t0 = Instant::now();
-            let _ = pgen::embedding_api::parse_grammar_profile_named(
-                "regex",
-                "regex_default",
-                pattern,
-            );
+            let _ =
+                pgen::embedding_api::parse_grammar_profile_named("regex", "regex_default", pattern);
             samples.push(t0.elapsed().as_nanos());
         }
         samples.sort_unstable();
@@ -132,9 +127,7 @@ fn main() {
         let max = *samples.last().unwrap();
         let mean = samples.iter().sum::<u128>() / samples.len() as u128;
         let p99 = samples[(samples.len() * 99) / 100];
-        p50_lines.push_str(&format!(
-            "{name}\t{p50}\t{min}\t{mean}\t{p99}\t{max}\n"
-        ));
+        p50_lines.push_str(&format!("{name}\t{p50}\t{min}\t{mean}\t{p99}\t{max}\n"));
         println!("PGEN parse {name}: p50 = {p50} ns");
     }
     fs::write(measurements_dir.join("pgen_parse_p50.txt"), &p50_lines).expect("p50");
