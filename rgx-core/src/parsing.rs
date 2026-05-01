@@ -859,6 +859,18 @@ impl<'a> PgenAstAdapter<'a> {
                 let index = map.get("index").and_then(|v| v.as_u64()).ok_or_else(|| {
                     self.contract_error("typed numeric backreference missing 'index'")
                 })?;
+                // PCRE2 rejects backreferences whose decoded index exceeds
+                // its capture-group ceiling. RGX's compiler validates the
+                // index against the actual capture count, but at the walker
+                // layer we still need to reject indices that won't fit in
+                // a `u32` — silently truncating 6_666_666_666 down to a
+                // wrapped value would alias to some legitimate small group
+                // and produce wrong matches. testinput9:287 covers this.
+                if index > u32::MAX as u64 {
+                    return Err(RgxError::compile(format!(
+                        "numeric backreference \\{index} exceeds the supported range"
+                    )));
+                }
                 #[allow(clippy::cast_possible_truncation)]
                 Ok(Regex::Backreference(index as u32))
             }

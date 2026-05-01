@@ -3072,8 +3072,8 @@ fn run_full_conformance() {
     // were addressed with a walker dispatch extension. Triage of the
     // remaining 13 cases is tracked as a follow-up against the
     // residual catalogue at `book/src/internals/pcre2-conformance-residual.md`.
-    const PASS_BASELINE: usize = 12_696;
-    const FAIL_BASELINE: usize = 114;
+    const PASS_BASELINE: usize = 12_697;
+    const FAIL_BASELINE: usize = 113;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
