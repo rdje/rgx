@@ -3341,3 +3341,27 @@ PGEN's slice 5 (`0ed2b2ad`, "stop tracking generated/* in git") removed the vend
 - Triage the 16-case conformance regression: compare buckets against `book/src/internals/pcre2-conformance-residual.md` baseline counts, identify which cases are new (regression introduced by typed-walker refactor) vs pre-existing baseline residuals. Walker bugs go to RGX; PGEN-side bugs get a PGEN-RGX-0078 report.
 - One known walker gap: conditional callout-prefix assertion `(?(?C99)(?=...)...)` — typed condition has shape `[<callout_arg>, "(", "?=", <pattern>]` that my walker doesn't dispatch yet. Treat as a walker shape extension (legitimate), not a workaround.
 - Optional: consider whether to bump the PCRE2 conformance ratchet baseline downward to 12,693 (capture the new shape state) or hold at 12,709 (force the triage to recover ground). Hold at 12,709 — the gap is small, the buckets are well-defined, and the triage is the right next move.
+
+## 2026-05-03 session — Cluster 2C analysis correction (no engine change)
+
+Picked up Cluster 2C (`\K` inside `{0}` zero-repetition, 3 conformance cases). The residual catalogue's prescription was: "counted-quantifier codegen — the `{0}` case should emit a bypass that never executes the inner body." Followed the chain through `vm.rs::codegen_pass` and `vm.rs::compile_subroutines`, then ran the cases against PCRE2 10.46 directly via `pcre2test` to ground-truth the expected behaviour.
+
+**Finding**: the prescription is wrong on its premise. PCRE2 *does* execute the subroutine body (it's the lexical `{0}` that gets elided, not the subroutine table). The actual divergence is **`\K` propagation from inside lookarounds** — RGX honours `\K` set inside a main-flow `(?1)` call but discards it inside a lookahead-wrapped `(?1)` call. PCRE2's behaviour is symmetric across both call sites.
+
+Verified with a minimal reproducer:
+```
+target/release/rgx 'ab(?1)c(\K){0}d' 'abcd'      → 2..4   # main-flow \K propagates ✓
+target/release/rgx 'ab(?=(?1))c(\K){0}d' 'abcd'   → 0..4   # lookahead-wrapped \K does NOT
+```
+
+PCRE2 on the actual conformance patterns produces *degenerate* matches (start > end) that pcre2test renders with the `Start of matched string is beyond its end` banner; the harness pairs the trailing ` 0:` line as an ordinary expected match, so what the catalogue flagged as "PCRE2 no match → FP" is actually SM. Reclassified Cluster 3C entries as part of Cluster 2C.
+
+**Outcome**: rewrote the Cluster 2C section in `book/src/internals/pcre2-conformance-residual.md` with the corrected diagnosis, struck the prescribed-fix plan in the worklist at the top, and explicitly marked the cluster as deferred — `\K`-from-lookaround propagation is a non-local engine change touching every lookaround entry/exit and the lookbehind variants need the same care; a short session can't responsibly bound the regression risk.
+
+### Why: avoid building on a wrong premise
+RGX's residual catalogue is the prioritization spine for conformance work. Letting an incorrect prescription survive into a future session means whoever picks it up implements the wrong fix, doesn't recover the cases, and has to re-derive the truth themselves. Correcting in place is the cheapest fix.
+
+### Next concrete action
+- The 16-case regression triage from 2026-05-01 is still the highest-leverage standing item. Cluster 2C deferral does not unblock anything — it just removes a tempting wrong move.
+- Bucket 5 (RGX-too-permissive, 4 cases) remains the lowest-hanging set — each is a single compile-time rejection. Consider as the next pickup.
+- Cluster 4 substitute case 1 (1 case, harness dispatch — "2 vs 1 replacement") is also single-case, harness-side.

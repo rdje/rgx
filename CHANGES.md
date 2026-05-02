@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - Cluster 2C analysis correction in residual catalogue
+- Scope: documentation only (`book/src/internals/pcre2-conformance-residual.md`, `MEMORY.md`)
+- Changes:
+  - Rewrote Cluster 2C section with the corrected diagnosis: the divergence on `(?=...(?1)...)<body>(\K){0}` patterns is `\K` propagation from inside lookarounds, not a `{0}`-codegen elision gap. Verified empirically against PCRE2 10.46 with `pcre2test` and a minimal RGX reproducer (`'ab(?=(?1))c(\K){0}d'` on `'abcd'`).
+  - Reclassified Cluster 3C entries into Cluster 2C — pcre2test renders the degenerate-match cases (start > end) with a banner-then-` 0:` shape that the harness pairs as ordinary SM, not no-match.
+  - Struck the "single compiler-codegen fix" worklist item at the top of the chapter; marked the cluster as deferred pending a dedicated `\K`-from-lookaround engine session.
+- Validation: no code change. Conformance baseline unchanged at 12,697 / 113.
+- Notes/impact: prevents a future session from implementing the wrong fix. Real fix path is a non-local engine change (lookahead/lookbehind state propagation for `\K`), out of scope for this pass.
+
 ### 2026-05-01 - Adapter: typed-shape walker rewrite for PGEN 1.1.29 → 1.1.40
 
 - Scope: PGEN's slice 9-onwards typed-rule annotation campaign reached the regex grammar's foundational shapes (regex/pattern/concatenation/piece/quantifier/anchor/posix_class/backreference) during the 2026-04-30 → 2026-05-01 window. Five PGEN releases absorbed in one session (1.1.30 → 1.1.40); RGX's adapter `rgx-core/src/parsing.rs` rewritten end-to-end to consume the new typed-Json shapes per the regex parser book at `subs/pgen/docs/regex_parser_book/`. Four PGEN-RGX reports filed and closed upstream during the same session; 13 stale earlier YAMLs flipped to `closed` with resolution notes.

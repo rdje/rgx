@@ -13,8 +13,8 @@ The harness sorts the 107 failures into **5 buckets**. Each bucket is a differen
 | Bucket | Count | Meaning | Where to start |
 |---|---:|---|---|
 | [**1. false negative**](#bucket-1--false-negatives-65-cases) | 65 | PCRE2 matches; RGX returns no match | Cluster 1A (recursive captures) is the architectural prize; Cluster 1C (`(*napla:...)`) is a bounded compiler change. |
-| [**2. span mismatch**](#bucket-2--span-mismatches-27-cases) | 27 | Both match; spans differ | Cluster 2A (balanced-bracket greedy recursion) is entangled with Bucket 1's recursive captures; Cluster 2C (`\K` inside `{0}`) is a clean one-point fix. |
-| [**3. false positive**](#bucket-3--false-positives-6-cases) | 6 | PCRE2 says no match; RGX matches | Cluster 3B (`.+` under `/newline`) is a newline-convention edge case. Cluster 3C (`\K` inside `{0}`) is the cleanest single win. |
+| [**2. span mismatch**](#bucket-2--span-mismatches-27-cases) | 27 | Both match; spans differ | Cluster 2A (balanced-bracket greedy recursion) is entangled with Bucket 1's recursive captures; Cluster 2C (`\K` inside `{0}`) needs `\K` propagation from lookarounds — non-trivial. |
+| [**3. false positive**](#bucket-3--false-positives-6-cases) | 6 | PCRE2 says no match; RGX matches | Cluster 3B (`.+` under `/newline`) is a newline-convention edge case. Cluster 3C reclassified into Cluster 2C (degenerate match handling, not FP). |
 | [**4. other (substitute-mode output)**](#bucket-4--substitute-mode-output-divergence-5-cases) | 5 | `/replace=TEMPLATE` tests where `replace_all` output disagrees | Harness dispatch for the first case (2 vs 1 replacements), engine for the rest. |
 | [**5. RGX too permissive**](#bucket-5--rgx-too-permissive-4-cases) | 4 | PCRE2 rejects at compile; RGX accepts | Add compile-time rejection in `compiler.rs::feature_validation_message`. |
 
@@ -24,7 +24,7 @@ If you have to pick one strategy to start with, the highest leverage per hour is
 
 1. **Sweep through Bucket 3** (6 FPs) — small targeted fixes each, 3 clusters totalling ~6 cases.
 2. **Pick off Bucket 5** (4 too-permissive) — each is a one-line compile-time rejection.
-3. **Attack Cluster 2C** (`\K` in `{0}`, 3 cases across FP+SM) — single compiler-codegen fix.
+3. ~~**Attack Cluster 2C**~~ — superseded; the single-codegen-fix prescription was wrong. Real fix is `\K` propagation from inside lookarounds, scoped as a multi-session engine change. See Cluster 2C below.
 4. **Attack Cluster 4-substitute-1** — harness dispatch, affects the "2 vs 1 replacement" output.
 
 That pass alone closes **~13 cases** in a single session and hands off a cleaner residual. After that, the architectural work (Cluster 1A, Cluster 1B) is the serious sprint that closes another ~30 cases but needs days, not hours.
@@ -242,18 +242,39 @@ The outer quantified recursive call `(?R)*` or `(?2)*` is supposed to keep going
 
 ## Cluster 2C — `\K` inside `{0}` zero-repetition (1 SM + 2 FP in Bucket 3)
 
-**Difficulty**: low-medium (single-point fix). **Expected payoff**: 3 cases across buckets.
+**Difficulty**: high. Original prescription was incorrect — see analysis below. **Expected payoff**: 3 cases across buckets.
 
-`(\K){0}` — the `\K` match-reset is inside a `{0}` quantifier. PCRE2 correctly never executes the inner body; RGX executes it anyway.
+The 3 cases share the shape `(?=...(?1)...)<body>(\K){0}` — a forward lookahead invokes group 1 (`(\K)`) via subroutine call, while the lexical occurrence of group 1 is wrapped in `{0}`.
 
-SM case:
-| testinput2:6439 | `(?=.{5}(?1))\d*(\K){0}` | `67890` | PCRE2=`67890`, RGX=`1234567890` |
+| File:line | Pattern | Subject | PCRE2 | RGX |
+|---|---|---|---|---|
+| testinput2:6439 | `(?=.{5}(?1))\d*(\K){0}` | `1234567890` | `67890` (start=5, end=10) | `1234567890` (start=0, end=10) |
+| testinput2:6433 | `(?=.{10}(?1))x(\K){0}` | `x1234567890` | degenerate start>end (start=10, end=1; pcre2test renders `123456789`) | `x` (start=0, end=1) |
+| testinput2:6439 | `(?=.{5}(?1))\d*(\K){0}` | `abcdefgh` | degenerate start>end (start=5, end=0; pcre2test renders `abcde`) | `""` (start=0, end=0) |
 
-FP cases (see Bucket 3):
-| testinput2:6433 | `(?=.{10}(?1))x(\K){0}` | `x1234567890` |
-| testinput2:6439 | `(?=.{5}(?1))\d*(\K){0}` | `abcdefgh` |
+Empirically verified against PCRE2 10.46 (2025-08-27, 8-bit) on 2026-05-01.
 
-**What to change**: counted-quantifier codegen in `compiler.rs` — the `{0}` case should emit a bypass that never executes the inner body. Search for `OpCode::Range` and the n=0 path.
+**Original prescription (rejected)**: the chapter previously said "PCRE2 correctly never executes the inner body; RGX executes it anyway" and proposed eliding the body in subroutine compilation when the host group is `{0}`-quantified. This is wrong on both counts:
+
+1. PCRE2 does execute the subroutine body when invoked via `(?1)` — the `{0}` only suppresses the lexical (main-flow) site, not the subroutine table.
+2. RGX is already eliding the lexical site correctly (`Quantifier::Range { min: 0, max: Some(0) }` in `vm.rs::codegen_pass` emits no opcodes).
+
+The actual divergence is **`\K` propagation from inside lookarounds**. PCRE2 propagates `\K` set inside a lookahead (here, via subroutine call) to the outer match start. RGX treats lookarounds as fully isolated, so the inner `\K` never reaches the outer `Match.start`.
+
+Confirmed with a minimal reproducer:
+
+```text
+target/release/rgx 'ab(?1)c(\K){0}d' 'abcd'      → 2..4   # main-flow (?1) propagates \K
+target/release/rgx 'ab(?=(?1))c(\K){0}d' 'abcd'   → 0..4   # lookahead-wrapped (?1) does NOT propagate
+```
+
+PCRE2's behaviour is symmetric across both call sites; RGX's diverges only inside lookarounds.
+
+**What to change**: lookaround state propagation in `vm.rs` — when a lookahead succeeds, surface any `\K`-driven match-start adjustment from the inner thread to the outer thread. Today the outer position is restored verbatim from before the lookaround. Risk: lookbehind variants need the same treatment, and care is required to keep capture-isolation intact for non-`\K` writes.
+
+Two of the three target cases are also degenerate-match cases (start > end), which `pcre2test` renders with the `Start of matched string is beyond its end` banner. The harness today treats the ` 0:` line that follows as an ordinary expected match, so chapter classification should read "1 SM + 2 SM" rather than "1 SM + 2 FP" — corrected here.
+
+**Status**: prescription corrected 2026-05-02. Implementation deferred — the `\K`-from-lookaround propagation is a non-local engine change and warrants a dedicated session with a full conformance pass to bound regression risk.
 
 ## Cluster 2D — Backtracking-verb span divergences (7 cases)
 
@@ -340,9 +361,11 @@ See `MEMORY.md` 2026-04-24 "tighten assertion verb propagation" for the partial 
 
 Both cases (testinput2:2107 `.+foo` on `\r\nfoo`, testinput2:2296 `.+A` on `\r\nA`) closed. Engine fix #11 (2026-04-22) had handled the START of a CRLF pair via `(?!\r\n)<any>` but missed the END. Extended to `(?!\r\n|(?<=\r)\n)<any>` — the inner lookbehind in the second alternative scopes the prev-`\r` check to `\n`-only positions so bare `\r` followed by non-`\n` (e.g. `c\rd`) still matches. See CHANGES.md 2026-04-24 "(*CRLF) . rejects both ends of \r\n pair (+2 passes)".
 
-## Cluster 3C — `\K` inside `{0}` (2 cases)
+## Cluster 3C — `\K` inside `{0}` (2 cases) — RECLASSIFIED into Cluster 2C as SM
 
-Same as Cluster 2C above but this sub-bucket:
+The two cases listed below were classified as FP (PCRE2 no match) but PCRE2 actually produces a degenerate start>end match that the harness pairs against an ordinary ` 0:` expected line — i.e. SM, not FP. Treat as part of Cluster 2C above; its corrected analysis covers them.
+
+Original entries (kept for cross-reference):
 
 | testinput2:6433 | `(?=.{10}(?1))x(\K){0}` | `x1234567890` — PCRE2 no match, RGX matches |
 | testinput2:6439 | `(?=.{5}(?1))\d*(\K){0}` | `abcdefgh` — PCRE2 no match, RGX matches |
