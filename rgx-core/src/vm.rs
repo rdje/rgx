@@ -2499,12 +2499,12 @@ impl RegexVM {
                 | OpCode::LookaheadNeg
                 | OpCode::Lookbehind
                 | OpCode::LookbehindNeg => {
-                    // Read the length of the assertion sub-expression
-                    if ip >= code.len() {
+                    // 2-byte LE length prefix; matches the codegen.
+                    if ip + 1 >= code.len() {
                         return false;
                     }
-                    let expr_len = code[ip] as usize;
-                    ip += 1;
+                    let expr_len = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
 
                     let expr_start = ip;
                     let expr_end = ip + expr_len;
@@ -5372,11 +5372,11 @@ impl RegexVM {
                 | OpCode::LookaheadNeg
                 | OpCode::Lookbehind
                 | OpCode::LookbehindNeg => {
-                    if ip >= code.len() {
+                    if ip + 1 >= code.len() {
                         return false;
                     }
-                    let expr_len = code[ip] as usize;
-                    ip += 1;
+                    let expr_len = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
                     let expr_start = ip;
                     let expr_end = ip + expr_len;
                     if expr_end > code.len() {
@@ -5850,12 +5850,12 @@ impl RegexVM {
                 | OpCode::LookaheadNeg
                 | OpCode::Lookbehind
                 | OpCode::LookbehindNeg => {
-                    // Read the length of the assertion sub-expression
-                    if ip >= code.len() {
+                    // 2-byte LE length prefix; matches the codegen.
+                    if ip + 1 >= code.len() {
                         return false;
                     }
-                    let expr_len = code[ip] as usize;
-                    ip += 1;
+                    let expr_len = u16::from_le_bytes([code[ip], code[ip + 1]]) as usize;
+                    ip += 2;
 
                     let expr_start = ip;
                     let expr_end = ip + expr_len;
@@ -7763,10 +7763,20 @@ impl OptimizingCompiler {
                     self.emit_op(OpCode::LookaheadNeg);
                 }
 
-                // Compile lookahead sub-expression inline with a length prefix.
+                // Compile lookahead sub-expression inline with a 2-byte LE
+                // length prefix. (1-byte prefix would silently truncate
+                // for bodies > 255 bytes — `(?<=(\d{1,255}))X` and similar
+                // bounded-repetition lookbehinds blew through it. The
+                // dispatch reads the same width.)
                 let sub_code = self.compile_inline_subexpr(expr);
-
-                self.code.push(sub_code.len() as u8);
+                assert!(
+                    sub_code.len() <= u16::MAX as usize,
+                    "lookahead body bytecode exceeds 65535 bytes ({} bytes); \
+                     widen the length prefix or split the body",
+                    sub_code.len()
+                );
+                self.code
+                    .extend_from_slice(&(sub_code.len() as u16).to_le_bytes());
                 self.code.extend(sub_code);
             }
 
@@ -7777,10 +7787,17 @@ impl OptimizingCompiler {
                     self.emit_op(OpCode::LookbehindNeg);
                 }
 
-                // Compile lookbehind sub-expression inline with a length prefix.
+                // 2-byte LE length prefix; see Lookahead arm above for
+                // the rationale.
                 let sub_code = self.compile_inline_subexpr(expr);
-
-                self.code.push(sub_code.len() as u8);
+                assert!(
+                    sub_code.len() <= u16::MAX as usize,
+                    "lookbehind body bytecode exceeds 65535 bytes ({} bytes); \
+                     widen the length prefix or split the body",
+                    sub_code.len()
+                );
+                self.code
+                    .extend_from_slice(&(sub_code.len() as u16).to_le_bytes());
                 self.code.extend(sub_code);
             }
 

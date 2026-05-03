@@ -3116,13 +3116,20 @@ fn run_full_conformance() {
     // were addressed with a walker dispatch extension. Triage of the
     // remaining 13 cases is tracked as a follow-up against the
     // residual catalogue at `book/src/internals/pcre2-conformance-residual.md`.
-    // Bumped 2026-05-03: per-subject `\=g` / `\=global` is now threaded
-    // through to substitute-mode dispatch, so subjects that pcre2test
-    // ran in PCRE2_SUBSTITUTE_GLOBAL mode are paired against RGX's
-    // `replace_all` instead of `replace`. Recovers Cluster 4 substitute
-    // case 1 (testinput2:4262 subject `123abc456abc789\=g`).
-    const PASS_BASELINE: usize = 12_698;
-    const FAIL_BASELINE: usize = 112;
+    // Bumped 2026-05-03 (a): per-subject `\=g` / `\=global` is now
+    // threaded through to substitute-mode dispatch, so subjects that
+    // pcre2test ran in PCRE2_SUBSTITUTE_GLOBAL mode are paired against
+    // RGX's `replace_all` instead of `replace`. Recovers Cluster 4
+    // substitute case 1 (testinput2:4262 subject `123abc456abc789\=g`).
+    //
+    // Bumped 2026-05-03 (b): widened the lookahead/lookbehind body
+    // length prefix in compiled bytecode from u8 to u16 LE — bodies
+    // larger than 255 bytes were silently truncating, so bounded-
+    // repetition lookbehinds like `(?<=(\d{1,255}))X` (testinput1:6597
+    // and testinput2:6509 under `/max`) decoded into garbage and
+    // returned no-match. +2 passes; -2 false negatives (70 → 68).
+    const PASS_BASELINE: usize = 12_700;
+    const FAIL_BASELINE: usize = 110;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

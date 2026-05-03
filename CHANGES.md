@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - Engine: widen lookaround body length prefix u8 → u16 LE (+2 passes)
+- Scope: `rgx-core/src/vm.rs` (codegen + 3 dispatch sites)
+- Changes:
+  - Lookahead/Lookbehind/LookaheadNeg/LookbehindNeg compiled with a 2-byte LE length prefix instead of 1 byte. Prior 1-byte prefix silently truncated for bodies above 255 bytes — the dispatch then read a wrong length and decoded garbage, returning no-match for valid patterns. Added a debug-time assert in codegen so future overflows beyond u16 surface immediately.
+  - Recovers `(?<=(\d{1,255}))X` (testinput1:6597) and `(?<=(\d{1,256}))X/max` (testinput2:6509) — Cluster 1G "bounded-lookbehind body-width analyser over-conservative" entries. The catalogue's diagnosis was incomplete: the analyser was fine; the encoder was lossy.
+  - Bumps the conformance ratchet baseline from 12,698 / 112 to 12,700 / 110. False-negative bucket 70 → 68.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,700 / 110, ratchet OK), `cargo clippy --workspace --all-targets` clean of errors.
+- Notes/impact: pure engine fix. No API surface change, no bytecode-format compatibility concern (RGX recompiles every regex). The change tightens the "silently truncate" failure mode to "compile-time assert" for any future > 64 KiB lookaround body, a much louder failure.
+
 ### 2026-05-03 - Conformance harness: thread per-subject `\=g` into substitute dispatch (+1 pass)
 - Scope: `rgx-core/tests/pcre2_conformance.rs` (test harness only)
 - Changes:

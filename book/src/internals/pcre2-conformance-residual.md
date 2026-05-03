@@ -188,8 +188,8 @@ Remaining FN cases that don't fit the above clusters. Each is its own investigat
 | File:line | Pattern | Subject | Note |
 |---|---|---|---|
 | testinput1:6450 | `(?(DEFINE) (?<word> \w+ ) ) ( (?&word)* )   \./xi` | `pokus.` | DEFINE reference + `*` quantifier over subroutine call — possibly a variant of Cluster 1A |
-| testinput1:6597 | `(?<=(\d{1,255}))X` | `1234X` | Lookbehind with bounded repetition — body-width analyser over-conservative |
-| testinput2:6509 | `(?<=(\d{1,256}))X/max` | `12345XYZ` | `/max` raises the bound |
+| ~~testinput1:6597~~ | ~~`(?<=(\d{1,255}))X`~~ | ~~`1234X`~~ | ✅ CLOSED 2026-05-03 — bytecode body-length prefix on lookahead/lookbehind opcodes was a single byte; bodies > 255 bytes (which `\d{1,N}` for N ≥ 64 produces because each optional iteration is 5 bytes of Split + class) silently truncated. Widened to u16 LE in `vm.rs`. |
+| ~~testinput2:6509~~ | ~~`(?<=(\d{1,256}))X/max`~~ | ~~`12345XYZ`~~ | ✅ CLOSED 2026-05-03 — same root as :6597. |
 | testinput1:6794 | `\Qab*\E{2,}` | `ab***z` | `\Q...\E` + `{2,}` quantifier applies to the last char of the quote (`*`), not the whole quote |
 | testinput2:6244 | `\A\s*(a\|(?:[^\`]{28500}){4})/I` | `a` | Start-optimization pathological alternation — trivial alt should be tried first |
 | testinput2:6249 | `\A\s*((?:[^\`]{28500}){4}\|a)/I` | `a` | same |

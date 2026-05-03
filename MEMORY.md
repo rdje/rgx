@@ -3406,3 +3406,26 @@ The pcre2test annotation is purely a test-rig instruction ("invoke this engine w
 ### Next concrete action
 - 16-case regression triage from 2026-05-01 still standing as the highest-leverage open item.
 - Cluster 4 still has 4 cases open (template-interpolation in case 3, engine-level newline-convention divergences in 2/4/5). Cases 2 and 5 (`(?<=abc)(\|def)/g` overlap semantics) might be a single fix. Worth a look as the next pickup.
+
+## 2026-05-03 session — engine: widen lookaround body length u8 → u16 (+2 passes)
+
+While picking off Cluster 1G's bounded-lookbehind entries, found the root cause was not the body-width analyser as catalogued, but the bytecode encoder: `Lookahead`/`Lookbehind` op bodies are emitted with a single-byte length prefix in `vm.rs::codegen_pass`, then dispatched with `code[ip] as usize` reads at three sites (standard / backtrack / suspendable VM modes). Bodies > 255 bytes silently truncated.
+
+For `\d{1,N}` the body grows ~5 bytes per optional iteration (each is a `Split` + 2-byte offset + the body op), so the threshold lands at exactly N = 64 (1 + 63 * 5 = 316 bytes). Below 64 the patterns work; at 64+ they decode garbage and return no-match. testinput1:6597 (`(?<=(\d{1,255}))X`) and testinput2:6509 (`(?<=(\d{1,256}))X/max`) are the two conformance cases that hit this; both close with the fix.
+
+Edit: 5 sites in `vm.rs`. Codegen writes `(len as u16).to_le_bytes()` + a debug assert (`len <= u16::MAX`). Dispatch reads `u16::from_le_bytes([code[ip], code[ip+1]])` and advances ip by 2 instead of 1.
+
+Lib tests 1118/1118, conformance ratchet bumped 12,698 / 112 → 12,700 / 110. FN bucket 70 → 68. No API surface change.
+
+### Why fix the encoder, not the analyser
+The catalogue listed this under Cluster 1G as a "body-width analyser over-conservative" issue (suggesting the engine refused to evaluate the lookbehind because it deemed the body width too variable). That diagnosis was wrong — the analyser ran fine and the body would have evaluated fine; the encoder lost the body length and the dispatch read into the next instruction. Tightening the encoding to u16 is the smallest correct fix; the only loud thing about the change is that future overflows past 64 KiB now hit a compile-time assert instead of silently miscompiling.
+
+### Net for the session
+Three engine/harness wins this session:
+- Cluster 4 substitute case 1 (per-subject `\=g`): +1
+- Cluster 1G bounded lookbehind (this fix): +2
+Total: +3 passes; 12,697 / 113 → 12,700 / 110. Plus PGEN-RGX-0079 filed for the `\o{<non-octal>}` parser bug (1 of the 5 RGX-too-permissive cases is awaiting a PGEN fix).
+
+### Next concrete action
+- Cluster 1G has more entries that may have similar wrong diagnoses — worth re-auditing each before attempting fixes per its catalogue prescription.
+- The 16-case regression triage is still standing as the highest-leverage open item; partially eaten into by the +3 from this session.
