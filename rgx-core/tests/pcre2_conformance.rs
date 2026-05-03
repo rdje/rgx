@@ -50,6 +50,17 @@ struct TestCase {
     /// set so the ratchet isn't distorted by thousands of
     /// structurally-untestable subject lines.
     per_subject_untestable: bool,
+    /// The subject line carried `\=g` / `\=global` — pcre2test runs
+    /// `pcre2_substitute(...PCRE2_SUBSTITUTE_GLOBAL...)` for *this*
+    /// subject regardless of pattern-level modifiers. The harness ORs
+    /// this into `opts.want_global` per case so substitute-mode dispatch
+    /// picks `replace_all` for the affected subjects instead of
+    /// `replace`. Without this thread-through, the pattern at
+    /// testinput2:4262 (`/abc/replace=xyz` with subject
+    /// `123abc456abc789\=g`) saw PCRE2's global output (count=2) paired
+    /// against RGX's single-replacement output (count=1) — surfacing
+    /// as Cluster 4 substitute case 1 in the residual catalogue.
+    per_subject_global: bool,
     line_number: usize,
 }
 
@@ -488,6 +499,8 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
         let (expected, consumed) = parse_subject_output(ob, oi, substitute_mode, utf_mode);
         oi += consumed;
 
+        let per_subject_global = subject_carries_per_subject_global(trimmed);
+
         cases.push(TestCase {
             pattern: pattern.clone(),
             modifiers: modifiers.clone(),
@@ -496,6 +509,7 @@ fn extract_pattern_cases(ib: &Block, ob: &[&[u8]]) -> Vec<TestCase> {
             expected,
             expect_no_match_annotation: expect_no_match,
             per_subject_untestable,
+            per_subject_global,
             line_number: pattern_line_number,
         });
     }
@@ -1267,6 +1281,36 @@ fn template_has_pcre2_only_syntax(template: &str) -> bool {
 /// Subjects carrying any of the above are marked
 /// `per_subject_untestable`; `run_case` Passes them unconditionally so
 /// the ratchet doesn't punish harness limitations as engine divergence.
+/// Inspect a subject line's `\=...` tail for a `g` / `global` token.
+/// Per-subject `\=g` enables `PCRE2_SUBSTITUTE_GLOBAL` in pcre2test
+/// regardless of pattern-level flags; the harness mirrors that by
+/// dispatching `replace_all` instead of `replace` for the affected
+/// subject. Tokens are comma-separated; each token may itself be a
+/// `name=value` pair (we only key on the name).
+fn subject_carries_per_subject_global(line: &[u8]) -> bool {
+    let mut idx = 0;
+    while idx + 1 < line.len() {
+        if line[idx] == b'\\' && line[idx + 1] == b'=' {
+            break;
+        }
+        idx += 1;
+    }
+    if idx + 1 >= line.len() {
+        return false;
+    }
+    let tail = &line[idx + 2..];
+    let Ok(tail_str) = std::str::from_utf8(tail) else {
+        return false;
+    };
+    for piece in tail_str.split(',') {
+        let name = piece.trim().split('=').next().unwrap_or("").trim();
+        if name == "g" || name == "global" {
+            return true;
+        }
+    }
+    false
+}
+
 fn subject_carries_untestable_modifier(line: &[u8]) -> bool {
     // Find the first `\=` in the line. Everything after it is the
     // per-subject modifier list (comma-separated). We accept the
@@ -2494,7 +2538,7 @@ fn run_case(case: &TestCase) -> Outcome {
     if opts.extended {
         builder = builder.ignore_whitespace();
     }
-    let want_global = opts.want_global;
+    let want_global = opts.want_global || case.per_subject_global;
 
     let re: Regex = match builder.build() {
         Ok(r) => {
@@ -3072,8 +3116,13 @@ fn run_full_conformance() {
     // were addressed with a walker dispatch extension. Triage of the
     // remaining 13 cases is tracked as a follow-up against the
     // residual catalogue at `book/src/internals/pcre2-conformance-residual.md`.
-    const PASS_BASELINE: usize = 12_697;
-    const FAIL_BASELINE: usize = 113;
+    // Bumped 2026-05-03: per-subject `\=g` / `\=global` is now threaded
+    // through to substitute-mode dispatch, so subjects that pcre2test
+    // ran in PCRE2_SUBSTITUTE_GLOBAL mode are paired against RGX's
+    // `replace_all` instead of `replace`. Recovers Cluster 4 substitute
+    // case 1 (testinput2:4262 subject `123abc456abc789\=g`).
+    const PASS_BASELINE: usize = 12_698;
+    const FAIL_BASELINE: usize = 112;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

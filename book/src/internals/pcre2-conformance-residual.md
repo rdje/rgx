@@ -25,7 +25,7 @@ If you have to pick one strategy to start with, the highest leverage per hour is
 1. **Sweep through Bucket 3** (6 FPs) — small targeted fixes each, 3 clusters totalling ~6 cases.
 2. **Pick off Bucket 5** (4 too-permissive) — each is a one-line compile-time rejection.
 3. ~~**Attack Cluster 2C**~~ — superseded; the single-codegen-fix prescription was wrong. Real fix is `\K` propagation from inside lookarounds, scoped as a multi-session engine change. See Cluster 2C below.
-4. **Attack Cluster 4-substitute-1** — harness dispatch, affects the "2 vs 1 replacement" output.
+4. ~~**Attack Cluster 4-substitute-1**~~ — closed 2026-05-03. Per-subject `\=g` is now threaded through harness substitute dispatch.
 
 That pass alone closes **~13 cases** in a single session and hands off a cleaner residual. After that, the architectural work (Cluster 1A, Cluster 1B) is the serious sprint that closes another ~30 cases but needs days, not hours.
 
@@ -394,12 +394,12 @@ Same root cause as Cluster 1C (napla compile path). Expected to close alongside 
 
 **Root causes**:
 
-1. **testinput2:4262** — PCRE2 replaces BOTH occurrences, RGX only the first. Either pcre2test's `/replace=` without `g` defaults to global in some contexts, or a modifier was missed. Harness-level dispatch investigation.
+1. **testinput2:4262** — ✅ CLOSED 2026-05-03. Diagnosis: per-subject `\=g` (`123abc456abc789\=g` is the affected fourth subject under the `/abc/replace=xyz` pattern) was not being threaded through to RGX's substitute-mode dispatch. Pcre2test ran `pcre2_substitute(...PCRE2_SUBSTITUTE_GLOBAL...)` and produced `123xyz456xyz789` (count=2); the harness called `re.replace(...)` (single) and produced `123xyz456abc789` (count=1). Fix landed in `tests/pcre2_conformance.rs` (helper `subject_carries_per_subject_global` + `case.per_subject_global` field ORed into `want_global`). Ratchet bumped 12,697 → 12,698.
 2. **testinput2:4268** and **testinput5:1640** — `(?<=abc)(|def)/g` with lookbehind + empty-or-`def`. Empty-match vs `def`-capture-match overlap semantics under `replace_all`.
 3. **testinput2:4953** — same root as Cluster 1F (dupnames: PCRE2 picks most-recently-set, RGX picks first-defined).
 4. **testinput2:5122** — `/gm` substitute on CRLF lines. RGX treats `\r` as its own line terminator in multiline mode; PCRE2's `\r\n` convention treats the pair as a single line break. Cross-cutting with Cluster 3B.
 
-**What to change**: fixes are harness-level (for case 1), template-interpolation (for case 3, shared with Cluster 1F), and engine-level (cases 2, 4, 5 in newline/substitute context). Case 1 is the cleanest single win.
+**What to change**: fixes are template-interpolation (for case 3, shared with Cluster 1F) and engine-level (cases 2, 4, 5 in newline/substitute context). Case 1 was harness-level and landed 2026-05-03.
 
 ---
 

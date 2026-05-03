@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - Conformance harness: thread per-subject `\=g` into substitute dispatch (+1 pass)
+- Scope: `rgx-core/tests/pcre2_conformance.rs` (test harness only)
+- Changes:
+  - New helper `subject_carries_per_subject_global` parses each subject's `\=...` tail for a `g` / `global` token. The result is stored as `TestCase.per_subject_global` and ORed into `opts.want_global` in `run_case`, so `Expected::Substitute` cases dispatch to `replace_all` for any subject that pcre2test ran in `PCRE2_SUBSTITUTE_GLOBAL` mode — even when the pattern itself doesn't carry the `g` flag.
+  - Recovers Cluster 4 substitute case 1 (testinput2:4262 subject `123abc456abc789\=g`) from the residual catalogue.
+  - Bumps the conformance ratchet baseline from 12,697 / 113 to 12,698 / 112.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,698 / 112, ratchet OK), `cargo clippy --workspace --all-targets` clean of errors.
+- Notes/impact: pure harness change — no engine effect. Cluster 4 in the residual catalogue now reads "1 closed, 4 remaining". The remaining cases (testinput2:4268 / 4953 / 5122 and testinput5:1640) are template-interpolation or engine-level newline-convention divergences.
+
 ### 2026-05-03 - File PGEN-RGX-0079 (`\o{<non-octal>}` silent acceptance)
 - Scope: bug-report bundle only; no RGX code change
 - Changes:

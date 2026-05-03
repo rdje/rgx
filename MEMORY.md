@@ -3391,3 +3391,18 @@ RGX's `parsing.rs::convert_typed_octal_braced` *already* validates octal digits 
 ### Next concrete action
 - Wait on PGEN to triage 0079.
 - Pickable next: investigate testinput2:6462 (`/X*/g`) — pcre2test rejects, RGX accepts; need to find what about the `/g` modifier under empty-match patterns triggers the rejection. Possibly a `notempty_atstart` flag the harness fails to thread through.
+
+## 2026-05-03 session — close Cluster 4 substitute case 1 (per-subject \\=g)
+
+Same session as the 0079 filing. Picked up Cluster 4 substitute case 1 (testinput2:4262), the catalogue's "harness dispatch — 2 vs 1 replacement" case. Diagnosed: pcre2test runs `pcre2_substitute(...PCRE2_SUBSTITUTE_GLOBAL...)` for any subject that carries `\=g` or `\=global`, regardless of pattern-level flags. RGX's harness was only honouring the *pattern-level* `g` modifier; per-subject `\=g` annotations were stripped from `case.subject` (correct — they're not part of the literal subject) but never threaded into `want_global`, so the substitute dispatch unconditionally called `re.replace(...)` (single) for those cases.
+
+Fix: added helper `subject_carries_per_subject_global` (mirrors the parsing pattern of `subject_carries_untestable_modifier`) plus a new `TestCase.per_subject_global` field, ORed into `opts.want_global` in `run_case`. One-line change at the dispatch site, ~25 lines of new helper + struct field.
+
+Ratchet bumped 12,697 / 113 → 12,698 / 112. Lib tests still 1118/1118; CLI 30/30; clippy clean of errors.
+
+### Why fix in the harness, not the engine
+The pcre2test annotation is purely a test-rig instruction ("invoke this engine with this flag for this subject"). RGX's `Regex` API exposes both `replace` and `replace_all` already; the harness's job is to pick the right one to mirror what PCRE2 was doing. No engine code change is justified for this case.
+
+### Next concrete action
+- 16-case regression triage from 2026-05-01 still standing as the highest-leverage open item.
+- Cluster 4 still has 4 cases open (template-interpolation in case 3, engine-level newline-convention divergences in 2/4/5). Cases 2 and 5 (`(?<=abc)(\|def)/g` overlap semantics) might be a single fix. Worth a look as the next pickup.
