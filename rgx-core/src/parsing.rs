@@ -5396,7 +5396,19 @@ fn ucp_posix_class_ranges(name: &str) -> Option<Vec<CharRange>> {
             v.sort_by_key(|r| r.start);
             v
         }
-        "space" => p("White_Space"),
+        // PCRE2 under `/ucp` treats U+180E (MONGOLIAN VOWEL SEPARATOR)
+        // as `\s`/`[:space:]` for compatibility with its pre-Unicode-6.3
+        // classification — U+180E was Zs then, Cf now, but PCRE2's
+        // `\s` definition didn't follow the reclassification. The
+        // `White_Space` property excludes it as of current Unicode
+        // tables, so we union it back in. Mirror the same special
+        // case already in `"blank"` and `"print"` below.
+        "space" => {
+            let mut v = p("White_Space");
+            v.push(CharRange::single('\u{180E}'));
+            v.sort_by_key(|r| r.start);
+            v
+        }
         "blank" => {
             // `[:blank:]` under UCP = Zs + `\t` + U+180E (PCRE2
             // historical treatment of MVS as blank-space, mirrors

@@ -3128,8 +3128,15 @@ fn run_full_conformance() {
     // repetition lookbehinds like `(?<=(\d{1,255}))X` (testinput1:6597
     // and testinput2:6509 under `/max`) decoded into garbage and
     // returned no-match. +2 passes; -2 false negatives (70 → 68).
-    const PASS_BASELINE: usize = 12_700;
-    const FAIL_BASELINE: usize = 110;
+    //
+    // Bumped 2026-05-03 (c): under `/ucp`, U+180E (MONGOLIAN VOWEL
+    // SEPARATOR) is now treated as `\s`/`[:space:]` to match PCRE2's
+    // pre-Unicode-6.3 historical classification of MVS as a space
+    // codepoint. Mirrors the special-case already in `[:blank:]` and
+    // `[:print:]`. Recovers testinput5:53 (`/^A\s+Z/utf,ucp` against
+    // `A\x{85}\x{180e}\x{2005}Z`); +1 pass, FN 68 → 67.
+    const PASS_BASELINE: usize = 12_701;
+    const FAIL_BASELINE: usize = 109;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

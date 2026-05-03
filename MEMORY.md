@@ -3449,3 +3449,18 @@ The catalogue listed testinput1:6794 (`\Qab*\E{2,}`) under Cluster 1G but RGX cu
 ### Next concrete action
 - 0080 awaits PGEN.
 - Continue auditing FN entries in the dump file `/tmp/fn_dump.log`. Many remaining cases are recursive captures (Cluster 1A — architectural) but a few might be similarly mis-diagnosed.
+
+## 2026-05-03 session — engine: U+180E added to `\s` under `/ucp` (+1 pass)
+
+Continued the FN audit. Probed testinput5:53 (`/^A\s+Z/utf,ucp` against `A\x{85}\x{180e}\x{2005}Z`). PCRE2 matches the full subject; RGX returned no match.
+
+Diagnosis: PCRE2 retains the pre-Unicode-6.3 classification of U+180E (MONGOLIAN VOWEL SEPARATOR) as `\s` for backward compatibility — MVS was Zs until 2013, then reclassified to Cf. RGX drives `\s` straight from the current `White_Space` property, so it missed U+180E. The same special case was already in `[:blank:]` and `[:print:]` for the same reason.
+
+Fix: 7-line addition in `parsing.rs::ucp_posix_class_ranges("space")` — union U+180E into the property-derived range set. Mirror of the existing pattern. Lib tests 1118/1118; conformance ratchet 12,700 / 110 → 12,701 / 109. FN bucket 68 → 67.
+
+### Why fix in RGX, not PGEN
+This isn't a parser/grammar issue — PGEN parses `\s` correctly into a Regex::Space node. The character-class membership for `\s` under UCP is a lookup table inside RGX's `unicode_support` / `parsing` layer. Quick, contained, no PGEN dependency.
+
+### Next concrete action
+- testinput4:1448/1452 next (`\p{katakana}` against U+3001 — Script vs Script_Extensions table issue). Could be a similar contained data-table fix.
+- testinput4:2383 (`A‎‏  B/x` — bidi formatting chars in `/x`) — likely lexer-level handling of Cf chars.

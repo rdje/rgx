@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - Engine: U+180E recognised as `\s`/`[:space:]` under `/ucp` (+1 pass)
+- Scope: `rgx-core/src/parsing.rs` (`ucp_posix_class_ranges("space")`)
+- Changes:
+  - Under `/ucp` (PCRE2_UCP), U+180E (MONGOLIAN VOWEL SEPARATOR) is now unioned into the `\s`/`[:space:]` set, mirroring the same special case already present in `[:blank:]` and `[:print:]`. Reason: U+180E was Zs (space-separator) until Unicode 6.3 (2013); PCRE2 retained the pre-6.3 classification of MVS as `\s` for backward compatibility, but RGX was driving `\s` straight from the current `White_Space` property and so missed it.
+  - Recovers testinput5:53 (`/^A\s+Z/utf,ucp` against `A\x{85}\x{180e}\x{2005}Z`).
+  - Bumps the conformance ratchet baseline from 12,700 / 110 to 12,701 / 109. False-negative bucket 68 → 67.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,701 / 109, ratchet OK).
+- Notes/impact: contained surface-area change to a single UCP class. The non-UCP path of `\s` is unchanged. Future-proofed: if Unicode ever adds U+180E back to White_Space the special-case becomes a no-op, not a duplicate.
+
 ### 2026-05-03 - File PGEN-RGX-0080 (whitespace inside `{m,n}` quantifier)
 - Scope: bug-report bundle only; no RGX code change
 - Changes:
