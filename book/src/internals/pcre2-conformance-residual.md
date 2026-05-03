@@ -190,7 +190,8 @@ Remaining FN cases that don't fit the above clusters. Each is its own investigat
 | testinput1:6450 | `(?(DEFINE) (?<word> \w+ ) ) ( (?&word)* )   \./xi` | `pokus.` | DEFINE reference + `*` quantifier over subroutine call — possibly a variant of Cluster 1A |
 | ~~testinput1:6597~~ | ~~`(?<=(\d{1,255}))X`~~ | ~~`1234X`~~ | ✅ CLOSED 2026-05-03 — bytecode body-length prefix on lookahead/lookbehind opcodes was a single byte; bodies > 255 bytes (which `\d{1,N}` for N ≥ 64 produces because each optional iteration is 5 bytes of Split + class) silently truncated. Widened to u16 LE in `vm.rs`. |
 | ~~testinput2:6509~~ | ~~`(?<=(\d{1,256}))X/max`~~ | ~~`12345XYZ`~~ | ✅ CLOSED 2026-05-03 — same root as :6597. |
-| testinput1:6794 | `\Qab*\E{2,}` | `ab***z` | `\Q...\E` + `{2,}` quantifier applies to the last char of the quote (`*`), not the whole quote |
+| testinput1:6794 | `\Qab*\E{2,}` | `ab***z` | `\Q...\E` + `{2,}` quantifier applies to the last char of the quote (`*`), not the whole quote (verified 2026-05-03: RGX currently passes — catalogue stale here) |
+| testinput1:6679 | `a{ 1 , 2 }` | `Xaaaaa` | Whitespace inside `{m,n}` quantifier between digits and comma. Filed as PGEN-RGX-0080 — PGEN's grammar accepts whitespace at outer boundaries (`{ 1,2 }`) but not abutting the comma. |
 | testinput2:6244 | `\A\s*(a\|(?:[^\`]{28500}){4})/I` | `a` | Start-optimization pathological alternation — trivial alt should be tried first |
 | testinput2:6249 | `\A\s*((?:[^\`]{28500}){4}\|a)/I` | `a` | same |
 | testinput2:6592 | `\G(?:(?=(\1.\|)(.))){1,13}?(?!.*\2.*\2)\1\K\2/g` | `aaabcccdeee` | `\G` + lazy outer + nested lookaheads + `\K` — deep interaction |

@@ -3429,3 +3429,23 @@ Total: +3 passes; 12,697 / 113 → 12,700 / 110. Plus PGEN-RGX-0079 filed for th
 ### Next concrete action
 - Cluster 1G has more entries that may have similar wrong diagnoses — worth re-auditing each before attempting fixes per its catalogue prescription.
 - The 16-case regression triage is still standing as the highest-leverage open item; partially eaten into by the +3 from this session.
+
+## 2026-05-03 session — file PGEN-RGX-0080 (whitespace in counted quantifier)
+
+Continuing the Cluster 1G audit (after the engine fix that recovered the bounded-lookbehind cases). Probed testinput1:6679 (`/a{ 1 , 2 }/` against `Xaaaaa`). PCRE2 10.47 default mode accepts; RGX returns no match.
+
+Root cause is in PGEN, not RGX: PGEN's `regex_default` profile accepts whitespace at the outer boundaries of a counted quantifier (`a{ 1,2 }` parses cleanly as quant {min:1, max:2}) but rejects whitespace between digits and comma (`a{ 1 , 2 }`, `a{1 ,2}`, `a{1, 2}`). When the quantifier rule fails, PGEN backtracks into 7-10 separate literal pieces (one per character of `{ 1 , 2 }`). The parse succeeds but the AST is structurally wrong — PCRE2's manual states whitespace is allowed anywhere inside `{...}` in default mode.
+
+Filed PGEN-RGX-0080 with 5-pattern reproducer matrix (baseline + outer-only + 3 inner-whitespace shapes). Bundle includes contract, parse outcomes, AST dumps, and trace.
+
+Bundle:
+- `pgen-issues/PGEN-RGX-0080.yaml`
+- `pgen-issues/artifacts/PGEN-RGX-0080/{repro_input.txt, pgen_contract.json, pgen_ast_dump.json, pgen_trace.log, pgen_parse_outcome_*.json, pgen_ast_dump_*.json}`
+- `rgx-core/examples/dump_quant_ws_artifacts.rs` (regenerator)
+
+### Catalogue note
+The catalogue listed testinput1:6794 (`\Qab*\E{2,}`) under Cluster 1G but RGX currently passes that case — verified empirically. Marked the entry "verified 2026-05-03: RGX currently passes" without removing it; cluster lists decay over time and the historical context still has value. Same correction style used for Cluster 2C earlier this session.
+
+### Next concrete action
+- 0080 awaits PGEN.
+- Continue auditing FN entries in the dump file `/tmp/fn_dump.log`. Many remaining cases are recursive captures (Cluster 1A — architectural) but a few might be similarly mis-diagnosed.

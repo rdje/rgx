@@ -1,0 +1,69 @@
+{
+  "content": {
+    "Json": {
+      "pattern": [
+        [
+          [
+            {
+              "atom": "a",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": "{",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": " ",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": "1",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": " ",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": ",",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": " ",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": "2",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": " ",
+              "quantifier": [],
+              "type": "piece"
+            },
+            {
+              "atom": "}",
+              "quantifier": [],
+              "type": "piece"
+            }
+          ]
+        ],
+        []
+      ],
+      "type": "regex"
+    }
+  },
+  "rule_name": "regex",
+  "span": {
+    "end": 10,
+    "start": 0
+  }
+}

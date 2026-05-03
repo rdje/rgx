@@ -1,0 +1,167 @@
+id: PGEN-RGX-0080
+summary: |
+  Counted quantifier `{m,n}` accepts whitespace at the outer boundaries (`a{ 1,2 }`) but rejects it between the digits and the comma (`a{ 1 , 2 }`, `a{1 ,2}`, `a{1, 2}`). PCRE2 allows whitespace anywhere inside `{...}` in default mode (not just under `/x` extended). When PGEN can't fit the inner-whitespace shape into the quantifier rule, it backtracks to a literal `{`, separate digit pieces, comma, etc., producing a structurally-wrong but successful parse.
+status: open
+opened_at: 2026-05-03T00:00:00Z
+first_seen_at: 2026-05-03T00:00:00Z
+last_updated_at: 2026-05-03T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.29
+rgx_commit: 070ba956ce29c9b9d9e6e0d4c6b07728a30b69c5
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  pgen_commit: 056f67842955dd4271cbf6fc6158f9cb9c64002e
+  api_version: "1.2.0"
+  regex_parser_release_version: "1.1.29"
+  regex_integration_contract_version: "1.1.31"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api plus parseability_probe
+  host_os_arch: Darwin arm64
+  command: |
+    PGEN_TRACE_VERBOSITY=debug cargo run --release \
+      --manifest-path subs/pgen/rust/Cargo.toml \
+      --features generated_parsers --bin parseability_probe -- \
+      --parse-dump-ast-pretty regex \
+      pgen-issues/artifacts/PGEN-RGX-0080/repro_input.txt \
+      pgen-issues/artifacts/PGEN-RGX-0080/pgen_ast_dump.json \
+      --profile regex_default \
+      --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0080/pgen_trace.log
+
+    cargo run --release -p rgx-core --example dump_quant_ws_artifacts
+  pattern: "a{ 1 , 2 }"
+  input: "a{ 1 , 2 }"
+  notes: |
+    Downstream project: RGX.
+
+    PCRE2 10.47 default mode accepts the pattern and matches `aa`:
+      /a{ 1 , 2 }/
+          Xaaaaa
+       0: aa
+
+    The PCRE2 manual (pcre2pattern(3) §"Repetition") states:
+      "Whitespace is permitted in the {m,n} quantifier. The amount of
+      whitespace allowed depends on the PCRE2 build, but in standard
+      builds spaces and tabs may appear at any point inside the
+      curly brackets."
+
+    PGEN currently accepts only a subset of the legal positions —
+    outer whitespace works, but any whitespace abutting the comma or
+    between the comma and a digit causes the quantifier rule to fail
+    and the parser to backtrack into per-character literal pieces
+    (so the brace, digits, and comma all become atoms in their own
+    right). The parse still succeeds; it's just structurally wrong.
+
+    Reproducer matrix (each pattern's behaviour against PCRE2 vs
+    PGEN's regex_default profile, on subject `Xaaaaa`):
+
+      | pattern        | PCRE2 match | PGEN parse shape       | RGX result |
+      |---             |---          |---                     |---         |
+      | a{1,2}         | aa          | piece(quant min=1 max=2) | OK       |
+      | a{ 1,2 }       | aa          | piece(quant min=1 max=2) | OK       |
+      | a{ 1 , 2 }     | aa          | 10 literal pieces        | NO MATCH |
+      | a{1 ,2}        | aa          | 7 literal pieces         | NO MATCH |
+      | a{1, 2}        | aa          | 7 literal pieces         | NO MATCH |
+
+    Surfaces in PCRE2 conformance test suite as testinput1:6679
+    (`/a{ 1 , 2 }/` against `Xaaaaa`).
+
+    The structurally-correct AST shape (matching the existing
+    `a{1,2}` parse) is:
+      atom: "a"
+      quantifier: {type: quantifier, min: 1, max: 2, greediness: []}
+      type: piece
+
+    The misparse is symptomatic of the quantifier rule's whitespace
+    handling — it likely allows whitespace tokens before the first
+    digit and after the last digit (around `min` / `max`) but not
+    between those and the comma. PCRE2's behaviour is "any
+    whitespace anywhere between the open `{` and the close `}`".
+expected_behavior: |
+  All five patterns in the reproducer matrix should parse to the
+  same `quantifier` shape with `min: 1, max: 2`. Whitespace inside
+  `{...}` should be ignored at every position, not only around the
+  outer boundaries.
+
+  The expected AST for the failing patterns matches the baseline
+  `a{1,2}`:
+
+    {
+      "atom": "a",
+      "quantifier": {
+        "type": "quantifier",
+        "greediness": [],
+        "min": 1,
+        "max": 2
+      },
+      "type": "piece"
+    }
+
+  Recommended PGEN fix: the EBNF rule for `counted_quantifier` (or
+  whichever rule covers `{...}` quantifiers) should treat
+  whitespace as a skippable separator at every position between the
+  outer braces, not just at the boundaries. The trailing-only / leading-only handling already
+  in place suggests the rule is partially-instrumented; the fix is
+  consistency.
+
+  See pcre2pattern(3) §"Repetition" for the canonical PCRE2 rule.
+actual_behavior: |
+  `parse_full` succeeds. The AST dump shows 10 separate literal
+  `piece` atoms instead of one quantified `piece`:
+
+    [{"atom":"a", ...},
+     {"atom":"{", ...},
+     {"atom":" ", ...},
+     {"atom":"1", ...},
+     {"atom":" ", ...},
+     {"atom":",", ...},
+     {"atom":" ", ...},
+     {"atom":"2", ...},
+     {"atom":" ", ...},
+     {"atom":"}", ...}]
+
+  RGX's adapter then compiles this as the literal sequence
+  `a{ 1 , 2 }` (10 chars, mostly whitespace and braces) instead of
+  a quantifier. The pattern stops matching the intended subjects
+  entirely.
+
+  Variants `a{1 ,2}` and `a{1, 2}` exhibit the same misparse with
+  fewer pieces. See `pgen_ast_dump_inner_ws_*.json` for the full
+  shapes.
+reproduction: |
+  Smallest reproducer (10 bytes, no trailing newline):
+    pattern: a{ 1 , 2 }
+    input file: pgen-issues/artifacts/PGEN-RGX-0080/repro_input.txt
+
+  Full bundle: pgen-issues/artifacts/PGEN-RGX-0080/
+    repro_input.txt                          - the 10-byte pattern
+    pgen_contract.json                       - parser_embedding_api_contract()
+    pgen_ast_dump.json                       - probe AST dump for the bug pattern
+    pgen_trace.log                           - PGEN_TRACE_VERBOSITY=debug trace
+    pgen_parse_outcome_*.json                - 5-pattern parse outcomes
+    pgen_ast_dump_*.json                     - 5-pattern AST dumps
+
+  Helper at: rgx-core/examples/dump_quant_ws_artifacts.rs
+  (regenerates the 5-pattern bundle in one command).
+impact: |
+  Class: "parses but returns the wrong AST/dump" — same class as
+  PGEN-RGX-0006 and PGEN-RGX-0079.
+
+  RGX-specific impact:
+    - PCRE2 conformance regression: testinput1:6679 (`/a{ 1 , 2 }/`)
+      currently flagged in the false-negative bucket.
+    - Any user-supplied pattern containing whitespace inside a
+      counted quantifier (not at the outer boundaries) compiles to a
+      literal sequence instead of being interpreted as a quantifier.
+
+  Workaround on the RGX side: detect the "literal `{`, digit, comma,
+  digit, `}` chain with whitespace pieces" shape in the adapter and
+  rewrite it as a quantifier. This is a workaround, not a fix, and
+  is rejected by the project's no-PGEN-workarounds rule (see
+  `feedback_no_pgen_workarounds.md`). Filed here per that policy.

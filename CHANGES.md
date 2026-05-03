@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - File PGEN-RGX-0080 (whitespace inside `{m,n}` quantifier)
+- Scope: bug-report bundle only; no RGX code change
+- Changes:
+  - New protocol-compliant report at `pgen-issues/PGEN-RGX-0080.yaml`. PGEN's `regex_default` profile accepts whitespace at the outer boundaries of a counted quantifier (`a{ 1,2 }`) but not between the digits and the comma (`a{ 1 , 2 }`, `a{1 ,2}`, `a{1, 2}`). PCRE2 10.47 default mode allows whitespace anywhere inside `{...}` per pcre2pattern(3) §"Repetition". Filed with a 5-pattern reproducer matrix.
+  - Artifacts under `pgen-issues/artifacts/PGEN-RGX-0080/`: repro input, contract, AST dump + parse outcome per pattern, trace log.
+  - Helper at `rgx-core/examples/dump_quant_ws_artifacts.rs` regenerates the bundle on demand.
+- Validation: `cargo fmt`, build of new example, conformance baseline unchanged at 12,700 / 110.
+- Notes/impact: corresponds to testinput1:6679 (`/a{ 1 , 2 }/`) in the false-negative bucket. Catalogued as Cluster 1G; deferred until PGEN's quantifier rule allows whitespace consistently.
+
 ### 2026-05-03 - Engine: widen lookaround body length prefix u8 → u16 LE (+2 passes)
 - Scope: `rgx-core/src/vm.rs` (codegen + 3 dispatch sites)
 - Changes:
