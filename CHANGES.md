@@ -14,6 +14,15 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-03 - File PGEN-RGX-0079 (`\o{<non-octal>}` silent acceptance)
+- Scope: bug-report bundle only; no RGX code change
+- Changes:
+  - New protocol-compliant report at `pgen-issues/PGEN-RGX-0079.yaml` filing the residual surface area of PGEN-RGX-0006: PGEN's `regex_default` profile silently accepts `\o{1239}` (and `\o{8}`, `\o{}`, `\o{12abc}`, `\o{12 34}`) by falling back to `\o` literal escape + `{NNN}` counted quantifier when contents are not all octal digits. PCRE2 10.47 rejects with `error 164: non-octal character in \o{}`. Filed under the cluster-first protocol with a 5-case reproducer matrix.
+  - Artifacts under `pgen-issues/artifacts/PGEN-RGX-0079/`: repro input, contract snapshot, parse outcome, two AST dumps (probe + embedding), trace log.
+  - Helper at `rgx-core/examples/dump_octal_brace_artifacts.rs` regenerates the embedding-API artifacts on demand.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy --workspace --all-targets` clean of errors.
+- Notes/impact: corresponds to one of the five "RGX too permissive" conformance failures (testinput2:3979). The other four in Bucket 5 are harness/model divergences (pcre2test syntax checks and a non-UTF-build test file), not RGX validation gaps. Deferred until PGEN's grammar disambiguation lands.
+
 ### 2026-05-03 - Cluster 2C analysis correction in residual catalogue
 - Scope: documentation only (`book/src/internals/pcre2-conformance-residual.md`, `MEMORY.md`)
 - Changes:

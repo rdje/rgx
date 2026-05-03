@@ -1,0 +1,32 @@
+{
+  "content": {
+    "Json": {
+      "pattern": [
+        [
+          [
+            {
+              "atom": [
+                "\\",
+                "o"
+              ],
+              "quantifier": {
+                "greediness": [],
+                "max": 1239,
+                "min": 1239,
+                "type": "quantifier"
+              },
+              "type": "piece"
+            }
+          ]
+        ],
+        []
+      ],
+      "type": "regex"
+    }
+  },
+  "rule_name": "regex",
+  "span": {
+    "end": 8,
+    "start": 0
+  }
+}

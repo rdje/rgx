@@ -3365,3 +3365,29 @@ RGX's residual catalogue is the prioritization spine for conformance work. Letti
 - The 16-case regression triage from 2026-05-01 is still the highest-leverage standing item. Cluster 2C deferral does not unblock anything — it just removes a tempting wrong move.
 - Bucket 5 (RGX-too-permissive, 4 cases) remains the lowest-hanging set — each is a single compile-time rejection. Consider as the next pickup.
 - Cluster 4 substitute case 1 (1 case, harness dispatch — "2 vs 1 replacement") is also single-case, harness-side.
+
+## 2026-05-03 session — file PGEN-RGX-0079 (\o{<non-octal>} fall-through)
+
+Triaged Bucket 5 of the conformance histogram. The five "RGX too permissive" cases are:
+| File:line | Pattern | Class |
+|---|---|---|
+| testinput2:3979 | `/^A\o{1239}B/` | PGEN parser bug — files as PGEN-RGX-0079 (this entry) |
+| testinput2:4959 | `/(a)\|(b)/replace` | pcre2test syntax check (`'=' expected after "replace"`); harness-side, not RGX |
+| testinput2:5047 | `/abc/replace` | same as above — pcre2test syntax check |
+| testinput2:6462 | `/X*/g` | needs investigation; pcre2test 10.47 actually accepts this. Likely modifier-context divergence in the harness |
+| testinput10:447 | `/abc/utf` | testinput10 is the no-UTF-build test file — `/utf` modifier is rejected only when PCRE2 is built without UTF support. Build-config divergence |
+
+Filed PGEN-RGX-0079 for testinput2:3979. PGEN's regex_default profile silently accepts `\o{1239}` (decimal `9` is non-octal) by falling back to `\o` (literal escape) + `{1239}` counted quantifier — same shape as the original PGEN-RGX-0006 bug, residual surface left after that fix landed only for valid-octal-digit content. PCRE2 10.47 rejects with `error 164: non-octal character in \o{}`. Reproducer matrix in the report covers `\o{8}`, `\o{}`, `\o{12abc}`, `\o{12 34}` for cluster-first audit.
+
+Bundle includes:
+- `pgen-issues/artifacts/PGEN-RGX-0079/{repro_input.txt, pgen_contract.json, pgen_parse_outcome.json, pgen_ast_dump.json, pgen_embedding_ast_dump.json, pgen_trace.log}`
+- `rgx-core/examples/dump_octal_brace_artifacts.rs` — one-shot regenerator for the embedding-API artifacts.
+
+The other 4 cases in Bucket 5 are model/harness divergences, not RGX-side validation gaps. Two specifically (testinput2:4959, testinput2:5047) are pcre2test syntax errors flagged at parse-time inside the testoutput pairing — RGX has no equivalent syntax to validate. The harness already classifies these as compile-error expectations, but RGX's compile path doesn't exercise `replace=TEMPLATE` modifier syntax at all (substitute templates are passed to `replace_all` separately). Could file a harness-side fix to skip these from Bucket 5 once the test categorisation is well-defined; out of scope for this session.
+
+### Why files for 0079 instead of fixing in RGX adapter
+RGX's `parsing.rs::convert_typed_octal_braced` *already* validates octal digits (the `u32::from_str_radix(digits, 8)` returns an error for `9`). The bug is that PGEN never routes `\o{1239}` through that path — it goes through the simple_escape + quantifier path instead, where the contents look syntactically valid. Catching this in the adapter would mean inspecting the `\o`-followed-by-counted-quantifier pattern across the AST, which is a workaround in spirit. Per the project rule (memory `feedback_no_pgen_workarounds.md`), grammar-level disambiguation belongs in PGEN.
+
+### Next concrete action
+- Wait on PGEN to triage 0079.
+- Pickable next: investigate testinput2:6462 (`/X*/g`) — pcre2test rejects, RGX accepts; need to find what about the `/g` modifier under empty-match patterns triggers the rejection. Possibly a `notempty_atstart` flag the harness fails to thread through.

@@ -1,0 +1,184 @@
+id: PGEN-RGX-0079
+summary: |
+  Braced octal escape `\o{...}` containing a non-octal digit (e.g. `\o{1239}`) is silently misparsed as a simple_escape for `\o` followed by a counted_quantifier `{1239}` instead of being rejected as an invalid octal escape. Same shape as PGEN-RGX-0006 (closed in PGEN 1.1.3) — that fix only handled valid-octal-digit content; non-octal contents still fall back to the literal+quantifier interpretation.
+status: open
+opened_at: 2026-05-03T00:00:00Z
+first_seen_at: 2026-05-03T00:00:00Z
+last_updated_at: 2026-05-03T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.29
+rgx_commit: ff533d8f5d0405ec9b3d62b462a4d865b7e097bd
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  pgen_commit: 056f67842955dd4271cbf6fc6158f9cb9c64002e
+  api_version: "1.2.0"
+  regex_parser_release_version: "1.1.29"
+  regex_integration_contract_version: "1.1.31"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api plus parseability_probe
+  host_os_arch: Darwin arm64
+  command: |
+    PGEN_TRACE_VERBOSITY=debug cargo run --release \
+      --manifest-path subs/pgen/rust/Cargo.toml \
+      --features generated_parsers --bin parseability_probe -- \
+      --parse regex pgen-issues/artifacts/PGEN-RGX-0079/repro_input.txt \
+      --profile regex_default \
+      --trace --trace-log-file pgen-issues/artifacts/PGEN-RGX-0079/pgen_trace.log
+
+    cargo run --release \
+      --manifest-path subs/pgen/rust/Cargo.toml \
+      --features generated_parsers --bin parseability_probe -- \
+      --parse-dump-ast-pretty regex \
+      pgen-issues/artifacts/PGEN-RGX-0079/repro_input.txt \
+      pgen-issues/artifacts/PGEN-RGX-0079/pgen_ast_dump.json \
+      --profile regex_default
+
+    cargo run --release -p rgx-core --example dump_octal_brace_artifacts
+  pattern: "\\o{1239}"
+  input: "\\o{1239}"
+  notes: |
+    Downstream project: RGX (https://github.com/<host>/rgx)
+
+    PCRE2 10.47 rejects this pattern at compile time with
+    `error 164 at offset 9: non-octal character in \o{} (closing brace missing?)`,
+    surfacing the bad `9` digit. PGEN's regex_default profile silently accepts
+    it, allocating two unrelated AST nodes (escape on `\o`, counted_quantifier
+    on `{1239}`).
+
+    Reproduction in pcre2test:
+      /\o{1239}/
+      Failed: error 164 at offset 9: non-octal character in \o{} (closing brace missing?)
+              here: \o{1239 |<--| }
+
+    This bug is the residual surface area of PGEN-RGX-0006 (closed 2026-04-06,
+    fixed in PGEN 1.1.3). The 0006 fix added an octal_escape rule that recognises
+    `\o{<octal_digits>}` when every brace-content character is a valid octal
+    digit (0..7). When *any* character inside the braces is non-octal, the
+    grammar backtracks all the way out and re-parses the byte sequence as
+    `\o` (simple_escape) + `{NNN}` (counted_quantifier). This means an invalid
+    pattern survives the parser and reaches downstream consumers as a
+    structurally valid AST.
+
+    The same bug class also affects `\o{}` with empty braces, decimal-only
+    contents past the octal range, and contents containing letters
+    (`\o{12abc}` parses as a chain of literal pieces). See "Reproducer
+    matrix" below.
+
+    Recommended PGEN fix: commit/cut after `\o{` so that, once the prefix
+    is matched, the parser is required to consume octal digits up to the
+    matching `}` and emit a structured parse error if the contents are not
+    valid octal. This mirrors the existing committed treatment of `\x{...}`
+    braced hex.
+expected_behavior: |
+  PGEN's regex_default profile should reject `\o{1239}` at parse time, with a
+  structured `ParseDiagnostic` whose `byte_offset` points at the offending
+  non-octal digit (`9` at byte offset 5 of the input `\o{1239}`).
+
+  Equivalently, the grammar's `octal_escape` rule (or the prefix that
+  matches `\o{`) should commit, so that `\o{1239}` does NOT silently
+  succeed via the simple_escape + counted_quantifier fallback.
+
+  Acceptable structured shapes (downstream is flexible — any of these
+  works as long as the parse is a *failure*, not a successful misparse):
+    1. `parse_outcome.status = "failure"` with diagnostic pointing at
+       the bad digit.
+    2. `parse_outcome.status = "success"` only when every brace-content
+       character is in `[0-7]` AND there is at least one digit AND the
+       sequence terminates with `}`.
+
+  For comparison, the existing braced hex escape `\x{...}` already commits
+  in this fashion: `\x{12g}` should likewise be rejected (verifying that
+  invariant is suggested as part of the same audit).
+
+  Reproducer matrix — patterns that exercise the same bug class:
+    `\o{1239}`   — non-octal digit `9`
+    `\o{8}`      — `8` is not an octal digit (smallest reproducer)
+    `\o{}`       — empty braces (no digits)
+    `\o{12abc}`  — letters mixed in
+    `\o{12 34}`  — whitespace inside braces
+
+  PGEN-RGX-0006's closing tree shape (kept for reference) was:
+    atom -> escape -> escape_unit -> octal_escape [Sequence]
+      element_0 (or fused prefix): Terminal("o{")
+      element_1 -> octal_digits [Quantified, '+']
+        octal_digit -> digit: Terminal("1")
+        octal_digit -> digit: Terminal("0")
+        octal_digit -> digit: Terminal("1")
+      element_2: Terminal("}")
+
+  The 0079 fix should make that rule reject when octal_digit fails to
+  match a brace-content character, rather than backtracking out to
+  simple_escape + counted_quantifier.
+actual_behavior: |
+  `parse_full` succeeds. The AST dump (see `pgen_embedding_ast_dump.json`)
+  shows the brace contents as a counted_quantifier on a literal `o`:
+
+    {
+      "atom": ["\\", "o"],
+      "quantifier": {
+        "greediness": [],
+        "max": 1239,
+        "min": 1239,
+        "type": "quantifier"
+      },
+      "type": "piece"
+    }
+
+  This is structurally identical to the original PGEN-RGX-0006 misparse,
+  with the only difference being that the brace-content `1239` survives
+  as the quantifier bounds. RGX's adapter then compiles the pattern as
+  `o` repeated 1239 times — a silently-wrong AST, not a rejection.
+
+  Evidence:
+    - 0 occurrences of `octal_escape` in the AST dump
+    - 1 occurrence of `quantifier` (carrying min=max=1239) on a literal `o`
+    - successful parse_outcome.status = "success", no diagnostic
+
+  PCRE2's behaviour, for reference:
+    Failed: error 164 at offset 9:
+      non-octal character in \o{} (closing brace missing?)
+      here: \o{1239 |<--| }
+
+  Same input, opposite verdict.
+reproduction: |
+  Smallest reproducer (8 bytes):
+    pattern: \o{1239}
+    input file: pgen-issues/artifacts/PGEN-RGX-0079/repro_input.txt
+
+  Full bundle: pgen-issues/artifacts/PGEN-RGX-0079/
+    repro_input.txt              - the 8-byte pattern, no trailing newline
+    pgen_contract.json           - parser_embedding_api_contract() snapshot
+    pgen_parse_outcome.json      - parse_grammar_profile_named outcome
+    pgen_ast_dump.json           - parseability_probe AST dump
+    pgen_embedding_ast_dump.json - parse_grammar_profile_ast_dump_named output
+    pgen_trace.log               - PGEN_TRACE_VERBOSITY=debug parse trace
+
+  Helper added at: rgx-core/examples/dump_octal_brace_artifacts.rs
+  (regenerates the embedding-API artifacts in one command).
+impact: |
+  Class: "parses but returns the wrong AST/dump" — same as the original
+  PGEN-RGX-0006. Downstream consumers that trust PGEN's parse outcome
+  will silently accept patterns that PCRE2 (and any other PCRE2-compatible
+  flavour) reject.
+
+  RGX-specific impact:
+    - PCRE2 conformance regression: testinput2:3979 (`/^A\o{1239}B/`)
+      currently flagged in the "RGX too permissive" bucket of the harness
+      (5 cases total, this is one of them).
+    - Any user pattern containing `\o{<contents-with-non-octal-char>}`
+      compiles to a quantified literal `o` instead of being rejected at
+      parse time.
+
+  Workaround on the RGX side: detect the `["\\", "o"]` atom + non-empty
+  counted_quantifier pattern in the adapter and reject. This is a
+  workaround, not a fix, and is rejected by the project's
+  no-PGEN-workarounds rule (see `feedback_no_pgen_workarounds.md` in the
+  RGX session memory: "Parsing issues must be fixed in PGEN, not hacked
+  around in RGX"). Filed here per that policy.
