@@ -1002,7 +1002,33 @@ impl<'a> PgenAstAdapter<'a> {
                 // so the compiler can strip them inside `(?x:...)` extended-mode
                 // groups. Escaped whitespace arrives via `escape` and is
                 // lowered to a plain `Char` upstream.
-                if matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{0C}' | '\u{0B}') {
+                //
+                // Under PCRE2_UTF, the ignorable-whitespace set under `/x`
+                // expands from "ASCII whitespace" to "Unicode
+                // Pattern_White_Space" (pcre2pattern(3) §"Option settings").
+                // The set is small and frozen by Unicode TR31: SP, HT, LF,
+                // VT, FF, CR (already above), plus NEL (U+0085), LRM
+                // (U+200E), RLM (U+200F), LINE SEPARATOR (U+2028) and
+                // PARAGRAPH SEPARATOR (U+2029). Including the Unicode 5
+                // here unconditionally is safe in practice: outside `(?x)`
+                // these stay `WhitespaceLiteral` and the compiler lowers
+                // them to plain `Char` (preserving literal meaning); inside
+                // `(?x)` they are stripped, matching PCRE2's `/x,utf`
+                // semantic. Recovers testinput4:2383 (`/A‎‏  B/x,utf`
+                // against `AB`).
+                if matches!(
+                    ch,
+                    ' ' | '\t'
+                        | '\n'
+                        | '\r'
+                        | '\u{0C}'
+                        | '\u{0B}'
+                        | '\u{0085}'
+                        | '\u{200E}'
+                        | '\u{200F}'
+                        | '\u{2028}'
+                        | '\u{2029}'
+                ) {
                     Ok(Regex::WhitespaceLiteral(ch))
                 } else {
                     Ok(Regex::Char(ch))

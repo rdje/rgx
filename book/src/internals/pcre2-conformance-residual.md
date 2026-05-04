@@ -198,7 +198,7 @@ Remaining FN cases that don't fit the above clusters. Each is its own investigat
 | ~~testinput5:53~~ | ~~`^A\s+Z/utf,ucp`~~ | ~~`A\x{85}\x{180e}\x{2005}Z`~~ | ✅ CLOSED 2026-05-03. U+180E is no longer in `White_Space` (since Unicode 6.3) but PCRE2 retains the pre-6.3 classification as `\s`/`[:space:]` for backward compatibility. Unioned in at `parsing.rs::ucp_posix_class_ranges("space")` to match. Same shape as the existing `[:blank:]` / `[:print:]` MVS special-cases. |
 | ~~testinput4:1448~~ | ~~`\p{katakana}/utf`~~ | ~~`、` (U+3001)~~ | ✅ CLOSED 2026-05-04. Bare `\p{<script>}` now resolves via `Script_Extensions=<script>` (PCRE2 default per pcre2pattern(3)). Fix in `parsing.rs::resolve_unicode_property_class` with a Common/Inherited carve-out per Unicode TR24 §5.2. |
 | ~~testinput4:1452~~ | ~~`\p{scx:katakana}/utf`~~ | ~~`、`~~ | ✅ CLOSED 2026-05-04. Same root as testinput4:1448; `scx:` prefix now forces `Script_Extensions=` lookup explicitly. |
-| testinput4:2383 | `A‎‏  B/x` | `AB` | Bi-di formatting chars U+200E/U+200F inside `/x` pattern — PCRE2 treats as ignorable; RGX treats as literals |
+| ~~testinput4:2383~~ | ~~`A‎‏  B/x`~~ | ~~`AB`~~ | ✅ CLOSED 2026-05-04. Pattern_White_Space chars (NEL/LRM/RLM/LSEP/PSEP — the Unicode TR31 set) are now classified as `WhitespaceLiteral` in the typed walker so `(?x)` strips them under `/x,utf` per pcre2pattern(3). |
 
 (The 18 total for this cluster includes the 11 above + 7 cases that belong arguably to overlapping clusters — I've listed the primary ones.)
 

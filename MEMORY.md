@@ -3488,3 +3488,16 @@ PGEN parses `\p{...}` to a UnicodeProperty atom with the property name as a chil
 ### Next concrete action
 - testinput4:2383 (`A‎‏  B/x` — bidi formatting chars in `/x`) — likely lexer-level handling of Cf chars.
 - Continue auditing the remaining 65 FN entries; many are recursive-capture (Cluster 1A / 1B — architectural) but a few may be similarly contained.
+
+## 2026-05-04 session — engine: Pattern_White_Space ignorable under `(?x,utf)` (+1 pass)
+
+Continued the FN audit. testinput4:2383 (`/A<NEL><LRM><RLM><LSEP><PSEP>B/x,utf` against `AB`) — RGX returned no match because the typed walker classified only ASCII whitespace as `WhitespaceLiteral`. PCRE2 under `/x,utf` treats any Pattern_White_Space character as ignorable per pcre2pattern(3) §"Option settings".
+
+Fix in `parsing.rs::convert_typed_atom`: extend the `WhitespaceLiteral` classifier to include the Unicode 5 (NEL/LRM/RLM/LSEP/PSEP) alongside the existing ASCII 6 (SP/HT/LF/VT/FF/CR). The total set is exactly Unicode's Pattern_White_Space, frozen by TR31 — no further expansion needed.
+
+Outside `(?x)`, the compiler's strip pass lowers `WhitespaceLiteral` → `Char(c)` so literal-meaning is preserved. Risk-checked: scanned the conformance corpus for non-`/utf` `/x` patterns containing non-ASCII bytes; none, so unconditionally including the Unicode 5 doesn't regress anything.
+
+Lib tests 1118/1118; conformance ratchet 12,703 / 107 → 12,704 / 106. FN 65 → 64.
+
+### Next concrete action
+- Continue FN audit, or pivot if user redirects.

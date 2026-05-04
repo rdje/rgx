@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-04 - Engine: Pattern_White_Space ignorable under `(?x)` matches PCRE2 `/x,utf` (+1 pass)
+- Scope: `rgx-core/src/parsing.rs` (typed-walker single-char atom classifier)
+- Changes:
+  - The `WhitespaceLiteral` classifier now also recognises the Unicode 5 — NEL (U+0085), LRM (U+200E), RLM (U+200F), LSEP (U+2028), PSEP (U+2029) — alongside the existing ASCII whitespace set (SP/HT/LF/VT/FF/CR). Per pcre2pattern(3) §"Option settings", PCRE2 under `/x,utf` ignores any character whose Unicode property is `Pattern_White_Space`; that set is exactly these 5 + the ASCII 6.
+  - Outside `(?x)` these stay `WhitespaceLiteral` and the compiler's strip pass lowers them to plain `Char(c)` (preserving literal meaning). Inside `(?x)` they are stripped — same treatment as ASCII whitespace.
+  - Recovers testinput4:2383 (`/A‎‏  B/x,utf` against `AB`).
+  - Bumps the conformance ratchet baseline from 12,703 / 107 to 12,704 / 106. False-negative bucket 65 → 64.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,704 / 106, ratchet OK).
+- Notes/impact: contained to a single dispatch site in the typed walker. PGEN's grammar emits these chars as plain single-char atoms (not `whitespace_literal`); the classification is RGX-side. The Unicode 5 list is frozen by Unicode TR31, so no future expansion needed.
+
 ### 2026-05-04 - Engine: `\p{<script>}` defaults to Script_Extensions (PCRE2 semantic) (+2 passes)
 - Scope: `rgx-core/src/unicode_support.rs::resolve_unicode_property_class`
 - Changes:

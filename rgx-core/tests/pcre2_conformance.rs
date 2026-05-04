@@ -3136,7 +3136,7 @@ fn run_full_conformance() {
     // `[:print:]`. Recovers testinput5:53 (`/^A\s+Z/utf,ucp` against
     // `A\x{85}\x{180e}\x{2005}Z`); +1 pass, FN 68 → 67.
     //
-    // Bumped 2026-05-04: bare `\p{<script>}` now resolves through
+    // Bumped 2026-05-04 (a): bare `\p{<script>}` now resolves through
     // `Script_Extensions=<script>` (PCRE2-default), with `Common` and
     // `Inherited` special-cased back to strict `Script=`
     // (PCRE2 / Unicode TR24 §5.2). `scx:` prefix forces
@@ -3144,8 +3144,15 @@ fn run_full_conformance() {
     // testinput4:1448 (`\p{katakana}` against U+3001) and
     // testinput4:1452 (`\p{scx:katakana}` against the same).
     // +2 passes, FN 67 → 65.
-    const PASS_BASELINE: usize = 12_703;
-    const FAIL_BASELINE: usize = 107;
+    //
+    // Bumped 2026-05-04 (b): the Pattern_White_Space classifier in
+    // `parsing.rs` now flags the Unicode 5 (NEL U+0085, LRM U+200E,
+    // RLM U+200F, LSEP U+2028, PSEP U+2029) as `WhitespaceLiteral` so
+    // the `(?x)` strip pass eats them under `/x,utf` per PCRE2's
+    // pcre2pattern(3) §"Option settings". Recovers testinput4:2383
+    // (`/A‎‏  B/x,utf` against `AB`); +1 pass, FN 65 → 64.
+    const PASS_BASELINE: usize = 12_704;
+    const FAIL_BASELINE: usize = 106;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
