@@ -3135,8 +3135,17 @@ fn run_full_conformance() {
     // codepoint. Mirrors the special-case already in `[:blank:]` and
     // `[:print:]`. Recovers testinput5:53 (`/^A\s+Z/utf,ucp` against
     // `A\x{85}\x{180e}\x{2005}Z`); +1 pass, FN 68 → 67.
-    const PASS_BASELINE: usize = 12_701;
-    const FAIL_BASELINE: usize = 109;
+    //
+    // Bumped 2026-05-04: bare `\p{<script>}` now resolves through
+    // `Script_Extensions=<script>` (PCRE2-default), with `Common` and
+    // `Inherited` special-cased back to strict `Script=`
+    // (PCRE2 / Unicode TR24 §5.2). `scx:` prefix forces
+    // Script_Extensions; `sc:` / `script:` force Script. Recovers
+    // testinput4:1448 (`\p{katakana}` against U+3001) and
+    // testinput4:1452 (`\p{scx:katakana}` against the same).
+    // +2 passes, FN 67 → 65.
+    const PASS_BASELINE: usize = 12_703;
+    const FAIL_BASELINE: usize = 107;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

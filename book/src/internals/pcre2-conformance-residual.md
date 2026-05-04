@@ -196,8 +196,8 @@ Remaining FN cases that don't fit the above clusters. Each is its own investigat
 | testinput2:6249 | `\A\s*((?:[^\`]{28500}){4}\|a)/I` | `a` | same |
 | testinput2:6592 | `\G(?:(?=(\1.\|)(.))){1,13}?(?!.*\2.*\2)\1\K\2/g` | `aaabcccdeee` | `\G` + lazy outer + nested lookaheads + `\K` — deep interaction |
 | ~~testinput5:53~~ | ~~`^A\s+Z/utf,ucp`~~ | ~~`A\x{85}\x{180e}\x{2005}Z`~~ | ✅ CLOSED 2026-05-03. U+180E is no longer in `White_Space` (since Unicode 6.3) but PCRE2 retains the pre-6.3 classification as `\s`/`[:space:]` for backward compatibility. Unioned in at `parsing.rs::ucp_posix_class_ranges("space")` to match. Same shape as the existing `[:blank:]` / `[:print:]` MVS special-cases. |
-| testinput4:1448 | `\p{katakana}/utf` | `、` (U+3001) | Script vs Script_Extensions: U+3001 categorised differently in RGX's Unicode tables vs PCRE2's |
-| testinput4:1452 | `\p{scx:katakana}/utf` | `、` | `scx` (Script_Extensions) treatment |
+| ~~testinput4:1448~~ | ~~`\p{katakana}/utf`~~ | ~~`、` (U+3001)~~ | ✅ CLOSED 2026-05-04. Bare `\p{<script>}` now resolves via `Script_Extensions=<script>` (PCRE2 default per pcre2pattern(3)). Fix in `parsing.rs::resolve_unicode_property_class` with a Common/Inherited carve-out per Unicode TR24 §5.2. |
+| ~~testinput4:1452~~ | ~~`\p{scx:katakana}/utf`~~ | ~~`、`~~ | ✅ CLOSED 2026-05-04. Same root as testinput4:1448; `scx:` prefix now forces `Script_Extensions=` lookup explicitly. |
 | testinput4:2383 | `A‎‏  B/x` | `AB` | Bi-di formatting chars U+200E/U+200F inside `/x` pattern — PCRE2 treats as ignorable; RGX treats as literals |
 
 (The 18 total for this cluster includes the 11 above + 7 cases that belong arguably to overlapping clusters — I've listed the primary ones.)

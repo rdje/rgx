@@ -3464,3 +3464,27 @@ This isn't a parser/grammar issue — PGEN parses `\s` correctly into a Regex::S
 ### Next concrete action
 - testinput4:1448/1452 next (`\p{katakana}` against U+3001 — Script vs Script_Extensions table issue). Could be a similar contained data-table fix.
 - testinput4:2383 (`A‎‏  B/x` — bidi formatting chars in `/x`) — likely lexer-level handling of Cf chars.
+
+## 2026-05-04 session — engine: bare `\p{<script>}` defaults to Script_Extensions (+2 passes)
+
+Continued the FN audit. Probed testinput4:1448 (`\p{katakana}` against U+3001 IDEOGRAPHIC COMMA `、`) and testinput4:1452 (`\p{scx:katakana}` against the same). PCRE2 matches both; RGX matched neither.
+
+Diagnosis: PCRE2's pcre2pattern(3) §"Unicode character properties" specifies that bare `\p{<script>}` resolves via Script_Extensions, not Script. RGX was driving everything through `regex_syntax`'s default (Script). U+3001 has Script=Common but Script_Extensions includes Katakana — hence the divergence.
+
+Fix in `unicode_support.rs::resolve_unicode_property_class`:
+- bare script name → `Script_Extensions=<name>` (tried first via regex_syntax parse-probe; falls back to bare for general categories like `Lu` and boolean properties like `Alphabetic`)
+- `scx:` prefix → forced `Script_Extensions=`
+- `sc:` / `script:` prefix → forced `Script=`
+- **Special case**: `Common` and `Inherited` resolve via strict `Script=` per PCRE2 / Unicode TR24 §5.2.
+
+### Why the special case
+First cut of the fix used Script_Extensions for ALL bare names. That regressed 5 cases under testinput5:2055 (`\p{Common}` against ARABIC COMMA U+060C, DEVANAGARI DANDA U+0964, etc.) and testinput5:2061 (`\p{Inherited}` against Arabic combining marks U+064B, etc.). Those characters have Script=Common (or Inherited) but Script_Extensions excluding Common — Unicode TR24 explicitly notes that Common and Inherited are pseudo-scripts where Script_Extensions doesn't echo the Script value.
+
+Caught the regressions by re-running the full conformance suite after the first cut (FN 67 → 72), diffing the FN sets, and narrowing the new failures to those two test lines. Added the `matches!(name, "Common" | "Inherited")` early-return for strict Script lookup. Net: +2 passes (12,701 / 109 → 12,703 / 107). FN 67 → 65.
+
+### Why fix in RGX, not PGEN
+PGEN parses `\p{...}` to a UnicodeProperty atom with the property name as a child terminal — that part is correct. The script-vs-Script_Extensions semantic is a property-resolution decision, not a parse decision. Belongs in `unicode_support.rs`.
+
+### Next concrete action
+- testinput4:2383 (`A‎‏  B/x` — bidi formatting chars in `/x`) — likely lexer-level handling of Cf chars.
+- Continue auditing the remaining 65 FN entries; many are recursive-capture (Cluster 1A / 1B — architectural) but a few may be similarly contained.

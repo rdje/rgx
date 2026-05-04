@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-04 - Engine: `\p{<script>}` defaults to Script_Extensions (PCRE2 semantic) (+2 passes)
+- Scope: `rgx-core/src/unicode_support.rs::resolve_unicode_property_class`
+- Changes:
+  - Bare `\p{<script>}` now resolves through `Script_Extensions=<script>`, matching PCRE2's documented default ("when a script name is used on its own, the matching is based on the Script_Extensions property"; pcre2pattern(3) §"Unicode character properties").
+  - The PCRE2 / Unicode TR24 §5.2 special case for `Common` and `Inherited` is preserved: those resolve through strict `Script=`. Without the special case, the change regressed testinput5:2055 (`\p{Common}` against ARABIC COMMA U+060C, whose Script is Common but Script_Extensions excludes Common) and testinput5:2061.
+  - `scx:` prefix forces `Script_Extensions`; `sc:` / `script:` force strict `Script`.
+  - Non-script bare names (e.g. `\p{Lu}`, `\p{Alphabetic}`) keep working: `Script_Extensions=<name>` is tried first, and if `regex_syntax` rejects it as an unknown script value, the bare form runs.
+  - Recovers testinput4:1448 (`\p{katakana}` against U+3001 IDEOGRAPHIC COMMA) and testinput4:1452 (`\p{scx:katakana}` against the same). U+3001 has Script=Common but Script_Extensions includes Katakana.
+  - Bumps the conformance ratchet baseline from 12,701 / 109 to 12,703 / 107. False-negative bucket 67 → 65.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,703 / 107, ratchet OK), targeted RGX-CLI probes confirm Lu/Alphabetic still resolve correctly.
+- Notes/impact: this caught one nuance in PCRE2's docs that's easy to miss (the Common/Inherited carve-out). The first cut of the fix landed regressions; surfaced them with the conformance suite, narrowed the cause to two specific test lines, and added the special case before committing.
+
 ### 2026-05-03 - Engine: U+180E recognised as `\s`/`[:space:]` under `/ucp` (+1 pass)
 - Scope: `rgx-core/src/parsing.rs` (`ucp_posix_class_ranges("space")`)
 - Changes:
