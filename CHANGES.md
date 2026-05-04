@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - File PGEN-RGX-0081 + PGEN-RGX-0082 (typed-shape regressions in PGEN 1.1.74)
+- Scope: bug-report bundles only (`pgen-issues/PGEN-RGX-008{1,2}.yaml`); no RGX code change.
+- Background: pulled the PGEN submodule forward (056f6784 → 108de21d, releases 1.1.40 → 1.1.74) per user request to absorb the 0078/0079/0080 fixes. Discovered that the typed-shape campaign across slices 11–42 dropped two pieces of load-bearing information from the AST. Submodule rolled back to 056f6784 for the moment; the bump retries against a PGEN that has restored the dropped fields.
+- 0081: `\g`-prefixed backref/subroutine family lost its bracket-form distinction. Slices 11+12+13 typed `name`, `subroutine_ref`, and `signed_digits` in succession; the end state collapses `\g<n>` (subroutine call) and `\g{n}` (back-reference) into the same `kind:"subroutine"` typed shape. PCRE2's `pcre2pattern(3)` mandates the bracket form determines semantic, so downstream consumers need that signal back. Filed with a 5-pattern reproducer matrix.
+- 0082: typed `code_block` shape silently drops the body for `(?{native:NAME})` patterns — `lang` surfaces correctly but `content` is `[]`. The Perl-style `(?{ NAME })` form preserves content. Affects 8+ RGX lib regression tests for native code-block callbacks. Filed with a 4-pattern reproducer matrix.
+- Validation: lib tests still 1118/1118 at the rolled-back pin; CLI 30/30; clippy clean of errors.
+- Notes/impact: the bump cycle uncovered the regressions before they reached commit. The walker-migration work that handled most other shape changes (typed `escape`, `atom`, `char_class`, `conditional`, `directive_verb`, `code_block`, `subroutine_call`, `inline_modifiers`, `alpha_lookaround`, etc.) is held off-tree until PGEN closes 0081 and 0082; carrying it forward to a "good enough" state would have required either (a) heuristic dispatch by `ref` shape (mishandles `\g<N>` numeric subroutine call) or (b) parsing the source pattern bytes directly to recover the dropped fields. Both rejected per the no-PGEN-workarounds rule.
+
 ### 2026-05-04 - Engine: Pattern_White_Space ignorable under `(?x)` matches PCRE2 `/x,utf` (+1 pass)
 - Scope: `rgx-core/src/parsing.rs` (typed-walker single-char atom classifier)
 - Changes:

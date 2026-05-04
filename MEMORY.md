@@ -3501,3 +3501,29 @@ Lib tests 1118/1118; conformance ratchet 12,703 / 107 → 12,704 / 106. FN 65 �
 
 ### Next concrete action
 - Continue FN audit, or pivot if user redirects.
+
+## 2026-05-05 session — abort PGEN 1.1.74 bump; file 0081 + 0082; resume after PGEN side-restoration
+
+User asked to bump PGEN to absorb the 0078/0079/0080 fixes that landed upstream (releases 1.1.72/73/74). Submodule pulled forward 056f6784 → 108de21d. The cycle uncovered TWO new typed-shape regressions that the slice campaign accumulated between 1.1.40 and 1.1.74:
+
+1. **PGEN-RGX-0081**: `\g`-prefixed family bracket-form distinction lost. Slices 11+12+13 (releases 1.1.41/42/43) typed the named-ref / subroutine_ref / signed_digits family progressively; the end shape collapses `\g<n>` (subroutine call), `\g{n}` (back-ref), and `\gN` (back-ref) into the same `kind:"subroutine"` typed object. PCRE2's bracket-form-determines-semantic rule needs the discriminator back.
+2. **PGEN-RGX-0082**: typed `code_block` drops body content when `lang:` prefix is present. `(?{native:NAME})` parses to `{kind:"code_block", lang:"native", content:[]}` — callback name silently lost. Perl-style `(?{ NAME })` preserves content normally.
+
+Walker-migration scaffolding was substantial — added typed-object dispatchers for: `escape` (shorthand/control/single_byte/hex/octal/unicode/property), `atom` (capturing_group/noncapturing_group/named_group/python_named_group/atomic_group/branch_reset_group/lookahead/lookbehind/quoted_literal/extended_class/posix_class/char_class/callout/comment/directive_verb/code_block/subroutine_call/inline_modifiers/scoped_inline_modifiers/conditional/alpha_lookaround/non_atomic_lookahead), `class_item` (class_range/class_quoted_range_atom/class_quoted_literal/escape inside class), `conditional_test` (recursion_named/lookahead/lookbehind/version-short-circuit/python_named/callout_assertion), and `subroutine_call_target` (recursion/python_named).
+
+Carrying it forward without PGEN-side fixes would have required either:
+- Heuristic dispatch by `ref` shape (string ⇒ recursion, object ⇒ backref) — mishandles `\g<N>` numeric subroutine call.
+- Parsing the source pattern bytes directly to recover the bracket form / `(?{...})` body — substantial refactor and a true PGEN workaround.
+
+Both rejected per `feedback_no_pgen_workarounds.md`. Submodule rolled back to `056f6784` (1.1.40); regenerated parser via `make regex_parser_bootstrap`; lib tests back to 1118/1118.
+
+### Cost summary at the new pin (for reference)
+Pre-rollback state at `108de21d` with the typed-shape walker scaffolding in place:
+- Lib tests: 1072 / 46 (was 1118 / 0)
+- Conformance: 12,656 / 154 (was 12,704 / 106)
+- ~10 of the 46 lib-test failures were structural (0081 + 0082); the rest were extended-class set-algebra approximation gaps and a few broad fixture sweeps.
+
+### Next concrete action
+- Wait on PGEN to close 0081 and 0082.
+- When PGEN ships the fixes, retry the bump. The walker scaffolding above is the working spec for the migration; it's gone from the working tree now but the patterns are documented across this session and recoverable from the editor history if needed. Cleanest course: re-derive against the post-fix shapes rather than re-apply the scaffolding wholesale.
+- 0078/0079/0080 fixes remain unabsorbed until the next bump succeeds. RGX's testinput2:3979 (`\o{1239}`), testinput1:6679 (`a{ 1 , 2 }`), and testinput2:4262 (per-subject `\=g`) tracker entries stay open until then — first two close automatically with the next bump; case 1 (`replace=`) already closed locally on 2026-05-03.
