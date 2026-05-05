@@ -3608,3 +3608,27 @@ Walkers that did `if let Some(s) = elem.as_str()` silently skipped sub-arrays / 
   - `(*NUL)` engine fix — structural, needs deferred newline-mode rewrite.
   - Cluster 2C `\K` propagation from lookarounds — multi-session engine change.
   - 5 FP / 4 RGX-too-permissive / 3 substitute-other — mostly architectural or harness/PGEN side.
+
+## 2026-05-05 session — well-is-dry: typed-shape sweep exhausted; JIT step-limit edge case documented
+
+After committing the 4 silent-shape fixes (`e716d41`, `c414ab3`, `4506c09`, `b170490`), re-ran FN/SM/FP/other-bucket diffs and confirmed no further newly-introduced silent regressions. Remaining failures are all architectural or structural engine work.
+
+One last investigation: testinput2:6244 / 6249 (`\A\s*(a|(?:[^\`]{28500}){4})/I` on `a`). RGX's CLI matches `a` correctly. With ANY `set_max_steps` limit (even `max_steps=10`), the JIT path returns no-match. The harness sets `max_steps=1_000_000`, so the conformance test sees no-match. Root cause not pinned — verified via threshold probe that limit-vs-no-limit divergence is the trigger (every limit tested 10 → 5M produced None; unbounded produced Some((0,1))). Tracking in the residual catalogue with the diagnosis and a "What to change" pointer to `try_jit_find_first` divergence investigation. 2 cases, JIT-internal — defer.
+
+### Final state at session end
+- Conformance: **12,716 / 94** (started session at 12,697 / 113 → +19 passes / -19 fails total today).
+- Lib: 1118 / 1118.
+- CLI: 30 / 30.
+- Submodule: pinned at `08593d05` (PGEN 1.1.75); all 0078–0082 fixes absorbed.
+- Live continuity docs all in sync per COMMIT.md track B (CHANGES.md, MEMORY.md, README.md, RUST_CODEBASE_ANALYSIS.md, docs/BACKLOG.md). DEVELOPMENT_NOTES.md needs no update (topical, not changelog).
+- Book residual catalogue updated with the JIT step-limit interaction note for future tracking.
+
+### Why the well is dry
+- 5 FP — all architectural (Cluster 2D backtracking-verb interactions, Cluster 3A `(*SKIP)` inside lookbehind, Cluster 1C `(*napla:...)`, Cluster 2C `\K` propagation deferred).
+- 4 RGX-too-permissive — pcre2test-syntax artefacts and build-config divergences (testinput10 no-UTF, `replace=` modifier without `=`).
+- 3 substitute-other — PCRE2 substitute-overlap retry semantic (testinput2:4268, testinput5:1640) and `(*CRLF)` `/gm` substitute (cross-cuts with the `(*NUL)` newline-mode/`/s` interaction documented in Cluster 2D).
+- ~30 FN, ~26 SM — Cluster 1A (recursive captures), Cluster 1B (returned-capture subroutine semantics), Cluster 2A (balanced-bracket recursion), Cluster 2B (empty-alt lazy quantifier) — all multi-session engine work.
+
+### Next concrete action
+- Future engine sessions: pick one of the architectural clusters and dedicate the session to it. Cluster 1A is the largest payoff (~16 FN cases); 2A is intertwined with 1A. Cluster 2B is 4 cases, small surface but engine-deep ("greedy-quantifier advancing retry" from 2026-04-18 was the symmetric fix; the lazy path is unfixed).
+- JIT step-limit divergence on testinput2:6244 worth re-investigating in a fresh session — could close 2 cases if the divergence is a single-spot fix.
