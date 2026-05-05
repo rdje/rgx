@@ -3641,6 +3641,28 @@ Two paths to close these 2 cases, neither tractable in an incremental sweep:
 
 Either is an engine-contract decision worth a deliberate session, not a silent-shape sweep target.
 
+### `(*SKIP)` overrides `(*COMMIT)` — Cluster 1D engine fix (+3 passes)
+
+After declaring the well dry, the user pointed me back at the FN bucket with PNT to focus on the architectural cluster set. Picked Cluster 1D (backtracking-verb interactions) as the most tractable.
+
+Diagnosis was direct: `aaaaa(*COMMIT)(*SKIP)b|a+c` on `aaaaaac` should match `ac` per PCRE2, but RGX returned no-match. Probed each verb separately — COMMIT-alone (no match, correct), SKIP-alone (matches, correct), COMMIT+SKIP (broken). The 8 scanning-loop sites all check `ctx.committed` first and `return None`/`break` before consulting `ctx.skip_position`. PCRE2's semantic is the inverse: SKIP's advance-to-mark supersedes COMMIT's abort.
+
+Fix is mechanical at every site:
+```rust
+if let Some(skip_pos) = ctx.skip_position.take() {
+    // advance to skip_pos; clear committed
+} else if ctx.committed {
+    // abort
+} else {
+    // advance by 1
+}
+```
+Plus the SIMD path's slightly different layout (SKIP consumed at iteration start vs failure tail) needed: when committed fires, check if SKIP is also pending and clear committed if so, letting the next iteration's SKIP-consume advance the cursor.
+
+Recovers testinput1:5429, 5486, 6355. Conformance ratchet 12,716 / 94 → 12,719 / 91. FN bucket 30 → 27.
+
+The catalogue had this exactly right: "Engine fix #36 closed `(*PRUNE)` clearing pending `(*COMMIT)`; the inverse combinations need symmetric treatment." This is the symmetric SKIP-vs-COMMIT inverse.
+
 ### Why the well is dry
 - 5 FP — all architectural (Cluster 2D backtracking-verb interactions, Cluster 3A `(*SKIP)` inside lookbehind, Cluster 1C `(*napla:...)`, Cluster 2C `\K` propagation deferred).
 - 4 RGX-too-permissive — pcre2test-syntax artefacts and build-config divergences (testinput10 no-UTF, `replace=` modifier without `=`).

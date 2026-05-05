@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Engine: `(*SKIP)` overrides `(*COMMIT)` in scanning loop (+3 passes)
+- Scope: `rgx-core/src/vm.rs` — 8 scanning-loop sites in `find_first_scanning`, `find_first_scanning_from`, `find_all`, plus the SIMD path.
+- Changes:
+  - PCRE2 semantic for verb interactions: when both `(*COMMIT)` and `(*SKIP)` fire in the same failed alternation branch, SKIP's "advance scan to mark position" supersedes COMMIT's "abort entire match." RGX was checking COMMIT first and returning None before consulting SKIP — `aaaaa(*COMMIT)(*SKIP)b|a+c` on `aaaaaac` should match `ac` but RGX returned no-match.
+  - Fix swaps the order at every scanning-loop site: check `ctx.skip_position.take()` first; if Some(skip_pos), advance the scan and clear `ctx.committed`; only abort on COMMIT if no SKIP was set.
+  - SIMD path uses a different SKIP-consume layout (SKIP is taken at the start of the next iteration rather than at the failure tail). Fix there: when COMMIT fired, check whether SKIP is also pending — if yes, clear committed so the next iteration's SKIP-consume can run; otherwise break.
+  - Recovers Cluster 1D entries: testinput1:5429 (`aaaaa(*COMMIT)(*SKIP)b|a+c`), testinput1:5486 (`a(*:m)a(*COMMIT)(*SKIP:m)b|a+c/mark`), testinput1:6355 (`a+(*:Z)b(*COMMIT:X)(*SKIP:Z)c|.*`).
+  - Bumps the conformance ratchet baseline from 12,716 / 94 to 12,719 / 91. False-negative bucket 30 → 27.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,719 / 91, ratchet OK).
+- Notes/impact: classic verb-interaction bug. The catalogue noted "Engine fix #36 closed `(*PRUNE)` clearing pending `(*COMMIT)`; the inverse combinations need symmetric treatment." This is exactly the symmetric SKIP-vs-COMMIT case. Doesn't break the COMMIT-alone path: when SKIP isn't set, the abort still fires. Doesn't break the SKIP-alone path: COMMIT isn't set, so the `else if` branch falls through to the regular skip-advance.
+
 ### 2026-05-05 - Walker: `class_quoted_literal` body flattens sub-array elements (+2 passes)
 - Scope: `rgx-core/src/parsing.rs` (`class_quoted_literal` arm in `convert_typed_class_item_object`)
 - Changes: same flatten idiom as the regular `quoted_literal` walker — when PGEN emits a sub-array body element (e.g. `[\Q\n\E]` becomes `[["\\", "n"]]` because `\n` would otherwise hit a reserved grammar terminal), the previous `as_str()`-only walk silently dropped it, omitting the chars from the class set. Now uses `walk_json_terminal_chars` per element.

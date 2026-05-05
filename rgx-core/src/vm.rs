@@ -1620,9 +1620,16 @@ impl RegexVM {
                 );
                 return matched;
             }
-            // (*COMMIT): abort entire search on failure
+            // PCRE2: SKIP overrides COMMIT. If both fired in the
+            // failed attempt, clear committed so the next iteration's
+            // skip-position consume at line 1588 can advance the
+            // candidate cursor instead of breaking out.
             if ctx.committed {
-                break;
+                if ctx.skip_position.is_some() {
+                    ctx.committed = false;
+                } else {
+                    break;
+                }
             }
         }
 
@@ -1855,16 +1862,16 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
-                // (*COMMIT): abort entire search on failure
-                if ctx.committed {
-                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
-                    return None;
-                }
-                // (*SKIP): advance to the skip position instead of start+1.
-                // Guard: named SKIP can target a mark before `start`;
-                // ensure forward progress to avoid an infinite loop.
+                // PCRE2 semantic: when both COMMIT and SKIP fire in
+                // the same branch, SKIP advances scan to its position
+                // and COMMIT's "abort entire match" is overridden.
+                // Check SKIP first; clear committed when SKIP wins.
                 if let Some(skip_pos) = ctx.skip_position.take() {
                     offset = skip_pos.max(start + 1);
+                    ctx.committed = false;
+                } else if ctx.committed {
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
+                    return None;
                 } else {
                     offset = start + 1;
                 }
@@ -1898,16 +1905,15 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
-                // (*COMMIT): abort entire search on failure
-                if ctx.committed {
-                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
-                    return None;
-                }
-                // (*SKIP): advance to the skip position instead of start+1.
-                // Guard: named SKIP can target a mark before `start`;
-                // ensure forward progress to avoid an infinite loop.
+                // PCRE2 semantic: SKIP overrides COMMIT when both
+                // fire in the same branch. See literal-prefix path
+                // above for full rationale.
                 if let Some(skip_pos) = ctx.skip_position.take() {
                     start = skip_pos.max(start + 1);
+                    ctx.committed = false;
+                } else if ctx.committed {
+                    trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
+                    return None;
                 } else {
                     start += 1;
                 }
@@ -1972,11 +1978,12 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
-                if ctx.committed {
-                    return None;
-                }
+                // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
                 if let Some(skip_pos) = ctx.skip_position.take() {
                     offset = skip_pos.max(start + 1);
+                    ctx.committed = false;
+                } else if ctx.committed {
+                    return None;
                 } else {
                     offset = start + 1;
                 }
@@ -2009,11 +2016,12 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
-                if ctx.committed {
-                    return None;
-                }
+                // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
                 if let Some(skip_pos) = ctx.skip_position.take() {
                     start = skip_pos.max(start + 1);
+                    ctx.committed = false;
+                } else if ctx.committed {
+                    return None;
                 } else {
                     start += 1;
                 }
@@ -2092,10 +2100,12 @@ impl RegexVM {
                     });
                     ctx.previous_match_end = Some(m_end);
                     offset = m_end.max(candidate + 1);
+                } else if let Some(skip_pos) = ctx.skip_position.take() {
+                    // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
+                    offset = skip_pos.max(candidate + 1);
+                    ctx.committed = false;
                 } else if ctx.committed {
                     break;
-                } else if let Some(skip_pos) = ctx.skip_position.take() {
-                    offset = skip_pos.max(candidate + 1);
                 } else {
                     offset = candidate + 1;
                 }
@@ -2145,10 +2155,12 @@ impl RegexVM {
                     });
                     ctx.previous_match_end = Some(m_end);
                     start = m_end.max(candidate + 1);
+                } else if let Some(skip_pos) = ctx.skip_position.take() {
+                    // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
+                    start = skip_pos.max(start + 1);
+                    ctx.committed = false;
                 } else if ctx.committed {
                     break;
-                } else if let Some(skip_pos) = ctx.skip_position.take() {
-                    start = skip_pos.max(start + 1);
                 } else {
                     start += 1;
                 }
@@ -4394,15 +4406,14 @@ impl RegexVM {
                     start = m_end.max(candidate + 1);
                     matches.push(m);
                 } else {
-                    // (*COMMIT): abort entire search on failure
-                    if ctx.committed {
-                        break;
-                    }
-                    // (*SKIP): advance to the skip position instead of candidate+1.
-                    // Guard: named SKIP can target a mark before `candidate`;
-                    // ensure forward progress.
+                    // PCRE2 semantic: SKIP overrides COMMIT when both
+                    // fire in the same branch. See find_first_scanning
+                    // for the full rationale.
                     if let Some(skip_pos) = ctx.skip_position.take() {
                         start = skip_pos.max(candidate + 1);
+                        ctx.committed = false;
+                    } else if ctx.committed {
+                        break;
                     } else {
                         start = candidate + 1;
                     }
@@ -4448,14 +4459,13 @@ impl RegexVM {
                     start = m_end.max(start + 1);
                     matches.push(m);
                 } else {
-                    // (*COMMIT): abort entire search on failure
-                    if ctx.committed {
-                        break;
-                    }
-                    // (*SKIP): advance to the skip position instead of start+1.
-                    // Guard: forward progress for named SKIP.
+                    // PCRE2 semantic: SKIP overrides COMMIT when both
+                    // fire in the same branch.
                     if let Some(skip_pos) = ctx.skip_position.take() {
                         start = skip_pos.max(start + 1);
+                        ctx.committed = false;
+                    } else if ctx.committed {
+                        break;
                     } else {
                         start += 1;
                     }

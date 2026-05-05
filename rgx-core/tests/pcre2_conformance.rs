@@ -3199,8 +3199,19 @@ fn run_full_conformance() {
     // `class_quoted_literal` (`[\Q\n\E]` becomes `[["\\", "n"]]`).
     // Sub-array body elements were silently dropped from the class.
     // Recovers testinput2:7554 (2 cases). +2 passes, FN 32 → 30.
-    const PASS_BASELINE: usize = 12_716;
-    const FAIL_BASELINE: usize = 94;
+    //
+    // Bumped 2026-05-05 (g): scanning-loop precedence between
+    // `(*SKIP)` and `(*COMMIT)` — when both fire in the same failed
+    // attempt, PCRE2's semantic is that SKIP advances the scan to
+    // its position, overriding COMMIT's "abort entire match". RGX
+    // was checking COMMIT first and returning None before consulting
+    // SKIP. Fix swaps the order across all 8 scanning-loop sites
+    // (`find_first_scanning` literal+class paths, `find_first_scanning_from`
+    // literal+class paths, `find_all` literal+class paths, plus the
+    // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
+    // backtracking-verb interactions). +3 passes, FN 30 → 27.
+    const PASS_BASELINE: usize = 12_719;
+    const FAIL_BASELINE: usize = 91;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

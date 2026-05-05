@@ -132,10 +132,10 @@ Single-verb behaviours are shipped (engine fixes #9, #18, #24, #25, #27, #28, #3
 
 | File:line | Pattern | Subject | Note |
 |---|---|---|---|
-| testinput1:5429 | `aaaaa(*COMMIT)(*SKIP)b\|a+c` | `aaaaaac` | COMMIT then SKIP pair — PCRE2 advances scan to SKIP position after COMMIT abort |
+| ~~testinput1:5429~~ | ~~`aaaaa(*COMMIT)(*SKIP)b\|a+c`~~ | ~~`aaaaaac`~~ | ✅ CLOSED 2026-05-05. SKIP-overrides-COMMIT precedence fix in `vm.rs` scanning loops. |
 | testinput1:5457 | `aaaaa(*COMMIT)(*THEN)b\|a+c` | `aaaaaac` | COMMIT then THEN |
-| testinput1:5486 | `a(*:m)a(*COMMIT)(*SKIP:m)b\|a+c/mark` | `aaaaaac` | MARK + COMMIT + named SKIP |
-| testinput1:6355 | `a+(*:Z)b(*COMMIT:X)(*SKIP:Z)c\|.*` | `aaaabd` | named COMMIT + named SKIP with different names |
+| ~~testinput1:5486~~ | ~~`a(*:m)a(*COMMIT)(*SKIP:m)b\|a+c/mark`~~ | ~~`aaaaaac`~~ | ✅ CLOSED 2026-05-05. Same root as testinput1:5429. |
+| ~~testinput1:6355~~ | ~~`a+(*:Z)b(*COMMIT:X)(*SKIP:Z)c\|.*`~~ | ~~`aaaabd`~~ | ✅ CLOSED 2026-05-05. Same root as testinput1:5429. |
 | testinput2:3350 | `^.*? (?1) c (?(DEFINE)(a(*THEN)b))/x` | `aabc` | THEN reached through DEFINE recursion |
 | testinput2:6604 | `a?(?=b(*COMMIT)c\|)d/I` | `bd` | Start-optimization: RGX's literal-prefix scan can't look past leading `a?` |
 | testinput2:6607 | `(?=b(*COMMIT)c\|)d/I` | `bd` | same family |
