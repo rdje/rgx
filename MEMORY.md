@@ -3623,6 +3623,24 @@ One last investigation: testinput2:6244 / 6249 (`\A\s*(a|(?:[^\`]{28500}){4})/I`
 - Live continuity docs all in sync per COMMIT.md track B (CHANGES.md, MEMORY.md, README.md, RUST_CODEBASE_ANALYSIS.md, docs/BACKLOG.md). DEVELOPMENT_NOTES.md needs no update (topical, not changelog).
 - Book residual catalogue updated with the JIT step-limit interaction note for future tracking.
 
+### testinput2:6244/6249 root-cause pinned (engine contract trade-off, not a fix)
+
+Traced the limit-vs-no-limit divergence to `Engine::should_dispatch_to_c2` (engine.rs:1770):
+
+```rust
+if self.vm.has_runtime_match_limits() {
+    return None;
+}
+```
+
+The gate skips Pike-VM dispatch whenever ANY runtime limit is set. The documented rationale: "patterns relying on [event observers or limits] continue to run on the existing backtracking VM." For our pattern, this means Pike-VM (linear-time, would handle the giant alternation in milliseconds) is bypassed and the JIT path runs the giant compiled program until the step limit trips.
+
+Two paths to close these 2 cases, neither tractable in an incremental sweep:
+- **(a)** Remove the limit gate. Pike-VM is linear-time by design; the limits' raison d'être is catastrophic-backtracking protection that Pike doesn't need. Violates the current documented contract.
+- **(b)** Thread `max_steps` through to Pike-VM and respect it as an NFA-step counter. Adds new infrastructure to Pike's hot loop.
+
+Either is an engine-contract decision worth a deliberate session, not a silent-shape sweep target.
+
 ### Why the well is dry
 - 5 FP — all architectural (Cluster 2D backtracking-verb interactions, Cluster 3A `(*SKIP)` inside lookbehind, Cluster 1C `(*napla:...)`, Cluster 2C `\K` propagation deferred).
 - 4 RGX-too-permissive — pcre2test-syntax artefacts and build-config divergences (testinput10 no-UTF, `replace=` modifier without `=`).
