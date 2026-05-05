@@ -3543,3 +3543,29 @@ Lib tests 1118/1118; conformance ratchet 12,704 / 106 → 12,705 / 105. SM bucke
 ### Next concrete action
 - Continue audit. Most remaining FN/SM cases are architectural (recursive captures, deep recursion, `(*napla:...)`); the catalogue's lowest-effort entries are largely worked through.
 - Cluster 2H (testinput1:6481, lookahead-as-alt in greedy `*`) is still open — single case but the engine fix touches the `*`-loop logic.
+
+## 2026-05-05 session — PGEN bump 1.1.40 → 1.1.75 + typed-shape walker migration (+2 passes)
+
+PGEN closed PGEN-RGX-0081 and 0082 (the regressions that blocked the previous bump cycle). User asked to retry the bump. Submodule pulled forward `056f6784 → 08593d05`; regenerated parser via `make regex_parser_bootstrap`. Lib tests at the new pin started at 578/540 — same migration scope as the aborted attempt three days ago, but this time with PGEN's typed shapes preserving the bracket-form distinction (\g<n> vs \g{n}) and the code_block_lang body content.
+
+Walker migration applied in two phases:
+1. Re-derived the typed-shape dispatchers from the prior session's working spec — typed `escape` and `atom` objects now route through `convert_typed_escape_object` / `convert_typed_atom_kind_object`. Approximately 600 lines of new dispatch + helpers.
+2. Backreference walker extended for the 4 new 0081 kinds: `subroutine_named`, `subroutine_numeric`, `numeric_backreference`, `python_named`. Each maps to a clean `Regex::Recursion` / `Regex::Backreference` variant — no more heuristic dispatch by `ref` shape.
+
+ECC content reconstruction was the trickiest piece. PGEN's typed body for `(?[[\dA-F]])` includes a typed escape object `{type:"escape",kind:"shorthand",char:"d"}`, which `walk_json_terminal_chars` would naively concatenate as `dshorthandescape`. New `reconstruct_typed_class_text` helper detects typed escape objects and emits the source escape syntax (`\d`/`\xFF`/`\p{...}`/etc.) so the compiler's dedicated ECC evaluator gets the input it expects.
+
+`\p{...}` walker output changed from `Regex::CharClass::Custom` to `Regex::CharClass::UnicodeClass`. The compiler's case-fold expansion (`\p{Lu}/i` → `\p{L&}`) only fires on the UnicodeClass variant — the lib regression test `case_distinguished_property_expands_under_i` would have failed otherwise.
+
+Walker fixes that landed:
+- typed `class_range` with `class_quoted_range_atom` endpoints (`[\Qa\E-\Qz\E]`).
+- typed `escape` inside char_class body — lowered into ranges via the regular escape walker, with `lower_regex_into_class_ranges` extended for `Digit`/`Word`/`Space`/`UnicodeClass` shorthands plus `\b` → `\x08` in class context plus single-digit backreferences (`\8`, `\9`) → literal digit chars.
+- `(?)` empty inline_modifiers → no-op.
+- VERSION conditionals (`=`, `==`, `>=`, etc.) short-circuit at parse time.
+- `alpha_lookaround` covers both short (`pla`/`plb`/`nlb`/`nla`) and long names plus `napla`/`naplb` variants.
+
+Final: lib 1118/1118; CLI 30/30; conformance ratchet 12,705 / 105 → 12,707 / 103. RGX-too-permissive 5 → 4 (PGEN-RGX-0079 fix closed `\o{1239}` rejection).
+
+### Next concrete action
+- Subsequent PGEN bumps in this generation should be smaller — the dispatch backbone is now in place.
+- Continue FN/SM audit. Remaining tractable wins are scarce; most are architectural (Cluster 1A recursive captures).
+- The `(*NUL)` directive bug discovered earlier (RGX excludes NUL from `.` even under `/s`) is still open — a real engine bug worth filing as a follow-up.

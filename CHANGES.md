@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - PGEN bump 1.1.40 → 1.1.75 + typed-shape walker migration (+2 passes)
+- Scope: `subs/pgen` submodule pin, `rgx-core/src/parsing.rs` (typed-walker scaffolding), `rgx-core/tests/pcre2_conformance.rs` (baseline bump).
+- Submodule: `056f6784` → `08593d05` (parser releases 1.1.40 → 1.1.75; contract 1.1.42 → 1.1.77). Regenerate with `make -C subs/pgen/rust regex_parser_bootstrap`.
+- Absorbs PGEN-side fixes for **0078** (compile-perf verification + Optim #14/#15 cached-worker + inline-fast-path), **0079** (`\o{<non-octal>}` rejection), **0080** (whitespace inside `{m,n}`), **0081** (`\g`-bracket-form distinction restored), **0082** (`code_block_lang` content drop fixed). The 0081/0082 cycle was a false start three days ago — submodule was rolled back so RGX could file the regressions; re-bumped now that PGEN closed both.
+- Walker migration in `parsing.rs`:
+  - New typed-object dispatchers in `convert_typed_atom_object`: `escape` (shorthand/control/single_byte/hex/octal/unicode/property) and `atom` (capturing_group, noncapturing_group, named_group, python_named_group, atomic_group, branch_reset_group, lookahead/lookahead_neg/lookbehind/lookbehind_neg, non_atomic_lookahead, alpha_lookaround [pla/plb/nla/nlb + non_atomic variants + long names], char_class, callout, comment, directive_verb [including mark_shorthand], code_block, subroutine_call, inline_modifiers + scoped_inline_modifiers, conditional, quoted_literal, extended_class, posix_class).
+  - Backreference walker extended for the 4 new 0081 kinds: `subroutine_named`, `subroutine_numeric`, `numeric_backreference`, `python_named` (alias of `named`).
+  - `convert_typed_class_item_object` extended: typed `class_range` with escape-typed endpoints, `class_quoted_range_atom`, `class_quoted_literal`, `escape` inside a class body (lower into ranges via the regular escape walker).
+  - `convert_typed_conditional_test` extended: `recursion_named`, typed `lookahead`/`lookbehind`, `alpha_lookaround` predicate, `callout_assertion`, `python_named`. VERSION conditionals short-circuit at parse time.
+  - `convert_typed_subroutine_call_target`: `numeric`/`named`/`recursion` (`(?R)`)/`python_named` (`(?P>n)`).
+  - New helpers: `convert_typed_alpha_lookaround_object`, `convert_typed_char_class_object`, `convert_typed_directive_verb_object`, `convert_typed_code_block_object`, `convert_typed_subroutine_call_object`, `convert_typed_inline_modifiers_object`, `convert_typed_conditional_object`, `convert_typed_pattern_branch_array`, `collect_extended_class_ranges`, `lower_regex_into_class_ranges`, `endpoint_to_char`, `reconstruct_typed_class_text`.
+  - `\p{...}` typed escape now lowers to `Regex::CharClass::UnicodeClass` (not `Custom`) so the compiler's case-fold expansion (`\p{Lu}/i` → `\p{L&}`) fires correctly.
+  - ECC `extended_class` body reconstruction uses a typed-aware walker that emits proper escape syntax (e.g. typed `{type:"escape",kind:"shorthand",char:"d"}` → `\d`) instead of concatenating field values.
+  - `(?)` empty-spec inline_modifiers handled as no-op.
+- Bumps the conformance ratchet baseline from 12,705 / 105 to 12,707 / 103. RGX-too-permissive bucket 5 → 4 (testinput2:3979 `\o{1239}` rejected by PGEN per 0079 fix).
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,707/103, ratchet OK), clippy clean of errors.
+- Notes/impact: substantial walker rewrite spanning ~600 lines of new dispatch code. Tracks PGEN's slice 11–42 typed-shape campaign as a single migration. Subsequent PGEN bumps within this generation should require minimal additional walker work — the dispatch backbone is in place.
+
 ### 2026-05-05 - Engine: PCRE2 quoted-run-as-range-start in char_class (+1 pass)
 - Scope: `rgx-core/src/parsing.rs` (`convert_typed_char_class` body iteration)
 - Changes:

@@ -3152,13 +3152,23 @@ fn run_full_conformance() {
     // pcre2pattern(3) §"Option settings". Recovers testinput4:2383
     // (`/A‎‏  B/x,utf` against `AB`); +1 pass, FN 65 → 64.
     //
-    // Bumped 2026-05-05: char_class body walker now detects the
+    // Bumped 2026-05-05 (a): char_class body walker now detects the
     // PCRE2 quoted-run-as-range-start shape `[\Qabc\E-z]` — the last
     // char of the quoted run is the range start, not just a literal.
     // Catalogue Cluster 2F. Recovers testinput1:6797
     // (`[\Qabc\E-z]+` on `abcdwxyz`); +1 pass, SM 27 → 26.
-    const PASS_BASELINE: usize = 12_705;
-    const FAIL_BASELINE: usize = 105;
+    //
+    // Bumped 2026-05-05 (b): PGEN submodule pulled forward
+    // 056f6784 → 08593d05 (releases 1.1.40 → 1.1.75) absorbing fixes
+    // for PGEN-RGX-0078/0079/0080/0081/0082. Major typed-shape walker
+    // migration in `parsing.rs` to handle the new typed `escape`,
+    // `atom`, `class_item`, and `conditional_test` object shapes
+    // accumulated across slices 11–42. Closes testinput2:3979
+    // (`\o{1239}` now rejected at parse time per 0079 fix), and
+    // recovers a handful of misc cases via the cleaner walker
+    // dispatch. +2 passes, RGX-too-permissive 5 → 4.
+    const PASS_BASELINE: usize = 12_707;
+    const FAIL_BASELINE: usize = 103;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
