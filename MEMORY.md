@@ -3569,3 +3569,42 @@ Final: lib 1118/1118; CLI 30/30; conformance ratchet 12,705 / 105 → 12,707 / 1
 - Subsequent PGEN bumps in this generation should be smaller — the dispatch backbone is now in place.
 - Continue FN/SM audit. Remaining tractable wins are scarce; most are architectural (Cluster 1A recursive captures).
 - The `(*NUL)` directive bug discovered earlier (RGX excludes NUL from `.` even under `/s`) is still open — a real engine bug worth filing as a follow-up.
+
+## 2026-05-05 session — post-bump silent-shape sweep (+9 passes from migration aftermath)
+
+After committing the PGEN bump (`42d1809` → ratchet 12,705/105 → 12,707/103), swept the FP and SM buckets to surface any silent typed-shape gaps the migration may have introduced. Five rounds of fixes landed, each from a single shape mismatch caught by post-bump bucket dumps:
+
+| Commit | Shape gap | Recovery | Conformance |
+|---|---|---|---|
+| `cfe676a` | `(*NUL)` engine bug — diagnosed but structural; documented in residual catalogue | 0 | 12,707/103 |
+| `e716d41` | `initial_close: true` (boolean) for leading-`]` `[]…]` / `[^]…]` — walker only checked `"]"` (string) | +5 | 12,712/98 |
+| `c414ab3` | typed `class_quoted_literal` in the quoted-run-as-range-start peek-ahead — Cluster 2F closure regressed silently after the bump because `is_quoted_class_run` only matched the legacy array shape | +1 | 12,713/97 |
+| `4506c09` | typed `quoted_literal` body — `\Q…\E` walker accepted only `as_str()` body elements, dropping sub-arrays like `["\\","$"]` for `\$` | +1 | 12,714/96 |
+| `b170490` | typed `class_quoted_literal` body + `extract_quoted_class_chars` helper + `code_block` content — same flatten idiom applied across all body-walking sites for consistency | +2 | 12,716/94 |
+
+### Why the silent-shape pattern repeats
+PGEN's typed shapes occasionally encode a single character as a **sub-array** rather than a string when the literal char would otherwise hit a reserved grammar terminal:
+- `\$` inside `\Q…\E` → `["\\", "$"]` (because `$` is the anchor terminal).
+- `\n` inside `\Q\n\E` → `["\\", "n"]` (n is benign, but the `\` is escaping a metacharacter so PGEN keeps the explicit pair).
+- Boolean `true` for marker fields (`initial_close: true`) where strings used to be enough.
+
+Walkers that did `if let Some(s) = elem.as_str()` silently skipped sub-arrays / non-string shapes. The fix idiom is `walk_json_terminal_chars` per element, which flattens both strings and nested array structures into characters.
+
+**Audit checklist established**: every typed `body:[]` / `content:[]` field walker should use `walk_json_terminal_chars` per element, not `as_str()`. The audit covered:
+- `convert_typed_atom_kind_object` "quoted_literal" arm — fixed.
+- `convert_typed_class_item_object` "class_quoted_literal" arm — fixed.
+- `extract_quoted_class_chars` helper (typed-object branch) — fixed prophylactically.
+- `convert_typed_code_block_object` content — fixed prophylactically.
+
+### Final state at session end
+- Conformance: **12,716 / 94** (started session at 12,697 / 113 → +19 passes / -19 fails total today).
+- Lib: 1118 / 1118.
+- CLI: 30 / 30.
+- Submodule: pinned at `08593d05` (PGEN 1.1.75); all 0078–0082 fixes absorbed.
+
+### Next concrete action
+- Continue the FN bucket diff sweep. Each silent-shape gap surfaced in this round was small (1–5 lines) and high-leverage (recovers 1–5 cases). Worth a few more rounds before the well runs dry.
+- Remaining open bugs:
+  - `(*NUL)` engine fix — structural, needs deferred newline-mode rewrite.
+  - Cluster 2C `\K` propagation from lookarounds — multi-session engine change.
+  - 5 FP / 4 RGX-too-permissive / 3 substitute-other — mostly architectural or harness/PGEN side.
