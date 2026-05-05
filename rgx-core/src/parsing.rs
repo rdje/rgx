@@ -1096,12 +1096,18 @@ impl<'a> PgenAstAdapter<'a> {
                 let body = map.get("body").and_then(|v| v.as_array()).ok_or_else(|| {
                     self.contract_error("typed quoted_literal missing 'body' array")
                 })?;
+                // Inside `\Q…\E`, every byte is a literal — no escape
+                // interpretation. PGEN occasionally emits a sub-array
+                // for chars that would otherwise hit a reserved grammar
+                // terminal (e.g. `\$` parses as `["\\", "$"]`). Flatten
+                // every body element to literal chars; ignore typed
+                // sub-shapes since they shouldn't appear inside `\Q\E`.
                 let mut items = Vec::with_capacity(body.len());
                 for elem in body {
-                    if let Some(s) = elem.as_str() {
-                        for ch in s.chars() {
-                            items.push(Regex::Char(ch));
-                        }
+                    let mut text = String::new();
+                    walk_json_terminal_chars(elem, &mut text);
+                    for ch in text.chars() {
+                        items.push(Regex::Char(ch));
                     }
                 }
                 match items.len() {

@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Walker: `quoted_literal` body flattens sub-array elements (+1 pass)
+- Scope: `rgx-core/src/parsing.rs` (typed `quoted_literal` arm in `convert_typed_atom_kind_object`)
+- Changes:
+  - PGEN parses certain chars inside `\Q…\E` as sub-arrays rather than plain strings — `\$` becomes `["\\", "$"]` because the literal `$` would otherwise hit the anchor terminal in the grammar. The walker accepted only `as_str()` body elements, so the sub-array was silently dropped, truncating the literal sequence.
+  - Now uses `walk_json_terminal_chars` per element to flatten any nested terminal-string structure into characters before pushing as `Regex::Char`.
+  - Recovers testinput1:3760 (`/\Qabc\$xyz\E/` against `abc\$xyz`).
+  - Bumps the conformance ratchet baseline from 12,713 / 97 to 12,714 / 96. False-negative bucket 33 → 32.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,714 / 96, ratchet OK).
+- Notes/impact: third silent typed-shape gap surfaced by post-bump bucket sweeps. The pattern is consistent: PGEN's typed shape encodes some sub-elements as arrays where strings used to suffice; walkers that did `if let Some(s) = elem.as_str()` skipped them. The fix idiom is `walk_json_terminal_chars` to handle both forms.
+
 ### 2026-05-05 - Walker: typed `class_quoted_literal` recognised in quoted-run-as-range-start (+1 pass)
 - Scope: `rgx-core/src/parsing.rs` (`is_quoted_class_run` + `extract_quoted_class_chars`)
 - Changes:

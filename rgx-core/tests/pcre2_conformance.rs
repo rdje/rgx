@@ -3186,8 +3186,16 @@ fn run_full_conformance() {
     // session regressed silently after the bump. Restored.
     // Recovers testinput1:6797 (`[\Qabc\E-z]+` on `abcdwxyz`).
     // +1 pass, SM 27 → 26.
-    const PASS_BASELINE: usize = 12_713;
-    const FAIL_BASELINE: usize = 97;
+    //
+    // Bumped 2026-05-05 (e): typed `quoted_literal` walker now
+    // flattens sub-array body elements (e.g. `\$` parses as
+    // `["\\", "$"]` inside `\Q…\E`) by walking JSON terminals
+    // instead of accepting only `as_str()` elements. Sub-arrays
+    // were silently dropped, truncating the literal sequence.
+    // Recovers testinput1:3760 (`/\Qabc\$xyz\E/` against
+    // `abc\$xyz`). +1 pass, FN 33 → 32.
+    const PASS_BASELINE: usize = 12_714;
+    const FAIL_BASELINE: usize = 96;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
