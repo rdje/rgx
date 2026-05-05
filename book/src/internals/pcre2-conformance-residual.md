@@ -294,7 +294,11 @@ Multi-verb interactions where RGX picks a different span than PCRE2.
 | testinput2:2357 | `(*NUL)^.*/s` | `a\nb\0ccc` | `a\nb\0ccc` | `a\nb` |
 | testinput2:6189 | `(*napla:a\|(.)(*ACCEPT)zz)\1../` | `abc` | `abc` | `bcd` |
 
-**What to change**: per case. `(*NUL)` newline convention (first case testinput2:2357) probably needs `(*NUL)` threaded into the `.`/`\N`/`^`/`$` handling similar to how `(*CRLF)` etc. are. The `(*:N)` + `(*SKIP:N)` + atomic-group interactions (testinput1:6318/6326/6329) are PCRE2-specific mark-registry lifecycle semantics.
+**What to change**: per case.
+
+`(*NUL)` (testinput2:2357) — verified 2026-05-05: the directive IS threaded through (`NewlineMode::Nul` is recognised in `parsing.rs::dot_ast`), but the rewrite to a negated `\0` CharClass happens at parse time, before `/s` flag context is known. Under `/s`, `.` should match everything including `\0`; the static rewrite ignores the flag and incorrectly truncates `.*` at NUL. The fix is structural: defer the newline-mode rewrite to compile time so it can consult the dot-all flag. Same shape applies to the `(*CRLF)` rewrite — both produce CharClass / Lookaround structures at parse time that don't compose with `/s`. **Engine task**: introduce a `Regex::DotWithNewlineMode(NewlineMode)` AST node (or thread newline_mode through the existing `Regex::Dot`) so the compiler can pick the right semantic per `/s` scope.
+
+The `(*:N)` + `(*SKIP:N)` + atomic-group interactions (testinput1:6318/6326/6329) are PCRE2-specific mark-registry lifecycle semantics.
 
 ## Cluster 2E — `(?0)` self-pattern recursion (3 cases)
 
