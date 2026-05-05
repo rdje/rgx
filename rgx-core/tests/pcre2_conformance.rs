@@ -3194,8 +3194,13 @@ fn run_full_conformance() {
     // were silently dropped, truncating the literal sequence.
     // Recovers testinput1:3760 (`/\Qabc\$xyz\E/` against
     // `abc\$xyz`). +1 pass, FN 33 → 32.
-    const PASS_BASELINE: usize = 12_714;
-    const FAIL_BASELINE: usize = 96;
+    //
+    // Bumped 2026-05-05 (f): same flatten idiom applied to typed
+    // `class_quoted_literal` (`[\Q\n\E]` becomes `[["\\", "n"]]`).
+    // Sub-array body elements were silently dropped from the class.
+    // Recovers testinput2:7554 (2 cases). +2 passes, FN 32 → 30.
+    const PASS_BASELINE: usize = 12_716;
+    const FAIL_BASELINE: usize = 94;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

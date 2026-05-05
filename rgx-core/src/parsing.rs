@@ -1712,10 +1712,12 @@ impl<'a> PgenAstAdapter<'a> {
             .and_then(|v| v.as_array())
             .ok_or_else(|| self.contract_error("typed code_block missing 'content' array"))?;
         let mut buf = String::new();
+        // Use `walk_json_terminal_chars` per element so sub-array
+        // shapes (PGEN's encoding for chars that hit reserved grammar
+        // terminals — e.g. `\$` becomes `["\\", "$"]`) flatten into
+        // literal chars instead of being silently dropped.
         for elem in content {
-            if let Some(s) = elem.as_str() {
-                buf.push_str(s);
-            }
+            walk_json_terminal_chars(elem, &mut buf);
         }
         let lang = map
             .get("lang")
@@ -3162,10 +3164,13 @@ impl<'a> PgenAstAdapter<'a> {
             }
         } else if let Some(map) = item.as_object() {
             if let Some(body) = map.get("body").and_then(|v| v.as_array()) {
+                // Same sub-array flatten idiom as the typed
+                // quoted_literal walkers: `\$` parses as
+                // `["\\", "$"]` because the literal `$` would hit
+                // the anchor terminal. Use `walk_json_terminal_chars`
+                // per element so both shapes contribute chars.
                 for elem in body {
-                    if let Some(s) = elem.as_str() {
-                        text.push_str(s);
-                    }
+                    walk_json_terminal_chars(elem, &mut text);
                 }
             }
         }
@@ -3267,11 +3272,16 @@ impl<'a> PgenAstAdapter<'a> {
                 let body = map.get("body").and_then(|v| v.as_array()).ok_or_else(|| {
                     self.contract_error("typed class_quoted_literal missing 'body'")
                 })?;
+                // PGEN emits sub-array body elements for chars that
+                // would hit a reserved grammar terminal — `\Q\n\E`
+                // becomes `[["\\", "n"]]` (backslash + n). Flatten
+                // with `walk_json_terminal_chars` so both strings and
+                // sub-arrays contribute literal class members.
                 for elem in body {
-                    if let Some(s) = elem.as_str() {
-                        for ch in s.chars() {
-                            ranges.push(CharRange::single(ch));
-                        }
+                    let mut text = String::new();
+                    walk_json_terminal_chars(elem, &mut text);
+                    for ch in text.chars() {
+                        ranges.push(CharRange::single(ch));
                     }
                 }
                 Ok(())

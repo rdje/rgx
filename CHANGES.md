@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Walker: `class_quoted_literal` body flattens sub-array elements (+2 passes)
+- Scope: `rgx-core/src/parsing.rs` (`class_quoted_literal` arm in `convert_typed_class_item_object`)
+- Changes: same flatten idiom as the regular `quoted_literal` walker — when PGEN emits a sub-array body element (e.g. `[\Q\n\E]` becomes `[["\\", "n"]]` because `\n` would otherwise hit a reserved grammar terminal), the previous `as_str()`-only walk silently dropped it, omitting the chars from the class set. Now uses `walk_json_terminal_chars` per element.
+- Recovers testinput2:7554 (`[\Q\n\E]` against `\` and against `n` — 2 cases).
+- Bumps the conformance ratchet baseline from 12,714 / 96 to 12,716 / 94. False-negative bucket 32 → 30.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,716 / 94, ratchet OK).
+- Notes/impact: fourth silent typed-shape gap surfaced by post-bump bucket sweeps. The pattern is now well-understood: PGEN's typed body shapes occasionally encode reserved-terminal characters as sub-arrays, and any walker that did `if let Some(s) = elem.as_str()` skipped them. Audit checklist: every typed `body:[]` field walker should use `walk_json_terminal_chars` per element rather than `as_str()`.
+
 ### 2026-05-05 - Walker: `quoted_literal` body flattens sub-array elements (+1 pass)
 - Scope: `rgx-core/src/parsing.rs` (typed `quoted_literal` arm in `convert_typed_atom_kind_object`)
 - Changes:
