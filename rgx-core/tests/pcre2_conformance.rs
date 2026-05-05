@@ -3175,8 +3175,19 @@ fn run_full_conformance() {
     // string form, so leading-`]` was silently dropped from the
     // class set. Recovers testinput1:154 (`/^[^]cde]/` on `]thing`)
     // and 4 more cases sharing the same shape. +5 passes, FP 7 → 5.
-    const PASS_BASELINE: usize = 12_712;
-    const FAIL_BASELINE: usize = 98;
+    //
+    // Bumped 2026-05-05 (d): `is_quoted_class_run` /
+    // `extract_quoted_class_chars` now recognise the typed
+    // `{type:"class_quoted_literal", body:[<chars>]}` form alongside
+    // the legacy `["\\Q", <chars>, "\\E"]` array. PGEN's typed shape
+    // for `[\Qabc\E-z]` post-bump goes through the typed walker,
+    // which previously missed the quoted-run-as-range-start peek-
+    // ahead — so the same pattern Cluster 2F closed earlier this
+    // session regressed silently after the bump. Restored.
+    // Recovers testinput1:6797 (`[\Qabc\E-z]+` on `abcdwxyz`).
+    // +1 pass, SM 27 → 26.
+    const PASS_BASELINE: usize = 12_713;
+    const FAIL_BASELINE: usize = 97;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -3133,19 +3133,34 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Is `item` a `\Q…\E` quoted run inside a char_class body?
+    /// Recognises both the legacy un-typed array shape
+    /// `["\\Q", <chars>, "\\E"]` and the typed-object form
+    /// `{type:"class_quoted_literal", body:[<chars>]}`.
     fn is_quoted_class_run(item: &serde_json::Value) -> bool {
         if let Some(arr) = item.as_array() {
             return matches!(arr.first().and_then(|v| v.as_str()), Some("\\Q"));
         }
+        if let Some(map) = item.as_object() {
+            return map.get("type").and_then(|v| v.as_str()) == Some("class_quoted_literal");
+        }
         false
     }
 
-    /// Extract the literal characters from a `[\Q, <chars>, \E]` array.
+    /// Extract the literal characters from a quoted-run class_item.
+    /// Handles both the legacy array shape and the typed-object form.
     fn extract_quoted_class_chars(item: &serde_json::Value) -> String {
         let mut text = String::new();
         if let Some(arr) = item.as_array() {
             if let Some(slot) = arr.get(1) {
                 walk_json_terminal_chars(slot, &mut text);
+            }
+        } else if let Some(map) = item.as_object() {
+            if let Some(body) = map.get("body").and_then(|v| v.as_array()) {
+                for elem in body {
+                    if let Some(s) = elem.as_str() {
+                        text.push_str(s);
+                    }
+                }
             }
         }
         text

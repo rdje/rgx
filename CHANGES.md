@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Walker: typed `class_quoted_literal` recognised in quoted-run-as-range-start (+1 pass)
+- Scope: `rgx-core/src/parsing.rs` (`is_quoted_class_run` + `extract_quoted_class_chars`)
+- Changes:
+  - PGEN now emits `[\Qabc\E]` inside char_class as `{type:"class_quoted_literal", body:["a","b","c"]}` (typed object) — the legacy un-typed array shape `["\\Q", <chars>, "\\E"]` was the only form the helpers recognised. After the PGEN bump, `[\Qabc\E-z]` flowed through the typed walker without the peek-ahead firing, regressing the Cluster 2F closure from earlier in the session.
+  - Both helpers now accept either the legacy array shape or the typed-object form.
+  - Recovers testinput1:6797 (`[\Qabc\E-z]+` on `abcdwxyz`).
+  - Bumps the conformance ratchet baseline from 12,712 / 98 to 12,713 / 97. Span-mismatch bucket 27 → 26.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,713 / 97, ratchet OK).
+- Notes/impact: same root-cause class as the earlier `initial_close: true` fix — silent typed-shape change in PGEN's slice campaign that the walker hadn't been taught to recognise. Surfaced via post-bump SM bucket sweep. Both legacy and typed encodings are now accepted, so the walker tolerates PGEN flipping back-and-forth on this encoding.
+
 ### 2026-05-05 - Walker: accept boolean `initial_close: true` for leading-`]` char_class (+5 passes)
 - Scope: `rgx-core/src/parsing.rs` (`convert_typed_char_class_object`)
 - Changes:
