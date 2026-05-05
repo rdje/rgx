@@ -3167,8 +3167,16 @@ fn run_full_conformance() {
     // (`\o{1239}` now rejected at parse time per 0079 fix), and
     // recovers a handful of misc cases via the cleaner walker
     // dispatch. +2 passes, RGX-too-permissive 5 → 4.
-    const PASS_BASELINE: usize = 12_707;
-    const FAIL_BASELINE: usize = 103;
+    //
+    // Bumped 2026-05-05 (c): typed `char_class` walker now accepts
+    // `initial_close: true` (boolean) for the leading-`]` shape
+    // `[]…]` / `[^]…]`. PGEN switched from `"]"` (string) to `true`
+    // somewhere in the slice campaign; the walker only checked the
+    // string form, so leading-`]` was silently dropped from the
+    // class set. Recovers testinput1:154 (`/^[^]cde]/` on `]thing`)
+    // and 4 more cases sharing the same shape. +5 passes, FP 7 → 5.
+    const PASS_BASELINE: usize = 12_712;
+    const FAIL_BASELINE: usize = 98;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

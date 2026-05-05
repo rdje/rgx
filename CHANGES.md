@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Walker: accept boolean `initial_close: true` for leading-`]` char_class (+5 passes)
+- Scope: `rgx-core/src/parsing.rs` (`convert_typed_char_class_object`)
+- Changes:
+  - PGEN's typed `char_class` shape switched from `initial_close: "]"` (string) to `initial_close: true` (boolean) for the leading-`]` form `[]…]` / `[^]…]`. The walker only matched on the string form, so `]` was silently dropped from the class set — `[^]cde]` lowered as `[^cde]`, falsely matching `]` characters.
+  - Now accepts both encodings: bool `true`, or string `"]"`. Empty array / `false` / absent → not present.
+  - Recovers testinput1:154 (`/^[^]cde]/` on `]thing` — PCRE2 no match, RGX was matching), testinput1:2539 (`/a[^]b]c/` on `a]c`), and 3 more cases sharing the same shape.
+  - Bumps the conformance ratchet baseline from 12,707 / 103 to 12,712 / 98. False-positive bucket 7 → 5.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,712 / 98, ratchet OK).
+- Notes/impact: this gap was introduced silently somewhere in PGEN's slice campaign — neither the PGEN release notes for 1.1.74/1.1.75 nor my own walker probes flagged the boolean form. Surfaced via the FP bucket dump after the bump landed. The walker now tolerates both shapes so future PGEN flips back-and-forth on this encoding don't break us again.
+
 ### 2026-05-05 - PGEN bump 1.1.40 → 1.1.75 + typed-shape walker migration (+2 passes)
 - Scope: `subs/pgen` submodule pin, `rgx-core/src/parsing.rs` (typed-walker scaffolding), `rgx-core/tests/pcre2_conformance.rs` (baseline bump).
 - Submodule: `056f6784` → `08593d05` (parser releases 1.1.40 → 1.1.75; contract 1.1.42 → 1.1.77). Regenerate with `make -C subs/pgen/rust regex_parser_bootstrap`.

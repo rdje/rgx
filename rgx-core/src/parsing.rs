@@ -943,14 +943,15 @@ impl<'a> PgenAstAdapter<'a> {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| self.contract_error("typed property-escape missing 'name'"))?
                     .to_string();
-                let negated = map.get("negated").and_then(|v| v.as_bool()).unwrap_or(false);
-                Ok(Regex::CharClass(CharClass::UnicodeClass {
-                    name,
-                    negated,
-                }))
+                let negated = map
+                    .get("negated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Ok(Regex::CharClass(CharClass::UnicodeClass { name, negated }))
             }
-            other => Err(self
-                .contract_error(&format!("unrecognised typed escape kind: {other:?}"))),
+            other => {
+                Err(self.contract_error(&format!("unrecognised typed escape kind: {other:?}")))
+            }
         }
     }
 
@@ -1065,7 +1066,9 @@ impl<'a> PgenAstAdapter<'a> {
             "alpha_lookaround" => self.convert_typed_alpha_lookaround_object(map),
             "char_class" => self.convert_typed_char_class_object(map),
             "callout" => match map.get("arg") {
-                Some(serde_json::Value::Number(n)) => Ok(Regex::Callout(n.as_u64().unwrap_or(0) as u32)),
+                Some(serde_json::Value::Number(n)) => {
+                    Ok(Regex::Callout(n.as_u64().unwrap_or(0) as u32))
+                }
                 Some(serde_json::Value::Array(a)) if a.is_empty() => Ok(Regex::Callout(0)),
                 _ => Ok(Regex::Empty),
             },
@@ -1090,12 +1093,9 @@ impl<'a> PgenAstAdapter<'a> {
             }
             "conditional" => self.convert_typed_conditional_object(map),
             "quoted_literal" => {
-                let body = map
-                    .get("body")
-                    .and_then(|v| v.as_array())
-                    .ok_or_else(|| {
-                        self.contract_error("typed quoted_literal missing 'body' array")
-                    })?;
+                let body = map.get("body").and_then(|v| v.as_array()).ok_or_else(|| {
+                    self.contract_error("typed quoted_literal missing 'body' array")
+                })?;
                 let mut items = Vec::with_capacity(body.len());
                 for elem in body {
                     if let Some(s) = elem.as_str() {
@@ -1234,9 +1234,8 @@ impl<'a> PgenAstAdapter<'a> {
                 let value = raw_ref
                     .get("value")
                     .and_then(|v| v.as_u64())
-                    .ok_or_else(|| {
-                        self.contract_error("subroutine_numeric ref missing 'value'")
-                    })? as i64;
+                    .ok_or_else(|| self.contract_error("subroutine_numeric ref missing 'value'"))?
+                    as i64;
                 let sign = raw_ref.get("sign").and_then(|v| v.as_str());
                 let target = match sign {
                     Some("+") => RecursionTarget::RelativeGroup(value as i32),
@@ -1248,9 +1247,7 @@ impl<'a> PgenAstAdapter<'a> {
             "numeric_backreference" => {
                 // `\g{N}` / `\gN` / `\g+N` / `\g-N` — back-reference
                 let raw_ref = map.get("ref").and_then(|v| v.as_object()).ok_or_else(|| {
-                    self.contract_error(
-                        "numeric_backreference missing 'ref' {sign,value}",
-                    )
+                    self.contract_error("numeric_backreference missing 'ref' {sign,value}")
                 })?;
                 let value = raw_ref
                     .get("value")
@@ -1583,8 +1580,15 @@ impl<'a> PgenAstAdapter<'a> {
             .and_then(|v| v.as_array())
             .ok_or_else(|| self.contract_error("typed char_class missing 'body' array"))?;
         let class_negated = matches!(map.get("negated"), Some(serde_json::Value::Bool(true)));
-        let initial_close_present =
-            matches!(map.get("initial_close"), Some(serde_json::Value::String(s)) if s == "]");
+        // PGEN emits `initial_close:true` (boolean) for the
+        // leading-`]` shape `[]...]` / `[^]...]` per the typed
+        // char_class slice (post-1.1.7x). Older pins used `"]"`
+        // (string). Accept both.
+        let initial_close_present = match map.get("initial_close") {
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(serde_json::Value::String(s)) => s == "]",
+            _ => false,
+        };
         let mut ranges: Vec<CharRange> = Vec::new();
         if initial_close_present {
             ranges.push(CharRange::single(']'));
@@ -1604,9 +1608,10 @@ impl<'a> PgenAstAdapter<'a> {
                         ranges.push(CharRange::single(ch));
                     }
                     let end_ch = match &body[idx + 2] {
-                        serde_json::Value::String(s) => s.chars().next().ok_or_else(|| {
-                            self.contract_error("empty quoted-run range end")
-                        })?,
+                        serde_json::Value::String(s) => s
+                            .chars()
+                            .next()
+                            .ok_or_else(|| self.contract_error("empty quoted-run range end"))?,
                         serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
                             let mut tmp: Vec<CharRange> = Vec::new();
                             self.convert_typed_class_item(&body[idx + 2], &mut tmp)?;
@@ -1733,12 +1738,9 @@ impl<'a> PgenAstAdapter<'a> {
             .ok_or_else(|| self.contract_error("typed subroutine_call target missing 'kind'"))?;
         match kind {
             "numeric" => {
-                let value = inner
-                    .get("value")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| {
-                        self.contract_error("typed subroutine_call numeric target missing 'value'")
-                    })?;
+                let value = inner.get("value").and_then(|v| v.as_u64()).ok_or_else(|| {
+                    self.contract_error("typed subroutine_call numeric target missing 'value'")
+                })?;
                 let sign = inner.get("sign").and_then(|v| v.as_str());
                 let target = match sign {
                     Some("+") => RecursionTarget::RelativeGroup(value as i32),
@@ -1879,10 +1881,7 @@ impl<'a> PgenAstAdapter<'a> {
         })
     }
 
-    fn convert_typed_conditional_test(
-        &self,
-        value: &serde_json::Value,
-    ) -> Result<ConditionalTest> {
+    fn convert_typed_conditional_test(&self, value: &serde_json::Value) -> Result<ConditionalTest> {
         match value {
             serde_json::Value::Number(n) => {
                 let idx = n
@@ -1944,47 +1943,43 @@ impl<'a> PgenAstAdapter<'a> {
                             }
                         }
                         "alpha_lookaround" => {
-                            let alpha_name = map
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .ok_or_else(|| {
-                                    self.contract_error(
-                                        "alpha_lookaround condition missing 'name'",
-                                    )
+                            let alpha_name =
+                                map.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+                                    self.contract_error("alpha_lookaround condition missing 'name'")
                                 })?;
                             let body = map.get("body").ok_or_else(|| {
                                 self.contract_error("alpha_lookaround condition missing 'body'")
                             })?;
                             let inner = self.convert_typed_pattern(body)?;
                             match alpha_name {
-                                "positive_lookahead" | "pla"
-                                | "non_atomic_positive_lookahead" | "napla" => {
-                                    Ok(ConditionalTest::Lookahead {
-                                        expr: Box::new(inner),
-                                        positive: true,
-                                    })
-                                }
-                                "negative_lookahead" | "nla"
-                                | "non_atomic_negative_lookahead" | "nanla" => {
-                                    Ok(ConditionalTest::Lookahead {
-                                        expr: Box::new(inner),
-                                        positive: false,
-                                    })
-                                }
-                                "positive_lookbehind" | "plb"
-                                | "non_atomic_positive_lookbehind" | "naplb" => {
-                                    Ok(ConditionalTest::Lookbehind {
-                                        expr: Box::new(inner),
-                                        positive: true,
-                                    })
-                                }
-                                "negative_lookbehind" | "nlb"
-                                | "non_atomic_negative_lookbehind" | "nanlb" => {
-                                    Ok(ConditionalTest::Lookbehind {
-                                        expr: Box::new(inner),
-                                        positive: false,
-                                    })
-                                }
+                                "positive_lookahead"
+                                | "pla"
+                                | "non_atomic_positive_lookahead"
+                                | "napla" => Ok(ConditionalTest::Lookahead {
+                                    expr: Box::new(inner),
+                                    positive: true,
+                                }),
+                                "negative_lookahead"
+                                | "nla"
+                                | "non_atomic_negative_lookahead"
+                                | "nanla" => Ok(ConditionalTest::Lookahead {
+                                    expr: Box::new(inner),
+                                    positive: false,
+                                }),
+                                "positive_lookbehind"
+                                | "plb"
+                                | "non_atomic_positive_lookbehind"
+                                | "naplb" => Ok(ConditionalTest::Lookbehind {
+                                    expr: Box::new(inner),
+                                    positive: true,
+                                }),
+                                "negative_lookbehind"
+                                | "nlb"
+                                | "non_atomic_negative_lookbehind"
+                                | "nanlb" => Ok(ConditionalTest::Lookbehind {
+                                    expr: Box::new(inner),
+                                    positive: false,
+                                }),
                                 other => Err(self.contract_error(&format!(
                                     "unrecognised alpha_lookaround condition variant: {other:?}"
                                 ))),
@@ -2010,9 +2005,10 @@ impl<'a> PgenAstAdapter<'a> {
                         "version" => Err(self.contract_error(
                             "version condition reached test-only path; should be short-circuited",
                         )),
-                        other => Err(self.contract_error(&format!(
-                            "unrecognised condition kind: {other:?}"
-                        ))),
+                        other => {
+                            Err(self
+                                .contract_error(&format!("unrecognised condition kind: {other:?}")))
+                        }
                     }
                 } else if let Some(value_int) = map.get("value").and_then(|v| v.as_u64()) {
                     let sign = map.get("sign").and_then(|v| v.as_str());
@@ -2032,10 +2028,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    fn convert_typed_pattern_branch_array(
-        &self,
-        value: &serde_json::Value,
-    ) -> Result<Regex> {
+    fn convert_typed_pattern_branch_array(&self, value: &serde_json::Value) -> Result<Regex> {
         let arr = value.as_array().ok_or_else(|| {
             self.contract_error(&format!(
                 "expected branch piece array, got {}",
@@ -2060,7 +2053,10 @@ impl<'a> PgenAstAdapter<'a> {
     ) -> Result<()> {
         match item {
             serde_json::Value::String(s) => {
-                if matches!(s.as_str(), " " | "\t" | "+" | "-" | "&" | "|" | "^" | "(" | ")") {
+                if matches!(
+                    s.as_str(),
+                    " " | "\t" | "+" | "-" | "&" | "|" | "^" | "(" | ")"
+                ) {
                     return Ok(());
                 }
                 if s.chars().count() == 1 {
@@ -2074,9 +2070,7 @@ impl<'a> PgenAstAdapter<'a> {
                     if let (Some(start_s), Some("-"), Some(end_s)) =
                         (arr[0].as_str(), arr[1].as_str(), arr[2].as_str())
                     {
-                        if let (Some(s), Some(e)) =
-                            (start_s.chars().next(), end_s.chars().next())
-                        {
+                        if let (Some(s), Some(e)) = (start_s.chars().next(), end_s.chars().next()) {
                             ranges.push(CharRange::range(s, e));
                             return Ok(());
                         }
@@ -2131,7 +2125,11 @@ impl<'a> PgenAstAdapter<'a> {
                 } else {
                     vec![CharRange::range('0', '9')]
                 };
-                let merged = if *negated { complement_ranges(&base) } else { base };
+                let merged = if *negated {
+                    complement_ranges(&base)
+                } else {
+                    base
+                };
                 ranges.extend(merged);
                 Ok(())
             }
@@ -2141,7 +2139,11 @@ impl<'a> PgenAstAdapter<'a> {
                 } else {
                     posix_class_ranges("word").unwrap_or_default()
                 };
-                let merged = if *negated { complement_ranges(&base) } else { base };
+                let merged = if *negated {
+                    complement_ranges(&base)
+                } else {
+                    base
+                };
                 ranges.extend(merged);
                 Ok(())
             }
@@ -2151,17 +2153,20 @@ impl<'a> PgenAstAdapter<'a> {
                 } else {
                     posix_class_ranges("space").unwrap_or_default()
                 };
-                let merged = if *negated { complement_ranges(&base) } else { base };
+                let merged = if *negated {
+                    complement_ranges(&base)
+                } else {
+                    base
+                };
                 ranges.extend(merged);
                 Ok(())
             }
             // `\p{...}` inside a class — resolve the Unicode property
             // and fold its ranges into the class union.
             Regex::CharClass(CharClass::UnicodeClass { name, negated }) => {
-                let resolved = crate::unicode_support::resolve_unicode_property_class(
-                    name, *negated,
-                )
-                .map_err(|e| self.contract_error(&e))?;
+                let resolved =
+                    crate::unicode_support::resolve_unicode_property_class(name, *negated)
+                        .map_err(|e| self.contract_error(&e))?;
                 ranges.extend(resolved);
                 Ok(())
             }
@@ -2175,9 +2180,9 @@ impl<'a> PgenAstAdapter<'a> {
                 ranges.push(CharRange::single(ch));
                 Ok(())
             }
-            Regex::Anchor(_) | Regex::MatchReset | Regex::Empty => Err(self.contract_error(
-                "zero-width escape inside char_class is not allowed",
-            )),
+            Regex::Anchor(_) | Regex::MatchReset | Regex::Empty => {
+                Err(self.contract_error("zero-width escape inside char_class is not allowed"))
+            }
             other => Err(self.contract_error(&format!(
                 "escape inside char_class produced unexpected Regex shape: {other:?}"
             ))),
@@ -2235,8 +2240,10 @@ impl<'a> PgenAstAdapter<'a> {
                             out.push('}');
                         }
                         "property" => {
-                            let negated =
-                                map.get("negated").and_then(|v| v.as_bool()).unwrap_or(false);
+                            let negated = map
+                                .get("negated")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
                             out.push('\\');
                             out.push(if negated { 'P' } else { 'p' });
                             out.push('{');
@@ -2265,11 +2272,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    fn endpoint_to_char(
-        &self,
-        value: &serde_json::Value,
-        what: &'static str,
-    ) -> Result<char> {
+    fn endpoint_to_char(&self, value: &serde_json::Value, what: &'static str) -> Result<char> {
         match value {
             serde_json::Value::String(s) => s
                 .chars()
@@ -2294,7 +2297,9 @@ impl<'a> PgenAstAdapter<'a> {
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.chars().next())
                         .ok_or_else(|| {
-                            self.contract_error(&format!("{what} class_quoted_range_atom missing 'char'"))
+                            self.contract_error(&format!(
+                                "{what} class_quoted_range_atom missing 'char'"
+                            ))
                         }),
                     other => Err(self.contract_error(&format!(
                         "{what} object is not a typed escape: type={other:?}"
@@ -3238,12 +3243,9 @@ impl<'a> PgenAstAdapter<'a> {
                 Ok(())
             }
             Some("class_quoted_literal") => {
-                let body = map
-                    .get("body")
-                    .and_then(|v| v.as_array())
-                    .ok_or_else(|| {
-                        self.contract_error("typed class_quoted_literal missing 'body'")
-                    })?;
+                let body = map.get("body").and_then(|v| v.as_array()).ok_or_else(|| {
+                    self.contract_error("typed class_quoted_literal missing 'body'")
+                })?;
                 for elem in body {
                     if let Some(s) = elem.as_str() {
                         for ch in s.chars() {

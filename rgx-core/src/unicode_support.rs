@@ -51,33 +51,32 @@ pub(crate) fn resolve_unicode_property_class(
     // mappings, RGX missed cases like U+3001 (IDEOGRAPHIC COMMA, Script
     // = Common, Script_Extensions includes Katakana) under
     // `\p{katakana}` / `\p{scx:katakana}` (testinput4:1448, :1452).
-    let (qualified, core_name): (String, &str) =
-        if let Some(rest) = name.strip_prefix("scx:") {
-            (format!("Script_Extensions={rest}"), rest)
-        } else if let Some(rest) = name
-            .strip_prefix("sc:")
-            .or_else(|| name.strip_prefix("script:"))
-        {
-            (format!("Script={rest}"), rest)
-        } else if matches!(name, "Common" | "Inherited") {
-            // PCRE2 / Unicode TR24 special case — strict Script lookup.
-            (format!("Script={name}"), name)
+    let (qualified, core_name): (String, &str) = if let Some(rest) = name.strip_prefix("scx:") {
+        (format!("Script_Extensions={rest}"), rest)
+    } else if let Some(rest) = name
+        .strip_prefix("sc:")
+        .or_else(|| name.strip_prefix("script:"))
+    {
+        (format!("Script={rest}"), rest)
+    } else if matches!(name, "Common" | "Inherited") {
+        // PCRE2 / Unicode TR24 special case — strict Script lookup.
+        (format!("Script={name}"), name)
+    } else {
+        // Bare name. Try `Script_Extensions=<name>` first — this
+        // succeeds for any registered script name (other than
+        // Common/Inherited above) and gives PCRE2-compatible
+        // semantics. If the name isn't a script (general category
+        // like `Lu`, boolean property like `Alphabetic`, etc.),
+        // `regex_syntax` rejects with a "value not found" error
+        // and we fall through to the bare form.
+        let scx_attempt = format!("Script_Extensions={name}");
+        let candidate = format!(r"\p{{{scx_attempt}}}");
+        if parse(&candidate).is_ok() {
+            (scx_attempt, name)
         } else {
-            // Bare name. Try `Script_Extensions=<name>` first — this
-            // succeeds for any registered script name (other than
-            // Common/Inherited above) and gives PCRE2-compatible
-            // semantics. If the name isn't a script (general category
-            // like `Lu`, boolean property like `Alphabetic`, etc.),
-            // `regex_syntax` rejects with a "value not found" error
-            // and we fall through to the bare form.
-            let scx_attempt = format!("Script_Extensions={name}");
-            let candidate = format!(r"\p{{{scx_attempt}}}");
-            if parse(&candidate).is_ok() {
-                (scx_attempt, name)
-            } else {
-                (name.to_string(), name)
-            }
-        };
+            (name.to_string(), name)
+        }
+    };
     let _ = core_name; // reserved for future error messaging
 
     let property_pattern = if negated {
