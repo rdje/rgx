@@ -314,11 +314,7 @@ Multi-verb interactions where RGX picks a different span than PCRE2.
 
 **Difficulty**: medium. **Expected payoff**: 1 case (+1 related FN in Cluster 1G).
 
-| testinput1:6797 | `[\Qabc\E-z]+` | `abcdwxyz` | `abcdwxyz` | `abc` |
-
-PCRE2 reads this as literal `a`, literal `b`, range `c-z` (last char of quote + dash + literal z). RGX reads the whole quote as literal set `{a,b,c}`.
-
-**What to change**: class-body parser/adapter needs to treat the final char of `\Q...\E` as a potential range-endpoint. See `parsing.rs::convert_class_item` for the quoted-class-literal handling.
+| ~~testinput1:6797~~ | ~~`[\Qabc\E-z]+`~~ | ~~`abcdwxyz`~~ | ✅ CLOSED 2026-05-05. `convert_typed_char_class` body iteration peeks ahead for the `[<quoted_run>, "-", <atom>]` shape and splits the last char of the quoted run as a range start. |
 
 ## Cluster 2G — Returned-capture subroutine balanced-paren (2 cases)
 

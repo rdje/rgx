@@ -1864,8 +1864,74 @@ impl<'a> PgenAstAdapter<'a> {
                 json_kind(&arr[3])
             ))
         })?;
-        for item in body {
+        let mut idx = 0;
+        while idx < body.len() {
+            let item = &body[idx];
+
+            // PCRE2-flavour quoted-run as range start: `[\Qabc\E-z]`
+            // reads as literal `a`, literal `b`, range `c-z` (last
+            // char of the quote is the range endpoint, not just a
+            // literal class member). PGEN's body shape for this
+            // pattern is three separate items: the quoted run, a
+            // literal `-`, then the range-end atom. Peek for that
+            // sequence here and split before falling back to the
+            // per-item walker. See `book/src/internals/
+            // pcre2-conformance-residual.md` Cluster 2F.
+            if Self::is_quoted_class_run(item)
+                && body.get(idx + 1).and_then(|v| v.as_str()) == Some("-")
+                && body.get(idx + 2).is_some()
+            {
+                let chars = Self::extract_quoted_class_chars(item);
+                if let Some(last) = chars.chars().last() {
+                    // Literals for everything except the last char.
+                    for ch in chars.chars().take(chars.chars().count() - 1) {
+                        ranges.push(CharRange::single(ch));
+                    }
+                    // Range end is either a single-char string or a
+                    // single-char escape (e.g. `\xFF` / `\.` / `\d`).
+                    // Most patterns hit the simple string case; lower
+                    // the escape case via the existing class-escape
+                    // walker as a side path that materialises a
+                    // single-char range, then read it back.
+                    let end_ch = match &body[idx + 2] {
+                        serde_json::Value::String(s) => s
+                            .chars()
+                            .next()
+                            .ok_or_else(|| self.contract_error("empty quoted-run range end"))?,
+                        serde_json::Value::Array(_) => {
+                            let mut tmp_ranges: Vec<CharRange> = Vec::new();
+                            self.convert_typed_class_item(&body[idx + 2], &mut tmp_ranges)?;
+                            if tmp_ranges.len() == 1 && tmp_ranges[0].start == tmp_ranges[0].end {
+                                tmp_ranges[0].start
+                            } else {
+                                return Err(self.contract_error(
+                                    "quoted-run range end must be a single character",
+                                ));
+                            }
+                        }
+                        other => {
+                            return Err(self.contract_error(&format!(
+                                "quoted-run range end has unexpected shape: {}",
+                                json_kind(other)
+                            )));
+                        }
+                    };
+                    if (end_ch as u32) < (last as u32) {
+                        return Err(self.contract_error(&format!(
+                            "descending character class range: {last:?}-{end_ch:?}"
+                        )));
+                    }
+                    ranges.push(CharRange::range(last, end_ch));
+                    idx += 3;
+                    continue;
+                }
+                // Empty quoted run + dash + atom is invalid PCRE2 but
+                // fall through to the regular walker so the existing
+                // error path fires.
+            }
+
             self.convert_typed_class_item(item, &mut ranges)?;
+            idx += 1;
         }
 
         Ok(Regex::CharClass(CharClass::Custom {
@@ -1873,6 +1939,25 @@ impl<'a> PgenAstAdapter<'a> {
             negated,
             ci_override_ranges: None,
         }))
+    }
+
+    /// Is `item` a `\Q…\E` quoted run inside a char_class body?
+    fn is_quoted_class_run(item: &serde_json::Value) -> bool {
+        if let Some(arr) = item.as_array() {
+            return matches!(arr.first().and_then(|v| v.as_str()), Some("\\Q"));
+        }
+        false
+    }
+
+    /// Extract the literal characters from a `[\Q, <chars>, \E]` array.
+    fn extract_quoted_class_chars(item: &serde_json::Value) -> String {
+        let mut text = String::new();
+        if let Some(arr) = item.as_array() {
+            if let Some(slot) = arr.get(1) {
+                walk_json_terminal_chars(slot, &mut text);
+            }
+        }
+        text
     }
 
     /// Convert a single class_item, appending its expanded ranges to `ranges`.

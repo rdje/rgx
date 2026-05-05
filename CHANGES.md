@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Engine: PCRE2 quoted-run-as-range-start in char_class (+1 pass)
+- Scope: `rgx-core/src/parsing.rs` (`convert_typed_char_class` body iteration)
+- Changes:
+  - The char_class body walker now recognises PCRE2's `[\Qabc\E-z]` semantic: when a `\Q…\E` quoted run is followed by `-` and another atom, the last character of the quoted run is the **start** of a range (not just a literal class member). Pre-fix the walker treated each class_item independently, producing the union `{a,b,c,-,z}` instead of `{a,b,c-z}`.
+  - Implementation: peek-ahead in the body iteration. When `is_quoted_class_run(item)` and `body[idx+1]` is `"-"` and `body[idx+2]` is present, split the quoted run: chars except the last become literals, last char + dash + next atom become the range. Falls through to the regular per-item walker otherwise.
+  - Recovers testinput1:6797 (`[\Qabc\E-z]+` against `abcdwxyz`).
+  - Bumps the conformance ratchet baseline from 12,704 / 106 to 12,705 / 105. Span-mismatch bucket 27 → 26 (Cluster 2F closed).
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo test -p rgx-core --test pcre2_conformance -- --ignored` (12,705 / 105, ratchet OK).
+- Notes/impact: the catalogue noted this as Cluster 2F with `class-body parser/adapter needs to treat the final char of \Q…\E as a potential range-endpoint`. Empirical probe confirmed the current PGEN AST gives the walker enough information (3 separate body items: quoted run, dash, atom); the fix is purely RGX-side adapter logic. Range-end can be a single-char string (most cases) or a single-char escape (`\xFF` / `\d` / `\.`); both paths supported.
+
 ### 2026-05-05 - File PGEN-RGX-0081 + PGEN-RGX-0082 (typed-shape regressions in PGEN 1.1.74)
 - Scope: bug-report bundles only (`pgen-issues/PGEN-RGX-008{1,2}.yaml`); no RGX code change.
 - Background: pulled the PGEN submodule forward (056f6784 → 108de21d, releases 1.1.40 → 1.1.74) per user request to absorb the 0078/0079/0080 fixes. Discovered that the typed-shape campaign across slices 11–42 dropped two pieces of load-bearing information from the AST. Submodule rolled back to 056f6784 for the moment; the bump retries against a PGEN that has restored the dropped fields.

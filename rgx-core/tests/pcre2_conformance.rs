@@ -3151,8 +3151,14 @@ fn run_full_conformance() {
     // the `(?x)` strip pass eats them under `/x,utf` per PCRE2's
     // pcre2pattern(3) §"Option settings". Recovers testinput4:2383
     // (`/A‎‏  B/x,utf` against `AB`); +1 pass, FN 65 → 64.
-    const PASS_BASELINE: usize = 12_704;
-    const FAIL_BASELINE: usize = 106;
+    //
+    // Bumped 2026-05-05: char_class body walker now detects the
+    // PCRE2 quoted-run-as-range-start shape `[\Qabc\E-z]` — the last
+    // char of the quoted run is the range start, not just a literal.
+    // Catalogue Cluster 2F. Recovers testinput1:6797
+    // (`[\Qabc\E-z]+` on `abcdwxyz`); +1 pass, SM 27 → 26.
+    const PASS_BASELINE: usize = 12_705;
+    const FAIL_BASELINE: usize = 105;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

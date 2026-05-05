@@ -3527,3 +3527,19 @@ Pre-rollback state at `108de21d` with the typed-shape walker scaffolding in plac
 - Wait on PGEN to close 0081 and 0082.
 - When PGEN ships the fixes, retry the bump. The walker scaffolding above is the working spec for the migration; it's gone from the working tree now but the patterns are documented across this session and recoverable from the editor history if needed. Cleanest course: re-derive against the post-fix shapes rather than re-apply the scaffolding wholesale.
 - 0078/0079/0080 fixes remain unabsorbed until the next bump succeeds. RGX's testinput2:3979 (`\o{1239}`), testinput1:6679 (`a{ 1 , 2 }`), and testinput2:4262 (per-subject `\=g`) tracker entries stay open until then — first two close automatically with the next bump; case 1 (`replace=`) already closed locally on 2026-05-03.
+
+## 2026-05-05 session — engine: quoted-run-as-range-start in char_class (+1 pass)
+
+After rolling back the PGEN bump and filing 0081 + 0082, returned to the FN/SM audit at the rolled-back pin. testinput1:6797 (`[\Qabc\E-z]+` against `abcdwxyz`) — Cluster 2F per the residual catalogue.
+
+Diagnosis matched the catalogue: PCRE2 reads the last char of `\Q…\E` as a range start (`a`, `b`, range `c-z`); RGX was treating each class_item independently, producing `{a,b,c,-,z}`. Probed PGEN's AST and confirmed the body has 3 separate items (quoted run, dash, atom) — the walker just needs peek-ahead to detect the sequence and split.
+
+Fix in `parsing.rs::convert_typed_char_class`: replaced the simple `for item in body` with `while idx < body.len()`, with a peek-ahead at the start of each iteration. When the triple matches the shape, split into literals (everything except the last char of the quoted run) + range (last char + dash + atom). 30-line addition + 2 small helpers (`is_quoted_class_run`, `extract_quoted_class_chars`).
+
+Range end can be a single-char string OR a typed-array escape (`\xFF` / `\.` / `\d`); both paths supported. The escape path materialises a temporary range vec, validates it's a single-char range, then reads the char back out — same trick the rolled-back walker scaffolding used.
+
+Lib tests 1118/1118; conformance ratchet 12,704 / 106 → 12,705 / 105. SM bucket 27 → 26.
+
+### Next concrete action
+- Continue audit. Most remaining FN/SM cases are architectural (recursive captures, deep recursion, `(*napla:...)`); the catalogue's lowest-effort entries are largely worked through.
+- Cluster 2H (testinput1:6481, lookahead-as-alt in greedy `*`) is still open — single case but the engine fix touches the `*`-loop logic.
