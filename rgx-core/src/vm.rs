@@ -59,16 +59,36 @@ enum CodeBlockOutcome {
     Suspended(String),
 }
 
-/// Outcome of `verb_apply_then`. PCRE2's `(*THEN)` either redirects to
-/// the next alternative in scope, or — if no alt-fallback frame is
-/// pending — degrades to `(*PRUNE)`. The subexpr dispatch site needs
-/// this distinction because the degraded path also clears the outer
-/// `ctx.backtrack_stack` (preventing `.*?`-style outer rescue), while
-/// the redirected path leaves the outer stack untouched.
+/// Outcome of `verb_apply_then`. PCRE2's `(*THEN)` has three distinct
+/// behaviours depending on the *lexical* alternation context (tracked
+/// via `alt_scope_marks`) and the *runtime* alt-fallback state (tracked
+/// via `alt_boundaries`):
+///
+/// - `Redirected`: an alt-fallback frame is pending in the innermost
+///   enclosing alternation. (*THEN) truncates the stack to that frame
+///   so the next backtrack pop redirects execution to the next
+///   alternative at the same position.
+///
+/// - `ScopeExhausted`: lexically inside an alternation, but every
+///   alternative has already been tried (no pending alt-fallback frame
+///   on the stack). PCRE2 lets the outer backtracking continue — the
+///   alternation as a whole fails and control returns to whatever
+///   surrounds it (e.g. a `.*?` quantifier that can extend). The
+///   apply function leaves the backtrack stack untouched.
+///
+/// - `FullyDegraded`: lexically outside any alternation. Per
+///   pcre2pattern(3): *"when (*THEN) is in a pattern or assertion with
+///   no enclosing alternation, it is equivalent to (*PRUNE)."* The
+///   apply function clears the stack like (*PRUNE).
+///
+/// The subexpr dispatch site uses the outcome to decide whether to
+/// also clear the outer `ctx.backtrack_stack` (only on the
+/// `FullyDegraded` path, mirroring the (*PRUNE)-equivalence).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThenOutcome {
     Redirected,
-    Degraded,
+    ScopeExhausted,
+    FullyDegraded,
 }
 
 /// High-performance bytecode instruction optimized for cache efficiency
@@ -2264,6 +2284,16 @@ impl RegexVM {
     /// works for both `ExecContext`'s global state and
     /// `execute_subexpr_inner`'s local stack. Clears `skip_position`
     /// in the non-atomic branch per last-verb-wins.
+    ///
+    /// Phase 2 (2026-05-06): the stack-clear is **deferred**. COMMIT
+    /// sets `committed = true` but leaves the backtrack stack intact
+    /// so a following `(*THEN)` in the same branch can still reach
+    /// the alt-fallback frame and redirect. `try_backtrack` clears
+    /// the stack at failure time when it sees `committed = true` —
+    /// the net behaviour for COMMIT alone (no THEN) is identical to
+    /// the eager-clear approach, but COMMIT + THEN now composes
+    /// correctly without per-pair logic. (Closes residual Cluster
+    /// 1D testinput1:5457 by construction.)
     #[inline]
     fn verb_apply_commit(
         skip_position: &mut Option<usize>,
@@ -2275,7 +2305,6 @@ impl RegexVM {
         if in_atomic {
             backtrack_stack.push(sentinel);
         } else {
-            backtrack_stack.clear();
             *skip_position = None;
             *committed = true;
         }
@@ -2307,13 +2336,25 @@ impl RegexVM {
     /// attempt failure.
     ///
     /// Records `skip_position = Some(pos)` and clears the active
-    /// backtrack stack. Per the last-verb-wins rule, also clears
-    /// `committed` so the scanning loop's "if skip take, else if
-    /// committed return None" check resolves to the SKIP-advance
-    /// branch when both COMMIT and SKIP fired in the same branch.
-    /// (The 2026-05-05 commit `4fb3980` SKIP-overrides-COMMIT fix
-    /// previously placed this clear in the scanning-loop sites; it
-    /// now lives in SKIP's apply function as a verb effect.)
+    /// backtrack stack (eager — see Phase 2 design note below). Per
+    /// the last-verb-wins rule, also clears `committed` so the
+    /// scanning loop's "if skip take, else if committed return None"
+    /// check resolves to the SKIP-advance branch when both COMMIT
+    /// and SKIP fired in the same branch.
+    ///
+    /// Phase 2 design note: the stack-clear stays **eager** for SKIP
+    /// (unlike COMMIT, which defers). The trade-off is:
+    /// - SKIP alone (no following verb) needs the eager clear so a
+    ///   pending alt-fallback frame doesn't rescue the failed
+    ///   attempt — PCRE2's contract for SKIP is "no further
+    ///   backtracking, scanner advances to mark".
+    /// - SKIP + THEN compositions don't get the closure that
+    ///   COMMIT + THEN does, but every SKIP + THEN test in the
+    ///   corpus was already failing in the pre-Phase-2 baseline,
+    ///   so the eager clear preserves the baseline rather than
+    ///   regressing it. A future Phase 3 could add a side-slot
+    ///   `pending_alt_revival` consumed by THEN to cover the
+    ///   SKIP+THEN case uniformly.
     #[inline]
     fn verb_apply_skip(
         skip_position: &mut Option<usize>,
@@ -2329,7 +2370,8 @@ impl RegexVM {
     /// (*SKIP:name) — advance the scanner to the most recent matching
     /// mark's recorded position. No-op if no matching mark exists
     /// (PCRE2 fallback). When a matching mark is found, behaves as
-    /// (*SKIP) with that position.
+    /// (*SKIP) with that position (eager stack-clear; see
+    /// `verb_apply_skip` design note).
     #[inline]
     fn verb_apply_skip_named(
         skip_position: &mut Option<usize>,
@@ -2356,18 +2398,18 @@ impl RegexVM {
     /// a pattern or assertion with no enclosing alternation, it is
     /// equivalent to (*PRUNE)."*
     ///
-    /// Returns `ThenOutcome::Redirected` when an alt-frame was found
-    /// (the alt-fallback will be picked up by the next backtrack pop);
-    /// returns `ThenOutcome::Degraded` when (*THEN) degraded to (*PRUNE).
-    /// The subexpr dispatch site uses the outcome to decide whether to
-    /// also clear the outer backtrack stack — a cross-context cleanup
-    /// that only applies on the degraded path.
+    /// Three-outcome dispatch — see `ThenOutcome` for the full
+    /// trichotomy (Redirected / ScopeExhausted / FullyDegraded). The
+    /// subexpr dispatch site reads the outcome to decide whether to
+    /// also clear the outer `ctx.backtrack_stack` (only on
+    /// `FullyDegraded`, which is PCRE2's PRUNE-equivalence).
     #[inline]
     fn verb_apply_then(
         skip_position: &mut Option<usize>,
         committed: &mut bool,
         backtrack_stack: &mut Vec<BacktrackFrame>,
         alt_boundaries: &mut Vec<usize>,
+        alt_scope_marks: &[usize],
     ) -> ThenOutcome {
         if let Some(&alt_idx) = alt_boundaries.last() {
             backtrack_stack.truncate(alt_idx + 1);
@@ -2378,9 +2420,20 @@ impl RegexVM {
             *skip_position = None;
             *committed = false;
             ThenOutcome::Redirected
+        } else if !alt_scope_marks.is_empty() {
+            // Lexically inside an alternation but every alternative
+            // has been tried. Per PCRE2: control returns to whatever
+            // surrounds the alternation (e.g. an outer `.*?` that
+            // can extend). Don't clear the stack — let the natural
+            // failure propagation pop the next outer frame.
+            *skip_position = None;
+            *committed = false;
+            ThenOutcome::ScopeExhausted
         } else {
+            // Lexically outside any alternation. PCRE2 spec:
+            // equivalent to (*PRUNE) — clear the stack.
             Self::verb_apply_prune(skip_position, committed, backtrack_stack);
-            ThenOutcome::Degraded
+            ThenOutcome::FullyDegraded
         }
     }
 
@@ -2470,13 +2523,29 @@ impl RegexVM {
     /// Restore a previously saved execution state if backtracking is available.
     /// Returns true when a frame was restored and execution should continue.
     fn try_backtrack(&self, ctx: &mut ExecContext<'_>, ip: &mut usize) -> bool {
-        // `(*COMMIT)` already fired during this match attempt
-        // (either directly or propagated from a failing assertion
-        // body). PCRE2's semantic is that the current match
-        // attempt is aborted — no further backtracking allowed,
-        // even into frames that were pushed before the commit.
-        // Clear the remaining stack so higher-level code treats
-        // the attempt as failed cleanly.
+        // Phase-2 verb-state consumer. The verb-apply functions defer
+        // their stack-clearing effect to here so a following (*THEN)
+        // in the same branch can still reach the alt-fallback frame
+        // before the clear happens.
+        //
+        // Only `committed` is a hard intra-attempt abort: it stops
+        // *all* backtracking, including any alt-fallback that an
+        // earlier `(*COMMIT)` would have wanted to preserve for a
+        // following `(*THEN)` (which would have cleared `committed`
+        // from its own apply function before reaching this point).
+        //
+        // `skip_position`, by contrast, is *per-attempt scanner
+        // signal*: it instructs the scanning loop to advance to the
+        // mark when the current attempt finishes failing — but it
+        // does **not** abort backtracking mid-attempt. A SKIP fired
+        // inside a subroutine, lookaround, or any nested context
+        // must not leak into the outer's backtracking decision; the
+        // outer attempt continues exploring other alternatives, and
+        // the skip mark is only honored if those alternatives also
+        // fail. Original RGX's eager-stack-clear in SKIP achieved
+        // this implicitly (cleared only the local stack); Phase 2
+        // replicates the contract by leaving `skip_position` out
+        // of `try_backtrack`'s priority chain.
         if ctx.committed {
             ctx.backtrack_stack.clear();
             ctx.alt_boundaries.clear();
@@ -2713,26 +2782,15 @@ impl RegexVM {
                             }
                         }
                     }
-                    // Character didn't match - try backtracking
-                    if let Some(frame) = ctx.backtrack_stack.pop() {
-                        let stack_depth = ctx.backtrack_stack.len() + 1;
-                        trace_log!(
-                            "vm",
-                            "  Backtrack: IP {} -> {}, pos {} -> {}",
-                            ip - 1,
-                            frame.ip,
-                            ctx.pos,
-                            frame.pos
-                        );
-                        // Restore saved state
-                        ip = frame.ip;
-                        ctx.pos = frame.pos;
-                        Self::restore_frame(ctx, &frame);
-                        ctx.code_result = frame.saved_code_result;
-                        self.emit_event(&MatchEvent::BacktrackOccurred {
-                            position: ctx.pos,
-                            stack_depth,
-                        });
+                    // Character didn't match — go through `try_backtrack`
+                    // so the Phase-2 verb-state contract holds:
+                    // a pending `(*COMMIT)` aborts the attempt; a
+                    // pending `(*SKIP)` clears the stack so the
+                    // scanner advances to `skip_position`. A direct
+                    // pop here would let an alt-fallback frame
+                    // pushed before COMMIT / SKIP rescue the failed
+                    // attempt incorrectly.
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     trace_log!("vm", "  ✗ Char match failed, no backtrack available");
@@ -3075,6 +3133,7 @@ impl RegexVM {
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
                         &mut ctx.alt_boundaries,
+                        &ctx.alt_scope_marks,
                     );
                 }
 
@@ -3793,13 +3852,10 @@ impl RegexVM {
                 }
 
                 OpCode::Fail => {
-                    // Try backtracking if we have saved states
-                    if let Some(frame) = ctx.backtrack_stack.pop() {
-                        // Restore saved state
-                        ip = frame.ip;
-                        ctx.pos = frame.pos;
-                        Self::restore_frame(ctx, &frame);
-                        ctx.code_result = frame.saved_code_result;
+                    // Route through try_backtrack so Phase-2 verb-state
+                    // (committed / skip_position) is honored. Direct
+                    // popping would bypass the abort/skip contract.
+                    if self.try_backtrack(ctx, &mut ip) {
                         continue;
                     }
                     return false;
@@ -5658,6 +5714,7 @@ impl RegexVM {
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
                         &mut ctx.alt_boundaries,
+                        &ctx.alt_scope_marks,
                     );
                 }
                 OpCode::VerbSkipNamed => {
@@ -5760,7 +5817,29 @@ impl RegexVM {
 
         macro_rules! local_backtrack_or_return_false {
             () => {
+                // Phase-2 verb-state contract: a pending `(*COMMIT)`
+                // from the subexpr body forbids further backtracking
+                // — the body fails immediately so the assertion-
+                // propagation code (`execute_assertion_subexpr`) can
+                // surface the flag to the outer match attempt.
+                // (`skip_position` is per-attempt scanner-signal,
+                // not an intra-attempt abort, so it does not gate
+                // backtracking — see `try_backtrack`'s comment.)
+                if ctx.committed {
+                    backtrack_stack.clear();
+                    local_alt_boundaries.clear();
+                    return false;
+                }
                 if let Some(frame) = backtrack_stack.pop() {
+                    if frame.ip == COMMIT_SENTINEL_IP {
+                        // COMMIT inside an atomic group inside this
+                        // subexpr; escalate to a committed abort so
+                        // the assertion-propagation site sees it.
+                        backtrack_stack.clear();
+                        local_alt_boundaries.clear();
+                        ctx.committed = true;
+                        return false;
+                    }
                     ip = frame.ip;
                     ctx.pos = frame.pos;
                     if let Some(ref snapshot) = frame.capture_snapshot {
@@ -6588,13 +6667,21 @@ impl RegexVM {
                 }
 
                 OpCode::Then => {
+                    // Subexpr context — `verb_apply_then` consults
+                    // both the local alt-boundaries (for the redirect
+                    // path) and the outer `ctx.alt_scope_marks` (for
+                    // the FullyDegraded vs ScopeExhausted distinction).
+                    // Pass `&ctx.alt_scope_marks` so a (*THEN) that
+                    // appears outside any lexical alt-scope correctly
+                    // degrades to (*PRUNE).
                     let outcome = Self::verb_apply_then(
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut backtrack_stack,
                         &mut local_alt_boundaries,
+                        &ctx.alt_scope_marks,
                     );
-                    if outcome == ThenOutcome::Degraded {
+                    if outcome == ThenOutcome::FullyDegraded {
                         // THEN degraded to PRUNE: clear local
                         // alt-boundaries so subsequent local THEN/
                         // PRUNE don't see stale entries.
