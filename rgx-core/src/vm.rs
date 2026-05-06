@@ -729,6 +729,18 @@ pub struct ExecContext<'a> {
     /// On match failure, the scanning loop advances to this position instead
     /// of `start + 1`.
     pub skip_position: Option<usize>,
+    /// Phase-3 slot for `(*SKIP)(*THEN)` and `(*PRUNE)(*THEN)`
+    /// composition (Cluster 1D residuals testinput1:5447, 5452).
+    /// SKIP and PRUNE eagerly clear the backtrack stack at apply
+    /// time — PCRE2's "no further backtracking" contract for those
+    /// verbs. To still let a following `(*THEN)` redirect to the
+    /// next alternative, the verb's apply function (when it would
+    /// have cleared a stack containing an alt-fallback frame) snapshots
+    /// the topmost alt-fallback frame to this slot before clearing.
+    /// `verb_apply_then` reads the slot: if Some, push the frame back
+    /// onto the stack so the alt-redirect path can take it. Reset to
+    /// None at execute_at start.
+    pub pending_alt_revival: Option<BacktrackFrame>,
     /// Set by `(*ACCEPT)` — forces an immediate successful match,
     /// bubbling through any enclosing subexpression runs. PCRE2
     /// docs: "(*ACCEPT) ... causes the match to succeed immediately;
@@ -1270,6 +1282,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1419,6 +1432,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1505,6 +1519,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1574,6 +1589,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -2400,7 +2416,19 @@ impl RegexVM {
         skip_position: &mut Option<usize>,
         committed: &mut bool,
         backtrack_stack: &mut Vec<BacktrackFrame>,
+        alt_boundaries: &[usize],
+        pending_alt_revival: &mut Option<BacktrackFrame>,
     ) {
+        // Phase 3 (Cluster 1D testinput1:5452): before clearing the
+        // stack, snapshot the topmost alt-fallback frame so a
+        // following `(*THEN)` can revive it. Without revival, the
+        // alt-redirect path has nothing to pop after PRUNE eagerly
+        // wiped the stack.
+        if let Some(&alt_idx) = alt_boundaries.last() {
+            if alt_idx < backtrack_stack.len() {
+                *pending_alt_revival = Some(backtrack_stack[alt_idx].clone());
+            }
+        }
         backtrack_stack.clear();
         *skip_position = None;
         *committed = false;
@@ -2417,25 +2445,30 @@ impl RegexVM {
     /// and SKIP fired in the same branch.
     ///
     /// Phase 2 design note: the stack-clear stays **eager** for SKIP
-    /// (unlike COMMIT, which defers). The trade-off is:
-    /// - SKIP alone (no following verb) needs the eager clear so a
-    ///   pending alt-fallback frame doesn't rescue the failed
-    ///   attempt — PCRE2's contract for SKIP is "no further
-    ///   backtracking, scanner advances to mark".
-    /// - SKIP + THEN compositions don't get the closure that
-    ///   COMMIT + THEN does, but every SKIP + THEN test in the
-    ///   corpus was already failing in the pre-Phase-2 baseline,
-    ///   so the eager clear preserves the baseline rather than
-    ///   regressing it. A future Phase 3 could add a side-slot
-    ///   `pending_alt_revival` consumed by THEN to cover the
-    ///   SKIP+THEN case uniformly.
+    /// (unlike COMMIT, which defers). PCRE2's contract for SKIP is
+    /// "no further backtracking, scanner advances to mark"; deferring
+    /// would let an alt-fallback rescue the failed attempt.
+    ///
+    /// Phase 3 (Cluster 1D testinput1:5447 / 5452, +2 passes): before
+    /// the eager clear, snapshot the topmost alt-fallback frame to
+    /// `pending_alt_revival`. A following `(*THEN)` revives it, restoring
+    /// the alt-redirect path without breaking SKIP-alone semantics.
+    /// `pending_alt_revival` resets to None at execute_at start
+    /// (per attempt) and is consumed (taken) by `verb_apply_then`.
     #[inline]
     fn verb_apply_skip(
         skip_position: &mut Option<usize>,
         committed: &mut bool,
         backtrack_stack: &mut Vec<BacktrackFrame>,
+        alt_boundaries: &[usize],
+        pending_alt_revival: &mut Option<BacktrackFrame>,
         pos: usize,
     ) {
+        if let Some(&alt_idx) = alt_boundaries.last() {
+            if alt_idx < backtrack_stack.len() {
+                *pending_alt_revival = Some(backtrack_stack[alt_idx].clone());
+            }
+        }
         *skip_position = Some(pos);
         backtrack_stack.clear();
         *committed = false;
@@ -2465,17 +2498,32 @@ impl RegexVM {
         skip_position: &mut Option<usize>,
         committed: &mut bool,
         backtrack_stack: &mut Vec<BacktrackFrame>,
+        alt_boundaries: &[usize],
+        pending_alt_revival: &mut Option<BacktrackFrame>,
         marks: &[(String, usize)],
         name: &str,
         pos: usize,
     ) {
         if let Some(mark_pos) = marks.iter().rev().find(|(n, _)| n == name).map(|(_, p)| *p) {
+            // Phase 3 — snapshot alt-fallback for THEN-revival.
+            if let Some(&alt_idx) = alt_boundaries.last() {
+                if alt_idx < backtrack_stack.len() {
+                    *pending_alt_revival = Some(backtrack_stack[alt_idx].clone());
+                }
+            }
             *skip_position = Some(mark_pos);
             backtrack_stack.clear();
             *committed = false;
         } else if name.is_empty() {
             // PCRE2 fallback: empty name is plain (*SKIP).
-            Self::verb_apply_skip(skip_position, committed, backtrack_stack, pos);
+            Self::verb_apply_skip(
+                skip_position,
+                committed,
+                backtrack_stack,
+                alt_boundaries,
+                pending_alt_revival,
+                pos,
+            );
         }
         // else: non-empty unmatched name → no effect (PCRE2 spec).
     }
@@ -2503,7 +2551,18 @@ impl RegexVM {
         backtrack_stack: &mut Vec<BacktrackFrame>,
         alt_boundaries: &mut Vec<usize>,
         alt_scope_marks: &[usize],
+        pending_alt_revival: &mut Option<BacktrackFrame>,
     ) -> ThenOutcome {
+        // Phase 3 (Cluster 1D testinput1:5447, 5452): if a preceding
+        // SKIP/PRUNE eagerly cleared the stack but stashed an
+        // alt-fallback frame here, push it back and route through
+        // the standard alt-redirect path. This composes SKIP+THEN /
+        // PRUNE+THEN without breaking SKIP-alone / PRUNE-alone.
+        if let Some(frame) = pending_alt_revival.take() {
+            let new_idx = backtrack_stack.len();
+            backtrack_stack.push(frame);
+            alt_boundaries.push(new_idx);
+        }
         if let Some(&alt_idx) = alt_boundaries.last() {
             backtrack_stack.truncate(alt_idx + 1);
             while alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
@@ -2525,7 +2584,13 @@ impl RegexVM {
         } else {
             // Lexically outside any alternation. PCRE2 spec:
             // equivalent to (*PRUNE) — clear the stack.
-            Self::verb_apply_prune(skip_position, committed, backtrack_stack);
+            Self::verb_apply_prune(
+                skip_position,
+                committed,
+                backtrack_stack,
+                alt_boundaries,
+                pending_alt_revival,
+            );
             ThenOutcome::FullyDegraded
         }
     }
@@ -2698,6 +2763,7 @@ impl RegexVM {
             previous_match_end: ctx.previous_match_end,
             committed: ctx.committed,
             skip_position: ctx.skip_position,
+            pending_alt_revival: ctx.pending_alt_revival.clone(),
             accept_forced: ctx.accept_forced,
             marks: ctx.marks.clone(),
             suspendable: ctx.suspendable,
@@ -2815,6 +2881,7 @@ impl RegexVM {
         ctx.skip_position = None;
         ctx.marks.clear();
         ctx.atomic_depth = 0;
+        ctx.pending_alt_revival = None;
         ctx.step_count = 0;
         ctx.hit_end = false;
         let mut ip = 0;
@@ -3228,6 +3295,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
+                        &ctx.alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                     );
                 }
 
@@ -3237,6 +3306,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
+                        &ctx.alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                         pos,
                     );
                 }
@@ -3248,6 +3319,7 @@ impl RegexVM {
                         &mut ctx.backtrack_stack,
                         &mut ctx.alt_boundaries,
                         &ctx.alt_scope_marks,
+                        &mut ctx.pending_alt_revival,
                     );
                 }
 
@@ -3267,6 +3339,8 @@ impl RegexVM {
                             &mut ctx.skip_position,
                             &mut ctx.committed,
                             &mut ctx.backtrack_stack,
+                            &ctx.alt_boundaries,
+                            &mut ctx.pending_alt_revival,
                             &ctx.marks,
                             &name,
                             ctx.pos,
@@ -4805,6 +4879,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -5089,6 +5164,7 @@ impl RegexVM {
             previous_match_end: None,
             committed: false,
             skip_position: None,
+            pending_alt_revival: None,
             accept_forced: false,
             marks: Vec::new(),
             suspendable: true,
@@ -5271,6 +5347,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             atomic_depth: 0,
+            pending_alt_revival: None,
         };
 
         // Determine the CodeBlockOutcome from the callback result.
@@ -5976,6 +6053,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
+                        &ctx.alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                     );
                 }
                 OpCode::VerbSkip => {
@@ -5984,6 +6063,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut ctx.backtrack_stack,
+                        &ctx.alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                         pos,
                     );
                 }
@@ -5994,6 +6075,7 @@ impl RegexVM {
                         &mut ctx.backtrack_stack,
                         &mut ctx.alt_boundaries,
                         &ctx.alt_scope_marks,
+                        &mut ctx.pending_alt_revival,
                     );
                 }
                 OpCode::VerbSkipNamed => {
@@ -6004,6 +6086,8 @@ impl RegexVM {
                             &mut ctx.skip_position,
                             &mut ctx.committed,
                             &mut ctx.backtrack_stack,
+                            &ctx.alt_boundaries,
+                            &mut ctx.pending_alt_revival,
                             &ctx.marks,
                             &name,
                             ctx.pos,
@@ -6967,6 +7051,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut backtrack_stack,
+                        &local_alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                     );
                     local_alt_boundaries.clear();
                     if ctx.alt_boundaries.is_empty() {
@@ -6988,6 +7074,7 @@ impl RegexVM {
                         &mut backtrack_stack,
                         &mut local_alt_boundaries,
                         &ctx.alt_scope_marks,
+                        &mut ctx.pending_alt_revival,
                     );
                     if outcome == ThenOutcome::FullyDegraded {
                         // THEN degraded to PRUNE: clear local
@@ -7010,6 +7097,8 @@ impl RegexVM {
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut backtrack_stack,
+                        &local_alt_boundaries,
+                        &mut ctx.pending_alt_revival,
                         pos,
                     );
                 }
@@ -7023,6 +7112,8 @@ impl RegexVM {
                             &mut ctx.skip_position,
                             &mut ctx.committed,
                             &mut backtrack_stack,
+                            &local_alt_boundaries,
+                            &mut ctx.pending_alt_revival,
                             &ctx.marks,
                             &name,
                             pos,

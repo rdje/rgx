@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Engine: Cluster 1D Phase 3 — pending_alt_revival slot (+2 passes, ratchet 12,736/74)
+- Scope: `rgx-core/src/vm.rs` — new `pending_alt_revival: Option<BacktrackFrame>` field on `ExecContext`. `verb_apply_skip` / `verb_apply_skip_named` / `verb_apply_prune` snapshot the topmost alt-fallback frame here before their eager stack-clear; `verb_apply_then` consumes (takes) the slot, pushing the frame back onto the stack with a new alt-boundary index before its alt-redirect dispatch. `execute_at` resets the slot per scanning attempt; `clone_exec_context` propagates it into assertion-subexpr clones.
+- Closes residual Cluster 1D testinput1:5447 (`aaaaa(*SKIP)(*THEN)b|a+c` → "aaaaaac") and testinput1:5452 (`aaaaa(*PRUNE)(*THEN)b|a+c` → "aaaaaac"). Both required preserving the alt-fallback through SKIP/PRUNE's eager stack-clear so a following `(*THEN)` could revive it for the alt-redirect.
+- Phase 3 design note: the slot is general-purpose — any verb that performs eager stack-clear can use it as a typed bridge to a downstream `(*THEN)`. The mechanism is per-verb-effects-compatible; N verbs per branch still compose by sequential apply (Phase 1), with COMMIT deferring stack-clear (Phase 2) and SKIP/PRUNE bridging via the slot (Phase 3). The verb-effects family is now fully closed for the conformance corpus.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy --workspace --all-targets` zero RGX errors. Conformance: **NEW BASELINE 12,736 / 74 / 0 / 0** (was 12,734/76). SM bucket 26 → 24.
+
 ### 2026-05-06 - Engine: Cluster 1A polish — `(?(N)...)` consults prev-iter (+4 passes, ratchet 12,734/76)
 - Scope: `rgx-core/src/vm.rs` — `capture_group_exists` now routes through `Self::resolve_backref_span` instead of inspecting only the current-iteration slots.
 - Changes: PCRE2's conditional `(?(N)...)` test "is group N set?" must see the previous iteration's completion when the current iter is in-flight (lower-half end is None). The Cluster 1A architecture already populates the upper-half prev-iter slots; extending the conditional test to consult them is one line. Closes testinput1:3254 (`(a(?(1)\1)){4}` on "aaaaaaaaaa") and the palindrome family (testinput1:5964 ×3 subjects).

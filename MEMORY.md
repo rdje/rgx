@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: Cluster 1D Phase 3 — pending_alt_revival slot (+2 passes, ratchet 12,736/74)
+- New `ctx.pending_alt_revival: Option<BacktrackFrame>` slot. SKIP/SKIP:name/PRUNE snapshot the topmost alt-fallback frame here BEFORE their eager stack-clear; THEN consumes it (push frame back, add alt-boundary, redirect). Resets at execute_at start.
+- Closes Cluster 1D testinput1:5447 (SKIP+THEN) and testinput1:5452 (PRUNE+THEN). The verb-effects family is now fully closed for the conformance corpus: Phase 1 centralized dispatch, Phase 2 deferred COMMIT for COMMIT+THEN, Phase 3 revival slot for SKIP/PRUNE+THEN.
+- All 3 dispatch sites (top-level, continuation, subexpr) plumbed.
+
 ### 2026-05-06 — Engine: Cluster 1A polish — `(?(N)...)` test consults prev-iter (+4 passes, ratchet 12,734/76)
 - `capture_group_exists` now routes through `resolve_backref_span` instead of looking at current slots only. The conditional `(?(N)...)` test now sees prev-iter when current is in-flight — required by `(a(?(1)\1)){4}` style patterns where iter K's conditional asks "did iter K-1 set group 1?". Single-line change leveraging the Cluster 1A capture-vector layout.
 - Recovers testinput1:3254 + 3 palindrome subjects (testinput1:5964 ×3). FN bucket 40 → 36.
