@@ -8919,7 +8919,60 @@ impl OptimizingCompiler {
                 let effective_lazy = |lazy: bool| lazy ^ self.swap_greed;
                 match quantifier {
                     Quantifier::OneOrMore { lazy } if effective_lazy(*lazy) => {
-                        self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
+                        // Family fix (Cluster 1E/2B/2H generalization
+                        // 2026-05-07): when the body has its own
+                        // backtrack frames, emit an inline mandatory-
+                        // first-iter followed by the lazy alt-aware
+                        // block for further iters. Body alt-frames
+                        // flow to the outer backtrack stack so a
+                        // continuation failure can fall through into
+                        // them. Compact `PlusLazy` subexpr opcode is
+                        // kept for simple bodies (no behavior change).
+                        //
+                        // Layout:
+                        //   <body>                  ; mandatory first iter
+                        //   StarLazyBlock [len]     ; further iters
+                        //     SaveLazyPos
+                        //     <body>
+                        //     StarLazyContinue back
+                        //   [exit]
+                        if Self::quantifier_body_needs_inline_backtrack(expr) {
+                            let segment_start = self.code.len();
+                            self.codegen_pass(expr, false);
+                            if self.code.len() == segment_start {
+                                // Empty body — fall back.
+                                self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
+                            } else {
+                                let block_op_pos = self.code.len();
+                                self.emit_op(OpCode::StarLazyBlock);
+                                let block_len_pos = self.code.len();
+                                self.code.push(0);
+                                let block_start = self.code.len();
+                                self.emit_op(OpCode::SaveLazyPos);
+                                self.codegen_pass(expr, false);
+                                self.emit_op(OpCode::StarLazyContinue);
+                                let offset_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                let after_offset = offset_pos + 2;
+                                let back_offset =
+                                    (block_start as isize) - (after_offset as isize);
+                                let back_i16 = back_offset as i16;
+                                let bo_bytes = back_i16.to_le_bytes();
+                                self.code[offset_pos] = bo_bytes[0];
+                                self.code[offset_pos + 1] = bo_bytes[1];
+                                let block_end = self.code.len();
+                                let block_len = block_end - block_start;
+                                if let Ok(len_u8) = u8::try_from(block_len) {
+                                    self.code[block_len_pos] = len_u8;
+                                } else {
+                                    self.code.truncate(block_op_pos);
+                                    self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
+                                }
+                            }
+                        } else {
+                            self.emit_subexpr_opcode(OpCode::PlusLazy, expr);
+                        }
                     }
                     Quantifier::OneOrMore { .. } => {
                         // For most `X+` patterns the compact
@@ -8977,6 +9030,58 @@ impl OptimizingCompiler {
                                 let offset_bytes = (split_offset as u16).to_le_bytes();
                                 self.code[split_offset_pos] = offset_bytes[0];
                                 self.code[split_offset_pos + 1] = offset_bytes[1];
+                            }
+                        } else if Self::quantifier_body_needs_inline_backtrack(expr) {
+                            // Family fix — greedy `+` with empty-capable
+                            // body: mandatory first iter then alt-aware
+                            // greedy loop (mirrors `*` empty-capable fix).
+                            //   <body>                ; mandatory first
+                            //   LOOP:
+                            //     Split EXIT
+                            //     SaveLazyPos
+                            //     <body>
+                            //     StarGreedyContinue back-to-LOOP
+                            //   EXIT:
+                            let segment_start = self.code.len();
+                            self.codegen_pass(expr, false);
+                            if self.code.len() == segment_start {
+                                self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                            } else {
+                                let loop_start = self.code.len();
+                                self.emit_op(OpCode::Split);
+                                let split_offset_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                self.emit_op(OpCode::SaveLazyPos);
+                                let body2_start = self.code.len();
+                                self.codegen_pass(expr, false);
+                                if self.code.len() == body2_start {
+                                    // Loop body emitted nothing — fall back.
+                                    self.code.truncate(segment_start);
+                                    self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                                } else {
+                                    self.emit_op(OpCode::StarGreedyContinue);
+                                    let cont_offset_pos = self.code.len();
+                                    self.code.push(0);
+                                    self.code.push(0);
+                                    let after_cont = cont_offset_pos + 2;
+                                    let back_offset =
+                                        (loop_start as isize) - (after_cont as isize);
+                                    let back_i16 = back_offset as i16;
+                                    let bo_bytes = back_i16.to_le_bytes();
+                                    self.code[cont_offset_pos] = bo_bytes[0];
+                                    self.code[cont_offset_pos + 1] = bo_bytes[1];
+                                    let exit_target = self.code.len();
+                                    let split_offset = exit_target - (split_offset_pos + 2);
+                                    if u16::try_from(split_offset).is_ok() {
+                                        let offset_bytes = (split_offset as u16).to_le_bytes();
+                                        self.code[split_offset_pos] = offset_bytes[0];
+                                        self.code[split_offset_pos + 1] = offset_bytes[1];
+                                    } else {
+                                        self.code.truncate(segment_start);
+                                        self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
+                                    }
+                                }
                             }
                         } else {
                             self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
@@ -9164,7 +9269,52 @@ impl OptimizingCompiler {
                         }
                     }
                     Quantifier::ZeroOrOne { lazy } if effective_lazy(*lazy) => {
-                        self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
+                        // Family fix — lazy `??` with body needing
+                        // inline backtrack. Layout:
+                        //   Split body_offset    ; push body fallback
+                        //   Jump exit_offset     ; preferred: skip body
+                        //   <body>               ; runs only via
+                        //                          backtrack pop
+                        //   exit:
+                        // Body alt-frames flow to outer ctx so a
+                        // continuation failure (after 1-iter) can
+                        // backtrack into them.
+                        if Self::quantifier_body_needs_inline_backtrack(expr) {
+                            let segment_start = self.code.len();
+                            self.emit_op(OpCode::Split);
+                            let split_offset_pos = self.code.len();
+                            self.code.push(0);
+                            self.code.push(0);
+                            self.emit_op(OpCode::Jump);
+                            let jump_offset_pos = self.code.len();
+                            self.code.push(0);
+                            self.code.push(0);
+                            let body_start = self.code.len();
+                            self.codegen_pass(expr, false);
+                            let exit = self.code.len();
+                            if exit == body_start {
+                                self.code.truncate(segment_start);
+                                self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
+                            } else {
+                                let body_offset = body_start - (split_offset_pos + 2);
+                                let exit_offset = exit - (jump_offset_pos + 2);
+                                if u16::try_from(body_offset).is_ok()
+                                    && i16::try_from(exit_offset as isize).is_ok()
+                                {
+                                    let body_bytes = (body_offset as u16).to_le_bytes();
+                                    self.code[split_offset_pos] = body_bytes[0];
+                                    self.code[split_offset_pos + 1] = body_bytes[1];
+                                    let exit_bytes = (exit_offset as i16).to_le_bytes();
+                                    self.code[jump_offset_pos] = exit_bytes[0];
+                                    self.code[jump_offset_pos + 1] = exit_bytes[1];
+                                } else {
+                                    self.code.truncate(segment_start);
+                                    self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
+                                }
+                            }
+                        } else {
+                            self.emit_subexpr_opcode(OpCode::QuestionLazy, expr);
+                        }
                     }
                     Quantifier::ZeroOrOne { .. } => {
                         // Split-based codegen: Split pushes a backtrack

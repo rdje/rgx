@@ -3798,3 +3798,13 @@ Key design: greedy loop layout uses one Split per iteration to push the exit-fal
 Cumulative for the day: 12,737/73 → 12,760/50 (+23 passes / 23 closures). Both Cluster 1E + 2B + 2H closed at the lazy/greedy alt-aware block level.
 
 Remaining residual: 50 cases. Largest open clusters: Cluster 1A residual (palindromes ~5), Cluster 1C napla (~6), Cluster 1D backtracking-verb residuals (~3), Cluster 2A balanced-bracket recursion (~8), Cluster 2D verb-spans (~4), Cluster 2E (?0) (~2), substitute "other" (3), Bucket 5 too-permissive (4 — needs Replacer fallible refactor + harness Expected::SubstituteFailure split). All remaining ARE the architectural items in the residual chapter.
+
+## 2026-05-07 session — family extension of alt-aware block (no regression, no raw-pass move)
+
+User doctrine reinforced: "Always look for the family of issues a bug is an instance of and fix the family." Saved as memory feedback_family_fix_doctrine.md.
+
+Applied to today's lazy/greedy `*` cluster-1E/2B/2H fix: probed the family axes (`+` greedy/lazy, `?` greedy/lazy, `{n,m}` greedy/lazy) and found `+?`, `+`, `??` with empty-capable bodies had the same bug. Extended codegen for those three. `?` greedy was already Split-based (already correct). `{n,m}` chains through `Star/QuestionLazy` so propagates automatically.
+
+Result: zero regression. Conformance ratchet UNCHANGED 12,760/50 — but distribution shifted FN 26 → 20, SM 13 → 19. Six tests previously no-match now produce a match (just wrong-span), surfacing the next sub-cluster (backref-interaction, dupnames-name-stability) for follow-up.
+
+Key insight: family fix shipped even without raw-pass progress because the family doctrine demands consistency. Future fixes on the SM cases now happen on a clean foundation.
