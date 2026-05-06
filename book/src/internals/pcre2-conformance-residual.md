@@ -254,7 +254,7 @@ Classic HTML-like balanced-bracket pattern with recursive call and possessive qu
 
 The outer quantified recursive call `(?R)*` or `(?2)*` is supposed to keep going until brackets balance; RGX's `Call` + quantifier-loop composition exits too early. Probably the same subroutine-stack reification as Cluster 1A.
 
-## Cluster 2B — Empty-alternative lazy-quantifier span (4 cases)
+## Cluster 2B — Empty-alternative lazy-quantifier span (4 cases — **PARTIAL CLOSURE 2026-05-07**: 3 of 4 closed)
 
 **Difficulty**: medium. **Expected payoff**: 4 cases.
 
@@ -262,10 +262,10 @@ The outer quantified recursive call `(?R)*` or `(?2)*` is supposed to keep going
 
 | File:line | Pattern | Subject | PCRE2 | RGX |
 |---|---|---|---|---|
-| testinput1:5825 | `(\|ab)*?d` | `abd` | `abd` | `d` |
-| testinput2:4192 | `(\|ab)*?d/I` | `abd` | `abd` | `d` |
-| testinput2:4196 | same | same | same | same |
-| testinput1:4862 | `(?P<abn>(?P=abn)xxx\|)+` | (context) | `""` | `xxx` |
+| ~~testinput1:5825~~ | ~~`(\|ab)*?d`~~ | ~~`abd`~~ | ~~`abd`~~ | ~~`d`~~ ✅ CLOSED 2026-05-07 (StarLazyBlock alt-aware layout) |
+| ~~testinput2:4192~~ | ~~`(\|ab)*?d/I`~~ | ~~`abd`~~ | ~~`abd`~~ | ~~`d`~~ ✅ CLOSED 2026-05-07 |
+| ~~testinput2:4196~~ | ~~same~~ | ~~same~~ | ~~same~~ | ~~same~~ ✅ CLOSED 2026-05-07 |
+| testinput1:4862 | `(?P<abn>(?P=abn)xxx\|)+` | (context) | `""` | `xxx` | Different shape — capturing-name backref + empty-alt; the lazy-block alt-frame fix didn't reach this case. Needs separate analysis. |
 
 **What to change**: `OpCode::StarLazy` / `PlusLazy` in `vm.rs` — the empty-branch-first behaviour needs to match PCRE2's "try zero iterations first, back off to alternatives only if the rest fails" semantic. Engine fix "greedy-quantifier advancing retry" (2026-04-18) touched this for greedy; the lazy path is symmetric but not yet fixed.
 

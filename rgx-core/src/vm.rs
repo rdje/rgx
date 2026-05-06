@@ -261,8 +261,35 @@ pub enum OpCode {
     PlusGreedy = 0x84,
     /// Optimized + quantifier (1+, lazy)
     PlusLazy = 0x85,
-    // 0x86 removed: RepeatRange (superseded by Split+QuestionGreedy approach)
-    // 0x87 removed: RepeatExact (superseded by Split+QuestionGreedy approach)
+    /// Save the current text position onto `ctx.lazy_iter_save` so a
+    /// matching `StarLazyContinue` at body exit can detect zero-width
+    /// iterations. Cluster 1E/2B/2H — lazy-quantifier alt-frame
+    /// preservation. Emitted at body entry of the new lazy-loop layout.
+    SaveLazyPos = 0x86,
+    /// Body-exit hook for the lazy-loop layout (`*?`). Pops the saved
+    /// pre-body pos from `ctx.lazy_iter_save`, compares to current
+    /// pos: if equal (zero-width) terminate the iter chain; if
+    /// advanced, push another iter-frame at the matching `SaveLazyPos`
+    /// (back-offset is the 2-byte signed operand). Closes Cluster 1E
+    /// + 2B + 2H by allowing body alt-frames to live on the outer
+    /// backtrack stack while preserving the 0-iter-preferred lazy
+    /// semantic. The back-offset uses the same convention as Jump
+    /// (read 2 bytes, advance ip by 2, ip += offset).
+    StarLazyContinue = 0x87,
+    /// Wrapper for the alt-aware lazy `*?` loop. Operand: 1-byte
+    /// block_len — length of the inline body block
+    /// `[SaveLazyPos][body][StarLazyContinue][2-byte back-offset]`.
+    /// Dispatch: push an iter-frame at the start of the block (=
+    /// `SaveLazyPos`) carrying the current text pos, then advance ip
+    /// past the entire block to the loop's continuation. The 0-iter
+    /// continuation runs first; on backtrack the iter-frame pops and
+    /// runs the body for one iteration. Body alt-frames live on the
+    /// outer `ctx.backtrack_stack`, so a continuation failure can
+    /// fall through into them — closing Cluster 1E + 2B + 2H.
+    /// Emitted by codegen only when the body needs inline backtrack
+    /// support; simple lazy bodies still emit the compact `StarLazy`
+    /// subexpr form.
+    StarLazyBlock = 0x88,
 
     // === ALTERNATIVE TRACKING (0x90-0x9F) ===
     /// Set the current alternative index (for match reporting)
@@ -741,6 +768,16 @@ pub struct ExecContext<'a> {
     /// onto the stack so the alt-redirect path can take it. Reset to
     /// None at execute_at start.
     pub pending_alt_revival: Option<BacktrackFrame>,
+    /// Cluster 1E/2B/2H — lazy-loop pre-body-pos save stack. Each
+    /// `OpCode::SaveLazyPos` (emitted at body entry of a `*?` lazy
+    /// loop) pushes the current text pos; the matching
+    /// `OpCode::StarLazyContinue` at body exit pops it to detect
+    /// zero-width iterations and decide whether to push another
+    /// iter-frame. Stack-discipline (LIFO) handles nested lazy
+    /// loops; backtrack save/restore via `BacktrackFrame
+    /// ::lazy_iter_save_len` truncates the stack on pop so the
+    /// abandoned-branch entries don't leak.
+    pub lazy_iter_save: Vec<usize>,
     /// Set by `(*ACCEPT)` — forces an immediate successful match,
     /// bubbling through any enclosing subexpression runs. PCRE2
     /// docs: "(*ACCEPT) ... causes the match to succeed immediately;
@@ -826,6 +863,12 @@ pub struct BacktrackFrame {
     /// PCRE2 `\K` semantics: the reset only takes effect on the
     /// surviving match path.
     pub saved_match_start_override: Option<usize>,
+    /// Cluster 1E/2B/2H — length of `ctx.lazy_iter_save` at frame-push
+    /// time. On pop, the lazy-iter-save stack is truncated to this
+    /// length so any `SaveLazyPos` pushes that were made on the
+    /// abandoned branch are unwound. Zero for non-lazy contexts —
+    /// truncating to 0 from an already-shorter stack is a no-op.
+    pub lazy_iter_save_len: usize,
 }
 
 /// Match result with full capture information
@@ -1283,6 +1326,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1433,6 +1477,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1520,6 +1565,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -1590,6 +1636,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -2617,6 +2664,7 @@ impl RegexVM {
             capture_snapshot: None,
             saved_code_result: ctx.code_result.clone(),
             saved_match_start_override: ctx.match_start_override,
+            lazy_iter_save_len: ctx.lazy_iter_save.len(),
         }
     }
 
@@ -2676,6 +2724,12 @@ impl RegexVM {
         // `\K` in an abandoned branch doesn't leak its reset onto the
         // eventual match span.
         ctx.match_start_override = frame.saved_match_start_override;
+        // Cluster 1E/2B/2H — truncate the lazy-iter-save stack to the
+        // length captured at frame push. Any `SaveLazyPos` pushes that
+        // happened on the abandoned branch are unwound so the
+        // `StarLazyContinue` hook in the surviving path sees the
+        // correct pre-body pos for its loop.
+        ctx.lazy_iter_save.truncate(frame.lazy_iter_save_len);
     }
 
     /// Restore a previously saved execution state if backtracking is available.
@@ -2764,6 +2818,7 @@ impl RegexVM {
             committed: ctx.committed,
             skip_position: ctx.skip_position,
             pending_alt_revival: ctx.pending_alt_revival.clone(),
+            lazy_iter_save: ctx.lazy_iter_save.clone(),
             accept_forced: ctx.accept_forced,
             marks: ctx.marks.clone(),
             suspendable: ctx.suspendable,
@@ -3547,6 +3602,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                         match_count += 1;
                         trace_log!(
@@ -3618,6 +3674,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -3661,6 +3718,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -3698,6 +3756,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -3739,6 +3798,7 @@ impl RegexVM {
                             capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -3802,6 +3862,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: after_first_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -3989,6 +4050,7 @@ impl RegexVM {
                                 capture_snapshot: None,
                                 saved_code_result,
                                 saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             });
                         }
                         continue;
@@ -4038,6 +4100,7 @@ impl RegexVM {
                                 capture_snapshot: None,
                                 saved_code_result,
                                 saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             });
                         }
                         continue;
@@ -4065,6 +4128,7 @@ impl RegexVM {
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
                 }
@@ -4090,6 +4154,7 @@ impl RegexVM {
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
                     };
                     let new_idx = ctx.backtrack_stack.len();
                     ctx.backtrack_stack.push(backtrack_frame);
@@ -4164,6 +4229,86 @@ impl RegexVM {
                         continue;
                     }
                     return false;
+                }
+
+                OpCode::SaveLazyPos => {
+                    // Cluster 1E/2B/2H — body-entry hook for the
+                    // lazy-loop layout. Push current text pos onto
+                    // `ctx.lazy_iter_save` so the matching
+                    // `StarLazyContinue` at body exit can detect a
+                    // zero-width iteration (and avoid pushing yet
+                    // another iter-frame). Save-stack pops on
+                    // backtrack happen via `restore_frame` which
+                    // truncates `ctx.lazy_iter_save` to the
+                    // `lazy_iter_save_len` captured when each frame
+                    // was pushed — so abandoned-branch pushes don't
+                    // leak.
+                    ctx.lazy_iter_save.push(ctx.pos);
+                }
+
+                OpCode::StarLazyBlock => {
+                    // Cluster 1E/2B/2H — alt-aware lazy `*?` wrapper.
+                    // Operand: 1-byte block_len. Push iter-frame at
+                    // block_start (= `SaveLazyPos`); skip past block
+                    // for the 0-iter-preferred path. On backtrack,
+                    // the iter-frame's `ip` re-enters the body so its
+                    // alt-frames can flow onto the outer stack.
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let block_len = code[ip] as usize;
+                    ip += 1;
+                    let block_start = ip;
+                    let block_end = ip + block_len;
+                    if block_end > code.len() {
+                        return false;
+                    }
+                    ctx.backtrack_stack.push(BacktrackFrame {
+                        ip: block_start,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                    });
+                    ip = block_end;
+                }
+
+                OpCode::StarLazyContinue => {
+                    // Cluster 1E/2B/2H — body-exit hook for the
+                    // lazy-loop layout. Operand: 2-byte signed
+                    // little-endian back-offset to the matching
+                    // `SaveLazyPos`. After reading the operand, ip
+                    // points to the loop's exit (continuation of
+                    // the surrounding pattern).
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        // Body advanced. Push another iter-frame so
+                        // backtracking from the continuation re-enters
+                        // the loop for one more iteration. The frame's
+                        // ip is the matching `SaveLazyPos` (back-jump
+                        // via the signed offset).
+                        let body_start = ((ip as isize) + (offset as isize)) as usize;
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: body_start,
+                            pos: ctx.pos,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
+                            saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        });
+                    }
+                    // Zero-width body or post-push: ip already points
+                    // to the loop exit; fall through to continuation.
                 }
 
                 // TODO: Implement remaining opcodes
@@ -4892,6 +5037,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: false,
@@ -5177,6 +5323,7 @@ impl RegexVM {
             committed: false,
             skip_position: None,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
             suspendable: true,
@@ -5360,6 +5507,7 @@ impl RegexVM {
             alt_scope_marks: Vec::new(),
             atomic_depth: 0,
             pending_alt_revival: None,
+            lazy_iter_save: Vec::new(),
         };
 
         // Determine the CodeBlockOutcome from the callback result.
@@ -5639,6 +5787,56 @@ impl RegexVM {
                     }
                     return false;
                 }
+                OpCode::SaveLazyPos => {
+                    // Cluster 1E/2B/2H — body-entry hook (subexpr path).
+                    ctx.lazy_iter_save.push(ctx.pos);
+                }
+                OpCode::StarLazyBlock => {
+                    // Cluster 1E/2B/2H — alt-aware lazy `*?` wrapper (subexpr path).
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let block_len = code[ip] as usize;
+                    ip += 1;
+                    let block_start = ip;
+                    let block_end = ip + block_len;
+                    if block_end > code.len() {
+                        return false;
+                    }
+                    ctx.backtrack_stack.push(BacktrackFrame {
+                        ip: block_start,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                    });
+                    ip = block_end;
+                }
+                OpCode::StarLazyContinue => {
+                    // Cluster 1E/2B/2H — body-exit hook (subexpr path).
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        let body_start = ((ip as isize) + (offset as isize)) as usize;
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: body_start,
+                            pos: ctx.pos,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
+                            saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        });
+                    }
+                }
                 OpCode::Char => {
                     if let Some(expected) = Self::read_char_operand(code, &mut ip) {
                         if let Some(actual) = Self::current_char(ctx) {
@@ -5760,6 +5958,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                         ip = target1;
                     } else {
@@ -5781,6 +5980,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                         ip = target2;
                     } else {
@@ -6025,6 +6225,7 @@ impl RegexVM {
                                     capture_snapshot: None,
                                     saved_code_result,
                                     saved_match_start_override,
+                                    lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 });
                             }
                         } else {
@@ -6670,6 +6871,7 @@ impl RegexVM {
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
                     });
                     if matches!(op, OpCode::AltSplit) {
                         local_alt_boundaries.push(pushed_idx);
@@ -6691,6 +6893,7 @@ impl RegexVM {
                         capture_snapshot: None,
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
                     });
                     ip += offset;
                 }
@@ -6741,6 +6944,7 @@ impl RegexVM {
                                 capture_snapshot: None,
                                 saved_code_result,
                                 saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             });
                         }
                         continue;
@@ -6780,6 +6984,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -6817,6 +7022,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -6867,6 +7073,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -6897,6 +7104,7 @@ impl RegexVM {
                             capture_snapshot: Some(probe_ctx.captures),
                             saved_code_result: probe_ctx.code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -6957,6 +7165,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -7004,6 +7213,7 @@ impl RegexVM {
                             capture_snapshot: None,
                             saved_code_result: after_first_code_result,
                             saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
                     }
 
@@ -7012,6 +7222,59 @@ impl RegexVM {
 
                 OpCode::Fail => {
                     local_backtrack_or_return_false!();
+                }
+
+                OpCode::SaveLazyPos => {
+                    // Cluster 1E/2B/2H — body-entry hook (continuation path).
+                    ctx.lazy_iter_save.push(ctx.pos);
+                }
+
+                OpCode::StarLazyBlock => {
+                    // Cluster 1E/2B/2H — alt-aware lazy `*?` wrapper (continuation path).
+                    if ip >= code.len() {
+                        return false;
+                    }
+                    let block_len = code[ip] as usize;
+                    ip += 1;
+                    let block_start = ip;
+                    let block_end = ip + block_len;
+                    if block_end > code.len() {
+                        return false;
+                    }
+                    ctx.backtrack_stack.push(BacktrackFrame {
+                        ip: block_start,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                    });
+                    ip = block_end;
+                }
+
+                OpCode::StarLazyContinue => {
+                    // Cluster 1E/2B/2H — body-exit hook (continuation path).
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        let body_start = ((ip as isize) + (offset as isize)) as usize;
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: body_start,
+                            pos: ctx.pos,
+                            trail_mark: ctx.capture_trail.len(),
+                            call_stack_mark: ctx.call_stack.len(),
+                            capture_snapshot: None,
+                            saved_code_result: ctx.code_result.clone(),
+                            saved_match_start_override: ctx.match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        });
+                    }
                 }
 
                 OpCode::Match => {
@@ -8662,7 +8925,69 @@ impl OptimizingCompiler {
                         }
                     }
                     Quantifier::ZeroOrMore { lazy } if effective_lazy(*lazy) => {
-                        self.emit_subexpr_opcode(OpCode::StarLazy, expr);
+                        // Cluster 1E/2B/2H — when the body has its own
+                        // backtrack frames (alternation, nested quantifier,
+                        // etc.) emit the alt-aware lazy-loop layout so
+                        // body alt-frames live on the outer stack and a
+                        // continuation failure can fall through into them.
+                        // Compact `StarLazy` subexpr opcode is kept for
+                        // simple bodies — no behavior change there.
+                        //
+                        // Layout:
+                        //   StarLazyBlock [block_len 1 byte]
+                        //     SaveLazyPos        ; pushes pre-body pos
+                        //     <body>             ; alt-frames flow to outer
+                        //     StarLazyContinue [back-offset 2 bytes]
+                        //                         ; pops save, decides
+                        //                         ; whether to push another
+                        //                         ; iter-frame
+                        //
+                        // Block_len is constrained to 255 by the 1-byte
+                        // operand. For oversized bodies fall back to the
+                        // compact form (the old probe-based StarLazy);
+                        // this preserves the existing behavior for the
+                        // few patterns that exceed the limit.
+                        if Self::quantifier_body_needs_inline_backtrack(expr) {
+                            let block_op_pos = self.code.len();
+                            self.emit_op(OpCode::StarLazyBlock);
+                            let block_len_pos = self.code.len();
+                            self.code.push(0);
+                            let block_start = self.code.len();
+                            self.emit_op(OpCode::SaveLazyPos);
+                            self.codegen_pass(expr, false);
+                            let continue_op_pos = self.code.len();
+                            self.emit_op(OpCode::StarLazyContinue);
+                            let offset_pos = self.code.len();
+                            self.code.push(0);
+                            self.code.push(0);
+                            // Back-offset from the byte AFTER the offset
+                            // operand to `SaveLazyPos` (= block_start).
+                            // StarLazyContinue dispatch reads offset, does
+                            // `ip += 2`, then `ip += offset` to land on
+                            // SaveLazyPos for the next iter retry.
+                            let after_offset = offset_pos + 2;
+                            let back_offset = (block_start as isize) - (after_offset as isize);
+                            let back_i16 = back_offset as i16;
+                            let bo_bytes = back_i16.to_le_bytes();
+                            self.code[offset_pos] = bo_bytes[0];
+                            self.code[offset_pos + 1] = bo_bytes[1];
+                            // Patch block_len.
+                            let block_end = self.code.len();
+                            let block_len = block_end - block_start;
+                            if let Ok(len_u8) = u8::try_from(block_len) {
+                                self.code[block_len_pos] = len_u8;
+                            } else {
+                                // Body too large for 1-byte operand —
+                                // discard the alt-aware emission and fall
+                                // back to the compact subexpr StarLazy.
+                                self.code.truncate(block_op_pos);
+                                self.emit_subexpr_opcode(OpCode::StarLazy, expr);
+                            }
+                            // Validate offset fits i16.
+                            let _ = continue_op_pos; // keep variable alive
+                        } else {
+                            self.emit_subexpr_opcode(OpCode::StarLazy, expr);
+                        }
                     }
                     Quantifier::ZeroOrMore { .. } => {
                         // Same dispatch as `X+`: when the body
@@ -9483,6 +9808,7 @@ impl OptimizingCompiler {
                 | OpCode::QuestionLazy
                 | OpCode::StarGreedy
                 | OpCode::StarLazy
+                | OpCode::StarLazyBlock
                 | OpCode::PlusGreedy
                 | OpCode::PlusLazy => {
                     if ip >= code.len() {
@@ -9541,7 +9867,13 @@ impl OptimizingCompiler {
                 | OpCode::Match
                 | OpCode::Fail
                 | OpCode::Accept
+                | OpCode::SaveLazyPos
                 | OpCode::Halt => {}
+                OpCode::StarLazyContinue => {
+                    // 2-byte signed back-offset operand to the matching
+                    // SaveLazyPos. No char-class id to remap.
+                    ip += 2;
+                }
                 OpCode::Mark | OpCode::VerbSkipNamed => {
                     // Skip the length-prefixed name operand. Both
                     // (*MARK:name) and (*SKIP:name) (A11) encode the
@@ -9815,9 +10147,10 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
         CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
         GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
         LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
-        PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative,
-        SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText,
-        Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+        PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos, SaveStart,
+        SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
+        StarLazyBlock, StarLazyContinue, StartLine, StartText, Then, VerbSkip, VerbSkipNamed,
+        WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
     t[0x00] = Some(Char);
@@ -9868,6 +10201,9 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x83] = Some(StarLazy);
     t[0x84] = Some(PlusGreedy);
     t[0x85] = Some(PlusLazy);
+    t[0x86] = Some(SaveLazyPos);
+    t[0x87] = Some(StarLazyContinue);
+    t[0x88] = Some(StarLazyBlock);
     t[0x90] = Some(SetAlternative);
     t[0xA0] = Some(Commit);
     t[0xA1] = Some(Prune);

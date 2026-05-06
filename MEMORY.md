@@ -3768,3 +3768,19 @@ Followed yesterday's correction directly: `parsing.rs::convert_typed_subroutine_
 Result: +10 passes, **ratchet 12,737/73 → 12,747/63**. 10 of 13 cluster-1B + 1 cluster-2G nested-bracket subject closed. Remaining 3 (testinput2:8119 cascading-prefix family + 8109 first subject) tie into the larger subroutine-stack-reification work shared with Cluster 1A/2A.
 
 Net for the day: started at 12,737/73 → 12,747/63 (+10 passes, -10 fails). Plus the (uncommitted) MEMORY-track session — withdrawal of false-premise PGEN-RGX-0083 — pushed earlier in 2f4f55d.
+
+## 2026-05-07 session — Cluster 2B lazy `*?` alt-aware block shipped
+
+Followed yesterday's root-cause diagnosis from end-to-end. Per the user's "zero regression" mandate, designed an alt-aware block layout that runs the body in main dispatch (so body alt-frames live on the outer `ctx.backtrack_stack` and are reachable when continuation backtracks) while preserving lazy 0-iter-preferred semantic via an iter-frame pushed at body entry.
+
+New opcodes: `OpCode::SaveLazyPos = 0x86` (body-entry pos save), `OpCode::StarLazyContinue = 0x87` (body-exit zero-width detection + iter-frame push for next-iter retry), `OpCode::StarLazyBlock = 0x88` (loop wrapper that pushes the initial iter-frame and skips past the body for 0-iter continuation).
+
+New ctx field: `lazy_iter_save: Vec<usize>` (save-stack, LIFO discipline for nested lazy loops). New `BacktrackFrame.lazy_iter_save_len: usize` field updated at every push site (24 sites) — `restore_frame` truncates the save-stack to the saved length so abandoned-branch entries unwind. Mostly mechanical edits via sed for the bulk update.
+
+Layout: `[StarLazyBlock][block_len][SaveLazyPos][body][StarLazyContinue][back-offset]`. Codegen emits the new layout only when body needs inline backtrack support (alternation, nested quantifier, conditional with branching); simple bodies fall back to the compact `StarLazy` subexpr opcode unchanged. Block_len is a 1-byte operand (≤255 byte body); oversized bodies fall back to the compact form too.
+
+Result: +3 passes, **ratchet 12,747/63 → 12,750/60**. Closed testinput1:5825 / testinput2:4192 / testinput2:4196 (Cluster 2B canonicals). testinput1:4862 stayed open — different shape (capturing-name backref + empty-alt; needs more analysis).
+
+Key invariant for zero regression: every BacktrackFrame push captures `ctx.lazy_iter_save.len()` and `restore_frame` truncates back. Lazy_iter_save is a single Vec<usize> shared across nested lazy loops (LIFO via SaveLazyPos push, StarLazyContinue pop). Abandoned-branch entries unwind via the per-frame saved length. Hot-path overhead: 1 push/pop per lazy iter + 1 usize copy per backtrack frame. Negligible.
+
+Next step: Cluster 1E (3) + 2H (1) use *greedy* `*` not lazy `*?`. Same root cause (body alt-frames lost in subexpr-clone path) but symmetric fix needed: `StarGreedyBlock` opcode that loops back to the body on non-zero-width (greedy semantic) while still using SaveLazyPos/StarLazyContinue infrastructure. Tracked as follow-up.

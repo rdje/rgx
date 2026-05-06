@@ -368,6 +368,11 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
         | OpCode::Call
         | OpCode::CallReturning
 
+        // === Ineligible: lazy-loop hooks (cluster 1E/2B/2H) ===
+        | OpCode::SaveLazyPos
+        | OpCode::StarLazyContinue
+        | OpCode::StarLazyBlock
+
         // === Ineligible: backtracking verbs ===
         | OpCode::Commit
         | OpCode::Prune
