@@ -54,9 +54,9 @@ The harness writes each dumped case as `<category> <file>:<line>: /<pattern>/<mo
 
 **RGX returns "no match" where PCRE2 finds one.** This is by far the biggest bucket and splits cleanly into 7 root-cause clusters.
 
-## Cluster 1A — Recursive / self-referencing captures across quantifier iterations (16 cases)
+## Cluster 1A — Recursive / self-referencing captures across quantifier iterations (16 cases — **PARTIAL CLOSURE 2026-05-06**: 11 of 16 recovered)
 
-**Difficulty**: high (architectural). **Expected payoff**: ~16 cases, plus indirect wins in Clusters 2A/3.
+**Difficulty**: high (architectural). **Expected payoff**: ~16 cases, plus indirect wins in Clusters 2A/3. **Status 2026-05-06**: 11 cases shipped via the prev-iter-capture-slot architecture (commit ad49523's successor — capture vector doubled, SaveStart promotes completed pair to upper-half "prev iter" slots, backref resolves current-first-then-prev-iter). Remaining: testinput1:3254 (`(a(?(1)\1)){4}` — conditional + self-backref), the 3 testinput1:5964 palindrome subjects, testinput1:5971, :5984 — these need the conditional `(?(N)...)` test or the lookahead-recursion path to also see prev-iter, plus the propagation isolation extends to subroutine calls.
 
 Patterns where a backreference (`\1`) or subroutine call (`(?1)`) refers to a capture group that is *currently being iterated* by a surrounding quantifier. On iteration N+1, the reference must see the value captured during iteration N. RGX's capture machinery restores group values on backtrack but does not preserve the "last completed iteration's value" as a separate, readable slot. When the inner body re-enters the group, the capture is in-flight and the backreference sees either an empty value or the wrong span.
 

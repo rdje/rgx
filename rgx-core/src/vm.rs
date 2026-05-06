@@ -1239,7 +1239,19 @@ impl RegexVM {
             pos: 0,
             match_start: 0,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -1376,7 +1388,19 @@ impl RegexVM {
             pos: start,
             match_start: start,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -1450,7 +1474,19 @@ impl RegexVM {
             pos: start,
             match_start: start,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -1507,7 +1543,19 @@ impl RegexVM {
             pos: 0,
             match_start: 0,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -3656,9 +3704,33 @@ impl RegexVM {
                     let group_id = code[ip] as usize;
                     ip += 1;
 
-                    // Save current position as start of capture group
+                    // Cluster 1A — preserve the prior iteration's
+                    // completed capture pair so a backref inside the
+                    // quantified body can see iter N-1's value while
+                    // iter N is in flight. If the current slot is
+                    // already a complete pair (start AND end Some),
+                    // copy it to the prev_iter slots in the upper
+                    // half before overwriting the current start.
                     let start_idx = group_id * 2;
-                    if start_idx < ctx.captures.len() {
+                    let end_idx = start_idx + 1;
+                    let half = ctx.captures.len() / 2;
+                    if start_idx < half {
+                        let cur_start = ctx.captures[start_idx];
+                        let cur_end = ctx.captures[end_idx];
+                        if cur_start.is_some() && cur_end.is_some() {
+                            // Promote the completed prior-iter pair
+                            // into the prev-iter slots so a backref
+                            // inside the upcoming iter can read it.
+                            Self::set_capture(ctx, half + start_idx, cur_start);
+                            Self::set_capture(ctx, half + end_idx, cur_end);
+                            // Clear the current end — entering iter
+                            // N+1 means the "current" pair is now
+                            // in-flight (start about to be set, end
+                            // not yet). Without this clear, a
+                            // following backref would read the stale
+                            // (newpos, oldend) pair.
+                            Self::set_capture(ctx, end_idx, None);
+                        }
                         Self::set_capture(ctx, start_idx, Some(ctx.pos));
                     }
                 }
@@ -3671,9 +3743,12 @@ impl RegexVM {
                     let group_id = code[ip] as usize;
                     ip += 1;
 
-                    // Save current position as end of capture group
+                    // Save current position as end of capture group.
+                    // The bound is the lower half (current iter slots);
+                    // the upper half holds the prev-iter snapshot which
+                    // is only written by SaveStart (Cluster 1A).
                     let end_idx = group_id * 2 + 1;
-                    if end_idx < ctx.captures.len() {
+                    if end_idx < ctx.captures.len() / 2 {
                         Self::set_capture(ctx, end_idx, Some(ctx.pos));
                     }
                     // Emit capture-completed event when both start and end are known
@@ -4145,14 +4220,40 @@ impl RegexVM {
     }
 
     /// Match the current position against the bytes captured by a numbered group.
-    fn match_backreference(&self, ctx: &mut ExecContext<'_>, group_id: usize) -> bool {
+    /// Cluster 1A — resolve a backref's span. Reads the *current*
+    /// iteration's capture pair if both `start` and `end` are set;
+    /// otherwise (the current iter is in-flight) falls back to the
+    /// *previous iteration's completed* pair stashed in the upper
+    /// half of `ctx.captures` by `OpCode::SaveStart`. Returns `None`
+    /// if neither slot has a complete pair (the backref is to a
+    /// not-yet-set group).
+    #[inline]
+    fn resolve_backref_span(ctx: &ExecContext<'_>, group_id: usize) -> Option<(usize, usize)> {
         let start_idx = group_id * 2;
         let end_idx = start_idx + 1;
-        let (Some(capture_start), Some(capture_end)) = (
-            ctx.captures.get(start_idx).and_then(|&x| x),
-            ctx.captures.get(end_idx).and_then(|&x| x),
-        ) else {
-            return false;
+        let cur_start = ctx.captures.get(start_idx).and_then(|&x| x);
+        let cur_end = ctx.captures.get(end_idx).and_then(|&x| x);
+        if let (Some(s), Some(e)) = (cur_start, cur_end) {
+            return Some((s, e));
+        }
+        // Current is in-progress (start set, end unset, or vice
+        // versa); consult the prev-iter slot.
+        let half = ctx.captures.len() / 2;
+        if half + end_idx >= ctx.captures.len() {
+            return None;
+        }
+        let prev_start = ctx.captures[half + start_idx];
+        let prev_end = ctx.captures[half + end_idx];
+        match (prev_start, prev_end) {
+            (Some(s), Some(e)) => Some((s, e)),
+            _ => None,
+        }
+    }
+
+    fn match_backreference(&self, ctx: &mut ExecContext<'_>, group_id: usize) -> bool {
+        let (capture_start, capture_end) = match Self::resolve_backref_span(ctx, group_id) {
+            Some(span) => span,
+            None => return false,
         };
 
         if capture_start > capture_end || capture_end > ctx.text.len() {
@@ -4227,13 +4328,9 @@ impl RegexVM {
         ctx: &mut ExecContext<'_>,
         group_id: usize,
     ) -> bool {
-        let start_idx = group_id * 2;
-        let end_idx = start_idx + 1;
-        let (Some(capture_start), Some(capture_end)) = (
-            ctx.captures.get(start_idx).and_then(|&x| x),
-            ctx.captures.get(end_idx).and_then(|&x| x),
-        ) else {
-            return false;
+        let (capture_start, capture_end) = match Self::resolve_backref_span(ctx, group_id) {
+            Some(span) => span,
+            None => return false,
         };
 
         if capture_start > capture_end || capture_end > ctx.text.len() {
@@ -4586,7 +4683,19 @@ impl RegexVM {
             pos: 0,
             match_start: 0,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -4858,7 +4967,19 @@ impl RegexVM {
             pos: 0,
             match_start: 0,
             end: bytes.len(),
-            captures: vec![None; (self.program.num_groups + 1) as usize * 2],
+            // Capture vector layout (Cluster 1A — recursive captures
+            // across quantifier iterations): the first half
+            // `[0 .. 2*(num_groups+1)]` holds the *current* iteration's
+            // (start, end) pair for each group. The second half
+            // `[2*(num_groups+1) .. 4*(num_groups+1)]` holds the
+            // *previous iteration's completed* (start, end) pair —
+            // populated by `OpCode::SaveStart` before it overwrites
+            // the current slot, consumed by `match_backreference` as
+            // a fallback when the current capture is in-progress
+            // (start set, end unset). This makes `\1` inside
+            // `(a\1?){4}` see iter N-1's value while iter N's body
+            // is mid-flight, per pcre2pattern(3).
+            captures: vec![None; (self.program.num_groups + 1) as usize * 4],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
             atomic_depth: 0,
@@ -5479,9 +5600,18 @@ impl RegexVM {
                     if ip < code.len() {
                         let group_id = code[ip] as usize;
                         ip += 1;
-                        let slot = group_id * 2;
-                        if slot < ctx.captures.len() {
-                            Self::set_capture(ctx, slot, Some(ctx.pos));
+                        // Cluster 1A — see top-level dispatch.
+                        let start_idx = group_id * 2;
+                        let end_idx = start_idx + 1;
+                        let half = ctx.captures.len() / 2;
+                        if start_idx < half {
+                            let cur_start = ctx.captures[start_idx];
+                            let cur_end = ctx.captures[end_idx];
+                            if cur_start.is_some() && cur_end.is_some() {
+                                Self::set_capture(ctx, half + start_idx, cur_start);
+                                Self::set_capture(ctx, half + end_idx, cur_end);
+                            }
+                            Self::set_capture(ctx, start_idx, Some(ctx.pos));
                         }
                     }
                 }
@@ -5490,7 +5620,7 @@ impl RegexVM {
                         let group_id = code[ip] as usize;
                         ip += 1;
                         let slot = group_id * 2 + 1;
-                        if slot < ctx.captures.len() {
+                        if slot < ctx.captures.len() / 2 {
                             Self::set_capture(ctx, slot, Some(ctx.pos));
                         }
                     }
@@ -6218,8 +6348,27 @@ impl RegexVM {
                     let group_id = code[ip] as usize;
                     ip += 1;
 
+                    // Cluster 1A — see top-level dispatch.
                     let start_idx = group_id * 2;
-                    if start_idx < ctx.captures.len() {
+                    let end_idx = start_idx + 1;
+                    let half = ctx.captures.len() / 2;
+                    if start_idx < half {
+                        let cur_start = ctx.captures[start_idx];
+                        let cur_end = ctx.captures[end_idx];
+                        if cur_start.is_some() && cur_end.is_some() {
+                            // Promote the completed prior-iter pair
+                            // into the prev-iter slots so a backref
+                            // inside the upcoming iter can read it.
+                            Self::set_capture(ctx, half + start_idx, cur_start);
+                            Self::set_capture(ctx, half + end_idx, cur_end);
+                            // Clear the current end — entering iter
+                            // N+1 means the "current" pair is now
+                            // in-flight (start about to be set, end
+                            // not yet). Without this clear, a
+                            // following backref would read the stale
+                            // (newpos, oldend) pair.
+                            Self::set_capture(ctx, end_idx, None);
+                        }
                         Self::set_capture(ctx, start_idx, Some(ctx.pos));
                     }
                 }
@@ -6232,7 +6381,7 @@ impl RegexVM {
                     ip += 1;
 
                     let end_idx = group_id * 2 + 1;
-                    if end_idx < ctx.captures.len() {
+                    if end_idx < ctx.captures.len() / 2 {
                         Self::set_capture(ctx, end_idx, Some(ctx.pos));
                     }
                 }
@@ -6819,7 +6968,19 @@ impl RegexVM {
         let mut assertion_ctx = Self::clone_exec_context(ctx);
         let body_matched = self.execute_subexpr(&mut assertion_ctx, code);
         if body_matched && propagate_captures {
-            ctx.captures = assertion_ctx.captures;
+            // Cluster 1A — propagate only the *current-iteration*
+            // capture slots (lower half). The upper half (prev-iter
+            // snapshots populated by SaveStart) is per-context state
+            // for the assertion's own quantifier loops; leaking it
+            // back would let an outer backref see a prev-iter from
+            // inside a positive lookaround. testinput2:6538 (pangram
+            // family) regressed when the whole vector was copied.
+            let half = ctx.captures.len() / 2;
+            if assertion_ctx.captures.len() == ctx.captures.len() {
+                ctx.captures[..half].copy_from_slice(&assertion_ctx.captures[..half]);
+            } else {
+                ctx.captures = assertion_ctx.captures;
+            }
             ctx.capture_trail = assertion_ctx.capture_trail;
         }
         // `(*COMMIT)` and `(*SKIP)` inside a FAILING **positive**
@@ -7008,7 +7169,14 @@ impl RegexVM {
             // empty at the anchor position.
             if self.execute_subexpr_ending_at(&mut lookbehind_ctx, code, assertion_end) {
                 if propagate_captures {
-                    ctx.captures = lookbehind_ctx.captures;
+                    // Cluster 1A — same prev-iter isolation as
+                    // execute_assertion_subexpr.
+                    let half = ctx.captures.len() / 2;
+                    if lookbehind_ctx.captures.len() == ctx.captures.len() {
+                        ctx.captures[..half].copy_from_slice(&lookbehind_ctx.captures[..half]);
+                    } else {
+                        ctx.captures = lookbehind_ctx.captures;
+                    }
                     ctx.capture_trail = lookbehind_ctx.capture_trail;
                 }
                 return true;
