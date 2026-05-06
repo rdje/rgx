@@ -2387,10 +2387,24 @@ impl RegexVM {
     }
 
     /// (*SKIP:name) — advance the scanner to the most recent matching
-    /// mark's recorded position. No-op if no matching mark exists
-    /// (PCRE2 fallback). When a matching mark is found, behaves as
-    /// (*SKIP) with that position (eager stack-clear; see
-    /// `verb_apply_skip` design note).
+    /// mark's recorded position. When a matching mark is found,
+    /// behaves as (*SKIP) with that position. When no matching mark
+    /// exists, behaviour depends on the name:
+    ///
+    /// - **Empty name `(*SKIP:)`**: PCRE2 treats this as plain
+    ///   `(*SKIP)` (set skip_position to the current position).
+    ///   testinput1:5213 (`A(*MARK:A)A+(*SKIP:)(B|Z)|AC/x` on
+    ///   "AAAC") expects no-match precisely because `(*SKIP:)`
+    ///   advances the scanner past the failing alt1's end-of-A+
+    ///   position; treating it as a no-op leaks alt2 → "AC".
+    ///
+    /// - **Non-empty unmatched name**: per pcre2pattern(3) §"Verbs
+    ///   that act after backtracking", *"if there is no preceding
+    ///   (*MARK:NAME) with a matching name, this verb has no
+    ///   effect."*
+    ///
+    /// Eager stack-clear in the matched / empty-name branches; see
+    /// `verb_apply_skip` design note.
     #[inline]
     fn verb_apply_skip_named(
         skip_position: &mut Option<usize>,
@@ -2398,12 +2412,17 @@ impl RegexVM {
         backtrack_stack: &mut Vec<BacktrackFrame>,
         marks: &[(String, usize)],
         name: &str,
+        pos: usize,
     ) {
-        if let Some(pos) = marks.iter().rev().find(|(n, _)| n == name).map(|(_, p)| *p) {
-            *skip_position = Some(pos);
+        if let Some(mark_pos) = marks.iter().rev().find(|(n, _)| n == name).map(|(_, p)| *p) {
+            *skip_position = Some(mark_pos);
             backtrack_stack.clear();
             *committed = false;
+        } else if name.is_empty() {
+            // PCRE2 fallback: empty name is plain (*SKIP).
+            Self::verb_apply_skip(skip_position, committed, backtrack_stack, pos);
         }
+        // else: non-empty unmatched name → no effect (PCRE2 spec).
     }
 
     /// (*THEN) — redirect to the next alternative in the innermost
@@ -3176,6 +3195,7 @@ impl RegexVM {
                             &mut ctx.backtrack_stack,
                             &ctx.marks,
                             &name,
+                            ctx.pos,
                         );
                     }
                 }
@@ -5758,6 +5778,7 @@ impl RegexVM {
                             &mut ctx.backtrack_stack,
                             &ctx.marks,
                             &name,
+                            ctx.pos,
                         );
                     }
                 }
@@ -6750,12 +6771,14 @@ impl RegexVM {
                     if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
                         let name = name.to_string();
                         ip = new_ip;
+                        let pos = ctx.pos;
                         Self::verb_apply_skip_named(
                             &mut ctx.skip_position,
                             &mut ctx.committed,
                             &mut backtrack_stack,
                             &ctx.marks,
                             &name,
+                            pos,
                         );
                     }
                 }

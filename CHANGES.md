@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Engine: empty `(*SKIP:)` falls back to `(*SKIP)` (+1 pass, ratchet 12,721/89)
+- Scope: `rgx-core/src/vm.rs::verb_apply_skip_named` (+ 3 callers update to pass `ctx.pos`).
+- Changes: per pcre2pattern(3) §"Verbs that act after backtracking", `(*SKIP:NAME)` with an unmatched name has no effect — except when the name is empty, where PCRE2 treats it as plain `(*SKIP)` (set `skip_position` to current pos). RGX previously no-op'd both unmatched-and-empty and unmatched-non-empty cases. The fix splits the fallback: empty name → `verb_apply_skip` semantics (eager stack-clear, scanner-advance-to-mark on attempt failure); non-empty unmatched name → no effect (PCRE2 spec).
+- Recovers testinput1:5213 (`A(*MARK:A)A+(*SKIP:)(B|Z) | AC/x` on "AAAC" — PCRE2 expected no match; RGX previously matched "AC" via alt2 because `(*SKIP:)` no-op left the scanner free to advance and pick up alt2 at pos 2).
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy --workspace --all-targets` zero RGX errors. Conformance ratchet bumped to **12,721 / 89 / 0 / 0** (was 12,720/90). FP bucket 5 → 4.
+
 ### 2026-05-06 - Docs: `alt_boundaries` manual-truncation audit (closes audit §5.3 / C8.1.3)
 - Scope: `book/src/internals/pcre2-conformance-audit.md` §5.3 rewritten to mark the cleanup contract closed; `docs/BACKLOG.md` C8.1.3 marked shipped.
 - Findings: the Phase-2 verb-effects refactor (`efb69b3`, `ad49523`) introduced parallel pop sites — `try_backtrack` for the global stack and `local_backtrack_or_return_false!` for the subexpr local stack — that share the cleanup contract by construction (committed-bail, `COMMIT_SENTINEL_IP` escalation, post-pop alt_boundaries sync). The remaining manual `alt_boundaries.truncate()` calls (in `verb_apply_then`, `verb_apply_prune`, and `AltScopeEnd`) are intentional bodies of the verb's own semantics, not redundant cleanups. No code change required.

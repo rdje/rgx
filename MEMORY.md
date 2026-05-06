@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: empty `(*SKIP:)` falls back to `(*SKIP)` (+1 pass, ratchet 12,721/89)
+- `verb_apply_skip_named` now distinguishes three cases per pcre2pattern(3): (a) name found in marks → set skip_position to mark's pos, eager stack-clear; (b) name is empty (`(*SKIP:)`) → fall back to plain `(*SKIP)` semantics (set skip_position to current pos); (c) non-empty name not found → no effect.
+- Recovers testinput1:5213 (`A(*MARK:A)A+(*SKIP:)(B|Z)|AC/x` on "AAAC"). Previously RGX no-op'd `(*SKIP:)` and let alt2 `AC` match at pos 2. With the fallback, the scanner advances past the failing alt1 and finds no further match — matching PCRE2.
+- 3 callers updated to pass `ctx.pos` (the new fallback position).
+
 ### 2026-05-06 — Docs: alt_boundaries manual-truncation audit (closes audit §5.3 / C8.1.3)
 - The Phase-2 verb-effects refactor (`efb69b3`, `ad49523`) and the corresponding `local_backtrack_or_return_false!` macro update gave the engine **two parallel pop sites that share the cleanup contract**: `try_backtrack` (global) and `local_backtrack_or_return_false!` (subexpr local). Both: (a) check `ctx.committed`, (b) handle `COMMIT_SENTINEL_IP` escalation, (c) sync alt-boundaries against post-pop stack length.
 - Remaining manual `alt_boundaries.truncate()` calls — in `verb_apply_then` redirect, `verb_apply_prune`, and `AltScopeEnd` — are intentional bodies of the verb/op's own semantics, not redundant cleanups. No refactor needed.
