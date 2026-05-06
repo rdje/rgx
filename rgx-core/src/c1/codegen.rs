@@ -366,6 +366,7 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
         | OpCode::JumpIfMatch
         | OpCode::JumpIfNoMatch
         | OpCode::Call
+        | OpCode::CallReturning
 
         // === Ineligible: backtracking verbs ===
         | OpCode::Commit

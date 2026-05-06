@@ -196,7 +196,14 @@ pub enum OpCode {
     JumpIfNoMatch = 0x44,
     /// Call subroutine (for recursion/subroutine calls)
     Call = 0x45,
-    // 0x46 removed: Return (never emitted; Call uses recursion stack instead)
+    /// Call subroutine with a "returned-capture" group list (PCRE2
+    /// `(?N(grouplist))` syntax). Operand format: target_id (u8) +
+    /// count (u8) + count × group_id (u8). After the subroutine
+    /// matches, the listed groups' captures (as set inside the
+    /// subroutine) leak back into the outer capture state; all
+    /// other captures made inside the subroutine are isolated and
+    /// restored to their pre-call values. Closes Cluster 1B.
+    CallReturning = 0x46,
 
     // === CAPTURE GROUPS (0x50-0x5F) ===
     /// Save position to capture group (group ID follows)
@@ -2707,6 +2714,22 @@ impl RegexVM {
 
     /// Invoke a compiled recursion/subroutine target with basic cycle protection.
     fn invoke_subroutine(&self, ctx: &mut ExecContext<'_>, target: usize) -> bool {
+        self.invoke_subroutine_inner(ctx, target, true)
+    }
+
+    /// Subroutine call core. When `isolate_captures` is true (default
+    /// for plain `(?N)` calls), captures made inside the subroutine
+    /// are reverted on return — only the advanced position leaks.
+    /// When false, captures are left at their post-call state — the
+    /// caller (`OpCode::CallReturning` for `(?N(grouplist))`) is
+    /// responsible for selectively re-applying just the listed groups
+    /// and restoring the rest.
+    fn invoke_subroutine_inner(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        target: usize,
+        isolate_captures: bool,
+    ) -> bool {
         let Some(code) = self.program.subroutines.get(target) else {
             return false;
         };
@@ -2755,13 +2778,16 @@ impl RegexVM {
         ctx.committed = saved_committed;
 
         if matched {
-            // PCRE2 semantics: subroutine calls advance position but do NOT
-            // export their internal captures to the outer match. Revert captures
-            // to what they were before the call, keeping only the position advance.
             let advanced_pos = ctx.pos;
-            Self::undo_trail(ctx, trail_mark);
-            ctx.pos = advanced_pos;
-            ctx.code_result = saved_code_result;
+            if isolate_captures {
+                // PCRE2 default semantics for plain `(?N)` calls:
+                // subroutine advances position but does NOT export
+                // its internal captures. Revert captures to pre-call.
+                Self::undo_trail(ctx, trail_mark);
+                ctx.pos = advanced_pos;
+                ctx.code_result = saved_code_result;
+            }
+            // else: caller (CallReturning) handles selective merging.
             true
         } else {
             ctx.pos = saved_pos;
@@ -3813,6 +3839,78 @@ impl RegexVM {
                     if condition_matches == jump_if_match {
                         ip += offset;
                     }
+                }
+
+                OpCode::CallReturning => {
+                    // PCRE2 `(?N(grouplist))` — call subroutine N
+                    // and leak the listed groups' inner captures back
+                    // to the outer state (other captures isolated).
+                    // Operand: target_id (u8) + count (u8) + count
+                    // × group_id (u8). Closes Cluster 1B.
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let target = code[ip] as usize;
+                    let count = code[ip + 1] as usize;
+                    ip += 2;
+                    if ip + count > code.len() {
+                        return false;
+                    }
+                    let returned: Vec<usize> =
+                        code[ip..ip + count].iter().map(|&b| b as usize).collect();
+                    ip += count;
+
+                    let saved_pos = ctx.pos;
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = ctx.call_stack.len();
+                    let saved_code_result = ctx.code_result.clone();
+                    let saved_match_start_override = ctx.match_start_override;
+
+                    if self.invoke_subroutine_inner(ctx, target, false) {
+                        // Snapshot the listed groups' post-call
+                        // captures, then undo the trail (restoring
+                        // pre-call state for ALL groups), then
+                        // re-apply the snapshot for the listed
+                        // groups so they leak through the call.
+                        let half = ctx.captures.len() / 2;
+                        let mut snapshot: Vec<(usize, Option<usize>, Option<usize>)> =
+                            Vec::with_capacity(returned.len());
+                        for &g in &returned {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            if s_idx < half {
+                                snapshot.push((g, ctx.captures[s_idx], ctx.captures[e_idx]));
+                            }
+                        }
+                        let advanced_pos = ctx.pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.pos = advanced_pos;
+                        for (g, s, e) in snapshot {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            Self::set_capture(ctx, s_idx, s);
+                            Self::set_capture(ctx, e_idx, e);
+                        }
+                        if ctx.pos > saved_pos
+                            && target < self.program.subroutine_can_match_empty.len()
+                            && self.program.subroutine_can_match_empty[target]
+                        {
+                            ctx.backtrack_stack.push(BacktrackFrame {
+                                ip,
+                                pos: saved_pos,
+                                trail_mark: ctx.capture_trail.len(),
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                            });
+                        }
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
                 }
 
                 OpCode::Call => {
@@ -8348,25 +8446,35 @@ impl OptimizingCompiler {
                 self.code.push(group_id as u8);
             }
 
-            Regex::Recursion { target } | Regex::ReturnedCaptureSubroutine { target, .. } => {
-                // ReturnedCaptureSubroutine compiles to the same Call opcode.
-                // Full capture-return semantics (preserving specified group
-                // captures across the call boundary) is a VM-level follow-up.
+            Regex::Recursion { target } => {
                 self.emit_op(OpCode::Call);
-                let target_id = match target {
-                    RecursionTarget::Entire => 0,
-                    RecursionTarget::Group(group_id) => *group_id as u8,
-                    RecursionTarget::NamedGroup(name) => self
-                        .named_groups
-                        .get(name)
-                        .copied()
-                        .expect("named recursion target should be validated before codegen")
-                        as u8,
-                    RecursionTarget::RelativeGroup(_) => {
-                        panic!("relative recursion target should be resolved before codegen")
-                    }
-                };
+                let target_id = self.recursion_target_to_id(target);
                 self.code.push(target_id);
+            }
+
+            Regex::ReturnedCaptureSubroutine {
+                target,
+                returned_groups,
+            } => {
+                // PCRE2 `(?N(grouplist))` — call subroutine N, but
+                // captures of the listed groups made *inside* the
+                // call leak back into the outer state (other captures
+                // are isolated). Closes Cluster 1B (`Saturday,Sat`
+                // family etc.). Empty grouplist falls back to plain
+                // Call (same as Regex::Recursion above).
+                let target_id = self.recursion_target_to_id(target);
+                if returned_groups.is_empty() {
+                    self.emit_op(OpCode::Call);
+                    self.code.push(target_id);
+                } else {
+                    self.emit_op(OpCode::CallReturning);
+                    self.code.push(target_id);
+                    let count = returned_groups.len().min(255) as u8;
+                    self.code.push(count);
+                    for g in returned_groups.iter().take(count as usize) {
+                        self.code.push((*g & 0xFF) as u8);
+                    }
+                }
             }
 
             Regex::Quantified { expr, quantifier } => {
@@ -8796,6 +8904,24 @@ impl OptimizingCompiler {
     fn emit_op(&mut self, op: OpCode) {
         self.code.push(op as u8);
         self.flags.instruction_count += 1;
+    }
+
+    /// Resolve a `RecursionTarget` to the u8 group id used by
+    /// `OpCode::Call` / `OpCode::CallReturning`.
+    fn recursion_target_to_id(&self, target: &RecursionTarget) -> u8 {
+        match target {
+            RecursionTarget::Entire => 0,
+            RecursionTarget::Group(group_id) => *group_id as u8,
+            RecursionTarget::NamedGroup(name) => self
+                .named_groups
+                .get(name)
+                .copied()
+                .expect("named recursion target should be validated before codegen")
+                as u8,
+            RecursionTarget::RelativeGroup(_) => {
+                panic!("relative recursion target should be resolved before codegen")
+            }
+        }
     }
 
     /// Emit an opcode followed by an inlined compiled sub-expression.
@@ -9573,13 +9699,13 @@ static OPCODE_TABLE: [Option<OpCode>; 256] = build_opcode_table();
 const fn build_opcode_table() -> [Option<OpCode>; 256] {
     use OpCode::{
         Accept, AltScopeBegin, AltScopeEnd, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart,
-        Backref, BackrefCaseInsensitive, Call, Char, CharClass, CharClassNeg, CodeBlock, Commit,
-        DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail, GraphemeCluster, Jump,
-        JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind, LookbehindNeg, Mark,
-        Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune,
-        QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative, SpaceAscii,
-        SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText, Then,
-        VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+        Backref, BackrefCaseInsensitive, Call, CallReturning, Char, CharClass, CharClassNeg,
+        CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
+        GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
+        LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
+        PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveStart, SetAlternative,
+        SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy, StartLine, StartText,
+        Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
     t[0x00] = Some(Char);
@@ -9609,6 +9735,7 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x43] = Some(JumpIfMatch);
     t[0x44] = Some(JumpIfNoMatch);
     t[0x45] = Some(Call);
+    t[0x46] = Some(CallReturning);
     t[0x47] = Some(AltSplit);
     t[0x48] = Some(AltScopeBegin);
     t[0x49] = Some(AltScopeEnd);
