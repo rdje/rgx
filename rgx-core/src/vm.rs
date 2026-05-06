@@ -7015,6 +7015,14 @@ impl RegexVM {
             }
         }
 
+        // Note: SKIP/COMMIT verb-state from a failed lookbehind body
+        // is intentionally NOT propagated to the outer ctx. PCRE2's
+        // lookbehind verbs are scoped to the body; the simple
+        // aggregation approach (mirror of the lookahead path) regresses
+        // testinput1:6490 / `(?<=(a(*COMMIT)b))c` per the residual
+        // catalogue's Cluster 3A note. Closing testinput1:6487 needs
+        // per-clone tracking — deferred.
+
         false
     }
 
