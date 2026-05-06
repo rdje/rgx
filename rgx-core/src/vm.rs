@@ -290,6 +290,16 @@ pub enum OpCode {
     /// support; simple lazy bodies still emit the compact `StarLazy`
     /// subexpr form.
     StarLazyBlock = 0x88,
+    /// Body-exit hook for the alt-aware *greedy* `*` loop. Mirrors
+    /// `StarLazyContinue` but with greedy iteration semantics: pops
+    /// the saved pre-body pos from `ctx.lazy_iter_save`; if equal
+    /// (zero-width) terminates the iter loop (fall through to the
+    /// continuation); if advanced, jumps back to the loop entry (the
+    /// matching `Split` that pushes the per-iter exit-fallback) so
+    /// the next iteration runs immediately. Operand: 2-byte signed
+    /// back-offset to the loop entry. Cluster 1E + 2H closes by the
+    /// same mechanism as 2B but with greedy looping.
+    StarGreedyContinue = 0x89,
 
     // === ALTERNATIVE TRACKING (0x90-0x9F) ===
     /// Set the current alternative index (for match reporting)
@@ -4311,6 +4321,29 @@ impl RegexVM {
                     // to the loop exit; fall through to continuation.
                 }
 
+                OpCode::StarGreedyContinue => {
+                    // Cluster 1E/2H — body-exit hook for the alt-aware
+                    // *greedy* `*` loop. Pops pre-body pos; on
+                    // non-zero-width, jumps back to the matching loop
+                    // entry (the `Split` that pushed this iter's
+                    // exit-fallback) for the next iteration; on
+                    // zero-width, falls through to terminate the
+                    // iter loop.
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        // Body advanced. Loop back to the entry Split
+                        // for another greedy iteration.
+                        ip = ((ip as isize) + (offset as isize)) as usize;
+                    }
+                    // Zero-width: ip already points past the offset
+                    // operand to the loop's exit; fall through.
+                }
+
                 // TODO: Implement remaining opcodes
                 _ => {
                     // Placeholder - skip unknown opcodes for now
@@ -5837,6 +5870,18 @@ impl RegexVM {
                         });
                     }
                 }
+                OpCode::StarGreedyContinue => {
+                    // Cluster 1E/2H — alt-aware greedy `*` body-exit hook (subexpr path).
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        ip = ((ip as isize) + (offset as isize)) as usize;
+                    }
+                }
                 OpCode::Char => {
                     if let Some(expected) = Self::read_char_operand(code, &mut ip) {
                         if let Some(actual) = Self::current_char(ctx) {
@@ -7274,6 +7319,19 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         });
+                    }
+                }
+
+                OpCode::StarGreedyContinue => {
+                    // Cluster 1E/2H — alt-aware greedy `*` body-exit hook (continuation path).
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                    ip += 2;
+                    let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
+                    if ctx.pos != pre_body_pos {
+                        ip = ((ip as isize) + (offset as isize)) as usize;
                     }
                 }
 
@@ -9041,6 +9099,66 @@ impl OptimizingCompiler {
                                 self.code[split_offset_pos] = offset_bytes[0];
                                 self.code[split_offset_pos + 1] = offset_bytes[1];
                             }
+                        } else if Self::quantifier_body_needs_inline_backtrack(expr) {
+                            // Cluster 1E/2H — alt-aware greedy `*`
+                            // for empty-capable bodies: emit a
+                            // SaveLazyPos+StarGreedyContinue loop so
+                            // body alt-frames live on the outer
+                            // backtrack stack and a continuation
+                            // failure can reach them. The
+                            // StarGreedyContinue handles zero-width
+                            // termination; loop-entry Split pushes
+                            // the per-iter exit-fallback frame.
+                            //
+                            //   LOOP:
+                            //     Split EXIT
+                            //     SaveLazyPos
+                            //     <body>
+                            //     StarGreedyContinue [back to LOOP]
+                            //   EXIT:
+                            let loop_start = self.code.len();
+                            self.emit_op(OpCode::Split);
+                            let split_offset_pos = self.code.len();
+                            self.code.push(0);
+                            self.code.push(0);
+                            self.emit_op(OpCode::SaveLazyPos);
+                            let body_start = self.code.len();
+                            self.codegen_pass(expr, false);
+                            if self.code.len() == body_start {
+                                // Empty body slot — fall back.
+                                self.code.truncate(loop_start);
+                                self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                            } else {
+                                self.emit_op(OpCode::StarGreedyContinue);
+                                let cont_offset_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                // Back-offset (signed) from the byte
+                                // AFTER the offset operand to the
+                                // loop entry (= `loop_start` Split).
+                                let after_cont = cont_offset_pos + 2;
+                                let back_offset = (loop_start as isize) - (after_cont as isize);
+                                let back_i16 = back_offset as i16;
+                                let bo_bytes = back_i16.to_le_bytes();
+                                self.code[cont_offset_pos] = bo_bytes[0];
+                                self.code[cont_offset_pos + 1] = bo_bytes[1];
+                                // Patch the entry Split's exit
+                                // offset to point past the
+                                // StarGreedyContinue+offset operand.
+                                let exit_target = self.code.len();
+                                let split_offset = exit_target - (split_offset_pos + 2);
+                                if let Ok(_) = u16::try_from(split_offset) {
+                                    let offset_bytes = (split_offset as u16).to_le_bytes();
+                                    self.code[split_offset_pos] = offset_bytes[0];
+                                    self.code[split_offset_pos + 1] = offset_bytes[1];
+                                } else {
+                                    // Body too large for the u16
+                                    // forward offset — fall back to
+                                    // the compact subexpr form.
+                                    self.code.truncate(loop_start);
+                                    self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
+                                }
+                            }
                         } else {
                             self.emit_subexpr_opcode(OpCode::StarGreedy, expr);
                         }
@@ -9869,9 +9987,9 @@ impl OptimizingCompiler {
                 | OpCode::Accept
                 | OpCode::SaveLazyPos
                 | OpCode::Halt => {}
-                OpCode::StarLazyContinue => {
+                OpCode::StarLazyContinue | OpCode::StarGreedyContinue => {
                     // 2-byte signed back-offset operand to the matching
-                    // SaveLazyPos. No char-class id to remap.
+                    // SaveLazyPos / loop entry. No char-class id to remap.
                     ip += 2;
                 }
                 OpCode::Mark | OpCode::VerbSkipNamed => {
@@ -10148,9 +10266,9 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
         GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
         LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
         PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos, SaveStart,
-        SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy, StarLazy,
-        StarLazyBlock, StarLazyContinue, StartLine, StartText, Then, VerbSkip, VerbSkipNamed,
-        WordAscii, WordAsciiNeg, WordBoundary,
+        SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
+        StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine, StartText, Then,
+        VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
     t[0x00] = Some(Char);
@@ -10204,6 +10322,7 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x86] = Some(SaveLazyPos);
     t[0x87] = Some(StarLazyContinue);
     t[0x88] = Some(StarLazyBlock);
+    t[0x89] = Some(StarGreedyContinue);
     t[0x90] = Some(SetAlternative);
     t[0xA0] = Some(Commit);
     t[0xA1] = Some(Prune);

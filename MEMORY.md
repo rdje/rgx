@@ -3784,3 +3784,17 @@ Result: +3 passes, **ratchet 12,747/63 → 12,750/60**. Closed testinput1:5825 /
 Key invariant for zero regression: every BacktrackFrame push captures `ctx.lazy_iter_save.len()` and `restore_frame` truncates back. Lazy_iter_save is a single Vec<usize> shared across nested lazy loops (LIFO via SaveLazyPos push, StarLazyContinue pop). Abandoned-branch entries unwind via the per-frame saved length. Hot-path overhead: 1 push/pop per lazy iter + 1 usize copy per backtrack frame. Negligible.
 
 Next step: Cluster 1E (3) + 2H (1) use *greedy* `*` not lazy `*?`. Same root cause (body alt-frames lost in subexpr-clone path) but symmetric fix needed: `StarGreedyBlock` opcode that loops back to the body on non-zero-width (greedy semantic) while still using SaveLazyPos/StarLazyContinue infrastructure. Tracked as follow-up.
+
+## 2026-05-07 session — Cluster 1E + 2H greedy block shipped
+
+Symmetric extension of yesterday's lazy block fix. Same root cause (body alt-frames lost in subexpr-clone path), greedy semantic (loop-back on non-zero-width vs lazy's fall-through-with-iter-frame-push). New opcode `OpCode::StarGreedyContinue = 0x89` reusing the SaveLazyPos + lazy_iter_save_len infrastructure.
+
+Codegen branch added: for `Quantifier::ZeroOrMore { lazy: false }` when body needs inline backtrack AND can match empty, emit `Split + SaveLazyPos + body + StarGreedyContinue + back-offset` instead of falling back to compact subexpr StarGreedy (which loses body alt-frames in execute_subexpr_inner_full's local stack).
+
+Result: +10 passes, **ratchet 12,750/60 → 12,760/50**. Closed Cluster 1E (testinput1:4110, testinput2:2601/2604) + Cluster 2H (testinput1:6481) + 6 other empty-capable greedy patterns falling out of the same shape (FN 29 → 26, SM 20 → 13).
+
+Key design: greedy loop layout uses one Split per iteration to push the exit-fallback frame. StarGreedyContinue jumps back on non-zero-width body so the next iteration starts immediately (no iter-frame needed — the per-iter Splits handle backtrack-driven back-off). Zero-width body terminates by falling through to the loop exit.
+
+Cumulative for the day: 12,737/73 → 12,760/50 (+23 passes / 23 closures). Both Cluster 1E + 2B + 2H closed at the lazy/greedy alt-aware block level.
+
+Remaining residual: 50 cases. Largest open clusters: Cluster 1A residual (palindromes ~5), Cluster 1C napla (~6), Cluster 1D backtracking-verb residuals (~3), Cluster 2A balanced-bracket recursion (~8), Cluster 2D verb-spans (~4), Cluster 2E (?0) (~2), substitute "other" (3), Bucket 5 too-permissive (4 — needs Replacer fallible refactor + harness Expected::SubstituteFailure split). All remaining ARE the architectural items in the residual chapter.

@@ -151,7 +151,7 @@ Single-verb behaviours are shipped (engine fixes #9, #18, #24, #25, #27, #28, #3
 - `(*:m)` mark-registry lifecycle: check `ctx.marks.clear()` placement — should clear per match *attempt*, not per *clone*.
 - Start-optimization past `a?`: the VM's literal-prefix scan bails on any leading optional quantifier. PCRE2's own start optimizer looks further. Residual from engine fix #28.
 
-## Cluster 1E — Conditional lookahead inside repeated alternation (3 cases)
+## Cluster 1E — Conditional lookahead inside repeated alternation (3 cases — ✅ CLOSED 2026-05-07)
 
 **Difficulty**: medium. **Expected payoff**: 3 cases.
 
@@ -358,11 +358,11 @@ The `(*:N)` + `(*SKIP:N)` + atomic-group interactions (testinput1:6318/6326/6329
 
 Same root cause as Cluster 1B — returned-capture subroutine semantics.
 
-## Cluster 2H — Lookahead-as-alternative in greedy star (1 case)
+## Cluster 2H — Lookahead-as-alternative in greedy star (1 case — ✅ CLOSED 2026-05-07)
 
-| testinput1:6481 | `(?:a\|(?=b)\|.)*\z` | `abc` | `abc` | `c` |
+| ~~testinput1:6481~~ | ~~`(?:a\|(?=b)\|.)*\z`~~ | ~~`abc`~~ | ~~`abc`~~ | ~~`c`~~ ✅ CLOSED 2026-05-07 (StarGreedyContinue alt-aware block) |
 
-The zero-width `(?=b)` alternative in a `*` loop — RGX exits the loop too early.
+Closed alongside Cluster 1E by the symmetric greedy extension to the lazy block work — same root cause (body alt-frames lost in the subexpr-clone path), same fix shape (`Split + SaveLazyPos + body + StarGreedyContinue + back-offset` running the body in main dispatch so its alt-frames live on the outer backtrack stack).
 
 ## Cluster 2I — Conditional over empty capture with quantified tail (1 case)
 
