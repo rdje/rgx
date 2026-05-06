@@ -413,18 +413,31 @@ Same root cause as Cluster 1C (napla compile path). Expected to close alongside 
 
 # Bucket 5 — RGX too permissive (4 cases)
 
-**PCRE2 rejects the pattern at compile time; RGX accepts it.** Each case is a single compile-time validation that RGX is missing.
+**Re-classified 2026-05-06 (empirical probe)**: the bucket name is a misnomer for these specific 4 cases. PCRE2 does NOT reject the *pattern* at compile time — `pcre2_compile` succeeds on all four. PCRE2's `Failed:` line in the test output comes from `pcre2_substitute` rejecting the *substitute call* (template syntax, unset-reference, infinite-loop-on-empty-match guard, invalid UTF in template under `/utf`). The harness conflates substitute-side `Failed:` lines with pattern-compile rejection by setting `Expected::CompileError` for both. The underlying divergence is real — RGX's `replace`/`replace_all` is more lenient than PCRE2's default `pcre2_substitute` — but the "compile-time" framing is wrong.
 
-| File:line | Pattern | Subject | Note |
-|---|---|---|---|
-| testinput10:447 | `/abc/utf` | `abc` | PCRE2 rejects — some UTF-mode precondition |
-| testinput2:4959 | `(a)\|(b)/replace` | `b` | PCRE2 rejects — top-level alternation with replace may be invalid |
-| testinput2:5047 | `/abc/replace` | `abc` | PCRE2 rejects — missing/invalid template requirement |
-| testinput2:6462 | `X*/g` | `>X<` | PCRE2 rejects — `X*` with `/g` on non-empty match may trigger zero-width-infinite-loop guard |
+| File:line | Pattern | Subject | Modifiers | PCRE2 substitute output | RGX `replace[_all]` output | Verdict |
+|---|---|---|---|---|---|---|
+| testinput2:5047 | `abc` | `abc` | `replace=A$3123456789Z` | `Failed: error 56: unknown group $N reference` | `"AZ"` (template parser greedily consumes all digits → group 3,123,456,789 → unset → silent empty; trailing `Z` survives) | RGX substitute bug — `$N` digit-run should bound by `num_capture_groups`, not infinite |
+| testinput2:4959 | `(a)\|(b)` | `b` | `replace=<$1>` | `Failed: error 55: unknown group $N reference` (group 1 unset because `(b)` branch captured) | `"<>"` (silent empty for unset $1) | RGX substitute bug — default should error on unset; PCRE2 only goes lenient with `PCRE2_SUBSTITUTE_UNKNOWN_UNSET` |
+| testinput2:6462 | `X*` | `>X<` | `g,replace=xy` | `Failed: error 54: bad substitution string` (zero-width infinite-loop guard) | `"xy>xy<xy"` (replaces every empty span between chars) | RGX substitute bug — `replace_all` should error or skip-and-advance on zero-width match instead of looping at the same position |
+| testinput10:447 | `abc` | `abc` (under `/utf`) | `replace=<U+FFFD or similar>` | `Failed: invalid UTF in template` | RGX `&str` API can't represent invalid-UTF templates; the case is structurally untestable | API gap — RGX has no path to surface invalid-UTF template errors because the `Replacer` trait takes `&str` |
 
-**What to change**: for each, identify the exact PCRE2 compile error via `pcre2test -v` or by reading the paired `testoutputN` file's rejection message. Then add the matching compile-time rejection in `rgx-core/src/compiler.rs::feature_validation_message` or the appropriate validation layer.
+**What to change** (per case, all RGX-side, all in `rgx-core/src/lib.rs::interpolate_replacement_ext` or its callers):
 
-Each fix is a one-or-two-line compile-check addition. The value is small per case but the pattern is clean and closes the bucket entirely with ~4 focused commits.
+1. **testinput2:5047** — in the digit-run scanner (line 2391-2400 area), bound the consumed digit count by `groups.len()` (number of capture groups). For `$3...` with 0 groups, treat as one-digit `$3` → unknown group → return error (or, in lenient mode, push empty and advance one digit).
+2. **testinput2:4959** — when the resolved group exists but its capture is `None`, today RGX silently pushes empty. PCRE2's default is to return `PCRE2_ERROR_UNSET`. Change RGX's default to return an error from `replace`/`replace_all`; add a builder method `Regex::lenient_substitute()` (or a `Replacer` flag) for callers who want the existing silent-empty behaviour.
+3. **testinput2:6462** — `replace_all` lacks a zero-width-loop guard. PCRE2 either errors or advances by one codepoint after a zero-width match. RGX currently retries at the same position, which is why `X*` produces a replacement at every position. The fix is in `replace_all` (or its inner loop): when the match is zero-width AND `pos == previous_match_end`, advance pos by one codepoint and continue; if the advance crosses end-of-input, stop. (PCRE2 calls this "no-empty-match-at-same-position".)
+4. **testinput10:447** — substantive API change. The `Replacer` trait would need to accept `&[u8]` or a typed UTF-validation hook. Out of scope for an incremental fix.
+
+**Path to closure** (proposed, not yet implemented):
+
+- Each case 1–3 is one focused commit on `lib.rs::interpolate_replacement_ext` / `replace_all`.
+- The harness needs a sibling change: introduce `Expected::SubstituteFailure` (distinct from `Expected::CompileError`) so the "Failed: inside substitute mode" path at `pcre2_conformance.rs` line 1888 maps onto a fall-through-to-RGX-substitute that compares RGX's `Result` against the expected error. Without this harness refinement the engine fixes won't move the ratchet because the harness short-circuits at compile time.
+- Case 4 stays open as a documented API-surface gap.
+
+**Status as of 2026-05-06**: analysis complete (RGX engine bugs identified per case, no PGEN involvement), but no engine commits yet — the RGX `Replacer` trait error-return refactor is the long-pole and warrants its own session. Closing this bucket honestly takes one substitute-API commit (Replacer → fallible) plus the three per-case validations plus the harness `Expected::SubstituteFailure` split. Total: ~5 small commits across one session, +3 ratchet (case 4 stays open).
+
+**No fudging policy** (2026-05-06): the previous draft of this section suggested adding a harness pass-through when `replace=` was in modifiers and `Expected::CompileError` was set. That would have hidden the RGX/PCRE2 substitute divergence, not closed it. Per CLAUDE.md and the no-PGEN-workarounds policy applied here to RGX-itself: every divergence gets analyzed and addressed engine-side, not papered over in the harness.
 
 ---
 
