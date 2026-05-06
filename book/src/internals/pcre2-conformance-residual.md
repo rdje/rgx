@@ -163,11 +163,28 @@ Pattern family: `^QUOTE ((?(?=[X])NOT_X_CHAR) | B)* QUOTE $`. The conditional as
 | testinput2:2601 | `^"((?(?=[a])[^"])\|b)*"$/auto` | `"ab"` |
 | testinput2:2604 | `^"((?(?=[a])[^"])\|b)*"$` | `"ab"` |
 
-**Investigation 2026-05-06 (rejected codegen attempt)**: tried the obvious "assertion-fail-no-else → emit Fail opcode" codegen change in `parsing.rs::convert_typed_subroutine_call_object`'s sibling `Regex::Conditional` codegen. That made testinput1:4110 / testinput2:2601 / 2604 pass but regressed testinput2:4128 (`(?(?=ab)ab)` on `ca` and `cd` — PCRE2 expects empty match) and testinput2:5915 (`(?(?=^))b`) — PCRE2's actual semantic is **match-empty** for assertion-fail-no-else, NOT fail. Reverted; net would have been −1 not +3.
+**Investigation 2026-05-06 (codegen attempt rejected)**: tried the obvious "assertion-fail-no-else → emit Fail" codegen change. Closed testinput1:4110 / testinput2:2601 / 2604 but regressed testinput2:4128 (`(?(?=ab)ab)` on `ca`/`cd` — PCRE2 expects empty match) and testinput2:5915 (`(?(?=^))b`). PCRE2's actual semantic for assertion-fail-no-else is **match-empty**, not fail. Reverted.
 
-**Real root cause (2026-05-06)**: the failing alternation+zero-width interaction is in the *quantifier*, not the conditional. For `(?(?=[a])[^%])|b)*%$` on `%ab%`: at pos 2 (`b`), alt-1 conditional matches empty zero-width; outer `*` stays at pos 2; engine's continuation `%$` fails; the engine should backtrack into the alternation to try alt 2 (`b`), but RGX's `StarLazy`/`StarGreedy` body-probe path uses a stateless `probe_subexpr` that doesn't surface body-internal alt-frames to the outer backtrack stack. The greedy zero-width-loop fix (commit `871c8fd`, 2026-04-18) terminated the loop on zero-width body match but kept the alternative-backtracking issue. The fix lives in the quantifier dispatch (`StarGreedy` / `StarLazy` in `vm.rs`): on zero-width body match in a quantified alternation, push a body-side alt-2 retry frame so the outer engine can fall through to subsequent alternatives. Same class of fix as the empty-alternative-lazy work in Cluster 2B.
+**Investigation 2026-05-07 (root cause traced)**: PCRE2 and RGX agree on conditional semantics; the divergence is in the *lazy quantifier*'s alternation-backtrack contract. Trace for `(|ab)*?d` on `abd` (the canonical Cluster 2B repro, smaller than the 1E patterns but identical mechanism):
 
-**What to change**: rework `OpCode::StarGreedy` / `StarLazy` (and the matching `Plus*` variants) to use `execute_subexpr`-style execution that pushes body-internal alt-frames onto the outer backtrack stack, rather than the current `probe_subexpr`-based snapshot approach. This is shared infrastructure with Cluster 2B (4 cases) and Cluster 2H (1 case) — the cleanest single change closes ~8 cases.
+PCRE2 at scan-pos 0:
+- Iter 0: `d` at pos 0 fails.
+- Iter 1: body alternation pushes alt-2 (`ab`) frame. Body alt-1 (empty) succeeds zero-width. Continuation `d` at pos 0 fails. **Backtrack pops alt-2 frame**, runs `ab` at pos 0 → pos 2. Continuation `d` at pos 2 succeeds. Match 0..3.
+
+RGX at scan-pos 0:
+- StarLazy main dispatch (`vm.rs:3707`) calls `probe_subexpr` which clones the ctx, runs body on the clone, and returns the clone if matched.
+- Clone runs body `(|ab)`: alternation pushes alt-2 frame **on the clone's `backtrack_stack`**. Alt-1 (empty) succeeds zero-width. Probe returns None (because `probe_ctx.pos == ctx.pos` and `!accept_forced` — see line 4181-4187).
+- Clone is dropped. **Alt-2 frame is lost**.
+- StarLazy advances `ip = expr_end`. Continuation `d` at pos 0 fails. No alt-2 frame to backtrack into. Scanner moves to pos 1, etc., eventually finds `d` at pos 2 → match 2..3 (just `d`).
+
+For `(ab|)*?d` on `abd` (alt order swapped) RGX *does* match 0..3 because alt-1 is `ab` which advances; probe returns the clone with non-zero advance; the existing iter-retry frame handles further iterations. The bug is *specifically*: **lazy quantifier with body whose first alternative matches zero-width**.
+
+**Why the fix is non-trivial**:
+1. Body alt-frames live on the clone's stack and get discarded. Lifting them to the outer ctx requires their `trail_mark` and `call_stack_mark` to be valid in the outer ctx — possible only for frames pushed *before* any body-induced state change (alt-frames at body entry). For deeper alts inside body, the clone's trail entries would have to be propagated too, which conflicts with the lazy "0-iter preferred" semantic that requires outer captures to stay at original.
+2. Even with alt-frame extraction, **multi-iter lazy** patterns (`(|ab)*?cd` on `ababcd` → expects 0..6) need the body to execute repeatedly. After alt-2 succeeds and body completes, there's no hook to push another iter-frame for the next iteration.
+3. The clean architectural fix requires: a `SaveLazyPos` opcode at body entry, a `StarLazyContinue` opcode at body exit, an `ExecContext.lazy_iter_save: Vec<usize>` stack, a `BacktrackFrame.lazy_iter_save_len: usize` field for save/restore across backtrack, codegen changes for `Quantifier::ZeroOrMore { lazy: true }`, and matching dispatch in **5 execution loops** (`execute_at`, `execute_at_continuation`, `execute_subexpr_inner`, plus subexpr dispatchers at lines 5630/6280). 25 `BacktrackFrame` initialization sites need the new field. Bytecode layout becomes `[StarLazy][block_len][SaveLazyPos][body bytes][StarLazyContinue][back-offset to SaveLazyPos]`.
+
+**Scope**: 3–5 hours of careful coding plus 5–10 conformance runs (~3:45 each) for verification. Closes Cluster 1E (3) + 2B (4) + 2H (1) = 8 cases. Not a PNT-sized increment; warrants a dedicated session.
 
 ## Cluster 1F — `(?J)` dupnames + conditional + substitute ✅ CLOSED 2026-04-24 (3 of 4 cases)
 
