@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: Cluster 1A polish — `(?(N)...)` test consults prev-iter (+4 passes, ratchet 12,734/76)
+- `capture_group_exists` now routes through `resolve_backref_span` instead of looking at current slots only. The conditional `(?(N)...)` test now sees prev-iter when current is in-flight — required by `(a(?(1)\1)){4}` style patterns where iter K's conditional asks "did iter K-1 set group 1?". Single-line change leveraging the Cluster 1A capture-vector layout.
+- Recovers testinput1:3254 + 3 palindrome subjects (testinput1:5964 ×3). FN bucket 40 → 36.
+
 ### 2026-05-06 — Engine: Cluster 1A — recursive captures across quantifier iterations (+9 net, ratchet 12,730/80)
 - **Audit §6.3.1 capstone landed**. ExecContext::captures capacity doubled (lower half = current iter, upper half = prev iter snapshot populated by SaveStart). New `resolve_backref_span` helper consults current first, falls back to upper half if current's end is None (in-progress). `OpCode::SaveStart` clears the current end slot and copies the completed prior-iter pair to the upper half before overwriting start.
 - Recovers 11 cases (Cluster 1A: testinput1:2372 ×3, testinput1:3247, :6502, :6506; testinput2:325, :330, :3030; testinput2:6538 pangram positives ×3 + testinput1:6490 sibling). Trade-off: testinput2:6538 pangram negatives FP ×3 (net 0 for this pattern). Net ratchet +9.

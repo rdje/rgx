@@ -14,6 +14,11 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Engine: Cluster 1A polish — `(?(N)...)` consults prev-iter (+4 passes, ratchet 12,734/76)
+- Scope: `rgx-core/src/vm.rs` — `capture_group_exists` now routes through `Self::resolve_backref_span` instead of inspecting only the current-iteration slots.
+- Changes: PCRE2's conditional `(?(N)...)` test "is group N set?" must see the previous iteration's completion when the current iter is in-flight (lower-half end is None). The Cluster 1A architecture already populates the upper-half prev-iter slots; extending the conditional test to consult them is one line. Closes testinput1:3254 (`(a(?(1)\1)){4}` on "aaaaaaaaaa") and the palindrome family (testinput1:5964 ×3 subjects).
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy --workspace --all-targets` zero RGX errors. Conformance: **NEW BASELINE 12,734 / 76 / 0 / 0** (was 12,730/80). FN 40 → 36, FP 7 → 7, SM 26 → 26.
+
 ### 2026-05-06 - Engine: Cluster 1A — recursive captures across quantifier iterations (+9 net, ratchet 12,730/80)
 - Scope: `rgx-core/src/vm.rs` — `ExecContext::captures` capacity doubled from `2*(num_groups+1)` to `4*(num_groups+1)`. The lower half holds the *current iteration's* capture pairs (existing semantic); the upper half holds the *previous iteration's completed* pairs (new). `OpCode::SaveStart` (3 dispatch sites) now: when the existing slot has a complete pair from a prior iter, copies it to the upper half and clears the current `end` slot before writing the new `start`. New helper `Self::resolve_backref_span(ctx, group_id)` reads current first; falls back to the upper half if current is in-progress (mid-iter, end unset). `match_backreference` and `match_backreference_case_insensitive` route through the helper. `execute_assertion_subexpr` and `execute_lookbehind_assertion` propagate only the lower half on body match (preserves outer's prev-iter snapshot).
 - Changes:

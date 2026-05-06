@@ -7122,16 +7122,14 @@ impl RegexVM {
         if group_id == 0 {
             return false;
         }
-
-        let start_idx = group_id * 2;
-        let end_idx = start_idx + 1;
-        matches!(
-            (
-                ctx.captures.get(start_idx).and_then(|&x| x),
-                ctx.captures.get(end_idx).and_then(|&x| x)
-            ),
-            (Some(_), Some(_))
-        )
+        // Cluster 1A — `resolve_backref_span` returns Some when the
+        // group has a complete pair in either the current iteration's
+        // slots or the previous iteration's snapshot (upper-half).
+        // For a conditional `(?(N)...)` test, "group N is set" must
+        // see the prev iter too — testinput1:3254
+        // `^(a(?(1)\1)){4}$` on "aaaaaaaaaa" depends on iter 2's
+        // (?(1)...) test seeing iter 1's completed group 1.
+        Self::resolve_backref_span(ctx, group_id).is_some()
     }
 
     /// Execute a lookbehind assertion by finding a sub-expression match
