@@ -1769,28 +1769,54 @@ impl<'a> PgenAstAdapter<'a> {
         &self,
         map: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<Regex> {
-        // NOTE (Cluster 1B, 2026-05-06): the typed `subroutine_call`
-        // shape carries the returned-capture grouplist
-        // `(?N(g1,g2,...))` inside `target.captures` as a raw-token
-        // tree (verified pin 1.1.75 via the embedding API). When an
-        // arg-list is present, `target` becomes
-        // `{subroutine, captures}` instead of the bare numeric/named
-        // ref; the captures array preserves the grammar token order
-        // including literal `"("`/`")"` strings and the comma-tail
-        // sub-array. Walking that tree is on the RGX side; until it
-        // lands the compile path below always emits `Regex::Recursion`
-        // (plain `(?N)` semantics) and the
-        // `Regex::ReturnedCaptureSubroutine` AST + `OpCode::CallReturning`
-        // dispatch stay dormant.
+        // The typed `subroutine_call.target` is one of two shapes:
+        //   plain `(?N)`:     `{kind, value, sign?}` (numeric) or
+        //                     `{kind:"named"|"python_named", name}`
+        //   `(?N(grouplist))`: `{subroutine: {<plain shape>}, captures: [...]}`
+        // The `captures` array is a raw-token tree in grammar order:
+        //   ["(", <first_arg>, [<comma-tail entries>], ")"]
+        // where each comma-tail entry is `[",", <arg>]`. An arg is
+        // either a string (named ref) or an object `{sign, value}`
+        // (numeric / relative numeric). Decoding it here populates
+        // `Regex::ReturnedCaptureSubroutine`; the compile path
+        // (`vm.rs::compile`) and `OpCode::CallReturning` dispatch
+        // close Cluster 1B (testinput2:8067-8168 family +
+        // testinput2:8109 nested-bracket subjects in Cluster 2G).
         let target = map
             .get("target")
             .and_then(|v| v.as_object())
             .ok_or_else(|| self.contract_error("typed subroutine_call missing 'target' object"))?;
+        let captures_array = target.get("captures").and_then(|v| v.as_array());
         let inner = if let Some(sub) = target.get("subroutine").and_then(|v| v.as_object()) {
             sub
         } else {
             target
         };
+        let target_recursion = self.decode_typed_subroutine_target(inner)?;
+        let Some(captures) = captures_array else {
+            return Ok(Regex::Recursion {
+                target: target_recursion,
+            });
+        };
+        let returned_groups = self.decode_typed_returned_capture_args(captures)?;
+        if returned_groups.is_empty() {
+            // `(?1())` empty arg-list — treat as plain recursion. (PCRE2
+            // rejects this; PGEN also rejects it. This branch is
+            // defensive.)
+            return Ok(Regex::Recursion {
+                target: target_recursion,
+            });
+        }
+        Ok(Regex::ReturnedCaptureSubroutine {
+            target: target_recursion,
+            returned_groups,
+        })
+    }
+
+    fn decode_typed_subroutine_target(
+        &self,
+        inner: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<RecursionTarget> {
         let kind = inner
             .get("kind")
             .and_then(|v| v.as_str())
@@ -1801,12 +1827,11 @@ impl<'a> PgenAstAdapter<'a> {
                     self.contract_error("typed subroutine_call numeric target missing 'value'")
                 })?;
                 let sign = inner.get("sign").and_then(|v| v.as_str());
-                let target = match sign {
+                Ok(match sign {
                     Some("+") => RecursionTarget::RelativeGroup(value as i32),
                     Some("-") => RecursionTarget::RelativeGroup(-(value as i32)),
                     _ => RecursionTarget::Group(value as u32),
-                };
-                Ok(Regex::Recursion { target })
+                })
             }
             "named" | "python_named" => {
                 let name = inner
@@ -1816,17 +1841,67 @@ impl<'a> PgenAstAdapter<'a> {
                         self.contract_error("typed subroutine_call named target missing 'name'")
                     })?
                     .to_string();
-                Ok(Regex::Recursion {
-                    target: RecursionTarget::NamedGroup(name),
-                })
+                Ok(RecursionTarget::NamedGroup(name))
             }
-            "recursion" => Ok(Regex::Recursion {
-                target: RecursionTarget::Entire,
-            }),
+            "recursion" => Ok(RecursionTarget::Entire),
             other => Err(self.contract_error(&format!(
                 "unrecognised typed subroutine_call target kind: {other:?}"
             ))),
         }
+    }
+
+    fn decode_typed_returned_capture_args(
+        &self,
+        captures: &[serde_json::Value],
+    ) -> Result<Vec<RecursionTarget>> {
+        // Shape: ["(", <first_arg>, [<comma-tail entries>], ")"]
+        // Comma-tail entry: [",", <arg>].
+        let mut out = Vec::new();
+        if captures.len() < 2 {
+            return Ok(out);
+        }
+        // Index 0 is the literal "(" — skip.
+        // Index 1 is the first arg.
+        out.push(self.decode_returned_capture_arg(&captures[1])?);
+        // Index 2 (if present) is the comma-tail list.
+        if let Some(tail) = captures.get(2).and_then(|v| v.as_array()) {
+            for entry in tail {
+                let entry_arr = entry.as_array().ok_or_else(|| {
+                    self.contract_error(
+                        "typed subroutine_call captures comma-tail entry not an array",
+                    )
+                })?;
+                // Each entry is [",", <arg>] — second element is the arg.
+                if entry_arr.len() < 2 {
+                    return Err(self.contract_error(
+                        "typed subroutine_call captures comma-tail entry too short",
+                    ));
+                }
+                out.push(self.decode_returned_capture_arg(&entry_arr[1])?);
+            }
+        }
+        // Index 3 is the literal ")" — skip.
+        Ok(out)
+    }
+
+    fn decode_returned_capture_arg(&self, arg: &serde_json::Value) -> Result<RecursionTarget> {
+        if let Some(s) = arg.as_str() {
+            return Ok(RecursionTarget::NamedGroup(s.to_string()));
+        }
+        if let Some(obj) = arg.as_object() {
+            let value = obj.get("value").and_then(|v| v.as_u64()).ok_or_else(|| {
+                self.contract_error("typed returned-capture arg object missing 'value'")
+            })?;
+            let sign = obj.get("sign").and_then(|v| v.as_str());
+            return Ok(match sign {
+                Some("+") => RecursionTarget::RelativeGroup(value as i32),
+                Some("-") => RecursionTarget::RelativeGroup(-(value as i32)),
+                _ => RecursionTarget::Group(value as u32),
+            });
+        }
+        Err(self.contract_error(&format!(
+            "unrecognised typed returned-capture arg shape: {arg:?}"
+        )))
     }
 
     fn convert_typed_inline_modifiers_object(
@@ -5518,20 +5593,36 @@ impl<'a> PgenAstAdapter<'a> {
             }
         };
 
-        // Extract returned group numbers from the group list.
-        let mut returned_groups = Vec::new();
+        // Extract returned group references from the group list.
+        // Each `returned_capture_group` node carries either
+        // `signed_digits` (numeric / relative) or a `name` (named ref).
+        let mut returned_groups: Vec<RecursionTarget> = Vec::new();
         let children = self.collect_descendants(node, "returned_capture_group");
         for group_node in &children {
             if let Some(signed) = self.first_descendant(group_node, "signed_digits") {
                 if let Ok(text) = self.slice(signed) {
-                    if let Ok(n) = text
-                        .trim_start_matches('+')
-                        .trim_start_matches('-')
-                        .parse::<u32>()
-                    {
-                        returned_groups.push(n);
+                    let trimmed = text.trim();
+                    let (sign, digits) = if let Some(rest) = trimmed.strip_prefix('+') {
+                        (Some('+'), rest)
+                    } else if let Some(rest) = trimmed.strip_prefix('-') {
+                        (Some('-'), rest)
+                    } else {
+                        (None, trimmed)
+                    };
+                    if let Ok(n) = digits.parse::<u32>() {
+                        let target = match sign {
+                            Some('+') => RecursionTarget::RelativeGroup(n as i32),
+                            Some('-') => RecursionTarget::RelativeGroup(-(n as i32)),
+                            _ => RecursionTarget::Group(n),
+                        };
+                        returned_groups.push(target);
+                        continue;
                     }
                 }
+            }
+            // Fall back: try to read a name.
+            if let Ok(name) = self.name_text(group_node) {
+                returned_groups.push(RecursionTarget::NamedGroup(name));
             }
         }
 

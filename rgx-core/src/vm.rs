@@ -8583,7 +8583,8 @@ impl OptimizingCompiler {
                     let count = returned_groups.len().min(255) as u8;
                     self.code.push(count);
                     for g in returned_groups.iter().take(count as usize) {
-                        self.code.push((*g & 0xFF) as u8);
+                        let id = self.recursion_target_to_id(g);
+                        self.code.push(id);
                     }
                 }
             }

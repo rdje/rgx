@@ -3760,3 +3760,11 @@ No other PGEN-related observations in the residual catalogue, BACKLOG, or RUST_C
 ## 2026-05-06 session — Cluster 1B walker is the next concrete unblock
 
 13 cluster-1B cases + 2 cluster-2G cases (testinput2:8109 nested-bracket subjects) close together once the typed walker decodes `target.captures`. The shape is regular per the canonical-12 dump matrix; expected effort is small (parsing.rs only, no engine work, no PGEN dependency).
+
+## 2026-05-06 session — Cluster 1B walker shipped
+
+Followed yesterday's correction directly: `parsing.rs::convert_typed_subroutine_call_object` now decodes `target.captures` raw-token tree into `Vec<RecursionTarget>`. Surface change: `ast.rs` field type widened `Vec<u32>` → `Vec<RecursionTarget>`; `compiler.rs` `resolve_relative_conditionals_inner` gains the `ReturnedCaptureSubroutine` arm; `vm.rs::compile` emits per-target via `recursion_target_to_id`. Untyped walker also covers named refs now (PGEN 1.1.9+ untyped tree had them but the old `signed_digits`-only walker dropped names).
+
+Result: +10 passes, **ratchet 12,737/73 → 12,747/63**. 10 of 13 cluster-1B + 1 cluster-2G nested-bracket subject closed. Remaining 3 (testinput2:8119 cascading-prefix family + 8109 first subject) tie into the larger subroutine-stack-reification work shared with Cluster 1A/2A.
+
+Net for the day: started at 12,737/73 → 12,747/63 (+10 passes, -10 fails). Plus the (uncommitted) MEMORY-track session — withdrawal of false-premise PGEN-RGX-0083 — pushed earlier in 2f4f55d.

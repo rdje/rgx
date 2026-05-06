@@ -2377,6 +2377,42 @@ impl Compiler {
                     opened_groups,
                 ))
             }
+            RegexAst::ReturnedCaptureSubroutine {
+                target,
+                returned_groups,
+            } => {
+                let resolved_target = match target {
+                    crate::ast::RecursionTarget::RelativeGroup(offset) => {
+                        crate::ast::RecursionTarget::Group(Self::resolve_relative_group_reference(
+                            offset,
+                            opened_groups,
+                            total_groups,
+                        )?)
+                    }
+                    other => other,
+                };
+                let resolved_groups = returned_groups
+                    .into_iter()
+                    .map(|t| match t {
+                        crate::ast::RecursionTarget::RelativeGroup(offset) => {
+                            Self::resolve_relative_group_reference(
+                                offset,
+                                opened_groups,
+                                total_groups,
+                            )
+                            .map(crate::ast::RecursionTarget::Group)
+                        }
+                        other => Ok(other),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((
+                    RegexAst::ReturnedCaptureSubroutine {
+                        target: resolved_target,
+                        returned_groups: resolved_groups,
+                    },
+                    opened_groups,
+                ))
+            }
             RegexAst::RelativeBackreference(offset) => {
                 let resolved =
                     Self::resolve_relative_group_reference(offset, opened_groups, total_groups)?;
@@ -2395,7 +2431,6 @@ impl Compiler {
             | RegexAst::Backreference(_)
             | RegexAst::NamedBackreference(_)
             | RegexAst::Recursion { .. }
-            | RegexAst::ReturnedCaptureSubroutine { .. }
             | RegexAst::CodeBlock { .. }
             | RegexAst::Callout(_)
             | RegexAst::MatchReset

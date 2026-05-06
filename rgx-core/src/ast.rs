@@ -127,8 +127,11 @@ pub enum Regex {
     ReturnedCaptureSubroutine {
         /// The subroutine target (group number or name)
         target: RecursionTarget,
-        /// Group numbers whose captures should be returned to the caller
-        returned_groups: Vec<u32>,
+        /// Groups whose captures should be returned to the caller. Each
+        /// entry resolves to a numeric group id at codegen via
+        /// `recursion_target_to_id`; relative entries are normalised
+        /// to absolute by `resolve_relative_conditionals` before then.
+        returned_groups: Vec<RecursionTarget>,
     },
 
     // Code execution (rgx's unique feature!)

@@ -485,7 +485,7 @@ mod tests {
         assert_needs_vm(
             &Regex::ReturnedCaptureSubroutine {
                 target: RecursionTarget::Group(1),
-                returned_groups: vec![1],
+                returned_groups: vec![RecursionTarget::Group(1)],
             },
             ExclusionReason::ReturnedCaptureSubroutine,
         );

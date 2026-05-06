@@ -80,9 +80,11 @@ Cases:
 
 **What to change**: the VM's `invoke_subroutine` (`rgx-core/src/vm.rs`) currently runs the subroutine body in an isolated local backtrack stack. A full fix needs (1) an explicit subroutine-call frame that preserves all enclosing capture slots at entry; (2) proper replay of the callee's capture writes into the caller's frame; (3) a "previous iteration's completed capture" read-only slot that backref sees. Multi-day architectural change.
 
-## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases — **RGX-SIDE WALKER PENDING**)
+## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases — **PARTIAL CLOSURE 2026-05-06**: 10 of 13 recovered)
 
-**Status 2026-05-06 (corrected)**: PGEN does carry the arg-list. Verified by capturing AST dumps via `pgen::embedding_api::parse_grammar_profile_ast_dump_named` for the canonical 12-pattern matrix at pin 1.1.75: when an arg-list is present, the typed `subroutine_call.target` becomes `{subroutine, captures}` — the `captures` field is a raw-token tree preserving the grammar token order, e.g. `(?1(2,3))` produces `["(", {sign:[], value:2}, [[",", {sign:[], value:3}]], ")"]`. RGX's typed walker (`parsing.rs::convert_typed_subroutine_call_object`) currently ignores the `captures` field and emits `Regex::Recursion`. The RGX-side `Regex::ReturnedCaptureSubroutine` AST and `OpCode::CallReturning = 0x46` VM dispatch are wired and DORMANT pending the walker that decodes `target.captures` into the existing `returned_groups: Vec<RecursionTarget>`. **Earlier "blocked-on-PGEN / arg-list dropped" framing was wrong** — withdrawn 2026-05-06 along with the (never-shipped) PGEN-RGX-0083 draft. PGEN's named-form coverage is also broader than first thought: `(?&fn('ret'))`, `(?P>fn(<ret>))`, `\g<fn('ret')>` all parse; only the bare-name `(?&fn(ret))` (which PCRE2 also rejects) does not.
+**Status 2026-05-06 (walker shipped, ratchet 12,747/63)**: typed walker in `parsing.rs::convert_typed_subroutine_call_object` now decodes `target.captures` (raw-token tree shape `["(", first_arg, [comma_tail], ")"]`) into `Regex::ReturnedCaptureSubroutine { target, returned_groups: Vec<RecursionTarget> }`. The compile path (`vm.rs::compile`) emits each via `recursion_target_to_id`; the `OpCode::CallReturning = 0x46` VM dispatch (commit 7105804) is now live. Closed 10 cases: testinput2:8067, 8099, 8142, 8145, 8148 (`(?-2(-1))` relative), 8151 (`(?+1(+2))` relative), 8154 (`(?&fn('ret'))` named), 8157 (`(?P>fn(<ret>))` named), 8168 (`(?1(2,3))` two-arg), plus the testinput2:8109 second nested-bracket subject. Remaining 3 ride the deeper subroutine-stack-reification work shared with Cluster 1A/2A:
+
+**Earlier "blocked-on-PGEN / arg-list dropped" framing was wrong** — withdrawn 2026-05-06 along with the never-shipped PGEN-RGX-0083 draft. Empirical AST capture against PGEN pin 1.1.75 (12-pattern matrix via `pgen::embedding_api::parse_grammar_profile_ast_dump_named`) proved the data was always present; the walker just wasn't reading it. The named-form coverage is broader than first thought: `(?&fn('ret'))`, `(?P>fn(<ret>))`, `\g<fn('ret')>` all parse; only the bare-name `(?&fn(ret))` (which PCRE2 also rejects) does not.
 
 **Difficulty**: medium-high. **Expected payoff**: 13 direct cases plus Cluster 2G (2 cases) = ~15.
 
@@ -94,19 +96,19 @@ Cases:
 |---|---|---|
 | testinput2:6277 | `^(?\|(\*)(*napla:\S*_(\2?+.+))\|(\w)(?=\S*_(\2?+\1)))+_\2$` | `*abc_12345abc` |
 | testinput2:6280 | same family with extra nesting | `*abc_12345abc` |
-| testinput2:8067 | `^(?1(2))\2(?(DEFINE)(a(.)b(.)c))` | `axbycx` |
-| testinput2:8099 | `^(?1)(?(DEFINE)(<(?2(3,4))><\4\3>)((..)(..)))` | `<abcd><cdab>` |
-| testinput2:8119 | `(?:(?1(<prefix>))#){4}(?(DEFINE)((?(<prefix>)\2)(?<prefix>.{3})))$` | 3 cascading-prefix subjects |
-| testinput2:8142 | `(?(R)(Sat)urday\|(?R(1)),\1)` | `Saturday,Sat` |
-| testinput2:8145 | `(?(DEFINE)((Sat)urday))(?1(2)),\2` | `Saturday,Sat` |
-| testinput2:8148 | `(?(DEFINE)((Sat)urday))(?-2(-1)),\2` | `Saturday,Sat` |
-| testinput2:8151 | `(?+1(+2)),\2(?(DEFINE)((Sat)urday))` | `Saturday,Sat` |
-| testinput2:8154 | `(?(DEFINE)(?<fn>(?<ret>Sat)urday))(?&fn('ret')),\k<ret>` | `Saturday,Sat` |
-| testinput2:8157 | `(?(DEFINE)(?<fn>(?<ret>Sat)urday))(?P>fn(<ret>)),\k<ret>` | `Saturday,Sat` |
-| testinput2:8168 | `(?(DEFINE)((Sat)(urday)))(?1(2,3)),\2,\3` | `Saturday,Sat,urday` |
-| testinput2:8109 | `<(?:[^<>]*?(?:(AB)[^<>]*\|)(?:\|(?R(1))))+>` | 6 nested-bracket subjects |
+| ~~testinput2:8067~~ | ~~`^(?1(2))\2(?(DEFINE)(a(.)b(.)c))`~~ | ~~`axbycx`~~ | ✅ CLOSED 2026-05-06 (typed walker). |
+| ~~testinput2:8099~~ | ~~`^(?1)(?(DEFINE)(<(?2(3,4))><\4\3>)((..)(..)))`~~ | ~~`<abcd><cdab>`~~ | ✅ CLOSED 2026-05-06 (typed walker). |
+| testinput2:8119 | `(?:(?1(<prefix>))#){4}(?(DEFINE)((?(<prefix>)\2)(?<prefix>.{3})))$` | 3 cascading-prefix subjects | Still red — needs subroutine-stack reification (Cluster 1A capstone). |
+| ~~testinput2:8142~~ | ~~`(?(R)(Sat)urday\|(?R(1)),\1)`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker). |
+| ~~testinput2:8145~~ | ~~`(?(DEFINE)((Sat)urday))(?1(2)),\2`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker). |
+| ~~testinput2:8148~~ | ~~`(?(DEFINE)((Sat)urday))(?-2(-1)),\2`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker; relative arg). |
+| ~~testinput2:8151~~ | ~~`(?+1(+2)),\2(?(DEFINE)((Sat)urday))`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker; relative arg). |
+| ~~testinput2:8154~~ | ~~`(?(DEFINE)(?<fn>(?<ret>Sat)urday))(?&fn('ret')),\k<ret>`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker; named arg). |
+| ~~testinput2:8157~~ | ~~`(?(DEFINE)(?<fn>(?<ret>Sat)urday))(?P>fn(<ret>)),\k<ret>`~~ | ~~`Saturday,Sat`~~ | ✅ CLOSED 2026-05-06 (typed walker; named arg). |
+| ~~testinput2:8168~~ | ~~`(?(DEFINE)((Sat)(urday)))(?1(2,3)),\2,\3`~~ | ~~`Saturday,Sat,urday`~~ | ✅ CLOSED 2026-05-06 (typed walker; two-arg). |
+| testinput2:8109 | `<(?:[^<>]*?(?:(AB)[^<>]*\|)(?:\|(?R(1))))+>` | 6 nested-bracket subjects | Walker closed the second subject (Cluster 2G); first subject still red — same subroutine-stack-reification dependency. |
 
-**What to change**: in `parsing.rs::convert_typed_subroutine_call_object`, when the typed `target` has a `captures` array, walk it (skipping the literal `"("`/`")"` strings and recursing into the comma-tail sub-array) to extract the list of `RecursionTarget`s, then return `Regex::ReturnedCaptureSubroutine { target, returned_groups }` instead of `Regex::Recursion`. The compile path (`vm.rs::compile`) and `OpCode::CallReturning` dispatch are already in place. After parsing lands, verify the 13 cluster-1B cases close and the 2 cluster-2G cases (testinput2:8109 nested-bracket subjects) close together with them. Explicit backlog item **A12 capture-return walker follow-up** in `docs/BACKLOG.md` and `RUST_CODEBASE_ANALYSIS.md`.
+**What still needs to change** (for the 3 residual): the cascading-prefix testinput2:8119 family and testinput2:8109's first nested-bracket subject share the same root cause as Cluster 1A's outstanding palindrome cases — recursive captures across quantifier iterations need full subroutine-stack reification, not just the prev-iter slot. See Cluster 1A "What to change" — the same change closes these.
 
 ## Cluster 1C — Non-atomic positive lookahead `(*napla:...)` (5 cases)
 
