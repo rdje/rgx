@@ -80,7 +80,9 @@ Cases:
 
 **What to change**: the VM's `invoke_subroutine` (`rgx-core/src/vm.rs`) currently runs the subroutine body in an isolated local backtrack stack. A full fix needs (1) an explicit subroutine-call frame that preserves all enclosing capture slots at entry; (2) proper replay of the callee's capture writes into the caller's frame; (3) a "previous iteration's completed capture" read-only slot that backref sees. Multi-day architectural change.
 
-## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases)
+## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases — **BLOCKED ON PGEN**)
+
+**Status 2026-05-06**: PGEN's typed `subroutine_call` shape (pin 1.1.75) only carries `kind`, `target`, `type` — the `(grouplist)` arg list is dropped from the typed JSON. The RGX-side `Regex::ReturnedCaptureSubroutine` AST and `OpCode::CallReturning = 0x46` dispatch (commit `7105804`) are in place but DORMANT until PGEN restores the field. Closes by construction once PGEN ships it.
 
 **Difficulty**: medium-high. **Expected payoff**: 13 direct cases plus Cluster 2G (2 cases) = ~15.
 
@@ -124,7 +126,9 @@ FN cases:
 
 **What to change**: compile `(*napla:X)` to a **re-enterable** lookahead whose captures and backtrack state are visible to the outer match. Currently compiled as ordinary `(?=X)` which is atomic. A new opcode path that leaves the assertion's alternation frames on the outer stack.
 
-## Cluster 1D — Complex backtracking-verb interactions (7 cases)
+## Cluster 1D — Complex backtracking-verb interactions (7 cases — **PARTIAL CLOSURE 2026-05-06**: testinput1:5429/5486/6355/5457 closed, testinput2:6604/6607 attempted but trade off)
+
+**Status 2026-05-06**: testinput1:5429/5486/6355 closed by `4fb3980` (SKIP-overrides-COMMIT). testinput1:5457 closed by `ad49523` (Phase 2 deferred-COMMIT). testinput2:6604/6607 attempted: a "let local alt-frame run after COMMIT-fail" subexpr-macro tweak recovered them but introduced regressions in testinput1:5599/5603 (which expect COMMIT to abort outer-alt-2 at the same position) — net ratchet 0. The right fix needs distinguishing "alt2 = empty" from "alt2 = content" or a different scoping of COMMIT through positive lookahead body.
 
 **Difficulty**: medium (each case needs targeted analysis). **Expected payoff**: 7 direct + related SM in Bucket 2.
 
