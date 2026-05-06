@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Docs: alt_boundaries manual-truncation audit (closes audit §5.3 / C8.1.3)
+- The Phase-2 verb-effects refactor (`efb69b3`, `ad49523`) and the corresponding `local_backtrack_or_return_false!` macro update gave the engine **two parallel pop sites that share the cleanup contract**: `try_backtrack` (global) and `local_backtrack_or_return_false!` (subexpr local). Both: (a) check `ctx.committed`, (b) handle `COMMIT_SENTINEL_IP` escalation, (c) sync alt-boundaries against post-pop stack length.
+- Remaining manual `alt_boundaries.truncate()` calls — in `verb_apply_then` redirect, `verb_apply_prune`, and `AltScopeEnd` — are intentional bodies of the verb/op's own semantics, not redundant cleanups. No refactor needed.
+- Future opcode additions that allocate per-frame side state should update both pop sites symmetrically; the parallel structure makes the invariant audit-able by inspection.
+
 ### 2026-05-06 — Engine: explicit `atomic_depth` for `(*COMMIT)`-in-atomic predicate (closes audit §5.4)
 - New `atomic_depth: u32` field on `ExecContext`. Bumped at `OpCode::AtomicStart` (3 dispatch sites), decremented at `OpCode::AtomicEnd`. The `(*COMMIT)` `in_atomic` predicate at all 3 dispatch sites now tests `ctx.atomic_depth > 0` instead of `!ctx.call_stack.is_empty()`. `clone_exec_context` inherits; `execute_at` resets to 0 between attempts; `saturating_add`/`saturating_sub` guard against IR malformations.
 - The previous `call_stack`-based predicate was a proxy: `call_stack` is doubly-used (atomic-group markers + quantifier subexpr-call markers), so the predicate would have wrongly evaluated true at any quantifier-subexpr-call outside an atomic group. The corpus didn't exercise the divergence, so conformance ratchet unchanged at 12,720/90 — but the latent semantic gap is closed by construction.

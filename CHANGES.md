@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Docs: `alt_boundaries` manual-truncation audit (closes audit §5.3 / C8.1.3)
+- Scope: `book/src/internals/pcre2-conformance-audit.md` §5.3 rewritten to mark the cleanup contract closed; `docs/BACKLOG.md` C8.1.3 marked shipped.
+- Findings: the Phase-2 verb-effects refactor (`efb69b3`, `ad49523`) introduced parallel pop sites — `try_backtrack` for the global stack and `local_backtrack_or_return_false!` for the subexpr local stack — that share the cleanup contract by construction (committed-bail, `COMMIT_SENTINEL_IP` escalation, post-pop alt_boundaries sync). The remaining manual `alt_boundaries.truncate()` calls (in `verb_apply_then`, `verb_apply_prune`, and `AltScopeEnd`) are intentional bodies of the verb's own semantics, not redundant cleanups. No code change required.
+- Validation: code review only. Conformance ratchet unchanged at 12,720/90.
+- Notes/impact: future opcode additions that allocate per-frame side state should update both `try_backtrack` and the subexpr macro symmetrically; the parallel structure makes the invariant audit-able by inspection.
+
 ### 2026-05-06 - Engine: explicit `atomic_depth` for `(*COMMIT)`-in-atomic predicate (closes audit §5.4 / C8.1.2)
 - Scope: `rgx-core/src/vm.rs` — new `atomic_depth: u32` field on `ExecContext`, incremented at `OpCode::AtomicStart` (3 dispatch sites: top-level, continuation, subexpr) and decremented at `OpCode::AtomicEnd`. The `(*COMMIT)` `in_atomic` predicate at all 3 dispatch sites changes from `!ctx.call_stack.is_empty()` to `ctx.atomic_depth > 0`. Reset to 0 at `execute_at` start; `clone_exec_context` inherits the counter. `saturating_add`/`saturating_sub` guard against pathological IR.
 - Changes:

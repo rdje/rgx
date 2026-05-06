@@ -385,20 +385,27 @@ The big payoff is the residual Cluster 1C (`(*napla:...)`): the cluster descript
 
 Scope estimate: **medium-large** (5-10 days). The state diagram can be derived from pcre2pattern(3) §"Lookaround assertions" and §"Atomic grouping and possessive quantifiers" plus the napla extension in PCRE2 10.34. Implementation is a struct + 9 constants + a dispatch refactor; testing is the heavier half.
 
-### 5.3 `try_backtrack` auto-cleanup contract
+### 5.3 `try_backtrack` auto-cleanup contract (CLOSED 2026-05-06)
 
-There are 34 call sites of `self.try_backtrack(ctx, &mut ip)` in `vm.rs`. The function (defined at `rgx-core/src/vm.rs:2254`) does several things:
+`try_backtrack` (defined at `rgx-core/src/vm.rs:2517`) does:
 
-1. Honours `ctx.committed` (clears stack and returns false; `vm.rs:2262-2266`)
-2. Pops a frame; escalates on `COMMIT_SENTINEL_IP` (`vm.rs:2274-2279`)
-3. Restores the frame's state via `restore_frame` (which itself unwinds the trail and `match_start_override`)
-4. **Synchronises `ctx.alt_boundaries` with the new stack length** (`vm.rs:2288-2291`, `while ctx.alt_boundaries.last().map_or(false, |&b| b >= new_len) { ctx.alt_boundaries.pop(); }`)
+1. Honours `ctx.committed` (clears stack and returns false).
+2. Pops a frame; escalates on `COMMIT_SENTINEL_IP`.
+3. Restores the frame's state via `restore_frame`.
+4. Synchronises `ctx.alt_boundaries` with the new stack length.
 
-The synchronisation in step 4 is a defensive cleanup added with engine fix #9 and reaffirmed by #34. Some manual call sites also clean up `alt_boundaries` directly (the `OpCode::Then` dispatch at `vm.rs:2891-2893` does its own pop-loop). The dual cleanup paths are correct today but easy to break — if a future opcode introduces a new per-frame side state, every manual cleanup site needs to update too.
+The Phase-2 verb-effects refactor (commits `efb69b3`, `ad49523`) and the `local_backtrack_or_return_false!` macro update inside `execute_subexpr_inner_full` give the engine **two parallel pop sites that share the contract**:
 
-A principled fix is to make `try_backtrack` the single place that knows about cross-stack invariants, and to forbid manual `alt_boundaries.truncate()` calls outside of opcode arms that explicitly need to reshape it (`AltScopeEnd`, `(*THEN)`'s redirect, the COMMIT-clears-everything path). Today there are ~15 places that touch `alt_boundaries` directly; an audit would converge them.
+- `try_backtrack` for the global `ctx.backtrack_stack` and `ctx.alt_boundaries`.
+- `local_backtrack_or_return_false!` for the local subexpr `backtrack_stack` and `local_alt_boundaries`.
 
-Scope estimate: **small** (1-3 days). Mostly a code-organization commit with no semantic change; risk is mostly in the alt-scope marks for `(*THEN)` lexical scope, which interact with `alt_boundaries` non-locally.
+Both sites: (a) check `ctx.committed` first, (b) handle `COMMIT_SENTINEL_IP` escalation, (c) sync the alt-boundaries vector against the post-pop stack length. The remaining manual `alt_boundaries.truncate()` sites are intentional and correct:
+
+- `verb_apply_then` redirect path (`vm.rs:~2433`): truncate to alt_idx + 1 — the body of the `(*THEN)` redirect; **must** truncate above the alt-frame.
+- `OpCode::AltScopeEnd` (3 dispatch sites): truncate to the saved scope mark — the body of the lexical-scope close; **must** unwind alt-boundaries pushed within the scope.
+- `verb_apply_prune` and `verb_apply_then`'s `FullyDegraded` path: clear the stack — the body of (*PRUNE)-equivalence.
+
+No further refactor is needed. Future opcode additions that allocate per-frame side state should update both `try_backtrack` and the subexpr macro symmetrically; the parallel structure makes the invariant audit-able by inspection.
 
 ### 5.4 `COMMIT_SENTINEL_IP` routing rules (CLOSED 2026-05-06)
 
