@@ -163,7 +163,11 @@ Pattern family: `^QUOTE ((?(?=[X])NOT_X_CHAR) | B)* QUOTE $`. The conditional as
 | testinput2:2601 | `^"((?(?=[a])[^"])\|b)*"$/auto` | `"ab"` |
 | testinput2:2604 | `^"((?(?=[a])[^"])\|b)*"$` | `"ab"` |
 
-**What to change**: the VM's conditional-with-lookahead dispatch routes through `evaluate_conditional_operand` → `execute_assertion_subexpr`. The failing path is probably when the conditional's test *fails* but the alternation should fall through to the `|` branch. Needs targeted dispatch investigation.
+**Investigation 2026-05-06 (rejected codegen attempt)**: tried the obvious "assertion-fail-no-else → emit Fail opcode" codegen change in `parsing.rs::convert_typed_subroutine_call_object`'s sibling `Regex::Conditional` codegen. That made testinput1:4110 / testinput2:2601 / 2604 pass but regressed testinput2:4128 (`(?(?=ab)ab)` on `ca` and `cd` — PCRE2 expects empty match) and testinput2:5915 (`(?(?=^))b`) — PCRE2's actual semantic is **match-empty** for assertion-fail-no-else, NOT fail. Reverted; net would have been −1 not +3.
+
+**Real root cause (2026-05-06)**: the failing alternation+zero-width interaction is in the *quantifier*, not the conditional. For `(?(?=[a])[^%])|b)*%$` on `%ab%`: at pos 2 (`b`), alt-1 conditional matches empty zero-width; outer `*` stays at pos 2; engine's continuation `%$` fails; the engine should backtrack into the alternation to try alt 2 (`b`), but RGX's `StarLazy`/`StarGreedy` body-probe path uses a stateless `probe_subexpr` that doesn't surface body-internal alt-frames to the outer backtrack stack. The greedy zero-width-loop fix (commit `871c8fd`, 2026-04-18) terminated the loop on zero-width body match but kept the alternative-backtracking issue. The fix lives in the quantifier dispatch (`StarGreedy` / `StarLazy` in `vm.rs`): on zero-width body match in a quantified alternation, push a body-side alt-2 retry frame so the outer engine can fall through to subsequent alternatives. Same class of fix as the empty-alternative-lazy work in Cluster 2B.
+
+**What to change**: rework `OpCode::StarGreedy` / `StarLazy` (and the matching `Plus*` variants) to use `execute_subexpr`-style execution that pushes body-internal alt-frames onto the outer backtrack stack, rather than the current `probe_subexpr`-based snapshot approach. This is shared infrastructure with Cluster 2B (4 cases) and Cluster 2H (1 case) — the cleanest single change closes ~8 cases.
 
 ## Cluster 1F — `(?J)` dupnames + conditional + substitute ✅ CLOSED 2026-04-24 (3 of 4 cases)
 
