@@ -400,13 +400,13 @@ A principled fix is to make `try_backtrack` the single place that knows about cr
 
 Scope estimate: **small** (1-3 days). Mostly a code-organization commit with no semantic change; risk is mostly in the alt-scope marks for `(*THEN)` lexical scope, which interact with `alt_boundaries` non-locally.
 
-### 5.4 `COMMIT_SENTINEL_IP` routing rules
+### 5.4 `COMMIT_SENTINEL_IP` routing rules (CLOSED 2026-05-06)
 
-The sentinel is consumed in `try_backtrack` (`vm.rs:2274-2278`) and pushed in two places: `OpCode::Commit` when `ctx.call_stack` is non-empty (`vm.rs:2830-2843`) and `OpCode::Commit` in `execute_subexpr_inner` (around line 5482). The decision for "is this an atomic group context?" is currently approximated by `ctx.call_stack.is_empty()`, which is true at top-level and false inside a subroutine call — but the actual question is "are we inside an atomic group?", not "are we inside any function call". The two coincide *for the cases the corpus exercises* (no test combines `(*COMMIT)` inside a subroutine that isn't itself inside an atomic group), but they are not the same predicate.
+Originally: the sentinel was consumed in `try_backtrack` and pushed in two places: `OpCode::Commit` when `ctx.call_stack` was non-empty and `OpCode::Commit` in `execute_subexpr_inner`. The "is this an atomic group context?" predicate was approximated by `!ctx.call_stack.is_empty()` — but `call_stack` is doubly-used (atomic-group depth markers + quantifier subexpr-call markers), so the predicate would have evaluated true at any quantifier subexpr-call site even outside an atomic group.
 
-A correct model would carry an explicit `atomic_depth: u32` counter on `ExecContext` incremented by `OpCode::AtomicStart` and decremented by `OpCode::AtomicEnd`. `OpCode::Commit` would test `atomic_depth > 0` instead of `!call_stack.is_empty()`. This is a one-field change and a one-line predicate flip; the only reason it hasn't shipped is that no test in the corpus runs the divergent case.
+**Closed by C8.1.2**: an explicit `atomic_depth: u32` counter on `ExecContext` is incremented by `OpCode::AtomicStart` (all three dispatch sites) and decremented by `OpCode::AtomicEnd`. The `(*COMMIT)` handler tests `ctx.atomic_depth > 0` instead of the call_stack proxy. `clone_exec_context` inherits the counter; `execute_at` resets it to 0 at attempt start. `saturating_add` / `saturating_sub` guard against pathological IR.
 
-Scope estimate: **trivial** (≤ 1 day). The risk is non-corpus regressions; the value is closing a known semantic gap.
+Conformance ratchet unchanged (no corpus case exercised the divergent predicate), but the latent semantic gap is closed.
 
 ### 5.5 Pike-VM vs backtracking-VM dispatch gating
 

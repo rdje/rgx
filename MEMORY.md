@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: explicit `atomic_depth` for `(*COMMIT)`-in-atomic predicate (closes audit §5.4)
+- New `atomic_depth: u32` field on `ExecContext`. Bumped at `OpCode::AtomicStart` (3 dispatch sites), decremented at `OpCode::AtomicEnd`. The `(*COMMIT)` `in_atomic` predicate at all 3 dispatch sites now tests `ctx.atomic_depth > 0` instead of `!ctx.call_stack.is_empty()`. `clone_exec_context` inherits; `execute_at` resets to 0 between attempts; `saturating_add`/`saturating_sub` guard against IR malformations.
+- The previous `call_stack`-based predicate was a proxy: `call_stack` is doubly-used (atomic-group markers + quantifier subexpr-call markers), so the predicate would have wrongly evaluated true at any quantifier-subexpr-call outside an atomic group. The corpus didn't exercise the divergence, so conformance ratchet unchanged at 12,720/90 — but the latent semantic gap is closed by construction.
+- Audit §5.4 / BACKLOG C8.1.2 closed.
+
 ### 2026-05-06 — Engine: per-verb effects Phase 2 — defer COMMIT stack-clear (+1 pass, ratchet 12,720/90)
 - COMMIT (non-atomic) now sets `ctx.committed = true` and `ctx.skip_position = None` but **leaves the backtrack stack untouched**. The stack-clear is deferred to `try_backtrack`, which empties the stack at failure-time when it sees `committed = true`. Net behaviour for COMMIT alone is identical to the eager-clear approach; the benefit is COMMIT+THEN composition — testinput1:5457 (`aaaaa(*COMMIT)(*THEN)b|a+c` → "aaaaaac") closes by construction.
 - `ThenOutcome` is now trichotomous: `Redirected` (alt-frame in scope, truncate-to-frame), `ScopeExhausted` (lexically in alt scope but no pending frame; control returns to outer backtracking, no stack clear), `FullyDegraded` (lexically outside any alt; equivalent to `(*PRUNE)`, stack cleared). Distinction uses `alt_scope_marks` (lexical) alongside `alt_boundaries` (runtime).

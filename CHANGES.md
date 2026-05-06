@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Engine: explicit `atomic_depth` for `(*COMMIT)`-in-atomic predicate (closes audit §5.4 / C8.1.2)
+- Scope: `rgx-core/src/vm.rs` — new `atomic_depth: u32` field on `ExecContext`, incremented at `OpCode::AtomicStart` (3 dispatch sites: top-level, continuation, subexpr) and decremented at `OpCode::AtomicEnd`. The `(*COMMIT)` `in_atomic` predicate at all 3 dispatch sites changes from `!ctx.call_stack.is_empty()` to `ctx.atomic_depth > 0`. Reset to 0 at `execute_at` start; `clone_exec_context` inherits the counter. `saturating_add`/`saturating_sub` guard against pathological IR.
+- Changes:
+  - `ctx.call_stack` is doubly-used (atomic-group depth markers + quantifier subexpr-call markers); the previous `!is_empty()` predicate would have wrongly evaluated true at any quantifier subexpr-call site outside an atomic group. The corpus didn't exercise the divergence, but the latent semantic gap is closed.
+  - Single source of truth: 3 increment / 3 decrement / 3 predicate-test sites all consult the same field.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy --workspace --all-targets` zero RGX errors. Conformance ratchet unchanged at **12,720 / 90 / 0 / 0** (no corpus regressions, no new passes — the predicate change is correct on cases the corpus exercises and silently corrects the divergent predicate that would have surfaced if a future test combined `(*COMMIT)` with non-atomic quantifier subexpr-calls).
+- Notes/impact: Closes audit §5.4 and BACKLOG C8.1.2. The fix would have been needed eventually when a corpus case landed that combined `(*COMMIT)` with non-atomic-group quantifier-subexpr execution; now that gap is preempted.
+
 ### 2026-05-06 - Engine: per-verb effects Phase 2 — defer COMMIT stack-clear (+1 pass, ratchet 12,720/90)
 - Scope: `rgx-core/src/vm.rs` (verb_apply_commit deferred, verb_apply_then 3-outcome with `ScopeExhausted`, `try_backtrack` honors `committed`, OpCode::Char and OpCode::Fail routed through `try_backtrack`, subexpr `local_backtrack_or_return_false!` macro guards on `ctx.committed`), `rgx-core/tests/pcre2_conformance.rs` (ratchet bump to 12,720/90).
 - Changes:

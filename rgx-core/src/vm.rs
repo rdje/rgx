@@ -685,6 +685,21 @@ pub struct ExecContext<'a> {
     pub capture_trail: Vec<(usize, Option<usize>)>,
     /// Call stack for recursion
     pub call_stack: Vec<usize>,
+    /// Depth of currently-active atomic groups. Incremented by
+    /// `OpCode::AtomicStart`, decremented by `OpCode::AtomicEnd`. The
+    /// `(*COMMIT)` handler consults this to decide between the
+    /// "abort entire match attempt" path (depth=0) and the
+    /// "push `COMMIT_SENTINEL_IP` so the commit only escalates if
+    /// the atomic itself fails" path (depth>0). Per pcre2pattern(3):
+    /// *"the scope of (*COMMIT) is limited to an enclosing atomic
+    /// group."*
+    ///
+    /// Audit §5.4 / BACKLOG C8.1.2: previously the predicate was
+    /// approximated by `!ctx.call_stack.is_empty()`, but `call_stack`
+    /// is doubly-used (atomic groups + quantifier subexpr-call
+    /// markers). For the corpus the two coincide; this explicit
+    /// counter closes the latent semantic gap.
+    pub atomic_depth: u32,
     /// Backtrack stack for alternation and optional quantifiers
     pub backtrack_stack: Vec<BacktrackFrame>,
     /// Track which alternative is currently being executed
@@ -1227,6 +1242,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -1363,6 +1379,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -1436,6 +1453,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -1492,6 +1510,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -2596,6 +2615,7 @@ impl RegexVM {
             captures: ctx.captures.clone(),
             capture_trail: ctx.capture_trail.clone(),
             call_stack: ctx.call_stack.clone(),
+            atomic_depth: ctx.atomic_depth,
             backtrack_stack: Vec::new(),
             current_alternative: ctx.current_alternative,
             recursion_stack: ctx.recursion_stack.clone(),
@@ -2701,6 +2721,7 @@ impl RegexVM {
         ctx.committed = false;
         ctx.skip_position = None;
         ctx.marks.clear();
+        ctx.atomic_depth = 0;
         ctx.step_count = 0;
         ctx.hit_end = false;
         let mut ip = 0;
@@ -3098,7 +3119,7 @@ impl RegexVM {
                 // last-verb-wins rule is encoded in each apply
                 // function rather than in scattered precedence checks.
                 OpCode::Commit => {
-                    let in_atomic = !ctx.call_stack.is_empty();
+                    let in_atomic = ctx.atomic_depth > 0;
                     let sentinel = Self::build_commit_sentinel(ctx);
                     Self::verb_apply_commit(
                         &mut ctx.skip_position,
@@ -3837,8 +3858,12 @@ impl RegexVM {
 
                 OpCode::AtomicStart => {
                     // Mark current backtrack depth; frames created after this point
-                    // are internal to the atomic group.
+                    // are internal to the atomic group. Also bump
+                    // `atomic_depth` so the (*COMMIT) handler can
+                    // distinguish atomic-group context from quantifier
+                    // subexpr-call markers (audit §5.4 / C8.1.2).
                     ctx.call_stack.push(ctx.backtrack_stack.len());
+                    ctx.atomic_depth = ctx.atomic_depth.saturating_add(1);
                 }
 
                 OpCode::AtomicEnd => {
@@ -3846,6 +3871,7 @@ impl RegexVM {
                     // frames created inside the group.
                     if let Some(mark) = ctx.call_stack.pop() {
                         ctx.backtrack_stack.truncate(mark);
+                        ctx.atomic_depth = ctx.atomic_depth.saturating_sub(1);
                         continue;
                     }
                     return false;
@@ -4543,6 +4569,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -4814,6 +4841,7 @@ impl RegexVM {
             captures: vec![None; (self.program.num_groups + 1) as usize * 2],
             capture_trail: Vec::new(),
             call_stack: Vec::new(),
+            atomic_depth: 0,
             backtrack_stack: Vec::new(),
             current_alternative: None,
             recursion_stack: Vec::new(),
@@ -5003,6 +5031,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            atomic_depth: 0,
         };
 
         // Determine the CodeBlockOutcome from the callback result.
@@ -5622,10 +5651,12 @@ impl RegexVM {
                 }
                 OpCode::AtomicStart => {
                     ctx.call_stack.push(ctx.backtrack_stack.len());
+                    ctx.atomic_depth = ctx.atomic_depth.saturating_add(1);
                 }
                 OpCode::AtomicEnd => {
                     if let Some(saved_len) = ctx.call_stack.pop() {
                         ctx.backtrack_stack.truncate(saved_len);
+                        ctx.atomic_depth = ctx.atomic_depth.saturating_sub(1);
                     }
                 }
                 OpCode::Call => {
@@ -5682,7 +5713,7 @@ impl RegexVM {
                 // suspension. Verb effects are textually-composed with
                 // last-verb-wins semantics by construction.
                 OpCode::Commit => {
-                    let in_atomic = !ctx.call_stack.is_empty();
+                    let in_atomic = ctx.atomic_depth > 0;
                     let sentinel = Self::build_commit_sentinel(ctx);
                     Self::verb_apply_commit(
                         &mut ctx.skip_position,
@@ -6147,11 +6178,13 @@ impl RegexVM {
 
                 OpCode::AtomicStart => {
                     call_stack.push(backtrack_stack.len());
+                    ctx.atomic_depth = ctx.atomic_depth.saturating_add(1);
                 }
 
                 OpCode::AtomicEnd => {
                     if let Some(mark) = call_stack.pop() {
                         backtrack_stack.truncate(mark);
+                        ctx.atomic_depth = ctx.atomic_depth.saturating_sub(1);
                         continue;
                     }
                     return false;
@@ -6641,15 +6674,22 @@ impl RegexVM {
                 // enclosing alternation, it is equivalent to
                 // (*PRUNE)"*).
                 OpCode::Commit => {
-                    // Subexpr context: in_atomic = false (the subexpr
-                    // is itself a logical unit; its ctx.committed
-                    // propagation is gated by execute_assertion_subexpr).
+                    // Subexpr context: in_atomic tracks whether we're
+                    // inside an atomic group at this point (not whether
+                    // we're inside the subexpr). With Phase-2 verb
+                    // dispatch and atomic_depth, the subexpr inherits
+                    // the outer atomic_depth via clone_exec_context
+                    // and bumps it locally on AtomicStart inside the
+                    // subexpr. ctx.committed propagation across the
+                    // subexpr boundary is gated by
+                    // execute_assertion_subexpr.
+                    let in_atomic = ctx.atomic_depth > 0;
                     let sentinel = Self::build_commit_sentinel(ctx);
                     Self::verb_apply_commit(
                         &mut ctx.skip_position,
                         &mut ctx.committed,
                         &mut backtrack_stack,
-                        false,
+                        in_atomic,
                         sentinel,
                     );
                 }
