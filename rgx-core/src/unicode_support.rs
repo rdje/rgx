@@ -93,6 +93,48 @@ pub(crate) fn resolve_unicode_property_class(
     })
 }
 
+/// PCRE2 case-distinguished Unicode property closure under `/i`.
+///
+/// Per pcre2pattern(3) lines 980-985: *"If they are used with the
+/// PCRE2_CASELESS option, pattern letters from the property classes
+/// Lu, Ll, and Lt are all matched against any letter (Lu, Ll, or
+/// Lt)."* The same rule applies to the boolean case-distinction
+/// properties Upper / Lower / Title (which collapse to `Cased`)
+/// because their members case-fold across the boundary.
+///
+/// Returns the closed-property name for a case-distinguished input,
+/// or `None` if the input is case-invariant under `/i` (Lo / Lm / Mn /
+/// Nd / scripts / blocks / etc., whose members do not case-fold to
+/// members outside the property). The class-item resolver in
+/// `parsing.rs` consults this to populate the `/i` override for ANY
+/// case-distinguished `\p{X}` / `\P{X}` form rather than hardcoding a
+/// specific set of property names — generalises the previous
+/// `\P{Lu/Ll/Lt}/i` band-aid (engine fix #13, audit §9.B B1) into the
+/// full family.
+///
+/// Name normalization: case-insensitive, ignores ASCII whitespace and
+/// underscores per the Unicode property loose-matching rule.
+pub(crate) fn case_fold_property_closure(name: &str) -> Option<&'static str> {
+    let normalized: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_')
+        .flat_map(char::to_lowercase)
+        .collect();
+    match normalized.as_str() {
+        // General-category letter triple — closure is L& (Lc).
+        "lu" | "uppercaseletter" | "ll" | "lowercaseletter" | "lt" | "titlecaseletter" | "l&"
+        | "lc" | "casedletter" => Some("L&"),
+        // Boolean case-distinction properties — closure is Cased.
+        // (Unicode does not define a standalone `Title` boolean
+        // property — `Lt` / `Titlecase_Letter` is a general-category
+        // value handled in the letter triple above. PCRE2 / pcre2test
+        // also reject `\p{Title}`.)
+        "upper" | "uppercase" | "lower" | "lowercase" | "cased" => Some("Cased"),
+        _ => None,
+    }
+}
+
 /// Resolve PCRE2-specific property aliases and synthetic classes that
 /// do not exist in the Unicode property database. Returns `None` if the
 /// name is not a recognized PCRE2 alias; callers then fall back to the

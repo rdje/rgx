@@ -294,6 +294,17 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: PCRE2 `\p{X}/i` family-aware case-fold closure (closes audit §9.B B1)
+- New `unicode_support::case_fold_property_closure(name) -> Option<&'static str>` is the single source of truth for the case-distinguished Unicode property family under `/i`. Returns `"L&"` for `Lu/Ll/Lt/L&/Lc/Cased_Letter/Uppercase_Letter/Lowercase_Letter/Titlecase_Letter`, `"Cased"` for `Upper/Uppercase/Lower/Lowercase/Cased`, `None` for case-invariant properties. Loose name matching (case-/whitespace-/underscore-insensitive per Unicode rules).
+- Replaces the engine #13 (`d434229`) hardcoded `\P{Lu/Ll/Lt}` band-aid. The family fix covers BOTH polarities (`\p{X}` AND `\P{X}`) and BOTH contexts (standalone via `Regex::UnicodeClass` codegen + `CharClass::UnicodeClass` codegen, AND in-class via `convert_char_class` / `convert_typed_char_class_object` walkers). Three call sites in `parsing.rs` and `vm.rs` go through the same closure helper.
+- Correctness gains beyond the original engine #13:
+  - `\p{Lu}/i` standalone now matches Lt characters (e.g. `Dz` U+01F2) via L& closure. Previously case_fold_ranges expanded Lu→Lu∪Ll, missing Lt.
+  - `\p{Upper}/i` / `\P{Upper}/i` / `\p{Cased}/i` / `\P{Cased}/i` etc. all work correctly.
+  - In-class typed walker (modern PGEN path) now populates `ci_override_ranges` — previously only the untyped walker did, so `(?i)[\P{Lu}]` on lowercase 'a' incorrectly matched.
+- The `CharClass::Custom::ci_override_ranges` side-channel field stays for now — eliminating it requires storing classes as item-list-with-provenance (deferred). Its contents are now principled.
+- Test coverage: `case_distinguished_property_expands_under_i` (lib.rs) covers Lu/Ll/Lt + Upper/Lower/Cased × `\p` / `\P` × standalone / in-class. 1118 lib tests pass; conformance ratchet ≥ 12,719/91.
+- Audit §9.C tally moves: A: 22 → 23, B: 1 → 0. Audit §9.B B1 closed.
+
 ### 2026-05-06 — Engine: PCRE2 backtracking-verb dispatch — per-verb effects refactor (Phase 1)
 - `rgx-core/src/vm.rs`: 8 new `verb_apply_*` associated functions (one per backtracking verb), one `ThenOutcome` enum, decoder helper for length-prefixed mark/skip-name operands. Three dispatch sites (top-level `execute_at`, continuation `execute_at_continuation`, subexpr `execute_subexpr_inner_full`) now call the same apply functions; previously each site had its own inline implementation. Last-verb-wins precedence is encoded inside each apply function (e.g. `verb_apply_skip` clears `committed`, `verb_apply_then` clears `skip_position` and `committed` on its alt-redirect branch); the 4fb3980 in-loop SKIP-overrides-COMMIT clear collapses into one line of the apply.
 - N verbs in a branch compose by sequential application — there is no in-tree pair-special-cased dispatch for the verb family any more. Engine fixes #24 (PRUNE-clears-SKIP) and #36 (PRUNE-clears-COMMIT) become rules inside `verb_apply_prune`; the 2026-05-05 SKIP-overrides-COMMIT scan-loop fix becomes a rule inside `verb_apply_skip`. Future verb-pair / verb-tuple behaviour adds rows to the apply table, not new dispatch sites.

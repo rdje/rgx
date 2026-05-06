@@ -1596,8 +1596,18 @@ impl<'a> PgenAstAdapter<'a> {
             _ => false,
         };
         let mut ranges: Vec<CharRange> = Vec::new();
+        // Parallel `/i` ranges — see `convert_char_class` for the
+        // rationale. For each class item that is a case-distinguished
+        // Unicode property (`\p{Lu/Ll/Lt/L&/Lc/Cased_Letter/Upper/
+        // Lower/Cased}` or its `\P` complement), `ci_ranges` gets the
+        // case-fold-closed substitution; otherwise it tracks `ranges`
+        // verbatim. `saw_ci_divergence` triggers `ci_override_ranges`
+        // population only when the literal/closed sets differ.
+        let mut ci_ranges: Vec<CharRange> = Vec::new();
+        let mut saw_ci_divergence = false;
         if initial_close_present {
             ranges.push(CharRange::single(']'));
+            ci_ranges.push(CharRange::single(']'));
         }
         let mut idx = 0;
         while idx < body.len() {
@@ -1612,6 +1622,7 @@ impl<'a> PgenAstAdapter<'a> {
                 if let Some(last) = chars.chars().last() {
                     for ch in chars.chars().take(chars.chars().count() - 1) {
                         ranges.push(CharRange::single(ch));
+                        ci_ranges.push(CharRange::single(ch));
                     }
                     let end_ch = match &body[idx + 2] {
                         serde_json::Value::String(s) => s
@@ -1642,17 +1653,33 @@ impl<'a> PgenAstAdapter<'a> {
                         )));
                     }
                     ranges.push(CharRange::range(last, end_ch));
+                    ci_ranges.push(CharRange::range(last, end_ch));
                     idx += 3;
                     continue;
                 }
             }
+            let item_start = ranges.len();
             self.convert_typed_class_item(item, &mut ranges)?;
+            let appended = ranges[item_start..].to_vec();
+            if let Some(diverged) = self.case_fold_property_typed_class_item_ranges(item) {
+                ci_ranges.extend(diverged);
+                saw_ci_divergence = true;
+            } else {
+                ci_ranges.extend(appended);
+            }
             idx += 1;
         }
+        let ci_override_ranges = if saw_ci_divergence {
+            let mut v = ci_ranges;
+            v.sort_by_key(|r| r.start);
+            Some(v)
+        } else {
+            None
+        };
         Ok(Regex::CharClass(CharClass::Custom {
             ranges,
             negated: class_negated,
-            ci_override_ranges: None,
+            ci_override_ranges,
         }))
     }
 
@@ -4750,13 +4777,17 @@ impl<'a> PgenAstAdapter<'a> {
         let mut ranges = Vec::new();
         // Parallel range set used when the enclosing pattern is
         // compiled with case-insensitive mode. Starts equal to
-        // `ranges`; when a `\P{Lu/Ll/Lt}` item is encountered, the
-        // CI set substitutes `complement(L&)` (non-cased-letter) for
-        // that item so PCRE2's `/i` + `\P{Lu}` semantic survives the
-        // merge into a mixed custom class. `saw_ci_divergence` is
-        // set only when at least one item actually diverged; if all
-        // items agree, we leave `ci_override_ranges = None` and let
-        // codegen fall back to `ranges`.
+        // `ranges`; for any class item that is a case-distinguished
+        // Unicode property (`\p{Lu/Ll/Lt/L&/Lc/Cased_Letter/Upper/
+        // Lower/Title/Cased}` and their `\P` complements), the CI
+        // set substitutes the property's case-fold closure (or its
+        // complement) for that item — so PCRE2's `/i` + property
+        // semantic survives the merge into a mixed custom class.
+        // `saw_ci_divergence` is set only when at least one item
+        // actually diverged; if all items are case-invariant under
+        // /i, we leave `ci_override_ranges = None` and let codegen
+        // fall back to `ranges` (where `case_fold_ranges` handles
+        // ASCII range case-closure correctly).
         let mut ci_ranges = Vec::new();
         let mut saw_ci_divergence = false;
 
@@ -4781,11 +4812,14 @@ impl<'a> PgenAstAdapter<'a> {
                 let item_start = ranges.len();
                 self.convert_class_item(item, &mut ranges)?;
                 let appended = ranges[item_start..].to_vec();
-                // Check whether this item was a `\P{Lu/Ll/Lt}` form.
-                // Walk the class_item for a `class_escape` whose
-                // resolved name matches — if so, substitute
-                // `complement(L&)` ranges into ci_ranges.
-                if let Some(diverged) = self.negated_letter_property_ci_ranges(item) {
+                // Check whether this item is a case-distinguished
+                // Unicode property whose `/i` semantic differs from
+                // the literal-range case-fold (Lu/Ll/Lt/L&/Lc/Upper/
+                // Lower/Title/Cased and their `\P` complements). If
+                // so, substitute the case-fold-closed ranges into
+                // ci_ranges; otherwise fall through with the literal
+                // ranges that will get case-fold-expanded by codegen.
+                if let Some(diverged) = self.case_fold_property_class_item_ranges(item) {
                     ci_ranges.extend(diverged);
                     saw_ci_divergence = true;
                 } else {
@@ -4809,31 +4843,84 @@ impl<'a> PgenAstAdapter<'a> {
         }))
     }
 
-    /// If the class_item is `\P{Lu/Ll/Lt}`, return PCRE2's /i-correct
-    /// expansion (complement of cased letters `L&`); otherwise return
-    /// None so the caller can use the normal ranges.
-    fn negated_letter_property_ci_ranges(&self, item: &PgenAstNode) -> Option<Vec<CharRange>> {
-        // Inspect the slice of the class_item and check if it's
-        // a `\P{Lu}` / `\P{Ll}` / `\P{Lt}` form (case- and
-        // whitespace-insensitive). Simpler than walking the PGEN
-        // tree for the specific escape kind.
+    /// PCRE2 `/i` case-fold closure for a single `\p{X}` or `\P{X}`
+    /// class item. Returns the case-fold-closed ranges if X is a
+    /// case-distinguished property, otherwise `None`.
+    ///
+    /// pcre2pattern(3) lines 980-985: under `/i`, members of the
+    /// case-distinguished property family — `Lu`, `Ll`, `Lt` (general
+    /// categories), `L&` / `Lc` / `Cased_Letter` (their union), and
+    /// the boolean properties `Upper`, `Lower`, `Title`, `Cased` —
+    /// case-fold *across* the property boundary, so `\p{X}/i` must
+    /// expand to the full closure (`L&` for the letter triple,
+    /// `Cased` for the boolean triple) rather than being case-folded
+    /// in-place by `case_fold_ranges`. Negated forms (`\P{X}/i`)
+    /// resolve to the complement of the closure.
+    ///
+    /// Generalizes the previous hardcoded `\P{Lu/Ll/Lt}` handler
+    /// (engine fix #13 / audit §9.B B1): the family is now
+    /// {Lu, Ll, Lt, L&, Lc, Cased_Letter, Upper, Lower, Title, Cased}
+    /// for both polarities, looked up via
+    /// `unicode_support::case_fold_property_closure`.
+    fn case_fold_property_class_item_ranges(&self, item: &PgenAstNode) -> Option<Vec<CharRange>> {
+        // Slice-based detection: PGEN's typed tree doesn't expose
+        // polarity uniformly, so scan the original text for
+        // `\p{...}` / `\P{...}`.
         let slice = self.slice(item).ok()?;
         let trimmed = slice.trim();
-        if !trimmed.starts_with("\\P{") || !trimmed.ends_with('}') {
+        let (negated, inside) = if let Some(rest) = trimmed.strip_prefix("\\P{") {
+            (true, rest.strip_suffix('}')?)
+        } else if let Some(rest) = trimmed.strip_prefix("\\p{") {
+            (false, rest.strip_suffix('}')?)
+        } else {
+            return None;
+        };
+        // PCRE2 also allows `\p{^X}` as in-class negation; strip it.
+        let (negated, prop_name) = if let Some(rest) = inside.trim().strip_prefix('^') {
+            (!negated, rest.trim())
+        } else {
+            (negated, inside.trim())
+        };
+        let closed = crate::unicode_support::case_fold_property_closure(prop_name)?;
+        crate::unicode_support::resolve_unicode_property_class(closed, negated).ok()
+    }
+
+    /// Typed-shape variant of `case_fold_property_class_item_ranges`
+    /// — recognises a typed class_item that carries a `\p{X}` /
+    /// `\P{X}` escape and returns the case-fold-closed ranges if X is
+    /// case-distinguished. The typed shapes recognised:
+    /// - `["\\", ["p{", <prop_name>, "}"]]` — braced positive
+    /// - `["\\", ["P{", <prop_name>, "}"]]` — braced negative
+    /// - `["\\", ["p", <short_prop_letter>]]` — short positive (`\pL`)
+    /// - `["\\", ["P", <short_prop_letter>]]` — short negative (`\PL`)
+    fn case_fold_property_typed_class_item_ranges(
+        &self,
+        item: &serde_json::Value,
+    ) -> Option<Vec<CharRange>> {
+        // PGEN typed shape for `\p{X}` / `\P{X}` inside a class:
+        //   {"kind":"property", "name":"<name>", "negated":<bool>,
+        //    "type":"escape"}
+        // (Older / array-shaped variants are not produced by the
+        //  current PGEN tree but would be added here if needed.)
+        let map = item.as_object()?;
+        if map.get("type").and_then(|v| v.as_str()) != Some("escape") {
             return None;
         }
-        let inside = trimmed.strip_prefix("\\P{")?.strip_suffix("}")?;
-        let norm: String = inside
-            .chars()
-            .filter(|c| !c.is_whitespace() && *c != '_')
-            .flat_map(char::to_lowercase)
-            .collect();
-        if !matches!(norm.as_str(), "lu" | "ll" | "lt") {
+        if map.get("kind").and_then(|v| v.as_str()) != Some("property") {
             return None;
         }
-        // Under /i, `\P{Lu}` / `\P{Ll}` / `\P{Lt}` case-close to
-        // `\P{L&}` (complement of cased letters). Resolve and return.
-        crate::unicode_support::resolve_unicode_property_class("L&", true).ok()
+        let raw_name = map.get("name").and_then(|v| v.as_str())?;
+        let negated = matches!(map.get("negated"), Some(serde_json::Value::Bool(true)));
+        // PCRE2 `\p{^X}` in-class negation marker; mirrors the
+        // untyped form.
+        let trimmed = raw_name.trim();
+        let (negated, prop_name) = if let Some(rest) = trimmed.strip_prefix('^') {
+            (!negated, rest.trim())
+        } else {
+            (negated, trimmed)
+        };
+        let closed = crate::unicode_support::case_fold_property_closure(prop_name)?;
+        crate::unicode_support::resolve_unicode_property_class(closed, negated).ok()
     }
 
     /// Convert a single `class_item` — either a `class_range`, a bare

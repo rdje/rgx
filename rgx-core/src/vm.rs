@@ -7706,15 +7706,21 @@ impl OptimizingCompiler {
                         // Store the class definition and emit CharClass opcode with index
                         let effective_ranges = if self.case_insensitive {
                             // If the parser supplied a /i-specific
-                            // override (set when any `\P{Lu/Ll/Lt}`
-                            // class item was present), use those
-                            // ranges as the base before folding —
-                            // PCRE2 case-closes `\P{Lu}` through
-                            // `L&` (cased-letter class) under /i, so
-                            // the override substitutes complement(L&)
-                            // for the original complement(Lu). Then
-                            // the normal case-fold expansion adds
-                            // folds of literal members on top.
+                            // override (set when any class item is a
+                            // case-distinguished Unicode property —
+                            // Lu/Ll/Lt/L&/Lc/Cased_Letter/Upper/
+                            // Lower/Title/Cased or their `\P`
+                            // complements), use those ranges as the
+                            // base before further case-fold expansion.
+                            // pcre2pattern(3) lines 980-985: under
+                            // /i, members of the case-distinguished
+                            // family case-fold across the property
+                            // boundary, so the override substitutes
+                            // the closure (`L&` or `Cased`) — or its
+                            // complement — for the literal property
+                            // ranges. The remaining ASCII range
+                            // case-closure is then handled by
+                            // `case_fold_ranges` on top.
                             let base = ci_override_ranges.as_ref().unwrap_or(ranges);
                             Self::case_fold_ranges(base)
                         } else {
@@ -7730,16 +7736,16 @@ impl OptimizingCompiler {
                         self.code.push(class_id as u8);
                     }
                     CharClass::UnicodeClass { name, negated } => {
-                        let resolved_name: &str = if self.case_insensitive
-                            && matches!(name.as_str(), "Lu" | "Ll" | "Lt")
-                        {
-                            // Under /i, PCRE2 expands case-distinguished
-                            // letter properties to match any cased letter
-                            // (L& = Lu|Ll|Lt). `\p{Lu}/i` on "a" should
-                            // match — folding 'a' → 'A' brings it into
-                            // the expanded class. Same for `\P{Lu}/i`
-                            // which becomes `\P{L&}`.
-                            "L&"
+                        // Under /i, case-distinguished Unicode
+                        // properties expand to their case-fold closure
+                        // (`L&` for Lu/Ll/Lt and aliases, `Cased` for
+                        // the boolean Upper/Lower/Title properties).
+                        // The closure helper is the single source of
+                        // truth for the family — see
+                        // `unicode_support::case_fold_property_closure`.
+                        let resolved_name: &str = if self.case_insensitive {
+                            crate::unicode_support::case_fold_property_closure(name)
+                                .unwrap_or(name.as_str())
                         } else {
                             name.as_str()
                         };
@@ -7753,15 +7759,14 @@ impl OptimizingCompiler {
             }
 
             Regex::UnicodeClass { name, negated } => {
-                let resolved_name: &str =
-                    if self.case_insensitive && matches!(name.as_str(), "Lu" | "Ll" | "Lt") {
-                        // See `CharClass::UnicodeClass` branch: under /i,
-                        // PCRE2 expands Lu/Ll/Lt to L& so case-folded
-                        // letters match regardless of original case.
-                        "L&"
-                    } else {
-                        name.as_str()
-                    };
+                // Mirror of `CharClass::UnicodeClass` — see that branch
+                // for the case-fold-closure rationale.
+                let resolved_name: &str = if self.case_insensitive {
+                    crate::unicode_support::case_fold_property_closure(name)
+                        .unwrap_or(name.as_str())
+                } else {
+                    name.as_str()
+                };
                 let ranges = resolve_unicode_property_class(resolved_name, *negated)
                     .expect("unicode property class should be validated before codegen");
                 let class_id = self.compile_char_class(&ranges);

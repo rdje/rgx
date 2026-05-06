@@ -6826,25 +6826,66 @@ mod tests {
 
     #[test]
     fn case_distinguished_property_expands_under_i() {
-        // Regression pin: under /i, PCRE2 expands the case-
-        // distinguished letter properties `\p{Lu}` / `\p{Ll}` /
-        // `\p{Lt}` to `\p{L&}` (any cased letter — Lu | Ll | Lt).
-        // `(?i)\p{Lu}` therefore matches 'a' (folded to 'A' is Lu).
-        // The negated forms `\P{Lu}/i` exclude the whole cased-letter
-        // set — so they reject every letter regardless of case.
-        let upper_i = Regex::compile(r"(?i)\p{Lu}").unwrap();
-        assert!(upper_i.is_match("a"));
-        assert!(upper_i.is_match("A"));
-        assert!(upper_i.is_match("ǅ")); // Lt folds into the cased-letter set
-        assert!(!upper_i.is_match("1"));
-        let not_upper_i = Regex::compile(r"(?i)\P{Lu}").unwrap();
-        assert!(!not_upper_i.is_match("a"));
-        assert!(!not_upper_i.is_match("A"));
-        assert!(not_upper_i.is_match("1"));
-        // Without /i the original property semantic is preserved.
+        // Regression pin: under /i, PCRE2 expands every case-
+        // distinguished Unicode property to its case-fold closure —
+        // {Lu, Ll, Lt, L&, Lc, Cased_Letter} → L& and the boolean
+        // {Upper, Lower, Title, Cased} → Cased (pcre2pattern(3)
+        // lines 980-985). The closure applies to both `\p{X}` and
+        // `\P{X}` forms, both standalone and inside a character
+        // class, dispatched uniformly via
+        // `unicode_support::case_fold_property_closure`.
+
+        // === General-category letter triple: closure is L& ===
+        for prop in &["Lu", "Ll", "Lt"] {
+            let pos = Regex::compile(&format!("(?i)\\p{{{prop}}}")).unwrap();
+            assert!(pos.is_match("a"), "/i \\p{{{prop}}} should match 'a'");
+            assert!(pos.is_match("A"), "/i \\p{{{prop}}} should match 'A'");
+            assert!(pos.is_match("ǅ"), "/i \\p{{{prop}}} should match Lt 'ǅ'");
+            assert!(!pos.is_match("1"), "/i \\p{{{prop}}} should not match '1'");
+
+            let neg = Regex::compile(&format!("(?i)\\P{{{prop}}}")).unwrap();
+            assert!(!neg.is_match("a"), "/i \\P{{{prop}}} should not match 'a'");
+            assert!(!neg.is_match("A"), "/i \\P{{{prop}}} should not match 'A'");
+            assert!(
+                !neg.is_match("ǅ"),
+                "/i \\P{{{prop}}} should not match Lt 'ǅ'"
+            );
+            assert!(neg.is_match("1"), "/i \\P{{{prop}}} should match '1'");
+        }
+
+        // === Boolean case-distinction properties: closure is Cased ===
+        // (Title is a general-category value Lt above, not a
+        // standalone boolean property — PCRE2 / regex_syntax reject
+        // `\p{Title}` for the same reason.)
+        for prop in &["Upper", "Lower", "Cased"] {
+            let pos = Regex::compile(&format!("(?i)\\p{{{prop}}}")).unwrap();
+            assert!(pos.is_match("a"), "/i \\p{{{prop}}} should match Cased 'a'");
+            assert!(pos.is_match("A"), "/i \\p{{{prop}}} should match Cased 'A'");
+            assert!(!pos.is_match("1"), "/i \\p{{{prop}}} should not match '1'");
+
+            let neg = Regex::compile(&format!("(?i)\\P{{{prop}}}")).unwrap();
+            assert!(!neg.is_match("a"), "/i \\P{{{prop}}} should not match 'a'");
+            assert!(!neg.is_match("A"), "/i \\P{{{prop}}} should not match 'A'");
+            assert!(neg.is_match("1"), "/i \\P{{{prop}}} should match '1'");
+        }
+
+        // === Without /i, the original property semantic survives ===
         let upper = Regex::compile(r"\p{Lu}").unwrap();
         assert!(!upper.is_match("a"));
         assert!(upper.is_match("A"));
+        let upper_bool = Regex::compile(r"\p{Upper}").unwrap();
+        assert!(!upper_bool.is_match("a"));
+        assert!(upper_bool.is_match("A"));
+
+        // === Inside a class — same closure rule applies ===
+        let mixed = Regex::compile(r"(?i)[\p{Upper}\d]").unwrap();
+        assert!(mixed.is_match("a"));
+        assert!(mixed.is_match("5"));
+        assert!(!mixed.is_match("א")); // Lo, not cased
+        let neg_class = Regex::compile(r"(?i)[\P{Lu}]").unwrap();
+        assert!(!neg_class.is_match("a"));
+        assert!(neg_class.is_match("1"));
+        assert!(neg_class.is_match("א"));
     }
 
     #[test]

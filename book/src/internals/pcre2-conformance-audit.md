@@ -22,7 +22,7 @@ The central tension is that the engine track is **conformance-driven** rather th
 
 **Headline finding**: the cleanest mechanical changes in the inventory are the ones grounded in *spec reading* (the unicode-property fixes, the `\h`/`\v`/U+180E corrections, the case-fold reduction to UCD simple-fold, the `(*CRLF)` pair-anchor compile rewrite, the `\K` backtrack-unwind). The least clean are the ones grounded in *test-case observation*: backtracking-verb interactions (15+ commits, no unifying state machine documented), capture-state propagation across atomic/lookaround/subroutine boundaries (engine fixes #18, #25, #28, #29, #30, #31, #32, #37 and the 2026-04-24 negative-vs-positive tightening), and the literal-prefix/scanner start-optimization parity work (engine fixes #21, #27, #28, residual Cluster 1D). The clean fixes do not return as later regressions; the test-case-driven fixes generate follow-ups because the model behind them was never written down.
 
-**Re-audit refinement (§9, 2026-05-06).** A focused re-audit of every fix §2 originally classified *targeted* (27 fixes) found that **22 of 27 are principled in disguise** (category A in §9.C) — the *targeted* label was assigned defensively at ship time, but the underlying fix ratifies a documented spec rule (or, in the U+180E and `[:print:]` cases, PCRE2's source-level behaviour where the man page is under-specified). The original *"engine track is conformance-driven rather than spec-driven"* framing is correct as a process observation but overstates the per-fix story: most fixes were correct readings of pcre2pattern(3) that went in under conservative labels. Only **1** fix — engine #13's `CharClass::Custom::ci_override_ranges` for `\P{Lu/Ll/Lt}/i` — is genuinely conformance-hardcoded (category B), and §9.B proposes a 1-2 day refactor to fold it into a uniform parse-time property remapping. **3 fixes** are members of the §5.1 verb-effects family (#24, #36, the 2026-05-05 SKIP-overrides-COMMIT) and collapse into rows of the per-verb `apply` table that §6.2.1 scopes. **1 fix** (#6 case-fold ASCII ranges) is already subsumed by later commits. After §9.B B1 lands the targeted-fix count moves to A: 23 / B: 0 / C: 1 / D: 3, leaving only the verb-effects family as a known carry-over.
+**Re-audit refinement (§9, 2026-05-06).** A focused re-audit of every fix §2 originally classified *targeted* (27 fixes) found that **23 of 27 are principled in disguise** (category A in §9.C) — the *targeted* label was assigned defensively at ship time, but the underlying fix ratifies a documented spec rule (or, in the U+180E and `[:print:]` cases, PCRE2's source-level behaviour where the man page is under-specified). The original *"engine track is conformance-driven rather than spec-driven"* framing is correct as a process observation but overstates the per-fix story: most fixes were correct readings of pcre2pattern(3) that went in under conservative labels. The single category-B finding — engine #13's `CharClass::Custom::ci_override_ranges` for `\P{Lu/Ll/Lt}/i` — was **closed 2026-05-06** by a family-aware case-fold-closure refactor (`unicode_support::case_fold_property_closure` is now the single source of truth for the case-distinguished property family — Lu/Ll/Lt/L&/Lc/Cased_Letter/Upper/Lower/Cased and aliases — across both polarities and both standalone/in-class contexts; see §9.B B1). **3 fixes** are members of the §5.1 verb-effects family (#24, #36, the 2026-05-05 SKIP-overrides-COMMIT) and collapse into rows of the per-verb `apply` table that §6.2.1 scopes; Phase 1 of that refactor landed the same day. **1 fix** (#6 case-fold ASCII ranges) is already subsumed by later commits. Final tally: A: 23 / B: 0 / C: 1 / D: 3, with only the verb-effects-Phase-2 deferred-stack work remaining as a known carry-over.
 
 **Per-verb effects refactor — Phase 1 shipped 2026-05-06.** The §5.1 / §6.2.1 model is partially landed. Each backtracking verb now has a single `verb_apply_*` associated function on `RegexVM` (`rgx-core/src/vm.rs:2200-`); all three dispatch sites (top-level `execute_at`, continuation `execute_at_continuation`, subexpr `execute_subexpr_inner_full`) call the same functions. Last-verb-wins precedence is encoded inside each apply function — `verb_apply_skip` clears `committed`, `verb_apply_prune` clears `skip_position` and `committed`, `verb_apply_then` clears `skip_position` and `committed` on its alt-redirect branch, `verb_apply_commit` (non-atomic) clears `skip_position`. Engine fixes #24, #36, and the 2026-05-05 SKIP-overrides-COMMIT scanning-loop fix collapsed into rules inside the apply functions; the previous per-pair if-it-fired-then-clear logic is gone from the dispatch sites. Conformance ratchet unchanged at 12,719/91. Phase 2 — deferring the stack-clear effect of (*COMMIT)/(*SKIP) so a subsequent (*THEN) can find the alt-fallback frame — is the remaining work to close residual Cluster 1D testinput1:5457 by construction; tracked at `docs/BACKLOG.md` C8.2.1.
 
@@ -553,9 +553,9 @@ The re-audit uses four labels:
 
 ### 9.B Genuinely conformance-hardcoded fixes — proposed general alternatives
 
-Of 27 targeted fixes re-audited, **1** falls into category B (genuinely hardcoded). It's listed below with a concrete general-alternative proposal.
+Of 27 targeted fixes re-audited, **1** fell into category B (genuinely hardcoded). It is now **CLOSED** as of 2026-05-06 — see B1 below for the landed family-aware fix.
 
-#### B1. Engine fix #13 — `CharClass::Custom::ci_override_ranges` for `\P{Lu/Ll/Lt}/i`
+#### B1. Engine fix #13 — `CharClass::Custom::ci_override_ranges` for `\P{Lu/Ll/Lt}/i` (CLOSED 2026-05-06)
 
 Commit: `d434229` (2026-04-22).
 
@@ -563,29 +563,37 @@ Commit: `d434229` (2026-04-22).
 
 **The underlying spec rule.** pcre2pattern(3) lines 980-985: under `/i`, `\p{Lu}`, `\p{Ll}`, and `\p{Lt}` all collapse to the merged `L&`/`Lc` property. This is a *uniform* rule on Unicode property items, and it composes with character-class union/intersection/complement the same way every other class element composes.
 
-**The general alternative.** Resolve `\p{X}/i` to its case-closed property *at parse time, uniformly*, so that by the time codegen sees a class, every item has already been normalized into its case-folded ranges. Concretely:
+**Landed fix (2026-05-06).** A new helper `unicode_support::case_fold_property_closure(name) -> Option<&'static str>` is the single source of truth for the case-distinguished property family. It returns:
+- `"L&"` for the general-category letter triple {Lu, Ll, Lt} and the merged-property aliases {L&, Lc, Cased_Letter, Uppercase_Letter, Lowercase_Letter, Titlecase_Letter}
+- `"Cased"` for the boolean case-distinction triple {Upper/Uppercase, Lower/Lowercase, Cased}
+- `None` for case-invariant properties (Lo, Lm, Mn, Nd, scripts, blocks, etc.)
 
-1. In `parsing.rs::convert_typed_char_class` (and `convert_typed_unicode_class`), when the enclosing flag context has `case_insensitive=true`, replace the property name *before* range resolution: `Lu`/`Ll`/`Lt` → `L&` (Lc); other case-distinguished pairs (`\p{Upper}`, `\p{Lower}`) similarly map to their case-merged form.
-2. Drop the `ci_override_ranges` field. The class's `ranges` already encodes the correct set under `/i`.
-3. The negation case (`\P{Lu}/i`) automatically becomes `\P{L&}/i` = complement of L& with the same uniform handling.
-4. Update the ~20 destructuring sites that today pattern-match `ci_override_ranges` to drop the field.
+Three call sites consult the same helper:
+1. **Standalone `Regex::UnicodeClass` codegen in `vm.rs`** — replaced the hardcoded `matches!(name, "Lu" | "Ll" | "Lt")` predicate with `case_fold_property_closure(name).unwrap_or(name)`.
+2. **In-class untyped walker `parsing.rs::convert_char_class`** — `case_fold_property_class_item_ranges` (formerly `negated_letter_property_ci_ranges`, now polarity- and family-general) populates `ci_ranges` for any case-distinguished item.
+3. **In-class typed walker `parsing.rs::convert_typed_char_class_object`** — new `case_fold_property_typed_class_item_ranges` recognises the typed-shape `{kind: "property", name, negated, type: "escape"}` and applies the same closure rule. Previously this walker always set `ci_override_ranges = None`, missing the case-distinguished family for the modern PGEN path.
 
-**Scope.** Small (1-2 days). The Unicode tables for `L&` (Lc) already exist (`resolve_pcre2_alias` in `unicode_support.rs`). The work is: (a) map the handful of case-distinguished property names at parse time; (b) verify the ~7 currently-harness-gated positive `\p{Lu}/i` cases pass without `ci_override_ranges`; (c) delete the field and all its destructuring sites; (d) lift the harness gate.
+The `CharClass::Custom::ci_override_ranges` field was retained as a side-channel; eliminating it requires storing classes as item-list-with-provenance (a larger refactor that is now optional rather than load-bearing). Its **contents** are now principled: any case-distinguished item populates the override correctly.
 
-**Risk.** Low. The transformation is at parse time before any other class processing, so it composes cleanly with negation (`\P{Lu}` is parsed as a negated class containing `\p{Lu}`; the inner mapping fires the same way), with class union (`[\p{Lu}\d]/i`) and with intersection (extended-class syntax). No VM behaviour change.
+Correctness gains beyond the original engine #13:
+- `\p{Lu}/i` standalone now matches Lt characters (e.g. `Dz` U+01F2). Previously `case_fold_ranges` expanded Lu's literal range to Lu ∪ Ll, missing Lt.
+- `\p{Upper}/i` / `\p{Lower}/i` / `\p{Cased}/i` and their `\P` complements all resolve correctly.
+- `(?i)[\P{Lu}]` on lowercase letters correctly returns no-match — the typed walker previously fell back to `case_fold_ranges(complement(Lu))` which incorrectly added 'a' via case-fold expansion.
+
+Test coverage in `lib.rs::case_distinguished_property_expands_under_i` covers the full family across `\p` / `\P` × standalone / in-class. Conformance ratchet preserved.
 
 ### 9.C Summary count
 
 | Category | Count | Fixes |
 |---|---:|---|
-| **A — Principled in disguise** | 22 | #20, #21, #23, #26, #27, #30, #33, #35, #37; 2026-04-17 scoped flag-disable; 2026-04-17 unscoped flag propagation; 2026-04-18 class-context escapes (mixed); 2026-04-18 QuestionGreedy zero-width; 2026-04-18 substitute backslash escapes; 2026-04-19 quantifier-retargets; 2026-04-19 `\p{Lu}/i`→`L&`; 2026-04-21 GraphemeCluster dispatch; 2026-04-21 `[:print:]` U+180E; 2026-04-22 `[:blank:]` U+180E; 2026-04-22 `[:word:]` (with caveat); 2026-04-23 `[:punct:]`; 2026-04-24 API substitute dupnames; 2026-05-03 U+180E `\s`/`[:space:]`; 2026-05-05 quoted-run-as-range-start |
-| **B — Genuinely conformance-hardcoded** | 1 | #13 `ci_override_ranges` |
+| **A — Principled in disguise** | 23 | #20, #21, #23, #26, #27, #30, #33, #35, #37, **#13 (closed 2026-05-06, see §9.B B1)**; 2026-04-17 scoped flag-disable; 2026-04-17 unscoped flag propagation; 2026-04-18 class-context escapes (mixed); 2026-04-18 QuestionGreedy zero-width; 2026-04-18 substitute backslash escapes; 2026-04-19 quantifier-retargets; 2026-04-19 `\p{Lu}/i`→`L&`; 2026-04-21 GraphemeCluster dispatch; 2026-04-21 `[:print:]` U+180E; 2026-04-22 `[:blank:]` U+180E; 2026-04-22 `[:word:]` (with caveat); 2026-04-23 `[:punct:]`; 2026-04-24 API substitute dupnames; 2026-05-03 U+180E `\s`/`[:space:]`; 2026-05-05 quoted-run-as-range-start |
+| **B — Genuinely conformance-hardcoded** | 0 | (formerly #13 `ci_override_ranges`, closed 2026-05-06) |
 | **C — Subsumed** | 1 | #6 case-fold ASCII ranges (already labelled in §2.1) |
 | **D — Verb-effects family** | 3 | #24 PRUNE-clears-SKIP, #36 PRUNE-clears-COMMIT, 2026-05-05 SKIP-overrides-COMMIT |
 | **Total re-audited** | 27 | |
 
 The dominant finding is **A** by a wide margin: 22 of 27 targeted fixes ratify a documented PCRE2 spec rule (or, in the U+180E and `[:print:]` cases, ratify PCRE2's *source-level* behaviour where the man page is under-specified). The original §2 *targeted* labels were assigned defensively at ship time — many of them were principled fixes that surfaced via a single failing test and got the conservative label. The audit's headline framing in §1 (*"the engine track is conformance-driven rather than spec-driven"*) is correct as a process observation but overstates the underlying-rule-fidelity of the individual fixes; in practice most fixes were correct readings of pcre2pattern(3) that went in under defensive labels.
 
-The category **B** finding is a single genuine band-aid (#13 `ci_override_ranges`) with a concrete 1-2 day refactor proposal. The category **D** count of 3 is exactly the verb-effects family already scoped in §5.1 and §6.2.1; closing them by writing the per-verb effects table is the single biggest cleanup of the targeted-fix surface.
+The category **B** finding (#13 `ci_override_ranges`) was closed 2026-05-06 by the family-aware case-fold-closure refactor (see §9.B B1 above). The category **D** count of 3 is exactly the verb-effects family scoped in §5.1 and §6.2.1; Phase 1 of that refactor landed 2026-05-06 (centralized `verb_apply_*` dispatch), Phase 2 (deferred stack effects to close residual Cluster 1D testinput1:5457 / 5447) is pending.
 
-When the §9.B B1 refactor lands, this section's count moves to **A: 23, B: 0, C: 1, D: 3**, and the audit's headline framing should be revisited: the substantive work was *spec-driven the first time*, the *labels* were conformance-driven.
+As of 2026-05-06 (post-§9.B B1 family-aware fix and Phase 1 of §6.2.1 verb-effects refactor) this section's count is **A: 23, B: 0, C: 1, D: 3** — the only remaining audit-flagged carry-over is the verb-effects family Phase 2 (deferred stack effects). The audit's headline framing now matches the data: the substantive work was *spec-driven the first time*, the *labels* were conformance-driven.
