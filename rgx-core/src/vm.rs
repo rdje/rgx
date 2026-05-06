@@ -3053,7 +3053,19 @@ impl RegexVM {
 
                 OpCode::Any => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if ch == '\n' {
+                        // Reject the newline terminator under the
+                        // active mode. For default LF, that's '\n'.
+                        // For (*NUL) without /s, parser leaves
+                        // `Regex::Dot` (which compiles to `Any` here)
+                        // and the terminator is '\0'. Other modes
+                        // (CRLF/ANY/etc.) are pre-rewritten to a
+                        // CharClass at parse time so this branch
+                        // doesn't see them.
+                        let terminator = match self.program.newline_mode {
+                            VmNewlineMode::Nul => '\0',
+                            _ => '\n',
+                        };
+                        if ch == terminator {
                             trace_log!("vm", "  ✗ Any: got newline");
                         } else {
                             trace_log!("vm", "  ✓ Any: matched '{}' (not newline)", ch);
@@ -5643,7 +5655,11 @@ impl RegexVM {
                 }
                 OpCode::Any => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if ch != '\n' {
+                        let terminator = match self.program.newline_mode {
+                            VmNewlineMode::Nul => '\0',
+                            _ => '\n',
+                        };
+                        if ch != terminator {
                             Self::advance_char(ctx);
                             continue;
                         }
@@ -6334,7 +6350,11 @@ impl RegexVM {
 
                 OpCode::Any => {
                     if let Some(ch) = Self::current_char(ctx) {
-                        if ch != '\n' {
+                        let terminator = match self.program.newline_mode {
+                            VmNewlineMode::Nul => '\0',
+                            _ => '\n',
+                        };
+                        if ch != terminator {
                             Self::advance_char(ctx);
                             continue;
                         }

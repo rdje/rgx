@@ -540,6 +540,17 @@ impl<'a> PgenAstAdapter<'a> {
         if self.newline_mode == NewlineMode::Lf {
             return Regex::Dot;
         }
+        // (*NUL): per pcre2pattern(3), `.` rejects NUL only when
+        // `/s` (PCRE2_DOTALL) is NOT set; with `/s` it matches NUL
+        // along with everything else. Leave the AST as `Regex::Dot`
+        // so codegen can distinguish — emitting `AnyDotAll` under
+        // `/s` and a NUL-aware variant otherwise. Pre-rewriting to
+        // `[^\0]` here would over-reject under `/s`. Closes
+        // testinput2:2357 (`(*NUL)^.*/s` on "a\nb\0ccc" expects
+        // "a\nb\0ccc"; the rewrite would have stopped at \0).
+        if self.newline_mode == NewlineMode::Nul {
+            return Regex::Dot;
+        }
         // `(*CRLF)`: the newline unit is the 2-byte `\r\n` pair.
         // PCRE2's `.` / `\N` rejects BOTH ends of the pair:
         //   - the leading `\r` of a `\r\n` (start of CRLF), and

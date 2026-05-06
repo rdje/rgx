@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-06 — Engine: `(*NUL)` `.` newline-terminator threading (+1 pass, ratchet 12,737/73)
+- `dot_ast` no longer pre-rewrites `Regex::Dot` to `[^\0]` for `NewlineMode::Nul` — that broke `/s` (PCRE2_DOTALL) which should make `.` match everything including NUL. Now leaves `Regex::Dot` so codegen picks the right opcode (AnyDotAll under /s, Any otherwise).
+- `OpCode::Any` (all 3 dispatch sites) now picks the rejection terminator from `program.newline_mode`: `'\0'` for NUL, `'\n'` for everything else (default LF). Other modes (CRLF/ANY/etc.) are pre-rewritten to CharClass at parse time so they don't reach Any.
+- Closes testinput2:2357 (`(*NUL)^.*/s` on "a\nb\0ccc" → full subject).
+
 ### 2026-05-06 — Engine: Cluster 1D Phase 3 — pending_alt_revival slot (+2 passes, ratchet 12,736/74)
 - New `ctx.pending_alt_revival: Option<BacktrackFrame>` slot. SKIP/SKIP:name/PRUNE snapshot the topmost alt-fallback frame here BEFORE their eager stack-clear; THEN consumes it (push frame back, add alt-boundary, redirect). Resets at execute_at start.
 - Closes Cluster 1D testinput1:5447 (SKIP+THEN) and testinput1:5452 (PRUNE+THEN). The verb-effects family is now fully closed for the conformance corpus: Phase 1 centralized dispatch, Phase 2 deferred COMMIT for COMMIT+THEN, Phase 3 revival slot for SKIP/PRUNE+THEN.

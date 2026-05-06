@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-06 - Engine: `(*NUL)` `.` newline-terminator threading (+1 pass, ratchet 12,737/73)
+- Scope: `rgx-core/src/parsing.rs::dot_ast` skips its CharClass pre-rewrite for `NewlineMode::Nul` (leaves `Regex::Dot` for codegen). `rgx-core/src/vm.rs::OpCode::Any` (3 dispatch sites) consults `program.newline_mode` and rejects `'\0'` instead of `'\n'` under `(*NUL)`.
+- Per pcre2pattern(3): `.` rejects NUL only when `/s` is NOT set; with `/s` it matches everything including NUL. The previous pre-rewrite to `[^\0]` was correct for `(*NUL)` no-`/s` but over-rejected under `/s` (PCRE2_DOTALL should override). Closes testinput2:2357 (`(*NUL)^.*/s` on "a\nb\0ccc" → expects full subject; previously stopped at `\0` due to the rewrite).
+- Recovers testinput2:2357 (`(*NUL)^.*/s`) but the new path also re-implements the no-`/s` rejection in `OpCode::Any`'s dispatch — so testinput2:2354 (the no-`/s` sibling, `(*NUL)^.*` → "a\nb") goes through the same path and reaches the same correct answer.
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), conformance: **NEW BASELINE 12,737 / 73 / 0 / 0** (was 12,736/74).
+
 ### 2026-05-06 - Engine: Cluster 1D Phase 3 — pending_alt_revival slot (+2 passes, ratchet 12,736/74)
 - Scope: `rgx-core/src/vm.rs` — new `pending_alt_revival: Option<BacktrackFrame>` field on `ExecContext`. `verb_apply_skip` / `verb_apply_skip_named` / `verb_apply_prune` snapshot the topmost alt-fallback frame here before their eager stack-clear; `verb_apply_then` consumes (takes) the slot, pushing the frame back onto the stack with a new alt-boundary index before its alt-redirect dispatch. `execute_at` resets the slot per scanning attempt; `clone_exec_context` propagates it into assertion-subexpr clones.
 - Closes residual Cluster 1D testinput1:5447 (`aaaaa(*SKIP)(*THEN)b|a+c` → "aaaaaac") and testinput1:5452 (`aaaaa(*PRUNE)(*THEN)b|a+c` → "aaaaaac"). Both required preserving the alt-fallback through SKIP/PRUNE's eager stack-clear so a following `(*THEN)` could revive it for the alt-redirect.
