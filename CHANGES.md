@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-05 - Docs: PCRE2 conformance fix audit landed (whack-a-mole vs principled review)
+- Scope: `book/src/internals/pcre2-conformance-audit.md` (new, 460 lines), `book/src/SUMMARY.md` (TOC entry), `MEMORY.md` (session-memory pointer), `docs/BACKLOG.md` (recommendations transcribed as backlog items).
+- Changes:
+  - Comprehensive review of every conformance-touching commit shipped 2026-04-13 → 2026-05-05 (~110 commits, 38 numbered engine fixes plus ~10 unnumbered, ~40 parser/PGEN-adapter commits, ~90 harness-only commits, 82 PGEN-RGX issue reports).
+  - Inventory (§2) tables every fix with date, commit, theme, Δ pass, and a principled-vs-targeted classification.
+  - Theme map (§3) groups fixes by domain; whack-a-mole flagging (§4) names the per-case patches that did not generalize, with concrete commits.
+  - Systemic gaps (§5) enumerates 5 unified-model debts the inventory exposes, ordered by impact: backtracking-verb dispatch via per-verb effects model that scales to N verbs in a branch (the deepest accretion site; arbitrary verb sequences like `(*MARK:m)(*COMMIT)(*PRUNE)(*SKIP:m)(*THEN)` are legal PCRE2 and the model handles them by composition rather than per-pair lookup), boundary-policy contract across atomic/lookaround/subroutine/napla, `try_backtrack` auto-cleanup contract, `COMMIT_SENTINEL_IP` routing predicate, Pike-VM step-limit threading.
+  - Recommendations (§6) prioritize Now / Next / Later with scope estimates and unlock targets — the headline Next item is the per-verb effects refactor that would close residual Cluster 1D by construction rather than via more pairwise patches and would scale to any verb count in the same branch.
+  - Residual-cluster cross-reference (§7) tags each open cluster with whack-a-mole risk so future contributors know which to attack one case at a time vs which need a unified model first.
+- Living-document protocol: the audit is updated whenever a conformance-touching commit lands or a residual cluster opens/closes — see the §0 "Update protocol" preamble. Pass-count progression visible in §1 should always cite the current `PASS_BASELINE` / `FAIL_BASELINE`.
+- Validation: audit produced via background-agent dispatch over `git log`, `CHANGES.md`, `MEMORY.md`, `book/src/internals/pcre2-conformance-residual.md`, `rgx-core/src/vm.rs`, `pgen-issues/`. Cross-checked with `vm.rs` HEAD (`4fb3980`) for current code-path citations. Ratchet at audit time: 12,719 / 91 / 0 / 0 against `testinput1..29`.
+- Notes/impact: triggered by a directive — verb-handling shall scale elegantly without hardcoded pair combinations. The audit gives the architectural basis to land a single decision function for verb-pair dispatch instead of accreting one commit per ordered pair. The held `commit_saved_alt` proposal for `(*COMMIT)(*THEN)` (testinput1:5457) is documented in §4.1 sub-cluster B as the canonical example of the per-case-patch pattern that the verb-precedence audit (§6.2.1) would supersede.
+
 ### 2026-05-05 - Engine: `(*SKIP)` overrides `(*COMMIT)` in scanning loop (+3 passes)
 - Scope: `rgx-core/src/vm.rs` — 8 scanning-loop sites in `find_first_scanning`, `find_first_scanning_from`, `find_all`, plus the SIMD path.
 - Changes:
