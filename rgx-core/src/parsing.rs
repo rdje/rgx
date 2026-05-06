@@ -1769,15 +1769,19 @@ impl<'a> PgenAstAdapter<'a> {
         &self,
         map: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<Regex> {
-        // NOTE (Cluster 1B, 2026-05-06): PGEN's typed `subroutine_call`
-        // shape (as of pin 1.1.75) carries only `kind`, `target`,
-        // `type` — the returned-capture grouplist `(?N(g1,g2,...))`
-        // is dropped. The compile path below therefore always emits
-        // `Regex::Recursion` (plain `(?N)` semantics), and the
+        // NOTE (Cluster 1B, 2026-05-06): the typed `subroutine_call`
+        // shape carries the returned-capture grouplist
+        // `(?N(g1,g2,...))` inside `target.captures` as a raw-token
+        // tree (verified pin 1.1.75 via the embedding API). When an
+        // arg-list is present, `target` becomes
+        // `{subroutine, captures}` instead of the bare numeric/named
+        // ref; the captures array preserves the grammar token order
+        // including literal `"("`/`")"` strings and the comma-tail
+        // sub-array. Walking that tree is on the RGX side; until it
+        // lands the compile path below always emits `Regex::Recursion`
+        // (plain `(?N)` semantics) and the
         // `Regex::ReturnedCaptureSubroutine` AST + `OpCode::CallReturning`
-        // VM dispatch are dormant until PGEN restores the field.
-        // PGEN issue tracking: pending file (no-workarounds rule —
-        // do not parse the slice text here).
+        // dispatch stay dormant.
         let target = map
             .get("target")
             .and_then(|v| v.as_object())

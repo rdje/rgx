@@ -95,9 +95,9 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ### A12. Returned-capture subroutines
 - **What**: `(?1(grouplist))` — PCRE2 10.47+ syntax for subroutines that return captures.
-- **Effort**: `medium`
+- **Effort**: `medium` (RGX-side typed walker — small surface).
 - **Rationale**: Very new PCRE2 feature with minimal adoption. Low priority.
-- **Dependencies**: Subroutine infrastructure (shipped).
+- **Dependencies**: Subroutine infrastructure (shipped). VM dispatch (`OpCode::CallReturning = 0x46`) and AST node (`Regex::ReturnedCaptureSubroutine`) wired and dormant. PGEN typed shape carries the arg-list in `target.captures` (verified 2026-05-06 for the 12-pattern matrix at PGEN pin 1.1.75; earlier "blocked-on-PGEN" framing was wrong and was withdrawn along with the unfilen PGEN-RGX-0083 draft). Remaining work: extend `parsing.rs::convert_typed_subroutine_call_object` to walk `target.captures` (skip literal `"("`/`")"` strings, recurse into the comma-tail sub-array) and populate `returned_groups: Vec<RecursionTarget>`. Closes 13 cluster-1B + 2 cluster-2G cases.
 
 ### A13. `(?(VERSION>=...)...)` conditionals ✅ DONE (2026-04-13)
 - **What**: Branch on engine version.
@@ -364,7 +364,7 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 - **C8.2.4 PGEN walker silent-shape audit** — every typed-shape arm in `rgx-core/src/parsing.rs::convert_typed_*` that has the pattern `if let Some(s) = elem.as_str()` should be replaced with `walk_json_terminal_chars` per element. Preventive — nothing is currently red, but four post-PGEN-1.1.75-bump silent-shape gaps in May 2026 had this signature. **Effort**: `small-medium` (2-3 days). **Unlocks**: resilience to PGEN typed-shape changes.
 
 **Tier 2 — Later (speculative larger redesigns)**
-- **C8.3.1 Subroutine-stack reification** — recursive captures across quantifier iterations need a "previous iteration's completed capture" read-only slot; returned-capture subroutines need explicit capture-merge semantics on success. Together: residual Clusters 1A + 1B + 2A + 2G ≈ 39 cases. **Effort**: `major` (weeks).
+- **C8.3.1 Subroutine-stack reification** — recursive captures across quantifier iterations need a "previous iteration's completed capture" read-only slot (Cluster 1A polish landed 2026-05-06 via doubled capture vector + prev-iter slot; 11/16 cases closed). Cluster 1B + 2G (returned-capture subroutines) is now an RGX-only typed-walker change in `parsing.rs::convert_typed_subroutine_call_object` reading `target.captures` — see A12. Together with Cluster 2A balanced-bracket recursion: residual ≈ 24 cases. **Effort**: 1B+2G `small` (parser walker only, half day); 1A residual + 2A `major` (weeks).
 - **C8.3.2 Compile-time `(*NUL)`/`(*CRLF)` newline-mode threading** — defer `.` rewrite under `(*CRLF)` etc. to compile time so `/s` flag context is known. **Effort**: `medium` (2-3 days). **Unlocks**: ~3 cases.
 - **C8.3.3 `\K` propagation from inside lookarounds** — non-local engine change for residual Cluster 2C. **Effort**: `medium` (5-10 days). **Unlocks**: 3 cases plus lookbehind variants.
 - **C8.3.4 Reverse-DFA pipeline unanchored extension** — `find_first` / `find_all` don't currently use the forward-unanchored DFA due to leftmost-LONGEST vs leftmost-first semantics. Not a conformance issue, a perf-headroom item. **Effort**: `medium`.

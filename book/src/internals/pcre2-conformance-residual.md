@@ -80,9 +80,9 @@ Cases:
 
 **What to change**: the VM's `invoke_subroutine` (`rgx-core/src/vm.rs`) currently runs the subroutine body in an isolated local backtrack stack. A full fix needs (1) an explicit subroutine-call frame that preserves all enclosing capture slots at entry; (2) proper replay of the callee's capture writes into the caller's frame; (3) a "previous iteration's completed capture" read-only slot that backref sees. Multi-day architectural change.
 
-## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases — **BLOCKED ON PGEN**)
+## Cluster 1B — Returned-capture subroutines `(?N(grouplist))` — A12 follow-up (13 cases — **RGX-SIDE WALKER PENDING**)
 
-**Status 2026-05-06**: PGEN's typed `subroutine_call` shape (pin 1.1.75) only carries `kind`, `target`, `type` — the `(grouplist)` arg list is dropped from the typed JSON. The RGX-side `Regex::ReturnedCaptureSubroutine` AST and `OpCode::CallReturning = 0x46` dispatch (commit `7105804`) are in place but DORMANT until PGEN restores the field. Closes by construction once PGEN ships it.
+**Status 2026-05-06 (corrected)**: PGEN does carry the arg-list. Verified by capturing AST dumps via `pgen::embedding_api::parse_grammar_profile_ast_dump_named` for the canonical 12-pattern matrix at pin 1.1.75: when an arg-list is present, the typed `subroutine_call.target` becomes `{subroutine, captures}` — the `captures` field is a raw-token tree preserving the grammar token order, e.g. `(?1(2,3))` produces `["(", {sign:[], value:2}, [[",", {sign:[], value:3}]], ")"]`. RGX's typed walker (`parsing.rs::convert_typed_subroutine_call_object`) currently ignores the `captures` field and emits `Regex::Recursion`. The RGX-side `Regex::ReturnedCaptureSubroutine` AST and `OpCode::CallReturning = 0x46` VM dispatch are wired and DORMANT pending the walker that decodes `target.captures` into the existing `returned_groups: Vec<RecursionTarget>`. **Earlier "blocked-on-PGEN / arg-list dropped" framing was wrong** — withdrawn 2026-05-06 along with the (never-shipped) PGEN-RGX-0083 draft. PGEN's named-form coverage is also broader than first thought: `(?&fn('ret'))`, `(?P>fn(<ret>))`, `\g<fn('ret')>` all parse; only the bare-name `(?&fn(ret))` (which PCRE2 also rejects) does not.
 
 **Difficulty**: medium-high. **Expected payoff**: 13 direct cases plus Cluster 2G (2 cases) = ~15.
 
@@ -106,7 +106,7 @@ Cases:
 | testinput2:8168 | `(?(DEFINE)((Sat)(urday)))(?1(2,3)),\2,\3` | `Saturday,Sat,urday` |
 | testinput2:8109 | `<(?:[^<>]*?(?:(AB)[^<>]*\|)(?:\|(?R(1))))+>` | 6 nested-bracket subjects |
 
-**What to change**: extend `invoke_subroutine` to accept an optional "return capture list" (currently the parser produces the AST but the VM ignores it). After the callee succeeds, merge the specified capture slots into the caller's capture state. Explicit backlog item **A12 capture-return VM semantics follow-up** in `docs/BACKLOG.md` and `RUST_CODEBASE_ANALYSIS.md`.
+**What to change**: in `parsing.rs::convert_typed_subroutine_call_object`, when the typed `target` has a `captures` array, walk it (skipping the literal `"("`/`")"` strings and recursing into the comma-tail sub-array) to extract the list of `RecursionTarget`s, then return `Regex::ReturnedCaptureSubroutine { target, returned_groups }` instead of `Regex::Recursion`. The compile path (`vm.rs::compile`) and `OpCode::CallReturning` dispatch are already in place. After parsing lands, verify the 13 cluster-1B cases close and the 2 cluster-2G cases (testinput2:8109 nested-bracket subjects) close together with them. Explicit backlog item **A12 capture-return walker follow-up** in `docs/BACKLOG.md` and `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Cluster 1C — Non-atomic positive lookahead `(*napla:...)` (5 cases)
 

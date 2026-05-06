@@ -3744,3 +3744,19 @@ The catalogue had this exactly right: "Engine fix #36 closed `(*PRUNE)` clearing
 ### Next concrete action
 - Future engine sessions: pick one of the architectural clusters and dedicate the session to it. Cluster 1A is the largest payoff (~16 FN cases); 2A is intertwined with 1A. Cluster 2B is 4 cases, small surface but engine-deep ("greedy-quantifier advancing retry" from 2026-04-18 was the symmetric fix; the lazy path is unfixed).
 - JIT step-limit divergence on testinput2:6244 worth re-investigating in a fresh session — could close 2 cases if the divergence is a single-spot fix.
+
+## 2026-05-06 session — Cluster 1B PGEN claim withdrawal
+
+After user prompt "Did you log a bug reports for every issue you think might be or is due to PGEN?" — drafted `pgen-issues/PGEN-RGX-0083.yaml` for Cluster 1B claiming PGEN drops the `(grouplist)` arg-list from the typed `subroutine_call`. User then directed me to read the formal protocol (`subs/pgen/docs/contracts/PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`) before filing.
+
+Read the protocol. Built the artifact bundle per §B (one-shot dumper at `rgx-core/examples/pgen_returned_capture_dump.rs`, 12-pattern matrix). The dumps proved the central claim was wrong: PGEN does carry the arg-list, just in a raw-token tree under `target.captures`. For `(?1(2,3))` the target object is `{subroutine: {kind:"numeric", value:1}, captures: ["(", {sign:[],value:2}, [[",", {sign:[],value:3}]], ")"]}`. The previous Cluster 1B framing — "blocked on PGEN, dormant CallReturning opcode awaiting field restoration" — was a misread.
+
+Withdrew the draft (deleted YAML, bundle, and example). Corrected the false claim in `parsing.rs::convert_typed_subroutine_call_object` comment and in `book/src/internals/pcre2-conformance-residual.md` Cluster 1B section. Cluster 1B is now correctly classified as "RGX-side typed walker pending": the fix lives in the parser walker, decoding `target.captures` into `Vec<RecursionTarget>`. The VM side (`OpCode::CallReturning`, dispatch) was wired correctly already; only the parser arm needs to start populating `Regex::ReturnedCaptureSubroutine` instead of `Regex::Recursion`.
+
+Lesson: the protocol exists for a reason. The bundle requirement (capture the actual AST dump) is also a self-check — if I had captured before drafting, I would have seen the data was present. From now on: dump first, draft second.
+
+No other PGEN-related observations in the residual catalogue, BACKLOG, or RUST_CODEBASE_ANALYSIS warrant a new report. The 0078–0082 set is closed; 0073 (parse perf) and 0078 (compile-time perf) remain open and non-blocking on conformance.
+
+## 2026-05-06 session — Cluster 1B walker is the next concrete unblock
+
+13 cluster-1B cases + 2 cluster-2G cases (testinput2:8109 nested-bracket subjects) close together once the typed walker decodes `target.captures`. The shape is regular per the canonical-12 dump matrix; expected effort is small (parsing.rs only, no engine work, no PGEN dependency).
