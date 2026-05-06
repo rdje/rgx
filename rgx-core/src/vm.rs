@@ -59,6 +59,18 @@ enum CodeBlockOutcome {
     Suspended(String),
 }
 
+/// Outcome of `verb_apply_then`. PCRE2's `(*THEN)` either redirects to
+/// the next alternative in scope, or — if no alt-fallback frame is
+/// pending — degrades to `(*PRUNE)`. The subexpr dispatch site needs
+/// this distinction because the degraded path also clears the outer
+/// `ctx.backtrack_stack` (preventing `.*?`-style outer rescue), while
+/// the redirected path leaves the outer stack untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThenOutcome {
+    Redirected,
+    Degraded,
+}
+
 /// High-performance bytecode instruction optimized for cache efficiency
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)] // Ensure tight packing for cache efficiency
@@ -1862,13 +1874,16 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                 }
-                // PCRE2 semantic: when both COMMIT and SKIP fire in
-                // the same branch, SKIP advances scan to its position
-                // and COMMIT's "abort entire match" is overridden.
-                // Check SKIP first; clear committed when SKIP wins.
+                // Verb-state consumption: read the failure-disposition
+                // flags set by the per-verb apply functions
+                // (`verb_apply_*` ~line 2200). The PCRE2 last-verb-wins
+                // precedence is encoded inside those apply functions —
+                // SKIP's apply clears `committed`, COMMIT's apply
+                // clears `skip_position`, etc. — so this consumer just
+                // reads the final state in priority order without any
+                // in-loop precedence logic.
                 if let Some(skip_pos) = ctx.skip_position.take() {
                     offset = skip_pos.max(start + 1);
-                    ctx.committed = false;
                 } else if ctx.committed {
                     trace_exit!("vm", "RegexVM::find_first_scanning", "committed=true");
                     return None;
@@ -2194,6 +2209,223 @@ impl RegexVM {
             }
         }
         matches
+    }
+
+    /// Write a single capture slot, recording the old value in the trail log
+    // ===================================================================
+    // PCRE2 backtracking-control verb dispatch — per-verb effects model.
+    //
+    // PCRE2 patterns can place arbitrarily many backtracking verbs in a
+    // single alternation branch (`(*MARK:m)(*COMMIT)(*PRUNE)(*SKIP:m)(*THEN)`
+    // is legal). To handle N verbs uniformly without per-pair logic, each
+    // verb has a single `verb_apply_*` associated function below. Every
+    // OpCode dispatch site (top-level execute_at, execute_at_continuation,
+    // execute_subexpr_inner) calls these helpers; N verbs in textual order
+    // compose by sequential application, producing the PCRE2 last-verb-wins
+    // semantic ("if two or more backtracking verbs appear in succession,
+    // all but the last has no effect" — pcre2pattern(3) §"Backtracking
+    // control") by construction. Per-pair patches (#24 PRUNE-clears-SKIP,
+    // #36 PRUNE-clears-COMMIT, the 2026-05-05 SKIP-overrides-COMMIT
+    // scanning-loop fix) collapse into rules inside the apply functions
+    // rather than scattered in-loop precedence checks.
+    //
+    // Design recorded in `book/src/internals/pcre2-conformance-audit.md` §5.1.
+    //
+    // The apply functions take `&mut Vec<BacktrackFrame>` and
+    // `&mut Vec<usize>` (the active backtrack stack and alt-boundary stack)
+    // explicitly so the same function works for both `ExecContext`'s
+    // global state and `execute_subexpr_inner`'s local state. Flag fields
+    // (`committed`, `skip_position`, `accept_forced`, `marks`) live on
+    // `ExecContext` and are passed via `&mut ExecContext` directly.
+    // ===================================================================
+
+    /// (*COMMIT) — abort the current match attempt at this point.
+    ///
+    /// Outside an atomic group (signalled by `in_atomic = false`),
+    /// clears the active backtrack stack and sets `ctx.committed`.
+    /// The scanning loop reads `committed` after `execute_at` returns
+    /// false and aborts further attempts.
+    ///
+    /// Inside an atomic group (`in_atomic = true`), pushes a
+    /// `COMMIT_SENTINEL_IP` frame instead. If the atomic group
+    /// succeeds, `OpCode::AtomicEnd` truncates inner frames and the
+    /// sentinel is discarded. If the atomic group fails, the sentinel
+    /// surfaces in `try_backtrack` which escalates to a committed
+    /// abort. This honours pcre2pattern(3): *"the scope of (*COMMIT)
+    /// is limited to an enclosing atomic group."*
+    ///
+    /// COMMIT alone does not clear `skip_position` flags from earlier
+    /// verbs — but a following PRUNE/SKIP/THEN in the same branch will
+    /// clear `committed` from its own apply function, encoding the
+    /// last-verb-wins rule.
+    ///
+    /// Takes the active stack and the failure-disposition flags
+    /// (`committed`, `skip_position`) explicitly so the same routine
+    /// works for both `ExecContext`'s global state and
+    /// `execute_subexpr_inner`'s local stack. Clears `skip_position`
+    /// in the non-atomic branch per last-verb-wins.
+    #[inline]
+    fn verb_apply_commit(
+        skip_position: &mut Option<usize>,
+        committed: &mut bool,
+        backtrack_stack: &mut Vec<BacktrackFrame>,
+        in_atomic: bool,
+        sentinel: BacktrackFrame,
+    ) {
+        if in_atomic {
+            backtrack_stack.push(sentinel);
+        } else {
+            backtrack_stack.clear();
+            *skip_position = None;
+            *committed = true;
+        }
+    }
+
+    /// (*PRUNE) — fail the current attempt; scanner advances by 1.
+    ///
+    /// Clears the active backtrack stack so the current path cannot
+    /// resume. Per the last-verb-wins rule, also clears
+    /// `skip_position` and `committed` — PRUNE supersedes any
+    /// preceding (*SKIP) (whose scanner-advance-to-mark semantic
+    /// would otherwise win) and any preceding (*COMMIT) (whose abort
+    /// semantic would otherwise win); the scanner's
+    /// default-advance-by-1 takes effect.
+    /// (Engine fixes #24 PRUNE-clears-SKIP and #36 PRUNE-clears-COMMIT
+    /// are absorbed here as effect rules.)
+    #[inline]
+    fn verb_apply_prune(
+        skip_position: &mut Option<usize>,
+        committed: &mut bool,
+        backtrack_stack: &mut Vec<BacktrackFrame>,
+    ) {
+        backtrack_stack.clear();
+        *skip_position = None;
+        *committed = false;
+    }
+
+    /// (*SKIP) — advance the scanner to the current text position on
+    /// attempt failure.
+    ///
+    /// Records `skip_position = Some(pos)` and clears the active
+    /// backtrack stack. Per the last-verb-wins rule, also clears
+    /// `committed` so the scanning loop's "if skip take, else if
+    /// committed return None" check resolves to the SKIP-advance
+    /// branch when both COMMIT and SKIP fired in the same branch.
+    /// (The 2026-05-05 commit `4fb3980` SKIP-overrides-COMMIT fix
+    /// previously placed this clear in the scanning-loop sites; it
+    /// now lives in SKIP's apply function as a verb effect.)
+    #[inline]
+    fn verb_apply_skip(
+        skip_position: &mut Option<usize>,
+        committed: &mut bool,
+        backtrack_stack: &mut Vec<BacktrackFrame>,
+        pos: usize,
+    ) {
+        *skip_position = Some(pos);
+        backtrack_stack.clear();
+        *committed = false;
+    }
+
+    /// (*SKIP:name) — advance the scanner to the most recent matching
+    /// mark's recorded position. No-op if no matching mark exists
+    /// (PCRE2 fallback). When a matching mark is found, behaves as
+    /// (*SKIP) with that position.
+    #[inline]
+    fn verb_apply_skip_named(
+        skip_position: &mut Option<usize>,
+        committed: &mut bool,
+        backtrack_stack: &mut Vec<BacktrackFrame>,
+        marks: &[(String, usize)],
+        name: &str,
+    ) {
+        if let Some(pos) = marks.iter().rev().find(|(n, _)| n == name).map(|(_, p)| *p) {
+            *skip_position = Some(pos);
+            backtrack_stack.clear();
+            *committed = false;
+        }
+    }
+
+    /// (*THEN) — redirect to the next alternative in the innermost
+    /// enclosing alternation (or degrade to (*PRUNE) if none).
+    ///
+    /// Truncates the active backtrack stack to the topmost alt-boundary
+    /// frame, preserving it so the next backtrack pop reaches the
+    /// alt-fallback. Removes nested alt-boundary indices that
+    /// referenced the dropped frames. If no alt-boundary is in scope,
+    /// degrades to (*PRUNE) per pcre2pattern(3): *"when (*THEN) is in
+    /// a pattern or assertion with no enclosing alternation, it is
+    /// equivalent to (*PRUNE)."*
+    ///
+    /// Returns `ThenOutcome::Redirected` when an alt-frame was found
+    /// (the alt-fallback will be picked up by the next backtrack pop);
+    /// returns `ThenOutcome::Degraded` when (*THEN) degraded to (*PRUNE).
+    /// The subexpr dispatch site uses the outcome to decide whether to
+    /// also clear the outer backtrack stack — a cross-context cleanup
+    /// that only applies on the degraded path.
+    #[inline]
+    fn verb_apply_then(
+        skip_position: &mut Option<usize>,
+        committed: &mut bool,
+        backtrack_stack: &mut Vec<BacktrackFrame>,
+        alt_boundaries: &mut Vec<usize>,
+    ) -> ThenOutcome {
+        if let Some(&alt_idx) = alt_boundaries.last() {
+            backtrack_stack.truncate(alt_idx + 1);
+            while alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
+                alt_boundaries.pop();
+            }
+            // Last-verb-wins: THEN supersedes preceding SKIP/COMMIT.
+            *skip_position = None;
+            *committed = false;
+            ThenOutcome::Redirected
+        } else {
+            Self::verb_apply_prune(skip_position, committed, backtrack_stack);
+            ThenOutcome::Degraded
+        }
+    }
+
+    /// (*MARK:name) — record `(name, pos)` in the marks vector so a
+    /// later `(*SKIP:name)` can look it up. The mark trail is
+    /// per-attempt and is reset by `execute_at` between scanning
+    /// positions.
+    #[inline]
+    fn verb_apply_mark(marks: &mut Vec<(String, usize)>, name: String, pos: usize) {
+        marks.push((name, pos));
+    }
+
+    /// Build the COMMIT sentinel frame from the current ExecContext
+    /// state. Used by `verb_apply_commit` when COMMIT fires inside
+    /// an atomic group.
+    #[inline]
+    fn build_commit_sentinel(ctx: &ExecContext<'_>) -> BacktrackFrame {
+        BacktrackFrame {
+            ip: COMMIT_SENTINEL_IP,
+            pos: ctx.pos,
+            trail_mark: ctx.capture_trail.len(),
+            call_stack_mark: ctx.call_stack.len(),
+            capture_snapshot: None,
+            saved_code_result: ctx.code_result.clone(),
+            saved_match_start_override: ctx.match_start_override,
+        }
+    }
+
+    /// Decode a length-prefixed UTF-8 mark/skip-name operand at the
+    /// given byte offset. Returns `(name, new_ip)` where `new_ip` is
+    /// the IP advanced past the operand. Returns None if the operand
+    /// would run off the end of the code buffer.
+    #[inline]
+    fn decode_verb_name<'a>(code: &'a [u8], ip: usize) -> Option<(&'a str, usize)> {
+        if ip >= code.len() {
+            return None;
+        }
+        let name_len = code[ip] as usize;
+        let name_start = ip + 1;
+        let name_end = name_start + name_len;
+        if name_end > code.len() {
+            return None;
+        }
+        let name = std::str::from_utf8(&code[name_start..name_end]).unwrap_or("");
+        Some((name, name_end))
     }
 
     /// Write a single capture slot, recording the old value in the trail log
@@ -2802,153 +3034,69 @@ impl RegexVM {
                 }
 
                 // --- Backtracking control verbs ---
+                // Effects defined once at `verb_apply_*` (~line 2200)
+                // and dispatched here uniformly. N verbs in textual
+                // order compose by sequential application; the PCRE2
+                // last-verb-wins rule is encoded in each apply
+                // function rather than in scattered precedence checks.
                 OpCode::Commit => {
-                    // (*COMMIT): cuts backtracking past the verb and
-                    // (outside atomic groups) aborts the whole match
-                    // attempt. Per pcre2pattern(3):
-                    //   "(*COMMIT) overrides the normal behaviour of
-                    //    backtracking; if it does not match, the
-                    //    entire match attempt fails, except that the
-                    //    scope of (*COMMIT) is limited to an
-                    //    enclosing atomic group."
-                    //
-                    // Outside any atomic group: clear the whole
-                    // backtrack stack and set `ctx.committed` so
-                    // the scanning loop does not advance after a
-                    // committed failure.
-                    //
-                    // Inside an atomic group: push a sentinel frame
-                    // (`COMMIT_SENTINEL_IP`). If the atomic group
-                    // later succeeds, `AtomicEnd` truncates its
-                    // inner frames, discarding the sentinel — no
-                    // effect on the outer world. If the atomic
-                    // group fails and backtracking reaches the
-                    // sentinel, `try_backtrack` escalates to a
-                    // committed abort. This mirrors the PCRE2
-                    // semantic where COMMIT is only "sticky" when
-                    // the enclosing atomic actually rolls back.
-                    if ctx.call_stack.is_empty() {
-                        ctx.backtrack_stack.clear();
-                        ctx.committed = true;
-                    } else {
-                        ctx.backtrack_stack.push(BacktrackFrame {
-                            ip: COMMIT_SENTINEL_IP,
-                            pos: ctx.pos,
-                            trail_mark: ctx.capture_trail.len(),
-                            call_stack_mark: ctx.call_stack.len(),
-                            capture_snapshot: None,
-                            saved_code_result: ctx.code_result.clone(),
-                            saved_match_start_override: ctx.match_start_override,
-                        });
-                    }
+                    let in_atomic = !ctx.call_stack.is_empty();
+                    let sentinel = Self::build_commit_sentinel(ctx);
+                    Self::verb_apply_commit(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        in_atomic,
+                        sentinel,
+                    );
                 }
 
                 OpCode::Prune => {
-                    // (*PRUNE): clear backtrack stack so that if the
-                    // current path fails, the entire attempt at this
-                    // start position fails immediately, then the
-                    // scanner advances to `start + 1` and retries.
-                    //
-                    // When PRUNE follows SKIP or COMMIT lexically
-                    // (`(*SKIP)(*PRUNE)`, `(*COMMIT)(*PRUNE)`),
-                    // PCRE2's documented behaviour is that PRUNE's
-                    // normal scanner-advance supersedes SKIP's
-                    // advance-to-mark and COMMIT's
-                    // don't-advance-at-all. Clear both
-                    // `skip_position` and `committed` so the
-                    // scanning loop falls into the default
-                    // +1-advance branch; SKIP / COMMIT without a
-                    // trailing PRUNE keep their effects.
-                    ctx.backtrack_stack.clear();
-                    ctx.skip_position = None;
-                    ctx.committed = false;
+                    Self::verb_apply_prune(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                    );
                 }
 
                 OpCode::VerbSkip => {
-                    // (*SKIP): record the current text position. On
-                    // match failure the scanning loop will advance
-                    // to this position instead of start+1.
-                    ctx.skip_position = Some(ctx.pos);
-                    // Also prune: do not backtrack past (*SKIP).
-                    ctx.backtrack_stack.clear();
+                    let pos = ctx.pos;
+                    Self::verb_apply_skip(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        pos,
+                    );
                 }
 
                 OpCode::Then => {
-                    // (*THEN): if inside an alternation, drop every
-                    // backtrack frame pushed since entering the
-                    // innermost alternation branch so that when the
-                    // current branch fails, control resumes at the
-                    // next alternative. If no enclosing alternation
-                    // remains, (*THEN) degrades to (*PRUNE) and the
-                    // attempt fails cleanly.
-                    if let Some(&alt_idx) = ctx.alt_boundaries.last() {
-                        // Keep the alt-boundary frame itself; drop
-                        // anything stacked above it.
-                        ctx.backtrack_stack.truncate(alt_idx + 1);
-                        // Remove any nested alt_boundaries entries
-                        // that referenced the frames we just dropped.
-                        // The current boundary at `alt_idx` stays.
-                        while ctx.alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
-                            ctx.alt_boundaries.pop();
-                        }
-                    } else {
-                        ctx.backtrack_stack.clear();
-                    }
+                    let _ = Self::verb_apply_then(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        &mut ctx.alt_boundaries,
+                    );
                 }
 
                 OpCode::Mark => {
-                    // (*MARK:name): record the mark name and current
-                    // position in `ctx.marks` so a later `(*SKIP:name)`
-                    // can look it up. The name is encoded as a
-                    // length-prefixed UTF-8 string operand.
-                    //
-                    // A11: Mark used to be a no-op for match behaviour.
-                    // It now pushes (name, pos) to ctx.marks so the
-                    // (*SKIP:name) → (*MARK:name) interaction works.
-                    // The match-result side effect is unchanged: marks
-                    // are scoped to the current match attempt and do
-                    // not affect the public MatchResult shape.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len])
-                                .unwrap_or("")
-                                .to_string();
-                            ctx.marks.push((name, ctx.pos));
-                            ip += name_len;
-                        }
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let owned = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
                     }
                 }
 
                 OpCode::VerbSkipNamed => {
-                    // (*SKIP:name): look up the most recent mark with
-                    // the matching name in ctx.marks; set
-                    // ctx.skip_position to that mark's recorded text
-                    // position. If no matching mark exists, the verb
-                    // is treated as a no-op (matches PCRE2's fallback
-                    // for missing marks). Like (*SKIP), also clears
-                    // the backtrack stack.
-                    //
-                    // A11.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
-                            // Search marks from most-recent to least-recent.
-                            if let Some(pos) = ctx
-                                .marks
-                                .iter()
-                                .rev()
-                                .find(|(n, _)| n == name)
-                                .map(|(_, p)| *p)
-                            {
-                                ctx.skip_position = Some(pos);
-                                ctx.backtrack_stack.clear();
-                            }
-                            ip += name_len;
-                        }
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let name = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_skip_named(
+                            &mut ctx.skip_position,
+                            &mut ctx.committed,
+                            &mut ctx.backtrack_stack,
+                            &ctx.marks,
+                            &name,
+                        );
                     }
                 }
 
@@ -5471,68 +5619,65 @@ impl RegexVM {
                         return false;
                     }
                 }
+                // --- Backtracking-control verbs (continuation context) ---
+                // Same per-verb apply functions as the top-level
+                // dispatch; the continuation dispatch is equivalent to
+                // a re-entry into the main loop after a code-block
+                // suspension. Verb effects are textually-composed with
+                // last-verb-wins semantics by construction.
                 OpCode::Commit => {
-                    // See top-level dispatch for rationale. Mirror
-                    // of the sentinel-when-inside-atomic approach.
-                    if ctx.call_stack.is_empty() {
-                        ctx.backtrack_stack.clear();
-                        ctx.committed = true;
-                    } else {
-                        ctx.backtrack_stack.push(BacktrackFrame {
-                            ip: COMMIT_SENTINEL_IP,
-                            pos: ctx.pos,
-                            trail_mark: ctx.capture_trail.len(),
-                            call_stack_mark: ctx.call_stack.len(),
-                            capture_snapshot: None,
-                            saved_code_result: ctx.code_result.clone(),
-                            saved_match_start_override: ctx.match_start_override,
-                        });
-                    }
+                    let in_atomic = !ctx.call_stack.is_empty();
+                    let sentinel = Self::build_commit_sentinel(ctx);
+                    Self::verb_apply_commit(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        in_atomic,
+                        sentinel,
+                    );
                 }
-                OpCode::Prune | OpCode::Then => {
-                    ctx.backtrack_stack.clear();
+                OpCode::Prune => {
+                    Self::verb_apply_prune(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                    );
                 }
                 OpCode::VerbSkip => {
-                    ctx.skip_position = Some(ctx.pos);
+                    let pos = ctx.pos;
+                    Self::verb_apply_skip(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        pos,
+                    );
+                }
+                OpCode::Then => {
+                    let _ = Self::verb_apply_then(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut ctx.backtrack_stack,
+                        &mut ctx.alt_boundaries,
+                    );
                 }
                 OpCode::VerbSkipNamed => {
-                    // (*SKIP:name): A11. Same logic as the main
-                    // dispatch — look up the matching mark in
-                    // ctx.marks and set ctx.skip_position to that
-                    // mark's recorded text position. No-op if no
-                    // matching mark exists.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
-                            if let Some(pos) = ctx
-                                .marks
-                                .iter()
-                                .rev()
-                                .find(|(n, _)| n == name)
-                                .map(|(_, p)| *p)
-                            {
-                                ctx.skip_position = Some(pos);
-                                ctx.backtrack_stack.clear();
-                            }
-                            ip += name_len;
-                        }
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let name = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_skip_named(
+                            &mut ctx.skip_position,
+                            &mut ctx.committed,
+                            &mut ctx.backtrack_stack,
+                            &ctx.marks,
+                            &name,
+                        );
                     }
                 }
                 OpCode::Mark => {
-                    // (*MARK:name): A11. Push (name, ctx.pos) to
-                    // ctx.marks so a later (*SKIP:name) can find it.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len])
-                                .unwrap_or("")
-                                .to_string();
-                            ctx.marks.push((name, ctx.pos));
-                            ip += name_len;
-                        }
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let owned = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
                     }
                 }
                 _ => {
@@ -6405,97 +6550,94 @@ impl RegexVM {
                     ctx.match_start_override = Some(ctx.pos);
                 }
 
+                // --- Backtracking-control verbs (subexpr context) ---
+                // Same per-verb apply functions as the top-level/
+                // continuation dispatch, with `backtrack_stack` /
+                // `local_alt_boundaries` standing in for the global
+                // ctx fields. THEN's degraded path additionally clears
+                // the outer ctx.backtrack_stack when no outer alt is
+                // in scope, preventing `.*?`-style outer rescue of a
+                // committed failure (per pcre2pattern(3): *"when
+                // (*THEN) is in a pattern or assertion with no
+                // enclosing alternation, it is equivalent to
+                // (*PRUNE)"*).
                 OpCode::Commit => {
-                    // Subexpr context: clear the local backtrack
-                    // stack so the COMMIT point cannot be
-                    // revisited by subsequent fallback branches
-                    // within this subexpr, and set the scanner-
-                    // abort flag on `ctx`. In assertion context,
-                    // `execute_assertion_subexpr` gates the
-                    // propagation of that flag on the assertion
-                    // body actually failing — a subsequent alt of
-                    // the assertion that succeeds absorbs the
-                    // commit; a pure failure exposes it to the
-                    // outer match attempt.
-                    backtrack_stack.clear();
-                    ctx.committed = true;
+                    // Subexpr context: in_atomic = false (the subexpr
+                    // is itself a logical unit; its ctx.committed
+                    // propagation is gated by execute_assertion_subexpr).
+                    let sentinel = Self::build_commit_sentinel(ctx);
+                    Self::verb_apply_commit(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut backtrack_stack,
+                        false,
+                        sentinel,
+                    );
                 }
 
-                OpCode::Prune | OpCode::Then => {
-                    // Inside a subexpression run `(*THEN)` uses the
-                    // subexpr's *local* alt boundaries to decide
-                    // where to redirect. If there's a pending local
-                    // alternation frame, truncate above it so
-                    // backtracking picks the next alternative; if
-                    // no local alt is open, THEN degrades to PRUNE
-                    // and we clear the local stack (and the outer
-                    // stack, per pcre2pattern(3): "when (*THEN) is
-                    // in a pattern or assertion with no enclosing
-                    // alternation, it is equivalent to (*PRUNE)"),
-                    // preventing `.*?`-style outer backtracking from
-                    // rescuing a committed failure.
-                    if matches!(op, OpCode::Then) {
-                        if let Some(&alt_idx) = local_alt_boundaries.last() {
-                            backtrack_stack.truncate(alt_idx + 1);
-                            while local_alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
-                                local_alt_boundaries.pop();
-                            }
-                            // Continue execution — on failure the
-                            // alt fallback frame will be popped
-                            // and control flows to the next alt.
-                            continue;
-                        }
-                    }
-                    backtrack_stack.clear();
+                OpCode::Prune => {
+                    Self::verb_apply_prune(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut backtrack_stack,
+                    );
                     local_alt_boundaries.clear();
                     if ctx.alt_boundaries.is_empty() {
                         ctx.backtrack_stack.clear();
                     }
                 }
 
-                OpCode::VerbSkip => {
-                    ctx.skip_position = Some(ctx.pos);
-                    backtrack_stack.clear();
-                }
-
-                OpCode::VerbSkipNamed => {
-                    // (*SKIP:name): A11. Look up the matching mark
-                    // in ctx.marks and set ctx.skip_position to its
-                    // recorded text position. No-op if no matching
-                    // mark exists.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len]).unwrap_or("");
-                            if let Some(pos) = ctx
-                                .marks
-                                .iter()
-                                .rev()
-                                .find(|(n, _)| n == name)
-                                .map(|(_, p)| *p)
-                            {
-                                ctx.skip_position = Some(pos);
-                                backtrack_stack.clear();
-                            }
-                            ip += name_len;
+                OpCode::Then => {
+                    let outcome = Self::verb_apply_then(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut backtrack_stack,
+                        &mut local_alt_boundaries,
+                    );
+                    if outcome == ThenOutcome::Degraded {
+                        // THEN degraded to PRUNE: clear local
+                        // alt-boundaries so subsequent local THEN/
+                        // PRUNE don't see stale entries.
+                        local_alt_boundaries.clear();
+                        if ctx.alt_boundaries.is_empty() {
+                            // Cross-context cleanup: no outer
+                            // alternation to rescue — clear the
+                            // outer stack so the committed failure
+                            // isn't backed-into by `.*?` etc.
+                            ctx.backtrack_stack.clear();
                         }
                     }
                 }
 
+                OpCode::VerbSkip => {
+                    let pos = ctx.pos;
+                    Self::verb_apply_skip(
+                        &mut ctx.skip_position,
+                        &mut ctx.committed,
+                        &mut backtrack_stack,
+                        pos,
+                    );
+                }
+
+                OpCode::VerbSkipNamed => {
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let name = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_skip_named(
+                            &mut ctx.skip_position,
+                            &mut ctx.committed,
+                            &mut backtrack_stack,
+                            &ctx.marks,
+                            &name,
+                        );
+                    }
+                }
+
                 OpCode::Mark => {
-                    // (*MARK:name): A11. Push (name, ctx.pos) to
-                    // ctx.marks so a later (*SKIP:name) can find it.
-                    if ip < code.len() {
-                        let name_len = code[ip] as usize;
-                        ip += 1;
-                        if ip + name_len <= code.len() {
-                            let name = std::str::from_utf8(&code[ip..ip + name_len])
-                                .unwrap_or("")
-                                .to_string();
-                            ctx.marks.push((name, ctx.pos));
-                            ip += name_len;
-                        }
+                    if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
+                        let owned = name.to_string();
+                        ip = new_ip;
+                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
                     }
                 }
 
