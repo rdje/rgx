@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-07 — Engine: AltSplitLong + JumpLong (+2 passes, ratchet 12,789/21)
+- New `OpCode::AltSplitLong = 0x4F` (4-byte alt-target offset) and `OpCode::JumpLong = 0x4E` (4-byte forward offset). Alternation codegen always emits them now; +4 bytes per alt arm but no u16 overflow when alt bodies > 64KB. Side fix: `execute_subexpr`'s `OpCode::Jump` was missing `ip += 2` — surfaced via `\g<name>` recursion through alt bodies.
+- JIT: added decode_forward_target_long; both opcodes JIT-eligible.
+- Closes testinput2:6244 / 6249 (Pike-VM gate family with `(?:[^X]{28500}){4}`). Cumulative session: 12,737/73 → 12,789/21 (+52 passes).
+
 ### 2026-05-07 — Engine: \K-in-lookaround propagation + match_start>end rejection (+3 passes, ratchet 12,787/23)
 - `execute_assertion_subexpr` now leaks `assertion_ctx.match_start_override` to outer ctx on body success; `OpCode::Match` rejects when override > current pos. PGEN parse-contract guarantees the override can only come from a subroutine called inside the assertion. Closes testinput2:6433 / 6439 family.
 - Added `OptimizingCompiler.suppress_match_reset` + `compile_lookaround_body` as defensive plumbing for future direct `\K` cases. Cumulative session: 12,737/73 → 12,787/23 (+50 passes).

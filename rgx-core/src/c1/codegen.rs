@@ -317,9 +317,11 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
 
         // === Eligible: control flow ===
         | OpCode::Jump
+        | OpCode::JumpLong
         | OpCode::Split
         | OpCode::SplitLazy
         | OpCode::AltSplit
+        | OpCode::AltSplitLong
 
         // === Eligible: capture groups ===
         | OpCode::SaveStart
@@ -444,6 +446,14 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
                 return None;
             }
             Some(2)
+        }
+
+        // 4 byte signed offset (alternation end-jump for huge alt bodies).
+        OpCode::JumpLong | OpCode::AltSplitLong => {
+            if rest.len() < 4 {
+                return None;
+            }
+            Some(4)
         }
 
         // Optimized quantifier opcodes wrap an inline subprogram:
@@ -2078,6 +2088,20 @@ fn decode_program(code: &[u8]) -> Result<Vec<JitOp>, JitHostError> {
                     target_op_idx: target_idx,
                 });
             }
+            OpCode::JumpLong => {
+                let target_idx =
+                    decode_forward_target_long(code, &mut ip, &op_positions, "JumpLong")?;
+                ops.push(JitOp::Jump {
+                    target_op_idx: target_idx,
+                });
+            }
+            OpCode::AltSplitLong => {
+                let target_idx =
+                    decode_forward_target_long(code, &mut ip, &op_positions, "AltSplitLong")?;
+                ops.push(JitOp::Split {
+                    branch_b_op_idx: target_idx,
+                });
+            }
             OpCode::SetAlternative => {
                 // Skip the 1-byte alternative-index operand. The
                 // op is a no-op in JIT'd code (we don't track
@@ -2679,6 +2703,32 @@ fn decode_forward_target(
     }
     let offset = i16::from_le_bytes([code[*ip], code[*ip + 1]]);
     *ip += 2;
+    let target_byte = ((*ip as isize) + (offset as isize)) as usize;
+    op_positions
+        .binary_search_by_key(&target_byte, |&(byte, _)| byte)
+        .map(|idx| op_positions[idx].1)
+        .map_err(|_| {
+            JitHostError::CodegenUnsupported(format!(
+                "{op_name} offset {offset} (target byte {target_byte}) \
+                 does not land on an op start; bytecode is malformed or the \
+                 target is mid-operand"
+            ))
+        })
+}
+
+fn decode_forward_target_long(
+    code: &[u8],
+    ip: &mut usize,
+    op_positions: &[(usize, usize)],
+    op_name: &str,
+) -> Result<usize, JitHostError> {
+    if *ip + 3 >= code.len() {
+        return Err(JitHostError::CodegenUnsupported(format!(
+            "truncated {op_name} opcode (missing 4-byte offset)"
+        )));
+    }
+    let offset = i32::from_le_bytes([code[*ip], code[*ip + 1], code[*ip + 2], code[*ip + 3]]);
+    *ip += 4;
     let target_byte = ((*ip as isize) + (offset as isize)) as usize;
     op_positions
         .binary_search_by_key(&target_byte, |&(byte, _)| byte)

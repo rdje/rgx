@@ -161,6 +161,19 @@ pub enum OpCode {
     // === CONTROL FLOW (0x40-0x4F) ===
     /// Unconditional jump (16-bit signed offset follows)
     Jump = 0x40,
+    /// Unconditional jump with 32-bit signed offset. Used by the
+    /// alternation codegen when the end-of-alt jump distance would
+    /// overflow `Jump`'s 2-byte operand — patterns like
+    /// `(a|(?:[^X]{28500}){4})` unroll counted quantifiers into
+    /// 100K+ bytes of bytecode, blowing past 65535. Closes
+    /// testinput2:6244 / 6249. Forward-only in current use; the
+    /// signed offset is decoded the same way as `Jump`.
+    JumpLong = 0x4E,
+    /// 32-bit-offset variant of `AltSplit`, used at alternation
+    /// boundaries when the offset to the next alternative would
+    /// overflow `AltSplit`'s 2-byte operand. Same runtime behaviour
+    /// (push next-alt frame, push `ctx.alt_boundaries` index).
+    AltSplitLong = 0x4F,
     /// Split execution (greedy quantifier support) - try first path, backtrack to second
     Split = 0x41,
     /// Split execution (lazy quantifier) - try second path first
@@ -4404,6 +4417,33 @@ impl RegexVM {
                     ctx.alt_boundaries.push(new_idx);
                 }
 
+                OpCode::AltSplitLong => {
+                    // 4-byte-offset variant of AltSplit. Used when
+                    // alt-1 body is huge enough that AltSplit's
+                    // 2-byte forward offset would overflow.
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let offset =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    let backtrack_frame = BacktrackFrame {
+                        ip: ip + offset,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
+                    };
+                    let new_idx = ctx.backtrack_stack.len();
+                    ctx.backtrack_stack.push(backtrack_frame);
+                    ctx.alt_boundaries.push(new_idx);
+                }
+
                 OpCode::AltScopeBegin => {
                     ctx.alt_scope_marks.push(ctx.alt_boundaries.len());
                 }
@@ -4424,6 +4464,20 @@ impl RegexVM {
                     }
                     let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
                     ip += 2; // Skip the 2-byte offset operand
+                    ip = ((ip as isize) + (offset as isize)) as usize;
+                }
+
+                OpCode::JumpLong => {
+                    // 32-bit signed offset variant — used by alternation
+                    // codegen when the end-jump distance overflows
+                    // `Jump`'s i16 range (huge unrolled counted
+                    // quantifiers).
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let offset =
+                        i32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]]);
+                    ip += 4;
                     ip = ((ip as isize) + (offset as isize)) as usize;
                 }
 
@@ -6342,6 +6396,21 @@ impl RegexVM {
                 OpCode::Jump => {
                     if ip + 1 < code.len() {
                         let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
+                        ip += 2;
+                        ip = ((ip as isize) + (offset as isize)) as usize;
+                    } else {
+                        return false;
+                    }
+                }
+                OpCode::JumpLong => {
+                    if ip + 3 < code.len() {
+                        let offset = i32::from_le_bytes([
+                            code[ip],
+                            code[ip + 1],
+                            code[ip + 2],
+                            code[ip + 3],
+                        ]);
+                        ip += 4;
                         ip = ((ip as isize) + (offset as isize)) as usize;
                     } else {
                         return false;
@@ -6377,6 +6446,27 @@ impl RegexVM {
                     } else {
                         return false;
                     }
+                }
+                OpCode::AltSplitLong => {
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let offset =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    ctx.backtrack_stack.push(BacktrackFrame {
+                        ip: ip + offset,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: ctx.call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
+                    });
+                    ctx.alt_boundaries.push(ctx.backtrack_stack.len() - 1);
                 }
                 OpCode::SplitLazy => {
                     if ip + 3 < code.len() {
@@ -7366,6 +7456,29 @@ impl RegexVM {
                     }
                 }
 
+                OpCode::AltSplitLong => {
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let offset =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    let pushed_idx = backtrack_stack.len();
+                    backtrack_stack.push(BacktrackFrame {
+                        ip: ip + offset,
+                        pos: ctx.pos,
+                        trail_mark: ctx.capture_trail.len(),
+                        call_stack_mark: call_stack.len(),
+                        capture_snapshot: None,
+                        saved_code_result: ctx.code_result.clone(),
+                        saved_match_start_override: ctx.match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
+                    });
+                    local_alt_boundaries.push(pushed_idx);
+                }
+
                 OpCode::SplitLazy => {
                     if ip + 1 >= code.len() {
                         return false;
@@ -7395,6 +7508,16 @@ impl RegexVM {
                     }
                     let offset = i16::from_le_bytes([code[ip], code[ip + 1]]);
                     ip += 2;
+                    ip = ((ip as isize) + (offset as isize)) as usize;
+                }
+
+                OpCode::JumpLong => {
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let offset =
+                        i32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]]);
+                    ip += 4;
                     ip = ((ip as isize) + (offset as isize)) as usize;
                 }
 
@@ -9369,10 +9492,17 @@ impl OptimizingCompiler {
                         // boundary split) so the runtime can record
                         // the next-alt frame in `ctx.alt_boundaries`
                         // for (*THEN) to jump to on failure.
-                        self.emit_op(OpCode::AltSplit);
+                        // Use the 4-byte AltSplitLong variant —
+                        // counted-quantifier unrolling can produce
+                        // alt bodies > 64KB (testinput2:6244/6249
+                        // `(?:[^X]{28500}){4}`). The 4-byte offset
+                        // accommodates any reasonable alt-1 size.
+                        self.emit_op(OpCode::AltSplitLong);
                         let split_offset_pos = self.code.len();
-                        self.code.push(0); // Will be patched
-                        self.code.push(0); // Will be patched
+                        self.code.push(0); // patched (4 bytes)
+                        self.code.push(0);
+                        self.code.push(0);
+                        self.code.push(0);
 
                         // Current alternative
                         if is_top_level {
@@ -9381,22 +9511,25 @@ impl OptimizingCompiler {
                         }
                         self.codegen_pass(alt, false);
 
-                        // Jump to end (except for last alternative)
-                        self.emit_op(OpCode::Jump);
+                        // Jump to end (except for last alternative).
+                        // 4-byte JumpLong for the same reason.
+                        self.emit_op(OpCode::JumpLong);
                         let end_jump_pos = self.code.len();
-                        self.code.push(0); // Will be patched
-                        self.code.push(0); // Will be patched
+                        self.code.push(0); // patched (4 bytes)
+                        self.code.push(0);
+                        self.code.push(0);
+                        self.code.push(0);
                         end_jumps.push(end_jump_pos);
 
-                        // Patch the Split offset to point to start of next alternative
+                        // Patch the AltSplitLong offset to point to start of next alternative
                         let next_alt_start = self.code.len();
-                        // split_offset_pos is the position of the first offset byte
-                        // We need to calculate: next_alt_start - current_ip_after_reading_offset
-                        // current_ip_after_reading_offset = split_offset_pos + 2
-                        let split_offset = next_alt_start - (split_offset_pos + 2);
-                        let offset_bytes = (split_offset as u16).to_le_bytes();
+                        // current_ip_after_reading_offset = split_offset_pos + 4
+                        let split_offset = next_alt_start - (split_offset_pos + 4);
+                        let offset_bytes = (split_offset as u32).to_le_bytes();
                         self.code[split_offset_pos] = offset_bytes[0];
                         self.code[split_offset_pos + 1] = offset_bytes[1];
+                        self.code[split_offset_pos + 2] = offset_bytes[2];
+                        self.code[split_offset_pos + 3] = offset_bytes[3];
                     }
                 }
 
@@ -9407,10 +9540,16 @@ impl OptimizingCompiler {
                 // paired `AltScopeBegin` mark is popped.
                 let end_pos = self.code.len();
                 for end_jump_pos in end_jumps {
-                    let jump_offset = end_pos - end_jump_pos - 2;
-                    let offset_bytes = (jump_offset as u16).to_le_bytes();
+                    // JumpLong: 4-byte offset operand. Convention as
+                    // for Jump in the main dispatch: ip is past the
+                    // operand bytes when the offset is added, so the
+                    // emitted offset accounts for the operand width.
+                    let jump_offset = end_pos as i64 - (end_jump_pos as i64 + 4);
+                    let offset_bytes = (jump_offset as i32).to_le_bytes();
                     self.code[end_jump_pos] = offset_bytes[0];
                     self.code[end_jump_pos + 1] = offset_bytes[1];
+                    self.code[end_jump_pos + 2] = offset_bytes[2];
+                    self.code[end_jump_pos + 3] = offset_bytes[3];
                 }
                 self.emit_op(OpCode::AltScopeEnd);
             }
@@ -10851,6 +10990,9 @@ impl OptimizingCompiler {
                 OpCode::Jump | OpCode::Split | OpCode::SplitLazy | OpCode::AltSplit => {
                     ip += 2;
                 }
+                OpCode::JumpLong | OpCode::AltSplitLong => {
+                    ip += 4;
+                }
                 OpCode::SaveStart
                 | OpCode::SaveEnd
                 | OpCode::Backref
@@ -11206,15 +11348,16 @@ static OPCODE_TABLE: [Option<OpCode>; 256] = build_opcode_table();
 
 const fn build_opcode_table() -> [Option<OpCode>; 256] {
     use OpCode::{
-        Accept, AltScopeBegin, AltScopeEnd, AltSplit, Any, AnyDotAll, AtomicEnd, AtomicStart,
-        Backref, BackrefCaseInsensitive, Call, CallReturning, Char, CharClass, CharClassNeg,
-        CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
-        GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
-        LookbehindNeg, Mark, Match, MatchReset, NaplaRestorePos, NaplaScopeBegin, NonWordBoundary,
-        PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd,
-        SaveLazyPos, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy,
-        StarGreedy, StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine,
-        StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+        Accept, AltScopeBegin, AltScopeEnd, AltSplit, AltSplitLong, Any, AnyDotAll, AtomicEnd,
+        AtomicStart, Backref, BackrefCaseInsensitive, Call, CallReturning, Char, CharClass,
+        CharClassNeg, CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL,
+        Fail, GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, JumpLong, Lookahead, LookaheadNeg,
+        Lookbehind, LookbehindNeg, Mark, Match, MatchReset, NaplaRestorePos, NaplaScopeBegin,
+        NonWordBoundary, PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy,
+        QuestionLazy, SaveEnd, SaveLazyPos, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg,
+        Split, SplitLazy, StarGreedy, StarGreedyContinue, StarLazy, StarLazyBlock,
+        StarLazyContinue, StartLine, StartText, Then, VerbSkip, VerbSkipNamed, WordAscii,
+        WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
     t[0x00] = Some(Char);
@@ -11248,6 +11391,8 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x47] = Some(AltSplit);
     t[0x48] = Some(AltScopeBegin);
     t[0x49] = Some(AltScopeEnd);
+    t[0x4E] = Some(JumpLong);
+    t[0x4F] = Some(AltSplitLong);
     t[0x50] = Some(SaveStart);
     t[0x51] = Some(SaveEnd);
     t[0x60] = Some(Lookahead);

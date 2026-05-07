@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: AltSplitLong + JumpLong for huge alternation bodies (+2 passes, ratchet 12,789/21)
+- Scope: alternation codegen's 2-byte forward offsets (`AltSplit` to next-alt, `Jump` to alt-end) overflow when alt bodies exceed 64KB. Counted-quantifier unrolling produces such bodies — `(?:[^X]{28500}){4}` lays out ~228KB of bytecode for the alt-2 path. The silent u16 truncation corrupted the bytecode and turned alt-1's `'a'` match into a no-match. Family fix.
+- Two new opcodes:
+  - `OpCode::AltSplitLong = 0x4F`: 4-byte LE next-alt offset. Same runtime semantics as `AltSplit` (push next-alt frame, register on `ctx.alt_boundaries` for `(*THEN)`).
+  - `OpCode::JumpLong = 0x4E`: 4-byte LE forward offset, used for the alt-end skip-to-end jump.
+- Codegen change: alternation arm always emits `AltSplitLong` for the next-alt branch and `JumpLong` for the end-jump (line 9403/9416). Bytecode overhead is +4 bytes per non-last alt arm vs the precise overflow-detect-and-rewrite alternative; the simplification is worth the trivial growth.
+- Dispatch added in 3 sites (top-level `execute_at`, `execute_subexpr`, `execute_subexpr_inner_full`). Side fix at `execute_subexpr` site: `OpCode::Jump` was missing the `ip += 2` past the offset operand — pre-existing latent bug surfaced when JumpLong patterns reached this dispatch via subroutine calls (`\g<name>` recursion). Both Jump and JumpLong now use the post-operand convention consistently.
+- JIT: AltSplitLong + JumpLong added to JIT-eligible list with `decode_forward_target_long` helper for 4-byte offsets. JIT lowers them to the same `JitOp::Split` / `JitOp::Jump` ops as the short variants.
+- Closes testinput2:6244 / 6249 (`\A\s*(a|(?:[^X]{28500}){4})` and the alt-swapped variant on subject `"a"` — alt-1 / alt-2 of size > 64KB; PCRE2 matches `"a"`, RGX previously returned no match due to corrupt bytecode).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118 — `dot_under_crlf_rejects_both_ends_of_pair` and `g_bracketed_is_subroutine_call_not_backref` regressed during dev iteration; both fixed by adding `ip += 2` to Jump and AltSplitLong dispatch in `execute_subexpr`). Conformance NEW BASELINE **12,789 / 21 / 0 / 0** (was 12,787/23). FN 10 → 8.
+
 ### 2026-05-07 - Engine: \K inside lookarounds (via subroutine) leaks then validates at Match (+3 passes, ratchet 12,787/23)
 - Scope: PCRE2 spec note "PCRE2 does not support the use of `\K` in lookaround assertions or in code that is called as a subroutine" — empirically PCRE2 LEAKS the match_start override from a subroutine call inside a lookaround, then rejects the match if `match_start > match_end`. Family fix.
 - Two coordinated changes:
