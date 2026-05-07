@@ -1,6 +1,8 @@
-# PCRE2 Conformance Residual — the 107 Remaining Failures
+# PCRE2 Conformance Residual — the 50 Remaining Failures
 
-At the time of writing the ratchet sits at **12,709 pass / 101 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.2%**. Initial draft of this chapter was at 12,703 / 107; closed since: Cluster 3B (`(*CRLF)` `.` lookbehind, +2), Cluster 1F conditional (+3), Cluster 1F substitute follow-up (+1). Total −6 since the catalogue landed.
+At the time of writing the ratchet sits at **12,760 pass / 50 fail / 0 panic / 0 skip** against the full `testinput1..29` corpus — approximately **99.6%**. Closed since the catalogue landed: Cluster 3B (`(*CRLF)` `.`, +2), Cluster 1F conditional (+3), Cluster 1F substitute follow-up (+1), Cluster 1B typed walker (+10, 2026-05-06), Cluster 1A polish (+4), Cluster 1D phase-3 (+2), `(*NUL)` (+1), Cluster 2B lazy alt-aware block (+3, 2026-05-07), Cluster 1E + 2H greedy alt-aware block (+10, 2026-05-07), plus the family extension to `+` / `??` (zero-regression, surfaced 6 SM follow-ups). Total **−57** since the catalogue landed at 107.
+
+**Family-fix doctrine** (2026-05-07): every fix must address the family of issues, not a specific instance. Before crafting a fix, list 3–5 sibling patterns. Verify with explicit sibling probes before commit.
 
 This chapter is a surgical, per-case map of those 107 remaining failures. Its purpose is to let a contributor walk in cold and immediately start fixing, without having to re-discover what has already been analysed.
 
@@ -10,13 +12,15 @@ This chapter is a surgical, per-case map of those 107 remaining failures. Its pu
 
 The harness sorts the 107 failures into **5 buckets**. Each bucket is a different kind of divergence between RGX and PCRE2 and each demands a different diagnostic approach. Pick a bucket that fits your budget, then go to its section below — each bucket lists every case inside it along with the root-cause cluster it belongs to.
 
-| Bucket | Count | Meaning | Where to start |
+| Bucket | Count (2026-05-07) | Meaning | Where to start |
 |---|---:|---|---|
-| [**1. false negative**](#bucket-1--false-negatives-65-cases) | 65 | PCRE2 matches; RGX returns no match | Cluster 1A (recursive captures) is the architectural prize; Cluster 1C (`(*napla:...)`) is a bounded compiler change. |
-| [**2. span mismatch**](#bucket-2--span-mismatches-27-cases) | 27 | Both match; spans differ | Cluster 2A (balanced-bracket greedy recursion) is entangled with Bucket 1's recursive captures; Cluster 2C (`\K` inside `{0}`) needs `\K` propagation from lookarounds — non-trivial. |
-| [**3. false positive**](#bucket-3--false-positives-6-cases) | 6 | PCRE2 says no match; RGX matches | Cluster 3B (`.+` under `/newline`) is a newline-convention edge case. Cluster 3C reclassified into Cluster 2C (degenerate match handling, not FP). |
-| [**4. other (substitute-mode output)**](#bucket-4--substitute-mode-output-divergence-5-cases) | 5 | `/replace=TEMPLATE` tests where `replace_all` output disagrees | Harness dispatch for the first case (2 vs 1 replacements), engine for the rest. |
-| [**5. RGX too permissive**](#bucket-5--rgx-too-permissive-4-cases) | 4 | PCRE2 rejects at compile; RGX accepts | Add compile-time rejection in `compiler.rs::feature_validation_message`. |
+| [**1. false negative**](#bucket-1--false-negatives-65-cases) | 20 | PCRE2 matches; RGX returns no match | Subroutine-stack reification family — closes 8 FN here + most SM. Cluster 1C napla is 6 FN. |
+| [**2. span mismatch**](#bucket-2--span-mismatches-27-cases) | 19 | Both match; spans differ | Same subroutine-stack family closes Cluster 2A balanced-bracket (4) + 2E `(?0)` (2) + 8109 nested-bracket recursion (8). |
+| [**3. false positive**](#bucket-3--false-positives-6-cases) | 4 | PCRE2 says no match; RGX matches | Cluster 3A SKIP-in-failing-lookbehind. Per-case targeted analysis. |
+| [**4. other (substitute-mode output)**](#bucket-4--substitute-mode-output-divergence-5-cases) | 3 | `/replace=TEMPLATE` tests where `replace_all` output disagrees | Substitute family — needs Replacer-trait fallible refactor + harness `Expected::SubstituteFailure` split. |
+| [**5. RGX too permissive**](#bucket-5--rgx-too-permissive-4-cases) | 4 | PCRE2 rejects at compile; RGX accepts | Substitute family — same Replacer rework. See Bucket 5 §below for per-case empirical analysis. |
+
+**The dominant remaining family is subroutine-stack reification** (BACKLOG C8.3.1). It closes ~22 cases across Buckets 1+2: Cluster 1A residual palindromes (5 FN) + Cluster 1B residual recursion (3 FN) + Cluster 1G:6450 quantified subroutine call (1 FN) + Cluster 2A balanced-bracket (4 SM) + Cluster 2E `(?0)` (2 SM) + Cluster 2G/8109 nested-bracket recursion (8 SM). Per family-fix doctrine, this is the next session's target. Multi-day work: explicit subroutine call frames preserving caller capture state, plus a "previous iteration's completed capture" read-only slot fully threaded through `Call` / `CallReturning` / recursive-pattern dispatch.
 
 **Total**: 107. Pass rate 99.2%. The number moves with every engine fix — the authoritative source is `cargo test --release -p rgx-core --test pcre2_conformance -- --ignored --nocapture` against the baselines in `rgx-core/tests/pcre2_conformance.rs`. When counts in this chapter go stale, the **cluster shape** is still the useful durable thing; individual case lists decay.
 
