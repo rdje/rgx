@@ -14,6 +14,25 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: + greedy first-iter zero-width termination (+1 pass, ratchet 12,773/37)
+- Scope: `rgx-core/src/vm.rs` — refined the `Quantifier::OneOrMore { lazy: false }` (greedy `+`) alt-aware emit to gate inner-loop entry on first-iter advance. Closes testinput1:4862 family — `(?P<abn>(?P=abn)xxx|)+` on `xxx` now correctly returns 0..0 (was 0..3).
+- Bug surfaced from earlier today's family extension. The previous layout was `<body>; LOOP { Split EXIT; SaveLazyPos; <body>; StarGreedyContinue back-to-LOOP }; EXIT` — mandatory first iter ran unconditionally, then the inner loop iter 2 saw iter 1's group capture (set to empty) and resolved the self-referential backref `(?P=abn)` to empty, advancing through `xxx`. PCRE2 terminates the loop on first zero-width body match.
+- New layout: wrap the mandatory first iter in `SaveLazyPos+body+StarGreedyContinue+Jump-around-loop` so zero-width first iter falls through past the inner loop entirely.
+  ```
+  SaveLazyPos
+  <body>
+  StarGreedyContinue +to_LOOP    ; advance: jump to LOOP; zero-width: fall through
+  Jump +to_EXIT                   ; zero-width: skip the inner loop
+  LOOP:
+    Split EXIT
+    SaveLazyPos
+    <body>
+    StarGreedyContinue back-to-LOOP
+  EXIT:
+  ```
+- Family probes verified: `(|ab)+d` on `abd` → 0..3 ✓, `(|ab)+d` on `d` → 0..1 ✓, `(|ab)+` on `ab` → 0..0 ✓ (PCRE2-correct: empty alt first → first iter zero-width → terminate).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), `cargo build -p rgx-cli --release` clean. Conformance: **NEW BASELINE 12,773 / 37 / 0 / 0** (was 12,772/38). SM 11 → 10.
+
 ### 2026-05-07 - Engine: CallReturning subexpr dispatch (+10 passes, ratchet 12,772/38)
 - Scope: `rgx-core/src/vm.rs` — added `OpCode::CallReturning` arms to both subexpr execution loops (`execute_subexpr_inner_full` at the previously-unsupported sites alongside the existing `OpCode::Call` arms). Mirror of the main-path dispatch shipped earlier today: invoke the subroutine via `invoke_subroutine_inner(target, false)`, snapshot the listed groups' post-call captures, undo the trail, re-apply the snapshot for the leaked groups, and push the empty-match retry frame onto the appropriate (outer ctx vs local) backtrack stack.
 - Family fix per the doctrine. CallReturning had only main-path dispatch (line 4001); when `(?N(grouplist))` ran inside a subexpr context (quantifier body, lookaround body, atomic group body) the opcode fell through and the enclosing subexpr failed silently. Discovered when probing `^(?1(1,2)){2,}+(?(DEFINE)((..)#))!` on `aa#bb#cc#dd#ee#!` (testinput2:8092): `{3}` fixed-count emitted body inline and worked, but `{2,}+` and `+` quantifiers wrap the body in a subexpr opcode that dispatches via the missing path. Single missing arm gated **10 cases**.

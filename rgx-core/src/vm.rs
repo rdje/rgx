@@ -9289,9 +9289,22 @@ impl OptimizingCompiler {
                             }
                         } else if Self::quantifier_body_needs_inline_backtrack(expr) {
                             // Family fix — greedy `+` with empty-capable
-                            // body: mandatory first iter then alt-aware
-                            // greedy loop (mirrors `*` empty-capable fix).
-                            //   <body>                ; mandatory first
+                            // body: mandatory first iter, then enter the
+                            // alt-aware greedy loop ONLY if the first
+                            // iter advanced. PCRE2 terminates the loop on
+                            // first zero-width body match; entering the
+                            // inner loop after a zero-width first iter
+                            // would let later iterations see the
+                            // group-empty capture and advance further
+                            // (testinput1:4862 family).
+                            //
+                            //   SaveLazyPos
+                            //   <body>                 ; mandatory first
+                            //   StarGreedyContinue +to_LOOP
+                            //                          ; on advance: jump to LOOP
+                            //                          ; on zero-width: fall through
+                            //   Jump +to_EXIT          ; zero-width first iter:
+                            //                          ; skip the inner loop
                             //   LOOP:
                             //     Split EXIT
                             //     SaveLazyPos
@@ -9299,10 +9312,21 @@ impl OptimizingCompiler {
                             //     StarGreedyContinue back-to-LOOP
                             //   EXIT:
                             let segment_start = self.code.len();
+                            self.emit_op(OpCode::SaveLazyPos);
+                            let mandatory_body_start = self.code.len();
                             self.codegen_pass(expr, false);
-                            if self.code.len() == segment_start {
+                            if self.code.len() == mandatory_body_start {
+                                self.code.truncate(segment_start);
                                 self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
                             } else {
+                                self.emit_op(OpCode::StarGreedyContinue);
+                                let mandatory_cont_offset_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
+                                self.emit_op(OpCode::Jump);
+                                let zero_width_jump_pos = self.code.len();
+                                self.code.push(0);
+                                self.code.push(0);
                                 let loop_start = self.code.len();
                                 self.emit_op(OpCode::Split);
                                 let split_offset_pos = self.code.len();
@@ -9312,7 +9336,6 @@ impl OptimizingCompiler {
                                 let body2_start = self.code.len();
                                 self.codegen_pass(expr, false);
                                 if self.code.len() == body2_start {
-                                    // Loop body emitted nothing — fall back.
                                     self.code.truncate(segment_start);
                                     self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);
                                 } else {
@@ -9328,10 +9351,32 @@ impl OptimizingCompiler {
                                     self.code[cont_offset_pos + 1] = bo_bytes[1];
                                     let exit_target = self.code.len();
                                     let split_offset = exit_target - (split_offset_pos + 2);
-                                    if u16::try_from(split_offset).is_ok() {
+                                    // Patch the Jump-around-loop's
+                                    // forward offset: zero-width first
+                                    // iter falls through to the Jump,
+                                    // which lands at exit_target.
+                                    let after_zero_jump = zero_width_jump_pos + 2;
+                                    let zero_jump_offset =
+                                        (exit_target as isize) - (after_zero_jump as isize);
+                                    // Patch the mandatory-iter's
+                                    // StarGreedyContinue back-offset:
+                                    // forward to LOOP_START on advance.
+                                    let after_mandatory = mandatory_cont_offset_pos + 2;
+                                    let mandatory_jump_offset =
+                                        (loop_start as isize) - (after_mandatory as isize);
+                                    if u16::try_from(split_offset).is_ok()
+                                        && i16::try_from(zero_jump_offset).is_ok()
+                                        && i16::try_from(mandatory_jump_offset).is_ok()
+                                    {
                                         let offset_bytes = (split_offset as u16).to_le_bytes();
                                         self.code[split_offset_pos] = offset_bytes[0];
                                         self.code[split_offset_pos + 1] = offset_bytes[1];
+                                        let z = (zero_jump_offset as i16).to_le_bytes();
+                                        self.code[zero_width_jump_pos] = z[0];
+                                        self.code[zero_width_jump_pos + 1] = z[1];
+                                        let m = (mandatory_jump_offset as i16).to_le_bytes();
+                                        self.code[mandatory_cont_offset_pos] = m[0];
+                                        self.code[mandatory_cont_offset_pos + 1] = m[1];
                                     } else {
                                         self.code.truncate(segment_start);
                                         self.emit_subexpr_opcode(OpCode::PlusGreedy, expr);

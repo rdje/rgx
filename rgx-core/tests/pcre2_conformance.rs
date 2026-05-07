@@ -3210,8 +3210,8 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    const PASS_BASELINE: usize = 12_772;
-    const FAIL_BASELINE: usize = 38;
+    const PASS_BASELINE: usize = 12_773;
+    const FAIL_BASELINE: usize = 37;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 
