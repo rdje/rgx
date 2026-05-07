@@ -7514,23 +7514,22 @@ impl RegexVM {
             ctx.capture_trail = assertion_ctx.capture_trail;
         }
         // `(*COMMIT)` and `(*SKIP)` inside a FAILING **positive**
-        // assertion propagate to the outer match. PCRE2 semantic:
-        // when a positive assertion body fires COMMIT/SKIP and then
-        // fails, the assertion itself fails, which aborts the
-        // surrounding match attempt at the current position
-        // (pcre2pattern(3): "if the assertion subsequently fails,
-        // the entire matching attempt is aborted"). For SKIP, the
-        // scanner's next candidate is also bumped to the recorded
-        // SKIP position. A successful assertion body absorbs both
-        // verbs — the successful zero-width match discards the
-        // commit-on-fail / skip-on-fail effect.
+        // assertion propagate to the outer match. PCRE2 semantic
+        // (testinput1:5505 / 5599 / 5603 / 5630): when the assertion
+        // body fires COMMIT/SKIP and the assertion has no surviving
+        // alternative path, the assertion fails AND the outer match
+        // attempt at the current starting position is aborted. For
+        // SKIP, the scanner's next candidate is also bumped to the
+        // recorded SKIP position. A successful assertion body
+        // absorbs both verbs.
         //
-        // `propagate_captures` is set by the caller to whether the
-        // assertion is **positive** (see dispatch sites and the
-        // conditional operand helper). We reuse it to gate the verb
-        // propagation: for a **negative** assertion, body failure is
-        // the path where the assertion *succeeds*, so the verbs
-        // should be absorbed rather than leaked to the outer match.
+        // Note: when the assertion body has a sibling alternative
+        // (e.g. `(?=b(*COMMIT)c|)d` — lookahead has empty alt-2),
+        // the body should match via the sibling alt and the
+        // assertion succeeds — that interaction is the responsibility
+        // of the subexpr dispatch's try_backtrack handling, NOT this
+        // propagation site (testinput2:6604 / 6607 — separate
+        // sub-cluster, see CHANGES.md).
         if propagate_captures && !body_matched {
             if assertion_ctx.committed {
                 ctx.committed = true;
@@ -8223,6 +8222,91 @@ impl OptimizingCompiler {
         }
     }
 
+    /// Cluster 1D residual: the assertion body unconditionally
+    /// succeeds zero-width AND contains no side effects (no
+    /// captures, no MARKs). For positive lookarounds with such a
+    /// body, the assertion is equivalent to a no-op; for negative
+    /// lookarounds, it always fails. Recognises the
+    /// `<expr>|<empty>` shape that PCRE2 treats as
+    /// "trivially-succeeds-via-empty-alt" — closes
+    /// testinput2:6604 / 6607 (`(?=b(*COMMIT)c|)d`) without
+    /// regressing `(?=b(*SKIP)a)bn|bnn` (5630) where the body has
+    /// no empty alt and the assertion-failure-propagation path is
+    /// the right semantic.
+    ///
+    /// The "no captures" / "no MARK" guard ensures we don't elide
+    /// PCRE2's user-visible side-effects: `(?=(a)|)b` on `ab` must
+    /// run alt-1 first so group 1 captures `a`; eliding would lose
+    /// that. Verbs like `(*COMMIT)` / `(*SKIP)` / `(*PRUNE)` are
+    /// safe to elide because their effects are *internal to the
+    /// abandoned branch* — when alt-2 (empty) is the chosen path,
+    /// alt-1's verb effects never fire in PCRE2 either.
+    #[must_use]
+    fn assertion_body_unconditionally_succeeds(expr: &Regex) -> bool {
+        match expr {
+            // `Empty` and `Sequence([])` both represent "match
+            // empty unconditionally".
+            Regex::Empty => true,
+            Regex::Sequence(items) if items.is_empty() => true,
+            // Sequence: every item must unconditionally succeed.
+            Regex::Sequence(items) => items
+                .iter()
+                .all(Self::assertion_body_unconditionally_succeeds),
+            // Alternation: any single trivially-succeeding alt makes
+            // the whole alternation succeed.
+            Regex::Alternation(alts) => alts
+                .iter()
+                .any(Self::assertion_body_unconditionally_succeeds),
+            Regex::Group { expr: inner, .. } => {
+                Self::assertion_body_unconditionally_succeeds(inner)
+            }
+            Regex::FlagGroup { expr: inner, .. } => {
+                Self::assertion_body_unconditionally_succeeds(inner)
+            }
+            // X*, X??, X{0,...} unconditionally match empty.
+            Regex::Quantified { quantifier, .. } => match quantifier {
+                Quantifier::ZeroOrMore { .. } | Quantifier::ZeroOrOne { .. } => true,
+                Quantifier::Range { min, .. } => *min == 0,
+                Quantifier::OneOrMore { .. } => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Returns true if `expr` contains a capturing group, MARK verb,
+    /// or any other user-visible side-effect that elision of an
+    /// assertion body would silently drop. Used by
+    /// [`Self::assertion_body_unconditionally_succeeds`]'s caller to
+    /// gate the elision optimisation.
+    #[must_use]
+    fn expr_has_capture_or_mark(expr: &Regex) -> bool {
+        match expr {
+            Regex::Group {
+                expr: inner, kind, ..
+            } => matches!(kind, GroupKind::Capturing) || Self::expr_has_capture_or_mark(inner),
+            Regex::FlagGroup { expr: inner, .. } => Self::expr_has_capture_or_mark(inner),
+            Regex::Sequence(items) | Regex::Alternation(items) => {
+                items.iter().any(Self::expr_has_capture_or_mark)
+            }
+            Regex::Quantified { expr: inner, .. } => Self::expr_has_capture_or_mark(inner),
+            Regex::Lookahead { expr: inner, .. } | Regex::Lookbehind { expr: inner, .. } => {
+                Self::expr_has_capture_or_mark(inner)
+            }
+            Regex::Conditional {
+                true_branch,
+                false_branch,
+                ..
+            } => {
+                Self::expr_has_capture_or_mark(true_branch)
+                    || false_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::expr_has_capture_or_mark(b))
+            }
+            Regex::Mark(_) => true,
+            _ => false,
+        }
+    }
+
     /// Can `expr` match the empty string? Conservative — returns
     /// true on anything recursive we cannot analyze. The inline
     /// `X+` codegen above must NOT engage when the body can match
@@ -8768,6 +8852,25 @@ impl OptimizingCompiler {
             }
 
             Regex::Lookahead { expr, positive } => {
+                // Cluster 1D residual: when the body unconditionally
+                // succeeds zero-width AND has no captures or MARK
+                // verbs, the assertion is a no-op (positive) or
+                // always-fail (negative). Closes testinput2:6604 /
+                // 6607 (`(?=b(*COMMIT)c|)d`) by short-circuiting
+                // before the body's COMMIT can fire and leak to the
+                // outer match. The capture/MARK guard preserves
+                // PCRE2's user-visible side-effects for bodies like
+                // `(?=(a)|)b` where alt-1's capture must still fire.
+                if Self::assertion_body_unconditionally_succeeds(expr)
+                    && !Self::expr_has_capture_or_mark(expr)
+                {
+                    if !*positive {
+                        self.emit_op(OpCode::Fail);
+                    }
+                    // positive: emit nothing (zero-width success).
+                    return;
+                }
+
                 if *positive {
                     self.emit_op(OpCode::Lookahead);
                 } else {
@@ -8792,6 +8895,19 @@ impl OptimizingCompiler {
             }
 
             Regex::Lookbehind { expr, positive } => {
+                // Mirror of Lookahead's body-trivially-succeeds
+                // elision (Cluster 1D residual). Positive lookbehind
+                // with empty-alt body becomes a no-op; negative
+                // becomes Fail.
+                if Self::assertion_body_unconditionally_succeeds(expr)
+                    && !Self::expr_has_capture_or_mark(expr)
+                {
+                    if !*positive {
+                        self.emit_op(OpCode::Fail);
+                    }
+                    return;
+                }
+
                 if *positive {
                     self.emit_op(OpCode::Lookbehind);
                 } else {
@@ -8955,8 +9071,7 @@ impl OptimizingCompiler {
                                 self.code.push(0);
                                 self.code.push(0);
                                 let after_offset = offset_pos + 2;
-                                let back_offset =
-                                    (block_start as isize) - (after_offset as isize);
+                                let back_offset = (block_start as isize) - (after_offset as isize);
                                 let back_i16 = back_offset as i16;
                                 let bo_bytes = back_i16.to_le_bytes();
                                 self.code[offset_pos] = bo_bytes[0];
@@ -9065,8 +9180,7 @@ impl OptimizingCompiler {
                                     self.code.push(0);
                                     self.code.push(0);
                                     let after_cont = cont_offset_pos + 2;
-                                    let back_offset =
-                                        (loop_start as isize) - (after_cont as isize);
+                                    let back_offset = (loop_start as isize) - (after_cont as isize);
                                     let back_i16 = back_offset as i16;
                                     let bo_bytes = back_i16.to_le_bytes();
                                     self.code[cont_offset_pos] = bo_bytes[0];

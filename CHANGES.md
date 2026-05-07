@@ -14,6 +14,19 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: assertion body elision when trivially-succeeds (+2 passes, ratchet 12,762/48)
+- Scope: `rgx-core/src/vm.rs` — two new helpers (`assertion_body_unconditionally_succeeds`, `expr_has_capture_or_mark`) and a structural elision in the `Regex::Lookahead` / `Regex::Lookbehind` codegen arms. When the assertion body has a trivially-succeeding alt (empty `Empty` variant or `Sequence([])`-style sub-expression in an alternation, or a `*`/`?`/`{0,...}` quantifier wrapping anything) AND no capturing group / `(*MARK:)` verb anywhere in the body, the assertion is elided: positive assertions become a no-op (zero-width success); negative assertions become an unconditional `Fail`.
+- Family fix per the family-fix doctrine. The `(*COMMIT)` / `(*SKIP)` propagation that closes testinput1:5505 / 5599 / 5603 / 5630 (assertion body fails after verb fires, propagation aborts the outer attempt) is preserved unchanged. The new structural recogniser handles the *complementary* sub-cluster — testinput2:6604 / 6607 (`a?(?=b(*COMMIT)c|)d` family) — where the body has an empty trailing alt that PCRE2 treats as "always succeeds" zero-width, never running alt-1's verb. The capture/MARK guard preserves user-visible side effects: `(?=(a)|)b` on `ab` still fires alt-1's group 1 capture because the body has a capturing group, so elision doesn't engage.
+- Family probe results (verified all match PCRE2):
+  - `(?=b(*COMMIT)c|)d` on `bd` → match `d` (was no-match) ✓
+  - `a?(?=b(*COMMIT)c|)d` on `bd` → match `d` ✓
+  - `a(?=b(*COMMIT)c)[^d]|abd` on `abd` → no-match (5505 unchanged) ✓
+  - `(?=a(*COMMIT)b|ac)ac|ac` on `ac` → no-match (5599 unchanged) ✓
+  - `(?=b(*SKIP)a)bn|bnn` on `bnn` → no-match (5630 unchanged) ✓
+  - `(?=(a)|)b` on `ab` → match `b` at 1..2 (capture preserved) ✓
+- Validation: `cargo fmt`, `cargo test -p rgx-core --lib` (1118/1118), `cargo clippy --workspace --all-targets --release` clean. Conformance: **NEW BASELINE 12,762 / 48 / 0 / 0** (was 12,760/50). FN 20 → 18, SM 19 → 19.
+- Notes/impact: closes the COMMIT/SKIP-in-assertion-with-empty-alt sub-cluster cleanly. The complementary "alt-frame survives across COMMIT in alt-1" semantic remains an open architectural question for non-empty trailing alts, but no test in the corpus currently requires it.
+
 ### 2026-05-07 - Engine: family extension of alt-aware block to `+` / `??` (zero regression, ratchet 12,760/50)
 - Scope: `rgx-core/src/vm.rs` — codegen for `Quantifier::OneOrMore` (greedy + lazy) and `Quantifier::ZeroOrOne { lazy: true }` extended to emit the alt-aware block layout when the body needs inline backtrack support, mirroring the `*` family fix shipped earlier today. Compact subexpr opcodes (`PlusGreedy` / `PlusLazy` / `QuestionLazy`) remain the fast-path for simple bodies.
 - Family doctrine (per user directive): "Always identify the family of issues a bug is an instance of and fix the family." The lazy/greedy `*` cluster bug applied verbatim to `+` (mandatory first iter then loop) and `?` (single optional iter) — same body alt-frame loss in the subexpr-clone path. Probes confirmed the bug pattern is identical: `(|ab)+?d` on `abd` returned no match, `(|ab)??d` on `abd` returned 2..3, etc.

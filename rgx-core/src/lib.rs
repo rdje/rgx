@@ -6413,7 +6413,8 @@ mod tests {
         // propagates SKIP's position to the outer match attempt,
         // aborting it at pos 0. Without propagation, alt 2 "bnn" would
         // match at pos 0 (false positive). Mirror of engine fix #28's
-        // COMMIT-in-failing-assertion propagation.
+        // COMMIT-in-failing-assertion propagation. Verified via
+        // testinput1:5630.
         let re = Regex::compile(r"(?=b(*SKIP)a)bn|bnn").unwrap();
         assert!(re.find_first("bnn").is_none());
     }
