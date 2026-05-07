@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: Cluster 1C napla non-atomic positive lookahead (+6 passes, ratchet 12,779/31)
+- Scope: AST extension + parser + codegen + new opcode `OpCode::NaplaRestorePos = 0x8A` + dispatch in 3 execution loops + jump-remap visitor + JIT-eligibility list. Family fix per the doctrine.
+- AST: `Regex::Lookahead` and `Regex::Lookbehind` gain a `non_atomic: bool` field. ~30 construction sites + ~10 destructure sites updated across `parsing.rs`, `compiler.rs`, `vm.rs`, `c2/nfa.rs`, `lib.rs`, `c2/classifier.rs`, `parser.rs` to thread the field through (compiler passes pass `non_atomic` through unchanged; pla forms get `non_atomic: false`, napla forms get `non_atomic: true`).
+- Parser: typed `non_atomic_lookahead` arm sets `non_atomic: true`; alpha-lookaround `napla`/`non_atomic_positive_lookahead` matches set `non_atomic: true`; symbol-form `non_atomic_lookahead_pos`/`non_atomic_lookbehind_pos` rules updated. Plain pla / nla / plb / nlb stay `false`.
+- Codegen for positive non_atomic Lookahead emits the body inline:
+  ```
+  SaveLazyPos                 ; saves pre-body pos to ctx.lazy_iter_save
+  <body inline>               ; alt-frames push to outer ctx.backtrack_stack
+  NaplaRestorePos             ; peeks the saved pos (doesn't pop) and
+                              ; restores ctx.pos so the assertion is
+                              ; observed as zero-width by what follows
+  ```
+- The peek-don't-pop semantic is essential: body alt-frames retried via outer backtrack will re-run NaplaRestorePos and need the same saved pos. The save lingers on the stack until ctx is reset between match attempts. Negative non_atomic falls back to atomic LookaheadNeg for now (different control-flow shape; not in this commit's scope).
+- Closes Cluster 1C: testinput2:6155, 6158, 6189, 6195 (×2 — both FN and FP for separate subjects), 6200. Family probes verified `(*napla:a|(.))\1\1` on `aabc` → 0..2 ✓, `(*napla:a|(*COMMIT)(.))\1\1` on `abbc` → no-match ✓, atomic pla regressions clean.
+- Validation: `cargo build -p rgx-core --release` clean, `cargo test -p rgx-core --lib` (1118/1118), `cargo build -p rgx-cli` clean. Conformance: **NEW BASELINE 12,779 / 31 / 0 / 0** (was 12,773/37). FN 16 → 10, SM 10 → 11, FP 4 → 3.
+
 ### 2026-05-07 - Engine: + greedy first-iter zero-width termination (+1 pass, ratchet 12,773/37)
 - Scope: `rgx-core/src/vm.rs` — refined the `Quantifier::OneOrMore { lazy: false }` (greedy `+`) alt-aware emit to gate inner-loop entry on first-iter advance. Closes testinput1:4862 family — `(?P<abn>(?P=abn)xxx|)+` on `xxx` now correctly returns 0..0 (was 0..3).
 - Bug surfaced from earlier today's family extension. The previous layout was `<body>; LOOP { Split EXIT; SaveLazyPos; <body>; StarGreedyContinue back-to-LOOP }; EXIT` — mandatory first iter ran unconditionally, then the inner loop iter 2 saw iter 1's group capture (set to empty) and resolved the self-referential backref `(?P=abn)` to empty, advancing through `xxx`. PCRE2 terminates the loop on first zero-width body match.

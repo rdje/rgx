@@ -176,13 +176,13 @@ pub fn reverse_ast(ast: &Regex) -> Regex {
         // rejects all of these, so the reverse NFA never actually
         // encounters them via the normal compile pipeline.
         Regex::GraphemeCluster => Regex::GraphemeCluster,
-        Regex::Lookahead { expr, positive } => Regex::Lookahead {
+        Regex::Lookahead { expr, positive, non_atomic } => Regex::Lookahead {
             expr: Box::new(reverse_ast(expr)),
-            positive: *positive,
+            positive: *positive, non_atomic: false,
         },
-        Regex::Lookbehind { expr, positive } => Regex::Lookbehind {
+        Regex::Lookbehind { expr, positive, non_atomic } => Regex::Lookbehind {
             expr: Box::new(reverse_ast(expr)),
-            positive: *positive,
+            positive: *positive, non_atomic: false,
         },
         Regex::Backreference(n) => Regex::Backreference(*n),
         Regex::NamedBackreference(n) => Regex::NamedBackreference(n.clone()),

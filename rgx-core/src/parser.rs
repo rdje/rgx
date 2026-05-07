@@ -663,7 +663,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_group_body()?;
                 Ok(Regex::Lookahead {
                     expr: Box::new(expr),
-                    positive: true,
+                    positive: true, non_atomic: false,
                 })
             }
             Some(Token::LookaheadNeg) => {
@@ -671,7 +671,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_group_body()?;
                 Ok(Regex::Lookahead {
                     expr: Box::new(expr),
-                    positive: false,
+                    positive: false, non_atomic: false,
                 })
             }
             Some(Token::LookbehindPos) => {
@@ -679,7 +679,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_group_body()?;
                 Ok(Regex::Lookbehind {
                     expr: Box::new(expr),
-                    positive: true,
+                    positive: true, non_atomic: false,
                 })
             }
             Some(Token::LookbehindNeg) => {
@@ -687,7 +687,7 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_group_body()?;
                 Ok(Regex::Lookbehind {
                     expr: Box::new(expr),
-                    positive: false,
+                    positive: false, non_atomic: false,
                 })
             }
             _ => unreachable!("parse_atom_group called for non-group token"),
@@ -1014,7 +1014,7 @@ mod tests {
             Regex::Sequence(elements) => {
                 assert_eq!(elements.len(), 2);
                 match &elements[0] {
-                    Regex::Lookahead { positive, .. } => assert!(*positive),
+                    Regex::Lookahead { positive, non_atomic: false, .. } => assert!(*positive),
                     _ => panic!("Expected positive lookahead"),
                 }
                 assert!(matches!(elements[1], Regex::Char('c')));
@@ -1032,7 +1032,7 @@ mod tests {
             Regex::Sequence(elements) => {
                 assert_eq!(elements.len(), 2);
                 match &elements[0] {
-                    Regex::Lookbehind { positive, .. } => assert!(!*positive),
+                    Regex::Lookbehind { positive, non_atomic: false, .. } => assert!(!*positive),
                     _ => panic!("Expected negative lookbehind"),
                 }
                 assert!(matches!(elements[1], Regex::Char('a')));

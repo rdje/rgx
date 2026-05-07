@@ -577,11 +577,13 @@ impl<'a> PgenAstAdapter<'a> {
                             Regex::Lookbehind {
                                 expr: Box::new(Regex::Char('\r')),
                                 positive: true,
+                                non_atomic: false,
                             },
                             Regex::Char('\n'),
                         ]),
                     ])),
                     positive: false,
+                    non_atomic: false,
                 },
                 Regex::CharClass(CharClass::Custom {
                     ranges: Vec::new(),
@@ -1055,12 +1057,12 @@ impl<'a> PgenAstAdapter<'a> {
                 if lookahead {
                     Ok(Regex::Lookahead {
                         expr: Box::new(inner),
-                        positive,
+                        positive, non_atomic: false,
                     })
                 } else {
                     Ok(Regex::Lookbehind {
                         expr: Box::new(inner),
-                        positive,
+                        positive, non_atomic: false,
                     })
                 }
             }
@@ -1072,6 +1074,7 @@ impl<'a> PgenAstAdapter<'a> {
                 Ok(Regex::Lookahead {
                     expr: Box::new(inner),
                     positive: true,
+                    non_atomic: true,
                 })
             }
             "alpha_lookaround" => self.convert_typed_alpha_lookaround_object(map),
@@ -1365,12 +1368,14 @@ impl<'a> PgenAstAdapter<'a> {
                 Regex::Lookahead {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 },
             ])),
             "posix_word_end" => Ok(Regex::Sequence(vec![
                 Regex::Lookbehind {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 },
                 Regex::WordBoundary { positive: true },
             ])),
@@ -1401,12 +1406,14 @@ impl<'a> PgenAstAdapter<'a> {
                 Regex::Lookahead {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 },
             ])),
             "[[:>:]]" => Ok(Regex::Sequence(vec![
                 Regex::Lookbehind {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 },
                 Regex::WordBoundary { positive: true },
             ])),
@@ -1553,29 +1560,44 @@ impl<'a> PgenAstAdapter<'a> {
             .get("body")
             .ok_or_else(|| self.contract_error("typed alpha_lookaround missing 'body'"))?;
         let inner = self.convert_typed_pattern(body)?;
+        let na = matches!(
+            name,
+            "non_atomic_positive_lookahead"
+                | "napla"
+                | "non_atomic_negative_lookahead"
+                | "nanla"
+                | "non_atomic_positive_lookbehind"
+                | "naplb"
+                | "non_atomic_negative_lookbehind"
+                | "nanlb"
+        );
         match name {
             "positive_lookahead" | "pla" | "non_atomic_positive_lookahead" | "napla" => {
                 Ok(Regex::Lookahead {
                     expr: Box::new(inner),
                     positive: true,
+                    non_atomic: na,
                 })
             }
             "negative_lookahead" | "nla" | "non_atomic_negative_lookahead" | "nanla" => {
                 Ok(Regex::Lookahead {
                     expr: Box::new(inner),
                     positive: false,
+                    non_atomic: na,
                 })
             }
             "positive_lookbehind" | "plb" | "non_atomic_positive_lookbehind" | "naplb" => {
                 Ok(Regex::Lookbehind {
                     expr: Box::new(inner),
                     positive: true,
+                    non_atomic: na,
                 })
             }
             "negative_lookbehind" | "nlb" | "non_atomic_negative_lookbehind" | "nanlb" => {
                 Ok(Regex::Lookbehind {
                     expr: Box::new(inner),
                     positive: false,
+                    non_atomic: na,
                 })
             }
             // Other alpha-prefixed forms — fall back to atomic group.
@@ -2604,12 +2626,12 @@ impl<'a> PgenAstAdapter<'a> {
         if is_lookahead {
             Ok(Regex::Lookahead {
                 expr: Box::new(inner),
-                positive,
+                positive, non_atomic: false,
             })
         } else {
             Ok(Regex::Lookbehind {
                 expr: Box::new(inner),
-                positive,
+                positive, non_atomic: false,
             })
         }
     }
@@ -4422,10 +4444,12 @@ impl<'a> PgenAstAdapter<'a> {
                 let word_ahead = || Regex::Lookahead {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 };
                 let word_behind = || Regex::Lookbehind {
                     expr: Box::new(Regex::CharClass(CharClass::Word { negated: false })),
                     positive: true,
+                    non_atomic: false,
                 };
                 match text {
                     "[[:<:]]" => Ok(Regex::Sequence(vec![
@@ -5888,18 +5912,22 @@ impl<'a> PgenAstAdapter<'a> {
             "lookahead_pos" => Ok(Regex::Lookahead {
                 expr: Box::new(expr),
                 positive: true,
+                non_atomic: false,
             }),
             "lookahead_neg" => Ok(Regex::Lookahead {
                 expr: Box::new(expr),
                 positive: false,
+                non_atomic: false,
             }),
             "lookbehind_pos" => Ok(Regex::Lookbehind {
                 expr: Box::new(expr),
                 positive: true,
+                non_atomic: false,
             }),
             "lookbehind_neg" => Ok(Regex::Lookbehind {
                 expr: Box::new(expr),
                 positive: false,
+                non_atomic: false,
             }),
             // PGEN 1.1.22+ also admits the symbol-forms
             // `(?*…)` (non-atomic positive lookahead) and
@@ -5913,10 +5941,12 @@ impl<'a> PgenAstAdapter<'a> {
             "non_atomic_lookahead_pos" => Ok(Regex::Lookahead {
                 expr: Box::new(expr),
                 positive: true,
+                non_atomic: true,
             }),
             "non_atomic_lookbehind_pos" => Ok(Regex::Lookbehind {
                 expr: Box::new(expr),
                 positive: true,
+                non_atomic: true,
             }),
             // PGEN 1.1.21+ supports PCRE2's callout-style lookaround
             // aliases under `alpha_lookaround = "(*" name ":" pattern? ")"`.
@@ -6921,21 +6951,25 @@ fn regex_from_alpha_lookaround_name(name: &str, expr: Regex) -> Option<Regex> {
             Regex::Lookahead {
                 expr: boxed,
                 positive: true,
+                non_atomic: false,
             }
         }
         "nla" | "negative_lookahead" => Regex::Lookahead {
             expr: boxed,
             positive: false,
+            non_atomic: false,
         },
         "plb" | "positive_lookbehind" | "naplb" | "non_atomic_positive_lookbehind" => {
             Regex::Lookbehind {
                 expr: boxed,
                 positive: true,
+                non_atomic: false,
             }
         }
         "nlb" | "negative_lookbehind" => Regex::Lookbehind {
             expr: boxed,
             positive: false,
+            non_atomic: false,
         },
         _ => return None,
     })

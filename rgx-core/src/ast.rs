@@ -83,6 +83,12 @@ pub enum Regex {
         expr: Box<Regex>,
         /// Whether this is a positive lookahead
         positive: bool,
+        /// PCRE2 `(*napla:...)` / `(*nanla:...)` non-atomic lookahead.
+        /// Default `false` (atomic). When `true`, codegen emits the
+        /// body inline so its alternation backtrack frames live on
+        /// the outer `ctx.backtrack_stack` — outer can backtrack INTO
+        /// the assertion body.
+        non_atomic: bool,
     },
     /// Lookbehind (?<=...) or negative lookbehind (?<!...)
     Lookbehind {
@@ -90,6 +96,9 @@ pub enum Regex {
         expr: Box<Regex>,
         /// Whether this is a positive lookbehind
         positive: bool,
+        /// PCRE2 `(*naplb:...)` / `(*nanlb:...)` non-atomic lookbehind.
+        /// Default `false`. Mirrors `Lookahead.non_atomic`.
+        non_atomic: bool,
     },
     /// Anchors like ^, $, \A, \Z, \z
     Anchor(AnchorType),

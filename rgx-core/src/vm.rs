@@ -300,6 +300,13 @@ pub enum OpCode {
     /// back-offset to the loop entry. Cluster 1E + 2H closes by the
     /// same mechanism as 2B but with greedy looping.
     StarGreedyContinue = 0x89,
+    /// Cluster 1C — non-atomic positive lookahead `(*napla:...)` body
+    /// epilogue. Pops the saved pre-body pos from `ctx.lazy_iter_save`
+    /// and sets `ctx.pos` to it, restoring the zero-width-assertion
+    /// semantic while leaving body's alternation backtrack frames on
+    /// the outer `ctx.backtrack_stack`. Codegen wraps the inline body
+    /// with a leading `SaveLazyPos` and a trailing `NaplaRestorePos`.
+    NaplaRestorePos = 0x8A,
 
     // === ALTERNATIVE TRACKING (0x90-0x9F) ===
     /// Set the current alternative index (for match reporting)
@@ -4344,6 +4351,25 @@ impl RegexVM {
                     // operand to the loop's exit; fall through.
                 }
 
+                OpCode::NaplaRestorePos => {
+                    // Cluster 1C — non-atomic positive lookahead body
+                    // epilogue. Pops the saved pre-body pos and
+                    // restores ctx.pos so the assertion is observed
+                    // as zero-width by what follows. Body's alt-frames
+                    // remain on the outer ctx.backtrack_stack so the
+                    // surrounding match attempt can backtrack INTO the
+                    // assertion body.
+                    // Peek (don't pop) — body alt-frames retried via
+                    // backtrack will re-run NaplaRestorePos and need
+                    // the same saved pos. The save lingers on the
+                    // stack until ctx is reset between match attempts;
+                    // that pollution is harmless because each scan
+                    // start re-creates ctx.
+                    if let Some(&saved) = ctx.lazy_iter_save.last() {
+                        ctx.pos = saved;
+                    }
+                }
+
                 // TODO: Implement remaining opcodes
                 _ => {
                     // Placeholder - skip unknown opcodes for now
@@ -5880,6 +5906,18 @@ impl RegexVM {
                     let pre_body_pos = ctx.lazy_iter_save.pop().unwrap_or(usize::MAX);
                     if ctx.pos != pre_body_pos {
                         ip = ((ip as isize) + (offset as isize)) as usize;
+                    }
+                }
+                OpCode::NaplaRestorePos => {
+                    // Cluster 1C — napla body epilogue (subexpr path).
+                    // Peek (don't pop) — body alt-frames retried via
+                    // backtrack will re-run NaplaRestorePos and need
+                    // the same saved pos. The save lingers on the
+                    // stack until ctx is reset between match attempts;
+                    // that pollution is harmless because each scan
+                    // start re-creates ctx.
+                    if let Some(&saved) = ctx.lazy_iter_save.last() {
+                        ctx.pos = saved;
                     }
                 }
                 OpCode::Char => {
@@ -7476,6 +7514,19 @@ impl RegexVM {
                     }
                 }
 
+                OpCode::NaplaRestorePos => {
+                    // Cluster 1C — napla body epilogue (continuation path).
+                    // Peek (don't pop) — body alt-frames retried via
+                    // backtrack will re-run NaplaRestorePos and need
+                    // the same saved pos. The save lingers on the
+                    // stack until ctx is reset between match attempts;
+                    // that pollution is harmless because each scan
+                    // start re-creates ctx.
+                    if let Some(&saved) = ctx.lazy_iter_save.last() {
+                        ctx.pos = saved;
+                    }
+                }
+
                 OpCode::Match => {
                     if let Some(origin) = must_advance_from {
                         if ctx.pos == origin {
@@ -8992,7 +9043,7 @@ impl OptimizingCompiler {
                 }
             }
 
-            Regex::Lookahead { expr, positive } => {
+            Regex::Lookahead { expr, positive, non_atomic } => {
                 // Cluster 1D residual: when the body unconditionally
                 // succeeds zero-width AND has no captures or MARK
                 // verbs, the assertion is a no-op (positive) or
@@ -9009,6 +9060,21 @@ impl OptimizingCompiler {
                         self.emit_op(OpCode::Fail);
                     }
                     // positive: emit nothing (zero-width success).
+                    return;
+                }
+
+                // Cluster 1C — non-atomic positive lookahead
+                // `(*napla:...)`. Emit body inline so its
+                // alternation backtrack frames live on the outer
+                // ctx.backtrack_stack — the surrounding match
+                // attempt can backtrack INTO the assertion body.
+                // Negative non_atomic falls back to the atomic path
+                // (LookaheadNeg) for now; that family needs a
+                // different control-flow shape (multi-step jump).
+                if *non_atomic && *positive {
+                    self.emit_op(OpCode::SaveLazyPos);
+                    self.codegen_pass(expr, false);
+                    self.emit_op(OpCode::NaplaRestorePos);
                     return;
                 }
 
@@ -9035,7 +9101,7 @@ impl OptimizingCompiler {
                 self.code.extend(sub_code);
             }
 
-            Regex::Lookbehind { expr, positive } => {
+            Regex::Lookbehind { expr, positive, non_atomic } => {
                 // Mirror of Lookahead's body-trivially-succeeds
                 // elision (Cluster 1D residual). Positive lookbehind
                 // with empty-alt body becomes a no-op; negative
@@ -10436,6 +10502,7 @@ impl OptimizingCompiler {
                 | OpCode::Fail
                 | OpCode::Accept
                 | OpCode::SaveLazyPos
+                | OpCode::NaplaRestorePos
                 | OpCode::Halt => {}
                 OpCode::StarLazyContinue | OpCode::StarGreedyContinue => {
                     // 2-byte signed back-offset operand to the matching
@@ -10717,7 +10784,8 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
         LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
         PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos, SaveStart,
         SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
-        StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine, StartText, Then,
+        NaplaRestorePos, StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine,
+        StartText, Then,
         VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
@@ -10773,6 +10841,7 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x87] = Some(StarLazyContinue);
     t[0x88] = Some(StarLazyBlock);
     t[0x89] = Some(StarGreedyContinue);
+    t[0x8A] = Some(NaplaRestorePos);
     t[0x90] = Some(SetAlternative);
     t[0xA0] = Some(Commit);
     t[0xA1] = Some(Prune);
