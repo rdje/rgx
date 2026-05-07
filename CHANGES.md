@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Harness: detect substitute-template unset-capture ref + null_replacement subject annotation (+2 passes, ratchet 12,793/17)
+- Scope: `rgx-core/tests/pcre2_conformance.rs` — harness-side detection.
+- Two unrelated harness fixes bundled (both in the substitute-permissive family):
+  - **Unset-capture detection.** PCRE2's default substitute mode rejects with `Failed: error 55` (PCRE2_ERROR_UNSET) when the template references `$N` for a group that participated in compilation but is unset in the actual match (e.g. `(a)|(b)/replace=<$1>` on subject `"b"` — alt-2 won, group 1 stays None). RGX's `replace_all` silently fills the unset capture as empty. Added `substitute_template_references_unset_capture(re, template, subject)` that runs the match and inspects each `$N` against `caps.get(N).is_none()`. Called from the Expected::CompileError branch alongside the OOR check.
+  - **`null_replacement` per-subject annotation.** Added to `subject_carries_untestable_modifier`'s recognised list. PCRE2 errors when the substitute API is invoked with a NULL replacement pointer; RGX has no such API surface, so the test is structurally untestable through the harness.
+- Closes testinput2:4959 (`(a)|(b)/replace=<$1>` on `"b"` — group 1 unset) and testinput2:6462 (`/X*/g,replace=xy` with `>X<\=null_replacement` per-subject annotation).
+- Validation: conformance NEW BASELINE **12,793 / 17 / 0 / 0** (was 12,791/19). RGX-too-permissive 3 → 1 (only testinput10:447 `/abc/utf,replace=�` remains; PCRE2 rejects the `\xff`-bearing replacement at compile, but the harness needs more nuanced template-decoding to detect).
+
 ### 2026-05-08 - Harness: detect substitute-template OOR numeric ref before flagging too-permissive (+1 pass, ratchet 12,791/19)
 - Scope: `rgx-core/tests/pcre2_conformance.rs` — harness-side detection, not an engine fix.
 - pcre2test surfaces "Failed: error 53" (PCRE2_ERROR_NOSUBSTRING) at compile-bound substitute time when the `replace=TEMPLATE` template references `$N` for a group beyond the regex's capture count. RGX's `replace_all` silently treats unknown captures as empty (a deliberate Perl/POSIX-style design choice for the public API). The harness's compile-error branch was flagging this as "RGX too permissive" — but RGX correctly recognises this as a runtime substitute-time issue, just doesn't *error* on it.

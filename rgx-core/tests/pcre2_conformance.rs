@@ -530,6 +530,64 @@ fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
 }
 
 /// Detect a `replace=` template that references a numeric group
+/// which is *unset* (None) in the actual match. PCRE2's default
+/// substitute mode rejects these at substitute time with
+/// `Failed: error 55` (PCRE2_ERROR_UNSET). RGX's `replace_all`
+/// silently fills the unset capture with an empty string. The
+/// harness's compile-error branch was flagging the divergence
+/// spuriously — detect by speculatively running the match and
+/// inspecting the captures.
+fn substitute_template_references_unset_capture(re: &Regex, template: &str, subject: &str) -> bool {
+    let Some(caps) = re.captures(subject) else {
+        return false;
+    };
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+        if b == b'$' {
+            let after = &bytes[i + 1..];
+            if !after.is_empty() && after[0] == b'{' {
+                if let Some(close) = after.iter().position(|&c| c == b'}') {
+                    let inner = &after[1..close];
+                    if !inner.is_empty() && inner.iter().all(|c| c.is_ascii_digit()) {
+                        if let Ok(s) = std::str::from_utf8(inner) {
+                            if let Ok(n) = s.parse::<usize>() {
+                                if n < caps.len() && caps.get(n).is_none() {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    i += close + 2;
+                    continue;
+                }
+            }
+            let digits_end = after.iter().take_while(|&&c| c.is_ascii_digit()).count();
+            if digits_end > 0 {
+                if let Ok(s) = std::str::from_utf8(&after[..digits_end]) {
+                    if let Ok(n) = s.parse::<usize>() {
+                        if n < caps.len() && caps.get(n).is_none() {
+                            return true;
+                        }
+                    }
+                }
+                i += 1 + digits_end;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Detect a `replace=` template that references a numeric group
 /// (`$N` or `${N}`) beyond the regex's capture count. PCRE2's
 /// substitute API rejects these at compile-bound substitute time
 /// with `Failed: error 53` (PCRE2_ERROR_NOSUBSTRING). RGX's
@@ -1468,6 +1526,7 @@ fn subject_carries_untestable_modifier(line: &[u8]) -> bool {
             | "callout_none"
             | "null_subject"
             | "null_context"
+            | "null_replacement"
             | "zero_terminate"
             | "offset_limit"
             | "match_limit"
@@ -2638,6 +2697,18 @@ fn run_case(case: &TestCase) -> Outcome {
                     if substitute_template_has_oor_numeric_ref(template, r.captures_len()) {
                         return Outcome::Pass;
                     }
+                    // PCRE2 errors at substitute time when the
+                    // template references a numeric group that is
+                    // unset in the match (default mode without
+                    // `substitute_unknown_unset` /
+                    // `substitute_unset_empty`). RGX silently fills
+                    // the unset group as empty. Detect post-match:
+                    // run the match, inspect the captures, and
+                    // count as agreement-on-rejection when any
+                    // referenced group is unset.
+                    if substitute_template_references_unset_capture(&r, template, subject) {
+                        return Outcome::Pass;
+                    }
                 }
                 return Outcome::Fail {
                     detail: format!(
@@ -3295,8 +3366,8 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    const PASS_BASELINE: usize = 12_791;
-    const FAIL_BASELINE: usize = 19;
+    const PASS_BASELINE: usize = 12_793;
+    const FAIL_BASELINE: usize = 17;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

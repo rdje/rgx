@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Harness: substitute-template unset-capture detection + null_replacement annotation (+2 passes, ratchet 12,793/17)
+- Added `substitute_template_references_unset_capture` (post-match check for $N where caps.get(N) is None) and `null_replacement` to subject-untestable list. Closes testinput2:4959 / 6462. Cumulative session: 12,737/73 → 12,793/17 (+56 passes).
+
 ### 2026-05-08 — Harness: detect substitute-template OOR ref before flagging too-permissive (+1 pass, ratchet 12,791/19)
 - Added `substitute_template_has_oor_numeric_ref` to the conformance harness. When PCRE2 expected a compile rejection (Failed: error 53 == NOSUBSTRING) and the `replace=TEMPLATE` references `$N >= captures_len`, count as agreement-on-rejection rather than RGX-too-permissive. Closes testinput2:5047. Cumulative session: 12,737/73 → 12,791/19 (+54 passes).
 
