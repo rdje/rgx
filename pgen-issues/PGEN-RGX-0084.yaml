@@ -1,0 +1,167 @@
+id: PGEN-RGX-0084
+summary: |
+  PGEN parses two-digit numeric backslash escapes (`\10`..`\99`) using the
+  *total* count of capturing groups in the pattern instead of the count of
+  groups defined *up to that parse position*. PCRE2's compile-time
+  disambiguation rule reads `\10` as octal `\010` (= U+0008 backspace) when
+  fewer than 10 capturing groups have been seen by the time `\10` is parsed,
+  even when group 10 is defined later in the same pattern. PGEN emits
+  `{"kind":"numeric","type":"backreference","index":10}` for `\10` in such
+  forward-reference contexts, which makes downstream consumers treat it as
+  a back reference and produce wrong matches.
+status: open
+opened_at: 2026-05-08T00:00:00Z
+first_seen_at: 2026-05-08T00:00:00Z
+last_updated_at: 2026-05-08T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.74
+rgx_commit: 3c0c7188d77ad87e7a1f28327abd2ed4bc7c5f2b
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  pgen_commit: 08593d05c2f298e6f4be524147258e187d92d92e
+  api_version: "1.2.0"
+  regex_parser_release_version: "1.1.74"
+  regex_integration_contract_version: "1.1.76"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api
+  host_os_arch: Darwin arm64
+  pattern: '()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+'
+  notes: |
+    Pattern surfaces as a single PCRE2 conformance failure
+    (testinput1:3910). The harness reports
+      PCRE2="bX", RGX="bXXaYYaY"
+    on subject "bXXaYYaY". The divergence traces to PGEN's
+    `\10` handling.
+expected_behavior: |
+  PCRE2's compile-time rule for one- or two-digit numeric backslash escapes
+  (pcre2pattern(3) "BACKREFERENCES" section):
+
+    Where a backslash is followed by digits ... the longest possible string
+    of digits is read; if it represents an integer N for which there are at
+    least N capturing groups in the pattern *up to that point*, the
+    sequence is taken as a back reference. Otherwise, the digits are taken
+    as an octal value if they qualify (one digit between 0 and 7, or two
+    digits between 0 and 77, or three octal digits).
+
+  At the position where `\10` appears inside the conditional
+  `(?(10)\10a|b)`, only nine capturing groups have been opened so far
+  (the leading `()()()()()()()()()`). Group 10 is the `(X|Y)` declared
+  *after* the conditional. The "up to that point" rule therefore applies:
+  9 < 10, so `\10` is the octal escape `\010` = U+0008 (BACKSPACE).
+
+  Concretely PGEN should emit, for the `\10` token in this position,
+  either an octal-escape AST atom or its 1-byte char-literal expansion —
+  but **not** a `numeric` backreference with index 10.
+
+  Confirmed against PCRE2 testoutput1 line ~6166:
+      /()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+/
+          bXXaYYaY
+       0: bX
+       1:
+       ...
+      10: X
+  PCRE2's overall span is "bX" (2 chars) — the conditional's then-branch
+  `\10a` cannot match anywhere in the subject because `\010` is BACKSPACE,
+  which is absent. Iter 2's `(?(10)…|b)` falls to the else branch `b`,
+  fails on the literal 'X', and the `+` loop terminates with a single
+  iteration.
+actual_behavior: |
+  PGEN's typed AST dump for the offending token in the same pattern:
+
+      "yes_branch":[
+        {"atom":{"index":10,"kind":"numeric","type":"backreference"},
+         "quantifier":[],"type":"piece"},
+        {"atom":"a","quantifier":[],"type":"piece"}
+      ]
+
+  PGEN treats `\10` as a back reference to group 10 — i.e., it counts the
+  *whole-pattern* capturing-group total (10 groups) rather than the count
+  of groups *seen so far* (9 at that parse position). Group 10 is
+  populated later in the pattern (inside the same `(?:...)+` wrapper), so
+  RGX's downstream codegen happily wires the backref. Iter 2 of the
+  outer `+` then sees iter 1's group-10 capture (= "X") and the
+  conditional takes the then-branch, producing `\10a` = "X"+"a" = "Xa",
+  which matches at pos 2..4 of "bXXaYYaY". Subsequent iters chain
+  similarly, yielding the over-greedy "bXXaYYaY" match instead of PCRE2's
+  "bX".
+
+  Verified end-to-end with the embedding-API AST dump (artifact
+  `pgen-issues/artifacts/PGEN-RGX-0084/ast_dump.json`).
+reproduction: |
+  Probe via the embedding-API AST dump on the `regex_default` profile:
+
+      let opts = pgen::embedding_api::AstDumpOptions::default();
+      let outcome = pgen::embedding_api::parse_grammar_profile_ast_dump(
+          pgen::embedding_api::GrammarFamily::Regex,
+          pgen::embedding_api::GrammarProfile::RegexDefault,
+          r"()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+",
+          &opts,
+      );
+
+  Inspect the JSON for the `\10` token. It is currently emitted as
+  `{"kind":"numeric","type":"backreference","index":10}` and should be an
+  octal/literal-character node instead.
+
+  RGX-side reproducer (post-bump, `cargo build --release`):
+    rgx-core/tests/pcre2_conformance.rs reports
+      span mismatch (semantic divergence) testinput1:3910:
+        /()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+/
+        :: span mismatch: PCRE2="bX", RGX="bXXaYYaY"
+
+  Sibling probe — same pattern with **only one** group instead of ten:
+
+      let pat = r"(?:(?(1)\1a|b)(X|Y))+";   // testinput1:3905
+
+  Here `\1` is a single digit, so the "up to that point" rule never
+  matters — PGEN gets it right and PCRE2/RGX agree on "bXXaYYaY".
+
+  Octal-only sibling — pattern with **zero** capturing groups:
+
+      let pat = r"\10";
+
+  PGEN parses this as the 1-byte octal escape `\010` (U+0008), which is
+  the right answer; this confirms PGEN knows how to emit the octal node.
+  The bug is exclusively in the *forward-reference* path where group N
+  exists somewhere in the pattern but has not yet been opened at the
+  parse position of `\NN`.
+impact: |
+  Class: "parses but returns the wrong AST/dump" — semantically wrong
+  token kind on a forward `\NN` escape.
+
+  RGX-specific impact:
+    - Single PCRE2 conformance failure (testinput1:3910), 1 SM bucket
+      entry. Conformance ratchet 12,789 / 21 → would close to
+      12,790 / 20 once PGEN emits the correct atom.
+    - Family scope: any pattern with two-or-more leading-digit
+      `\NN` references where N exceeds the count of groups
+      defined-so-far is mis-parsed. Patterns that PCRE2 accepts as
+      mixed octal-literal / partial-backref are silently turned
+      into pure backrefs.
+
+  No-workaround stance per the doctrine "parsing issues must be fixed in
+  PGEN, not hacked around in RGX" (see CLAUDE.md). RGX could in principle
+  walk the AST, count `capturing_group` atoms, and rewrite
+  `numeric_backreference` nodes whose index exceeds the running count,
+  but that duplicates PGEN's parse-state and re-introduces the
+  parser/runtime split this contract was built to avoid. Logging here so
+  PGEN owns the fix.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when PGEN's fix lands.
+    Verification path:
+      1. Bump PGEN to a release with the `\NN` parse-position fix.
+      2. Re-run `cargo run -p rgx-core --release --example dump_3910_pgen`
+         and confirm the `\10` token surfaces as an octal/literal atom.
+      3. Re-run `cargo test -p rgx-core --test pcre2_conformance --
+            --ignored --nocapture` and confirm testinput1:3910 closes
+         (ratchet baseline ticks +1 / -1).

@@ -1,0 +1,13 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "success",
+  "diagnostic": null,
+  "ast_dump": {
+    "dump_json": "{\"content\":{\"Json\":{\"pattern\":[[[{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[],[]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[[{\"atom\":{\"condition\":{\"sign\":[],\"value\":10},\"kind\":\"conditional\",\"no_branch\":[\"|\",[{\"atom\":\"b\",\"quantifier\":[],\"type\":\"piece\"}]],\"type\":\"atom\",\"yes_branch\":[{\"atom\":{\"index\":10,\"kind\":\"numeric\",\"type\":\"backreference\"},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":\"a\",\"quantifier\":[],\"type\":\"piece\"}]},\"quantifier\":[],\"type\":\"piece\"},{\"atom\":{\"body\":[[[{\"atom\":\"X\",\"quantifier\":[],\"type\":\"piece\"}]],[[\"|\",[[{\"atom\":\"Y\",\"quantifier\":[],\"type\":\"piece\"}]]]]],\"kind\":\"capturing_group\",\"type\":\"atom\"},\"quantifier\":[],\"type\":\"piece\"}]],[]],\"kind\":\"noncapturing_group\",\"type\":\"atom\"},\"quantifier\":{\"greediness\":[],\"max\":null,\"min\":1,\"type\":\"quantifier\"},\"type\":\"piece\"}]],[]],\"type\":\"regex\"}},\"rule_name\":\"regex\",\"span\":{\"end\":41,\"start\":0}}",
+    "truncated": false,
+    "full_bytes": 1644,
+    "emitted_bytes": 1644
+  }
+}

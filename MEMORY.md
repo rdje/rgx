@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Filed PGEN-RGX-0084: forward-reference `\NN` parses as backref instead of octal
+- testinput1:3910 SM. PCRE2 spec: at parse position of `\NN`, if only K < N groups have been opened so far, treat as octal `\NN` (codepoint 0..63). PGEN counts the WHOLE-PATTERN total (10) instead. Filed; awaiting upstream fix. No RGX change per the no-PGEN-workarounds doctrine.
+
 ### 2026-05-07 — Engine: AltSplitLong + JumpLong (+2 passes, ratchet 12,789/21)
 - New `OpCode::AltSplitLong = 0x4F` (4-byte alt-target offset) and `OpCode::JumpLong = 0x4E` (4-byte forward offset). Alternation codegen always emits them now; +4 bytes per alt arm but no u16 overflow when alt bodies > 64KB. Side fix: `execute_subexpr`'s `OpCode::Jump` was missing `ip += 2` — surfaced via `\g<name>` recursion through alt bodies.
 - JIT: added decode_forward_target_long; both opcodes JIT-eligible.

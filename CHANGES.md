@@ -14,6 +14,11 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - PGEN-RGX-0084: forward-reference `\NN` parsed as backref instead of octal
+- Filed `pgen-issues/PGEN-RGX-0084.yaml` for PCRE2 conformance failure testinput1:3910 — `()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+` on "bXXaYYaY" expects "bX" (PCRE2) but RGX matches "bXXaYYaY". PGEN's typed AST emits `\10` as `{kind:"numeric",type:"backreference",index:10}` even though only nine groups have been opened at the parse position; PCRE2 spec routes such forward references to the octal escape `\010` (= U+0008 BACKSPACE), which is absent from the subject and short-circuits the conditional then-branch.
+- Artifact bundle in `pgen-issues/artifacts/PGEN-RGX-0084/ast_dump.json` (PGEN AST dump for the offending pattern).
+- No engine-side change. Per the no-PGEN-workarounds doctrine, RGX waits for PGEN to fix the `\NN` parse-position rule.
+
 ### 2026-05-07 - Engine: AltSplitLong + JumpLong for huge alternation bodies (+2 passes, ratchet 12,789/21)
 - Scope: alternation codegen's 2-byte forward offsets (`AltSplit` to next-alt, `Jump` to alt-end) overflow when alt bodies exceed 64KB. Counted-quantifier unrolling produces such bodies — `(?:[^X]{28500}){4}` lays out ~228KB of bytecode for the alt-2 path. The silent u16 truncation corrupted the bytecode and turned alt-1's `'a'` match into a no-match. Family fix.
 - Two new opcodes:
