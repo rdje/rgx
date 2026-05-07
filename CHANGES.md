@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: ACCEPT scoping inside napla bodies (+2 passes, ratchet 12,783/27)
+- Scope: PCRE2 spec for `(*ACCEPT)` inside positive assertions: "the assertion succeeds, and the matching is committed at that point". Previously RGX's inline napla codegen let ACCEPT bubble all the way up to the outer match. Family fix.
+- New opcode `OpCode::NaplaScopeBegin = 0x8B` with 4-byte LE body-length operand. Codegen for `(*napla:...)` (positive non_atomic Lookahead) now emits:
+  ```
+  NaplaScopeBegin <body_len: u32 LE>
+  <body inline>
+  NaplaRestorePos
+  ```
+- New struct `NaplaScope { start_ip, end_ip, saved_pos, backtrack_stack_len, alt_boundaries_len }`. Stack `ExecContext.napla_scope_stack: Vec<NaplaScope>`. Push on `NaplaScopeBegin`; peek on `NaplaRestorePos` for saved_pos restore.
+- `OpCode::Accept` (main dispatch) checks the topmost scope: if the current ip is inside `[start_ip, end_ip)`, ACCEPT is scoped to the assertion — truncate `ctx.backtrack_stack` and `ctx.alt_boundaries` to the lengths captured at scope entry (drops body alt-frames, committing the assertion), then jump to the matching `NaplaRestorePos` byte.
+- `BacktrackFrame.napla_scope_len: usize` tracks the scope-stack length at frame push; `restore_frame` truncates `ctx.napla_scope_stack` on backtrack so a body whose `NaplaScopeBegin` has been backtracked past loses its scope record. Without this rollback, the scope would leak past the assertion and mis-scope an outer ACCEPT.
+- Closes testinput2:6189 (`(*napla:a|(.)(*ACCEPT)zz)\1..` on "abcd" → "abc"; alt-2's ACCEPT commits with group 1 set, outer `\1` matches) and testinput2:6192 (`(*napla:a(*ACCEPT)zz|(.))\1..` on "abcd" → "bcd"; alt-1's ACCEPT commits without setting group 1, outer `\1` fails at pos 0 forcing the scanner to advance, alt-2 of body succeeds at pos 1).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,783 / 27 / 0 / 0** (was 12,781/29). SM 11 → 9, +2 passes.
+
 ### 2026-05-07 - Engine: substitute empty-match retry-at-same-pos (NOTEMPTY_ATSTART, +2 passes, ratchet 12,781/29)
 - Scope: PCRE2 substitute `/g` semantic — after an empty match, retry at the SAME anchor with NOTEMPTY_ATSTART forcing a non-empty match. If a non-empty match exists at the same pos, emit it too. Family fix.
 - Why: pattern `(?<=abc)(|def)/g` with `replace=<$0>`: at the post-`abc` anchor, alt-1 (empty) wins leftmost-first. PCRE2 then retries at the same pos rejecting empty matches; alt-2 `def` matches non-empty. Both substitutions fire, yielding `abc<><def>...`. RGX previously advanced by 1 byte after the empty match, missing the non-empty retry — output was `abc<>def...`.

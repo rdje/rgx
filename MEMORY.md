@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-07 — Engine: ACCEPT scoping inside napla bodies (+2 passes, ratchet 12,783/27)
+- New `OpCode::NaplaScopeBegin = 0x8B` (4-byte LE body-len) replaces the prior `SaveLazyPos` prologue. Pushes `NaplaScope { start_ip, end_ip, saved_pos, backtrack_stack_len, alt_boundaries_len }`. `OpCode::Accept` redirects to `end_ip` and truncates the body's pushed alt-frames on scope hit (PCRE2 commit-at-ACCEPT semantic).
+- `BacktrackFrame.napla_scope_len` rolls back the scope stack on backtrack-past-the-Begin so an outer ACCEPT after the assertion doesn't get mis-scoped.
+- Closes testinput2:6189 (`(*napla:a|(.)(*ACCEPT)zz)\1..` → "abc") and testinput2:6192 (`(*napla:a(*ACCEPT)zz|(.))\1..` → "bcd"). Cumulative session ratchet: 12,737/73 → 12,783/27 (+46 passes).
+
 ### 2026-05-07 — Engine: substitute empty-match retry-at-same-pos (NOTEMPTY_ATSTART, +2 passes, ratchet 12,781/29)
 - New `ExecContext.notempty_atstart` flag. `OpCode::Match` rejects zero-byte matches anchored at `match_start` (no `\K` shift) when set, routing through `try_backtrack` to keep exploring.
 - Both `find_all_scanning_from` (memchr + class-filter) and the legacy `RegexVM::find_all` (memchr + class-filter) gained the post-empty-match retry: re-execute at same candidate with the flag, push any non-empty match found, advance past it. Else clear the flag and advance by 1.

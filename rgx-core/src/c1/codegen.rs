@@ -374,6 +374,7 @@ fn is_opcode_jit_eligible(op: OpCode) -> bool {
         | OpCode::StarLazyBlock
         | OpCode::StarGreedyContinue
         | OpCode::NaplaRestorePos
+        | OpCode::NaplaScopeBegin
 
         // === Ineligible: backtracking verbs ===
         | OpCode::Commit

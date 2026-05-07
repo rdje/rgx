@@ -301,12 +301,23 @@ pub enum OpCode {
     /// same mechanism as 2B but with greedy looping.
     StarGreedyContinue = 0x89,
     /// Cluster 1C — non-atomic positive lookahead `(*napla:...)` body
-    /// epilogue. Pops the saved pre-body pos from `ctx.lazy_iter_save`
-    /// and sets `ctx.pos` to it, restoring the zero-width-assertion
-    /// semantic while leaving body's alternation backtrack frames on
-    /// the outer `ctx.backtrack_stack`. Codegen wraps the inline body
-    /// with a leading `SaveLazyPos` and a trailing `NaplaRestorePos`.
+    /// epilogue. Restores `ctx.pos` from the topmost
+    /// `ctx.napla_scope_stack` entry's `saved_pos` (peek, no pop:
+    /// outer-driven backtrack into the body re-runs this op).
+    /// The scope itself is rolled back on backtrack-past-the-Begin
+    /// via `BacktrackFrame.napla_scope_len`.
     NaplaRestorePos = 0x8A,
+    /// Cluster 1C — non-atomic positive lookahead body prologue.
+    /// 4-byte LE operand: byte-offset from the end of the operand to
+    /// the matching `NaplaRestorePos`. Pushes a `NaplaScope` onto
+    /// `ctx.napla_scope_stack` recording (start_ip = body_start,
+    /// end_ip = NaplaRestorePos_pos, saved_pos = current ctx.pos).
+    /// `OpCode::Accept` checks the top scope: if the current ip is
+    /// within `[start_ip, end_ip)`, ACCEPT is scoped to the
+    /// assertion — control jumps to the NaplaRestorePos byte instead
+    /// of bubbling up as a force-match. PCRE2 spec: "(*ACCEPT) inside
+    /// a positive assertion makes the assertion succeed".
+    NaplaScopeBegin = 0x8B,
 
     // === ALTERNATIVE TRACKING (0x90-0x9F) ===
     /// Set the current alternative index (for match reporting)
@@ -850,6 +861,16 @@ pub struct ExecContext<'a> {
     /// *lexically* enclosing alternation instead of any still-on-
     /// stack alt frame from a closed inner group.
     pub alt_scope_marks: Vec<usize>,
+    /// Cluster 1C — active non-atomic positive lookahead body
+    /// scopes. Pushed by `NaplaScopeBegin`, peeked by
+    /// `NaplaRestorePos` (saved_pos) and `OpCode::Accept`
+    /// (start_ip/end_ip range). Truncated on backtrack via
+    /// `BacktrackFrame.napla_scope_len`. The scope stack lingers
+    /// across body alt re-entries (peek-don't-pop) so ACCEPT can
+    /// be redirected each time, and is rolled back by the backtrack
+    /// machinery when execution backtracks past the corresponding
+    /// `NaplaScopeBegin`.
+    pub napla_scope_stack: Vec<NaplaScope>,
     /// PCRE2 NOTEMPTY_ATSTART: when set, the engine rejects matches
     /// that span zero bytes at the search-start position. Used by
     /// `find_all_scanning_from` after an empty match to retry at the
@@ -858,6 +879,28 @@ pub struct ExecContext<'a> {
     /// the same anchor (e.g. `(?<=abc)(|def)` produces both `<>` and
     /// `<def>` at the post-`abc` position).
     pub notempty_atstart: bool,
+}
+
+/// Cluster 1C — non-atomic positive lookahead body scope record.
+/// `start_ip` / `end_ip` describe the body's bytecode range so
+/// `OpCode::Accept` can detect "we're inside a napla body" by
+/// instruction pointer (the inline-body codegen reuses the outer
+/// dispatch loop, so a flag-based approach would mis-fire on outer
+/// ACCEPTs after the assertion completes). `saved_pos` is the
+/// pre-body text position that `NaplaRestorePos` peeks-and-restores.
+/// `backtrack_stack_len` and `alt_boundaries_len` are the backtrack
+/// stack lengths at scope entry; `OpCode::Accept` truncates the
+/// stacks to these lengths to commit the assertion (PCRE2 spec:
+/// "When (*ACCEPT) occurs within a positive assertion, the
+/// matching is committed at that point") so the body's pending
+/// alt-frames cannot be retried via outer-driven backtrack.
+#[derive(Debug, Clone, Copy)]
+pub struct NaplaScope {
+    pub start_ip: u32,
+    pub end_ip: u32,
+    pub saved_pos: usize,
+    pub backtrack_stack_len: usize,
+    pub alt_boundaries_len: usize,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -894,6 +937,13 @@ pub struct BacktrackFrame {
     /// abandoned branch are unwound. Zero for non-lazy contexts —
     /// truncating to 0 from an already-shorter stack is a no-op.
     pub lazy_iter_save_len: usize,
+    /// Cluster 1C — length of `ctx.napla_scope_stack` at frame-push
+    /// time. On backtrack-restore, the napla scope stack is
+    /// truncated to this length so a body whose `NaplaScopeBegin`
+    /// has been backtracked past loses its scope record. Without
+    /// this rollback, the scope would leak past the assertion and
+    /// scope an outer ACCEPT incorrectly.
+    pub napla_scope_len: usize,
 }
 
 /// Match result with full capture information
@@ -1368,6 +1418,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -1520,6 +1571,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -1609,6 +1661,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -1681,6 +1734,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         // Scan through positions looking for one that hits end-of-input.
@@ -2757,6 +2811,7 @@ impl RegexVM {
             saved_code_result: ctx.code_result.clone(),
             saved_match_start_override: ctx.match_start_override,
             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+            napla_scope_len: ctx.napla_scope_stack.len(),
         }
     }
 
@@ -2822,6 +2877,11 @@ impl RegexVM {
         // `StarLazyContinue` hook in the surviving path sees the
         // correct pre-body pos for its loop.
         ctx.lazy_iter_save.truncate(frame.lazy_iter_save_len);
+        // Cluster 1C — truncate the napla scope stack to the length
+        // captured at frame push. Any `NaplaScopeBegin` pushes that
+        // happened on the abandoned branch are unwound so an outer
+        // ACCEPT after the assertion isn't mis-scoped.
+        ctx.napla_scope_stack.truncate(frame.napla_scope_len);
     }
 
     /// Restore a previously saved execution state if backtracking is available.
@@ -2923,6 +2983,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         }
     }
 
@@ -3404,6 +3465,31 @@ impl RegexVM {
                 }
 
                 OpCode::Accept => {
+                    // (*ACCEPT) inside a `(*napla:...)` body is
+                    // scoped to the assertion per PCRE2 docs: "If
+                    // (*ACCEPT) is inside a positive assertion, the
+                    // assertion succeeds." Detect "we're inside a
+                    // napla body" by checking whether the current ip
+                    // falls in the topmost scope's [start_ip, end_ip)
+                    // range; if so, jump to the matching
+                    // NaplaRestorePos byte (= scope.end_ip) so the
+                    // assertion exits via the standard epilogue.
+                    if let Some(&scope) = ctx.napla_scope_stack.last() {
+                        if (ip as u32) >= scope.start_ip && (ip as u32) < scope.end_ip {
+                            // Commit the assertion: PCRE2 spec
+                            // "matching is committed at that point" —
+                            // drop body-pushed backtrack frames (alt
+                            // frames, quantifier frames, …) so the
+                            // outer match can't backtrack INTO the
+                            // assertion body. Captures set on this
+                            // path live forward (per PCRE2 napla
+                            // capture-leakage semantics).
+                            ctx.backtrack_stack.truncate(scope.backtrack_stack_len);
+                            ctx.alt_boundaries.truncate(scope.alt_boundaries_len);
+                            ip = scope.end_ip as usize;
+                            continue;
+                        }
+                    }
                     // (*ACCEPT): like `Match` at the top level, but
                     // the flag tells any enclosing
                     // `execute_subexpr_inner` run to also return
@@ -3710,6 +3796,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                         match_count += 1;
                         trace_log!(
@@ -3782,6 +3869,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -3826,6 +3914,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -3864,6 +3953,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -3906,6 +3996,7 @@ impl RegexVM {
                             saved_code_result: probe_ctx.code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -3970,6 +4061,7 @@ impl RegexVM {
                             saved_code_result: after_first_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -4158,6 +4250,7 @@ impl RegexVM {
                                 saved_code_result,
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
                             });
                         }
                         continue;
@@ -4208,6 +4301,7 @@ impl RegexVM {
                                 saved_code_result,
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
                             });
                         }
                         continue;
@@ -4236,6 +4330,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
                 }
@@ -4262,6 +4357,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     };
                     let new_idx = ctx.backtrack_stack.len();
                     ctx.backtrack_stack.push(backtrack_frame);
@@ -4379,6 +4475,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     });
                     ip = block_end;
                 }
@@ -4412,6 +4509,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
                     // Zero-width body or post-push: ip already points
@@ -4443,21 +4541,42 @@ impl RegexVM {
 
                 OpCode::NaplaRestorePos => {
                     // Cluster 1C — non-atomic positive lookahead body
-                    // epilogue. Pops the saved pre-body pos and
+                    // epilogue. Peeks the topmost napla scope and
                     // restores ctx.pos so the assertion is observed
                     // as zero-width by what follows. Body's alt-frames
                     // remain on the outer ctx.backtrack_stack so the
                     // surrounding match attempt can backtrack INTO the
-                    // assertion body.
-                    // Peek (don't pop) — body alt-frames retried via
-                    // backtrack will re-run NaplaRestorePos and need
-                    // the same saved pos. The save lingers on the
-                    // stack until ctx is reset between match attempts;
-                    // that pollution is harmless because each scan
-                    // start re-creates ctx.
-                    if let Some(&saved) = ctx.lazy_iter_save.last() {
-                        ctx.pos = saved;
+                    // assertion body — alt re-entries re-run
+                    // NaplaRestorePos and need the same saved_pos
+                    // (peek-don't-pop). The scope is rolled back via
+                    // BacktrackFrame.napla_scope_len when execution
+                    // backtracks past the matching NaplaScopeBegin.
+                    if let Some(scope) = ctx.napla_scope_stack.last() {
+                        ctx.pos = scope.saved_pos;
                     }
+                }
+
+                OpCode::NaplaScopeBegin => {
+                    // Cluster 1C — push a scope record so ACCEPT
+                    // inside the body redirects to NaplaRestorePos
+                    // instead of bubbling up. 4-byte LE operand =
+                    // body byte length.
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let body_len =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    let start_ip = ip; // body start
+                    let end_ip = ip + body_len; // NaplaRestorePos byte
+                    ctx.napla_scope_stack.push(NaplaScope {
+                        start_ip: start_ip as u32,
+                        end_ip: end_ip as u32,
+                        saved_pos: ctx.pos,
+                        backtrack_stack_len: ctx.backtrack_stack.len(),
+                        alt_boundaries_len: ctx.alt_boundaries.len(),
+                    });
                 }
 
                 // TODO: Implement remaining opcodes
@@ -5203,6 +5322,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         let mut matches = Vec::new();
@@ -5551,6 +5671,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -5718,6 +5839,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            napla_scope_stack: Vec::new(),
             atomic_depth: 0,
             pending_alt_revival: None,
             lazy_iter_save: Vec::new(),
@@ -6025,6 +6147,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     });
                     ip = block_end;
                 }
@@ -6047,6 +6170,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
                 }
@@ -6064,15 +6188,26 @@ impl RegexVM {
                 }
                 OpCode::NaplaRestorePos => {
                     // Cluster 1C — napla body epilogue (subexpr path).
-                    // Peek (don't pop) — body alt-frames retried via
-                    // backtrack will re-run NaplaRestorePos and need
-                    // the same saved pos. The save lingers on the
-                    // stack until ctx is reset between match attempts;
-                    // that pollution is harmless because each scan
-                    // start re-creates ctx.
-                    if let Some(&saved) = ctx.lazy_iter_save.last() {
-                        ctx.pos = saved;
+                    // Peek-don't-pop the napla scope and restore pos.
+                    if let Some(scope) = ctx.napla_scope_stack.last() {
+                        ctx.pos = scope.saved_pos;
                     }
+                }
+                OpCode::NaplaScopeBegin => {
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let body_len =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    ctx.napla_scope_stack.push(NaplaScope {
+                        start_ip: ip as u32,
+                        end_ip: (ip + body_len) as u32,
+                        saved_pos: ctx.pos,
+                        backtrack_stack_len: ctx.backtrack_stack.len(),
+                        alt_boundaries_len: ctx.alt_boundaries.len(),
+                    });
                 }
                 OpCode::Char => {
                     if let Some(expected) = Self::read_char_operand(code, &mut ip) {
@@ -6196,6 +6331,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                         ip = target1;
                     } else {
@@ -6218,6 +6354,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                         ip = target2;
                     } else {
@@ -6499,6 +6636,7 @@ impl RegexVM {
                                 saved_code_result,
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
                             });
                         }
                         continue;
@@ -6534,6 +6672,7 @@ impl RegexVM {
                                     saved_code_result,
                                     saved_match_start_override,
                                     lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                    napla_scope_len: ctx.napla_scope_stack.len(),
                                 });
                             }
                         } else {
@@ -7180,6 +7319,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     });
                     if matches!(op, OpCode::AltSplit) {
                         local_alt_boundaries.push(pushed_idx);
@@ -7202,6 +7342,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     });
                     ip += offset;
                 }
@@ -7253,6 +7394,7 @@ impl RegexVM {
                                 saved_code_result,
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
                             });
                         }
                         continue;
@@ -7323,6 +7465,7 @@ impl RegexVM {
                                 saved_code_result,
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
                             });
                         }
                         continue;
@@ -7363,6 +7506,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -7401,6 +7545,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -7452,6 +7597,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -7483,6 +7629,7 @@ impl RegexVM {
                             saved_code_result: probe_ctx.code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -7544,6 +7691,7 @@ impl RegexVM {
                             saved_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -7592,6 +7740,7 @@ impl RegexVM {
                             saved_code_result: after_first_code_result,
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
 
@@ -7628,6 +7777,7 @@ impl RegexVM {
                         saved_code_result: ctx.code_result.clone(),
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
                     });
                     ip = block_end;
                 }
@@ -7651,6 +7801,7 @@ impl RegexVM {
                             saved_code_result: ctx.code_result.clone(),
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
                         });
                     }
                 }
@@ -7670,15 +7821,25 @@ impl RegexVM {
 
                 OpCode::NaplaRestorePos => {
                     // Cluster 1C — napla body epilogue (continuation path).
-                    // Peek (don't pop) — body alt-frames retried via
-                    // backtrack will re-run NaplaRestorePos and need
-                    // the same saved pos. The save lingers on the
-                    // stack until ctx is reset between match attempts;
-                    // that pollution is harmless because each scan
-                    // start re-creates ctx.
-                    if let Some(&saved) = ctx.lazy_iter_save.last() {
-                        ctx.pos = saved;
+                    if let Some(scope) = ctx.napla_scope_stack.last() {
+                        ctx.pos = scope.saved_pos;
                     }
+                }
+                OpCode::NaplaScopeBegin => {
+                    if ip + 3 >= code.len() {
+                        return false;
+                    }
+                    let body_len =
+                        u32::from_le_bytes([code[ip], code[ip + 1], code[ip + 2], code[ip + 3]])
+                            as usize;
+                    ip += 4;
+                    ctx.napla_scope_stack.push(NaplaScope {
+                        start_ip: ip as u32,
+                        end_ip: (ip + body_len) as u32,
+                        saved_pos: ctx.pos,
+                        backtrack_stack_len: ctx.backtrack_stack.len(),
+                        alt_boundaries_len: ctx.alt_boundaries.len(),
+                    });
                 }
 
                 OpCode::Match => {
@@ -9230,8 +9391,20 @@ impl OptimizingCompiler {
                 // (LookaheadNeg) for now; that family needs a
                 // different control-flow shape (multi-step jump).
                 if *non_atomic && *positive {
-                    self.emit_op(OpCode::SaveLazyPos);
+                    // Layout: NaplaScopeBegin <body_len LE u32> <body inline> NaplaRestorePos
+                    // The scope record carries (start_ip = body_start,
+                    // end_ip = NaplaRestorePos byte, saved_pos =
+                    // pre-body ctx.pos). NaplaRestorePos peek-restores
+                    // the pos; ACCEPT inside the body's IP range
+                    // redirects to NaplaRestorePos via the scope.
+                    self.emit_op(OpCode::NaplaScopeBegin);
+                    let off_pos = self.code.len();
+                    self.code.extend_from_slice(&[0u8; 4]); // placeholder
+                    let body_start = self.code.len();
                     self.codegen_pass(expr, false);
+                    let body_len = self.code.len() - body_start;
+                    self.code[off_pos..off_pos + 4]
+                        .copy_from_slice(&(body_len as u32).to_le_bytes());
                     self.emit_op(OpCode::NaplaRestorePos);
                     return;
                 }
@@ -10671,6 +10844,10 @@ impl OptimizingCompiler {
                     // SaveLazyPos / loop entry. No char-class id to remap.
                     ip += 2;
                 }
+                OpCode::NaplaScopeBegin => {
+                    // 4-byte LE body-length operand. No char-class id.
+                    ip += 4;
+                }
                 OpCode::Mark | OpCode::VerbSkipNamed => {
                     // Skip the length-prefixed name operand. Both
                     // (*MARK:name) and (*SKIP:name) (A11) encode the
@@ -10943,11 +11120,11 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
         Backref, BackrefCaseInsensitive, Call, CallReturning, Char, CharClass, CharClassNeg,
         CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
         GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
-        LookbehindNeg, Mark, Match, MatchReset, NaplaRestorePos, NonWordBoundary, PlusGreedy,
-        PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos,
-        SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
-        StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine, StartText, Then,
-        VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
+        LookbehindNeg, Mark, Match, MatchReset, NaplaRestorePos, NaplaScopeBegin, NonWordBoundary,
+        PlusGreedy, PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd,
+        SaveLazyPos, SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy,
+        StarGreedy, StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine,
+        StartText, Then, VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
     t[0x00] = Some(Char);
@@ -11003,6 +11180,7 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
     t[0x88] = Some(StarLazyBlock);
     t[0x89] = Some(StarGreedyContinue);
     t[0x8A] = Some(NaplaRestorePos);
+    t[0x8B] = Some(NaplaScopeBegin);
     t[0x90] = Some(SetAlternative);
     t[0xA0] = Some(Commit);
     t[0xA1] = Some(Prune);
