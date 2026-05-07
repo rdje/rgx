@@ -2392,6 +2392,13 @@ fn resolve_modifiers(full: &str) -> Result<EffectiveOptions, &'static str> {
     ];
 
     for piece in full.split(',') {
+        // Trim surrounding whitespace before classifying. pcre2test
+        // tolerates trailing spaces on modifier strings (testinput1:
+        // 6450 `/.../xi ` is the canonical example); without
+        // trimming the bundle-detection below sees `xi ` and the
+        // space disqualifies it from `is_short_bundle`, dropping
+        // both `x` and `i` to the unrecognised-named-modifier path.
+        let piece = piece.trim();
         // pcre2test disambiguates short bundles vs named modifiers:
         // a piece is a short bundle ONLY if its chars are all distinct
         // short-flags. Repeated chars like `xx` / `nn` / `rr` fall to
@@ -3210,8 +3217,8 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    const PASS_BASELINE: usize = 12_789;
-    const FAIL_BASELINE: usize = 21;
+    const PASS_BASELINE: usize = 12_790;
+    const FAIL_BASELINE: usize = 20;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Conformance harness: trim trailing whitespace before short-bundle modifier check (+1 pass, ratchet 12,790/20)
+- Scope: `rgx-core/tests/pcre2_conformance.rs` — modifier-classification bug, not an engine fix.
+- pcre2test tolerates trailing whitespace on the modifier portion of a pattern line (`/.../xi `). The harness's `is_short_bundle` heuristic failed on the trailing space because ` ` isn't in `SHORT_FLAGS`; both `x` and `i` then routed through the unrecognised-named-modifier path and dropped silently. RGX compiled the pattern WITHOUT `/x` (so the literal `   ` before `\.` became required match content) and WITHOUT `/i`, producing a no-match where PCRE2 + my isolated probe both matched.
+- Fix: trim each comma-separated piece before the SHORT_FLAGS membership check.
+- Closes testinput1:6450 (`(?(DEFINE) (?<word> \w+ ) ) ( (?&word)* )   \./xi ` on `"pokus."` → match `"pokus."`). Sibling 6447 already passed because that pattern lacks the trailing space — the issue was specifically about the harness's modifier parsing tripping on the space.
+- Validation: `cargo fmt -p rgx-core`, conformance NEW BASELINE **12,790 / 20 / 0 / 0** (was 12,789/21). FN 9 → 7, SM 8 → 8 (+1 from 6450 closing FN, but 3910 SM was previously reclassified — net SM unchanged).
+
 ### 2026-05-08 - PGEN-RGX-0084: forward-reference `\NN` parsed as backref instead of octal
 - Filed `pgen-issues/PGEN-RGX-0084.yaml` for PCRE2 conformance failure testinput1:3910 — `()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+` on "bXXaYYaY" expects "bX" (PCRE2) but RGX matches "bXXaYYaY". PGEN's typed AST emits `\10` as `{kind:"numeric",type:"backreference",index:10}` even though only nine groups have been opened at the parse position; PCRE2 spec routes such forward references to the octal escape `\010` (= U+0008 BACKSPACE), which is absent from the subject and short-circuits the conditional then-branch.
 - Artifact bundle in `pgen-issues/artifacts/PGEN-RGX-0084/ast_dump.json` (PGEN AST dump for the offending pattern).

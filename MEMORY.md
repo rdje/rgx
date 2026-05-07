@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Conformance harness fix: trim trailing space before short-bundle modifier check (+1 pass, ratchet 12,790/20)
+- `pcre2_conformance.rs` `is_short_bundle` rejected `xi ` (trailing space) because ` ` not in SHORT_FLAGS. Both /x and /i were silently dropped → RGX compiled pattern with literal-space requirement → no match. Trim each comma-separated piece before the SHORT_FLAGS check. Closes testinput1:6450. Cumulative session: 12,737/73 → 12,790/20 (+53 passes).
+
 ### 2026-05-08 — Filed PGEN-RGX-0084: forward-reference `\NN` parses as backref instead of octal
 - testinput1:3910 SM. PCRE2 spec: at parse position of `\NN`, if only K < N groups have been opened so far, treat as octal `\NN` (codepoint 0..63). PGEN counts the WHOLE-PATTERN total (10) instead. Filed; awaiting upstream fix. No RGX change per the no-PGEN-workarounds doctrine.
 
