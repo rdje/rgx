@@ -3485,6 +3485,22 @@ impl RegexVM {
                         }
                         return false;
                     }
+                    // Reject matches where `\K` shifted match_start
+                    // past the current end. PCRE2 spec: when `\K`
+                    // inside a lookaround/subroutine leaves
+                    // match_start > match_end, the match is
+                    // discarded — testinput2:6433 / 6439a
+                    // (`(?=…(?1)…)x(\K){0}` pattern: \K-in-(?1)
+                    // shifts match_start past the lookahead but the
+                    // outer match ends before that pos).
+                    if let Some(override_start) = ctx.match_start_override {
+                        if override_start > ctx.pos {
+                            if self.try_backtrack(ctx, &mut ip) {
+                                continue;
+                            }
+                            return false;
+                        }
+                    }
                     return true;
                 }
 
@@ -8043,6 +8059,22 @@ impl RegexVM {
                 ctx.captures = assertion_ctx.captures;
             }
             ctx.capture_trail = assertion_ctx.capture_trail;
+            // Propagate `\K`-driven match_start override from a
+            // successful assertion body. PCRE2 semantic
+            // (testinput2:6433 / 6439): a `\K` reached via a
+            // subroutine call inside a lookaround leaks its
+            // match_start to the outer match — PGEN already rejects
+            // direct `\K` inside lookarounds (parse-contract), so
+            // the only way the override is set here is through a
+            // subroutine call, where PCRE2 lets the effect bubble.
+            // Combined with the "match_start > match_end" rejection
+            // in `OpCode::Match` dispatch, this gives PCRE2-correct
+            // behaviour: when the resulting span is valid the match
+            // succeeds with the shifted start; when it's invalid
+            // the match is discarded.
+            if assertion_ctx.match_start_override.is_some() {
+                ctx.match_start_override = assertion_ctx.match_start_override;
+            }
         }
         // `(*COMMIT)` and `(*SKIP)` inside a FAILING **positive**
         // assertion propagate to the outer match. PCRE2 semantic
@@ -8680,6 +8712,14 @@ pub struct OptimizingCompiler {
     /// When true, `*` / `+` / `?` / `{n,m}` default to lazy; `*?` / `+?`
     /// etc. default to greedy. Toggle-flip semantics.
     swap_greed: bool,
+    /// Cluster — `\K` is a no-op inside lookarounds and inside
+    /// subroutine call bodies per pcre2pattern(3): "PCRE2 does not
+    /// support the use of \K in lookaround assertions or in code
+    /// that is called as a subroutine". Set when codegen recurses
+    /// into a Lookahead/Lookbehind body or a subroutine body so the
+    /// `Regex::MatchReset` arm can suppress the `OpCode::MatchReset`
+    /// emission. Closes testinput2:6433 / 6439.
+    suppress_match_reset: bool,
     /// Newline convention for the `^` / `$` line-anchor opcodes
     /// under `/m`. Set at the compiler boundary from the pattern's
     /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
@@ -8950,6 +8990,7 @@ impl OptimizingCompiler {
             dotall: false,
             case_insensitive: false,
             swap_greed: false,
+            suppress_match_reset: false,
             newline_mode: VmNewlineMode::Lf,
             ucp_enabled: false,
         };
@@ -9425,7 +9466,11 @@ impl OptimizingCompiler {
                     let off_pos = self.code.len();
                     self.code.extend_from_slice(&[0u8; 4]); // placeholder
                     let body_start = self.code.len();
+                    // PCRE2 ignores `\K` inside lookarounds.
+                    let saved_suppress = self.suppress_match_reset;
+                    self.suppress_match_reset = true;
                     self.codegen_pass(expr, false);
+                    self.suppress_match_reset = saved_suppress;
                     let body_len = self.code.len() - body_start;
                     self.code[off_pos..off_pos + 4]
                         .copy_from_slice(&(body_len as u32).to_le_bytes());
@@ -9444,7 +9489,7 @@ impl OptimizingCompiler {
                 // for bodies > 255 bytes — `(?<=(\d{1,255}))X` and similar
                 // bounded-repetition lookbehinds blew through it. The
                 // dispatch reads the same width.)
-                let sub_code = self.compile_inline_subexpr(expr);
+                let sub_code = self.compile_lookaround_body(expr);
                 assert!(
                     sub_code.len() <= u16::MAX as usize,
                     "lookahead body bytecode exceeds 65535 bytes ({} bytes); \
@@ -9482,7 +9527,7 @@ impl OptimizingCompiler {
 
                 // 2-byte LE length prefix; see Lookahead arm above for
                 // the rationale.
-                let sub_code = self.compile_inline_subexpr(expr);
+                let sub_code = self.compile_lookaround_body(expr);
                 assert!(
                     sub_code.len() <= u16::MAX as usize,
                     "lookbehind body bytecode exceeds 65535 bytes ({} bytes); \
@@ -10224,7 +10269,13 @@ impl OptimizingCompiler {
             }
 
             Regex::MatchReset => {
-                self.emit_op(OpCode::MatchReset);
+                if !self.suppress_match_reset {
+                    self.emit_op(OpCode::MatchReset);
+                }
+                // PCRE2: `\K` inside a lookaround / subroutine body
+                // is silently ignored. The `suppress_match_reset`
+                // flag is set by `compile_nested_code` for those
+                // contexts. testinput2:6433 / 6439.
             }
 
             Regex::GraphemeCluster => {
@@ -10359,7 +10410,8 @@ impl OptimizingCompiler {
     fn emit_subexpr_opcode(&mut self, op: OpCode, expr: &Regex) {
         self.emit_op(op);
 
-        let sub_code = self.compile_nested_code(expr, self.group_counter);
+        let sub_code =
+            self.compile_nested_code(expr, self.group_counter, self.suppress_match_reset);
 
         self.code.push(sub_code.len() as u8);
         self.code.extend(sub_code);
@@ -10470,15 +10522,28 @@ impl OptimizingCompiler {
     }
 
     fn compile_inline_subexpr(&mut self, expr: &Regex) -> Vec<u8> {
-        self.compile_nested_code(expr, self.group_counter)
+        self.compile_nested_code(expr, self.group_counter, self.suppress_match_reset)
     }
 
-    fn compile_nested_code(&mut self, expr: &Regex, starting_group_counter: u32) -> Vec<u8> {
+    /// Compile a lookaround/lookbehind body. PCRE2 silently ignores
+    /// `\K` inside lookarounds, so the flag is forced on for the
+    /// duration of the nested compile.
+    fn compile_lookaround_body(&mut self, expr: &Regex) -> Vec<u8> {
+        self.compile_nested_code(expr, self.group_counter, true)
+    }
+
+    fn compile_nested_code(
+        &mut self,
+        expr: &Regex,
+        starting_group_counter: u32,
+        suppress_match_reset: bool,
+    ) -> Vec<u8> {
         let mut sub_compiler = OptimizingCompiler::with_named_groups(self.named_groups.clone());
         sub_compiler.group_counter = starting_group_counter;
         sub_compiler.multiline = self.multiline;
         sub_compiler.dotall = self.dotall;
         sub_compiler.case_insensitive = self.case_insensitive;
+        sub_compiler.suppress_match_reset = suppress_match_reset;
         sub_compiler.codegen_pass(expr, false);
 
         let mut sub_code = sub_compiler.code;
@@ -10557,10 +10622,11 @@ impl OptimizingCompiler {
         let max_group_id = defs.iter().map(|(id, _)| *id).max().unwrap_or(0);
         let size = (self.group_counter.max(max_group_id) as usize) + 1;
         let mut subroutines = vec![Vec::new(); size];
-        subroutines[0] = self.compile_nested_code(ast, 0);
+        subroutines[0] = self.compile_nested_code(ast, 0, false);
 
         for (group_id, group_ast) in defs {
-            subroutines[group_id as usize] = self.compile_nested_code(&group_ast, group_id - 1);
+            subroutines[group_id as usize] =
+                self.compile_nested_code(&group_ast, group_id - 1, false);
         }
 
         subroutines

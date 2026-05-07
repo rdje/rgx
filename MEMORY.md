@@ -294,6 +294,10 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-07 — Engine: \K-in-lookaround propagation + match_start>end rejection (+3 passes, ratchet 12,787/23)
+- `execute_assertion_subexpr` now leaks `assertion_ctx.match_start_override` to outer ctx on body success; `OpCode::Match` rejects when override > current pos. PGEN parse-contract guarantees the override can only come from a subroutine called inside the assertion. Closes testinput2:6433 / 6439 family.
+- Added `OptimizingCompiler.suppress_match_reset` + `compile_lookaround_body` as defensive plumbing for future direct `\K` cases. Cumulative session: 12,737/73 → 12,787/23 (+50 passes).
+
 ### 2026-05-07 — Engine: ANYCRLF treats CRLF as single newline unit (+1 pass, ratchet 12,784/26)
 - `VmNewlineMode::Anycrlf` is_line_start_before/is_line_end_at now mirror `Any`'s CRLF-pair handling: ^/$ don't fire mid-CRLF. Closes testinput2:5122 substitute. Cumulative session: 12,737/73 → 12,784/26 (+47 passes).
 

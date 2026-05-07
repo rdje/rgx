@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: \K inside lookarounds (via subroutine) leaks then validates at Match (+3 passes, ratchet 12,787/23)
+- Scope: PCRE2 spec note "PCRE2 does not support the use of `\K` in lookaround assertions or in code that is called as a subroutine" — empirically PCRE2 LEAKS the match_start override from a subroutine call inside a lookaround, then rejects the match if `match_start > match_end`. Family fix.
+- Two coordinated changes:
+  - `execute_assertion_subexpr` now propagates `assertion_ctx.match_start_override` to the outer ctx on a SUCCESSFUL body. PGEN already rejects direct `\K` inside a lookaround (parse-contract), so the override here can only have been set by a subroutine call inside the assertion — exactly the PCRE2 leak case.
+  - `OpCode::Match` (main dispatch) now rejects matches where `match_start_override > ctx.pos` (the effective end), routing through `try_backtrack` so the match attempt fails properly. PCRE2-correct: when the post-leak span is valid the match succeeds with the shifted start; when it's invalid (e.g. `\d*` consumed nothing but `\K` shifted start past it) the match is discarded.
+- Closes:
+  - testinput2:6433 (`(?=.{10}(?1))x(\K){0}` on `"x1234567890"` — PCRE2 no match, was RGX FP).
+  - testinput2:6439a FP (`(?=.{5}(?1))\d*(\K){0}` on `"abcdefgh"` — PCRE2 no match).
+  - testinput2:6439b SM (`(?=.{5}(?1))\d*(\K){0}` on `"1234567890"` — PCRE2="67890", RGX now produces same span; was matching whole subject).
+- Also added `OptimizingCompiler.suppress_match_reset` plumbing as a defensive belt: a new `compile_lookaround_body` helper sets the flag on lookahead/lookbehind body sub-compiles and inline napla codegen, so any future direct-`\K`-in-lookaround that PGEN might admit would silently no-op rather than mis-fire.
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,787 / 23 / 0 / 0** (was 12,784/26). FP 3 → 1, SM 9 → 8.
+
 ### 2026-05-07 - Engine: ANYCRLF newline mode treats CRLF as single unit (+1 pass, ratchet 12,784/26)
 - Scope: `VmNewlineMode::Anycrlf` was firing `^` after BOTH halves of a `\r\n` pair (and `$` before both halves), producing too many empty-line matches under `^$/gm,newline=anycrlf`. PCRE2 spec: `\r\n` is a single newline UNIT — `^` only fires after `\n` of a CRLF pair, not after the `\r` mid-pair. Family fix.
 - `is_line_start_before` and `is_line_end_at` for `Anycrlf` now mirror `Any`'s CRLF-aware logic: a `\r` immediately followed by `\n` is mid-unit (not a line start after, not a line end before); a bare `\r` (next char ≠ `\n`) and bare `\n` (prev char ≠ `\r`) still fire as boundaries.
