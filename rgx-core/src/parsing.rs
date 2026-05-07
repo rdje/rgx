@@ -1057,12 +1057,14 @@ impl<'a> PgenAstAdapter<'a> {
                 if lookahead {
                     Ok(Regex::Lookahead {
                         expr: Box::new(inner),
-                        positive, non_atomic: false,
+                        positive,
+                        non_atomic: false,
                     })
                 } else {
                     Ok(Regex::Lookbehind {
                         expr: Box::new(inner),
-                        positive, non_atomic: false,
+                        positive,
+                        non_atomic: false,
                     })
                 }
             }
@@ -2626,12 +2628,14 @@ impl<'a> PgenAstAdapter<'a> {
         if is_lookahead {
             Ok(Regex::Lookahead {
                 expr: Box::new(inner),
-                positive, non_atomic: false,
+                positive,
+                non_atomic: false,
             })
         } else {
             Ok(Regex::Lookbehind {
                 expr: Box::new(inner),
-                positive, non_atomic: false,
+                positive,
+                non_atomic: false,
             })
         }
     }

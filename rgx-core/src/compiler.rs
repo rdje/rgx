@@ -914,12 +914,20 @@ impl Compiler {
                 index,
                 name,
             },
-            RegexAst::Lookahead { expr, positive, non_atomic } => RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookahead {
                 expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
                 positive,
                 non_atomic,
             },
-            RegexAst::Lookbehind { expr, positive, non_atomic } => RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookbehind {
                 expr: Box::new(Self::resolve_octal_backreferences(*expr, total_groups)),
                 positive,
                 non_atomic,
@@ -1020,12 +1028,20 @@ impl Compiler {
                 index,
                 name,
             },
-            RegexAst::Lookahead { expr, positive, non_atomic } => RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookahead {
                 expr: Box::new(Self::lower_flag_toggles(*expr)),
                 positive,
                 non_atomic,
             },
-            RegexAst::Lookbehind { expr, positive, non_atomic } => RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookbehind {
                 expr: Box::new(Self::lower_flag_toggles(*expr)),
                 positive,
                 non_atomic,
@@ -1242,12 +1258,20 @@ impl Compiler {
                 index,
                 name,
             },
-            RegexAst::Lookahead { expr, positive, non_atomic } => RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookahead {
                 expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
                 positive,
                 non_atomic,
             },
-            RegexAst::Lookbehind { expr, positive, non_atomic } => RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookbehind {
                 expr: Box::new(Self::strip_extended_inner(*expr, in_x_mode)),
                 positive,
                 non_atomic,
@@ -1354,12 +1378,20 @@ impl Compiler {
                 index,
                 name,
             },
-            RegexAst::Lookahead { expr, positive, non_atomic } => RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookahead {
                 expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
                 positive,
                 non_atomic,
             },
-            RegexAst::Lookbehind { expr, positive, non_atomic } => RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => RegexAst::Lookbehind {
                 expr: Box::new(Self::retarget_quantifiers_on_transparent(*expr)),
                 positive,
                 non_atomic,
@@ -1459,12 +1491,20 @@ impl Compiler {
                 index,
                 name,
             }),
-            RegexAst::Lookahead { expr, positive, non_atomic } => Ok(RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => Ok(RegexAst::Lookahead {
                 expr: Box::new(Self::lower_extended_char_classes(*expr)?),
                 positive,
                 non_atomic,
             }),
-            RegexAst::Lookbehind { expr, positive, non_atomic } => Ok(RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => Ok(RegexAst::Lookbehind {
                 expr: Box::new(Self::lower_extended_char_classes(*expr)?),
                 positive,
                 non_atomic,
@@ -2084,24 +2124,32 @@ impl Compiler {
             RegexAst::Group {
                 expr, kind, name, ..
             } => Self::assign_capture_indices_group(*expr, kind, name, next_group),
-            RegexAst::Lookahead { expr, positive, non_atomic } => {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
                 (
                     RegexAst::Lookahead {
                         expr: Box::new(expr),
                         positive,
-                non_atomic,
+                        non_atomic,
                     },
                     next,
                 )
             }
-            RegexAst::Lookbehind { expr, positive, non_atomic } => {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 let (expr, next) = Self::assign_capture_indices_inner(*expr, next_group);
                 (
                     RegexAst::Lookbehind {
                         expr: Box::new(expr),
                         positive,
-                non_atomic,
+                        non_atomic,
                     },
                     next,
                 )
@@ -2344,26 +2392,34 @@ impl Compiler {
                 opened_groups,
                 total_groups,
             ),
-            RegexAst::Lookahead { expr, positive, non_atomic } => {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 let (expr, opened_after_expr) =
                     Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
                 Ok((
                     RegexAst::Lookahead {
                         expr: Box::new(expr),
                         positive,
-                non_atomic,
+                        non_atomic,
                     },
                     opened_after_expr,
                 ))
             }
-            RegexAst::Lookbehind { expr, positive, non_atomic } => {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 let (expr, opened_after_expr) =
                     Self::resolve_relative_conditionals_inner(*expr, opened_groups, total_groups)?;
                 Ok((
                     RegexAst::Lookbehind {
                         expr: Box::new(expr),
                         positive,
-                non_atomic,
+                        non_atomic,
                     },
                     opened_after_expr,
                 ))
@@ -2706,7 +2762,11 @@ impl Compiler {
                 )?),
                 quantifier,
             }),
-            RegexAst::Lookahead { expr, positive, non_atomic } => Ok(RegexAst::Lookahead {
+            RegexAst::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => Ok(RegexAst::Lookahead {
                 expr: Box::new(Self::resolve_recursion_conditionals(
                     *expr,
                     total_groups,
@@ -2715,7 +2775,11 @@ impl Compiler {
                 positive,
                 non_atomic,
             }),
-            RegexAst::Lookbehind { expr, positive, non_atomic } => Ok(RegexAst::Lookbehind {
+            RegexAst::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => Ok(RegexAst::Lookbehind {
                 expr: Box::new(Self::resolve_recursion_conditionals(
                     *expr,
                     total_groups,

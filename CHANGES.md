@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: substitute empty-match retry-at-same-pos (NOTEMPTY_ATSTART, +2 passes, ratchet 12,781/29)
+- Scope: PCRE2 substitute `/g` semantic — after an empty match, retry at the SAME anchor with NOTEMPTY_ATSTART forcing a non-empty match. If a non-empty match exists at the same pos, emit it too. Family fix.
+- Why: pattern `(?<=abc)(|def)/g` with `replace=<$0>`: at the post-`abc` anchor, alt-1 (empty) wins leftmost-first. PCRE2 then retries at the same pos rejecting empty matches; alt-2 `def` matches non-empty. Both substitutions fire, yielding `abc<><def>...`. RGX previously advanced by 1 byte after the empty match, missing the non-empty retry — output was `abc<>def...`.
+- Implementation:
+  - New `ExecContext.notempty_atstart: bool` flag. When set, `OpCode::Match` rejects matches where the match span is zero bytes anchored exactly at `match_start` (no `\K` shift) and routes through `try_backtrack` to keep exploring. The override-form (\K-shifted match_start past start) is still allowed since it doesn't span zero bytes at the anchor.
+  - Both `find_all_scanning_from` (byte-prefix + class-filter branches) and the legacy `RegexVM::find_all` (memchr + class-filter branches) gained the retry: after pushing an empty match, set `notempty_atstart=true`, reset ctx, retry at the same candidate. If a non-empty match is found, push it too and advance past it. Else clear the flag and advance by 1.
+- Closes: testinput2:4268 / testinput5:1640 — `(?<=abc)(|def)/g` substitute. PCRE2-equivalent output verified.
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,781 / 29 / 0 / 0** (was 12,779/31). 1 substitute residual remains (testinput2:5122 `^$/gm` on CRLF — different family).
+- Notes/impact: `(?<=abc)(|def)/g` family probe verified directly: `re.replace_all("123abcxyzabcdef789abcpqr", "<$0>")` → `123abc<>xyzabc<><def>789abc<>pqr` (was `...abc<>def789...`). No unit-test regressions.
+
 ### 2026-05-07 - Engine: Cluster 1C napla non-atomic positive lookahead (+6 passes, ratchet 12,779/31)
 - Scope: AST extension + parser + codegen + new opcode `OpCode::NaplaRestorePos = 0x8A` + dispatch in 3 execution loops + jump-remap visitor + JIT-eligibility list. Family fix per the doctrine.
 - AST: `Regex::Lookahead` and `Regex::Lookbehind` gain a `non_atomic: bool` field. ~30 construction sites + ~10 destructure sites updated across `parsing.rs`, `compiler.rs`, `vm.rs`, `c2/nfa.rs`, `lib.rs`, `c2/classifier.rs`, `parser.rs` to thread the field through (compiler passes pass `non_atomic` through unchanged; pla forms get `non_atomic: false`, napla forms get `non_atomic: true`).

@@ -2727,7 +2727,8 @@ mod tests {
                     RegexAst::Char('a'),
                     RegexAst::Char('t'),
                 ])),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             RegexAst::Char('c'),
         ]);
@@ -2744,7 +2745,8 @@ mod tests {
         let ast = RegexAst::Sequence(vec![
             RegexAst::Lookahead {
                 expr: Box::new(RegexAst::Char('x')),
-                positive: false, non_atomic: false,
+                positive: false,
+                non_atomic: false,
             },
             RegexAst::Dot,
         ]);
@@ -2764,7 +2766,8 @@ mod tests {
                     RegexAst::Char('a'),
                     RegexAst::Char('t'),
                 ])),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             RegexAst::Char('d'),
         ]);
@@ -2783,7 +2786,8 @@ mod tests {
         let ast = RegexAst::Sequence(vec![
             RegexAst::Lookbehind {
                 expr: Box::new(RegexAst::Char('x')),
-                positive: false, non_atomic: false,
+                positive: false,
+                non_atomic: false,
             },
             RegexAst::Char('a'),
         ]);

@@ -496,7 +496,8 @@ mod tests {
         assert_needs_vm(
             &Regex::Lookahead {
                 expr: Box::new(lit('a')),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             ExclusionReason::Lookaround,
         );
@@ -507,7 +508,8 @@ mod tests {
         assert_needs_vm(
             &Regex::Lookahead {
                 expr: Box::new(lit('a')),
-                positive: false, non_atomic: false,
+                positive: false,
+                non_atomic: false,
             },
             ExclusionReason::Lookaround,
         );
@@ -518,7 +520,8 @@ mod tests {
         assert_needs_vm(
             &Regex::Lookbehind {
                 expr: Box::new(lit('a')),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             ExclusionReason::Lookaround,
         );
@@ -529,7 +532,8 @@ mod tests {
         assert_needs_vm(
             &Regex::Lookbehind {
                 expr: Box::new(lit('a')),
-                positive: false, non_atomic: false,
+                positive: false,
+                non_atomic: false,
             },
             ExclusionReason::Lookaround,
         );
@@ -632,7 +636,8 @@ mod tests {
         let ast = quantified(
             Regex::Lookahead {
                 expr: Box::new(lit('a')),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             Quantifier::ZeroOrMore { lazy: false },
         );
@@ -673,7 +678,8 @@ mod tests {
         let ast = seq(vec![
             Regex::Lookahead {
                 expr: Box::new(lit('a')),
-                positive: true, non_atomic: false,
+                positive: true,
+                non_atomic: false,
             },
             Regex::Backreference(1),
         ]);

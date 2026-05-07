@@ -850,6 +850,14 @@ pub struct ExecContext<'a> {
     /// *lexically* enclosing alternation instead of any still-on-
     /// stack alt frame from a closed inner group.
     pub alt_scope_marks: Vec<usize>,
+    /// PCRE2 NOTEMPTY_ATSTART: when set, the engine rejects matches
+    /// that span zero bytes at the search-start position. Used by
+    /// `find_all_scanning_from` after an empty match to retry at the
+    /// same position forcing a non-empty match — the PCRE2 substitute
+    /// `/g` semantic that emits both empty and non-empty matches at
+    /// the same anchor (e.g. `(?<=abc)(|def)` produces both `<>` and
+    /// `<def>` at the post-`abc` position).
+    pub notempty_atstart: bool,
 }
 
 /// Backtracking frame for alternation and quantifiers
@@ -1359,6 +1367,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         // Adaptive strategy selection based on program characteristics
@@ -1510,6 +1519,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         // For offset scans, always use the scanning path (anchored / SIMD
@@ -1598,6 +1608,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         self.find_all_scanning_from(&mut ctx, start)
@@ -1669,6 +1680,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         // Scan through positions looking for one that hits end-of-input.
@@ -2288,7 +2300,41 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                     ctx.previous_match_end = Some(m_end);
-                    offset = m_end.max(candidate + 1);
+                    let mut next_offset = m_end.max(candidate + 1);
+                    // PCRE2 NOTEMPTY_ATSTART retry: after an empty
+                    // match, retry at the same anchor forcing
+                    // non-empty. If a non-empty match is found, emit
+                    // it too — `(?<=abc)(|def)/g` produces both `<>`
+                    // and `<def>` at the post-`abc` anchor.
+                    if m_start == m_end {
+                        ctx.notempty_atstart = true;
+                        ctx.pos = candidate;
+                        ctx.match_start = candidate;
+                        ctx.match_start_override = None;
+                        ctx.code_result = None;
+                        ctx.current_alternative = None;
+                        Self::reset_captures(ctx);
+                        let retry_matched = self.execute_at(ctx, candidate);
+                        ctx.notempty_atstart = false;
+                        if retry_matched {
+                            let r_start = ctx.match_start_override.unwrap_or(candidate);
+                            let r_end = ctx.pos;
+                            if r_start != r_end || r_start != candidate {
+                                last_match_end = Some(r_end);
+                                matches.push(Match {
+                                    start: r_start,
+                                    end: r_end,
+                                    groups: self.extract_captures_with_match(ctx, r_start, r_end),
+                                    matched_alternative: ctx.current_alternative,
+                                    code_result: ctx.code_result.clone(),
+                                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
+                                });
+                                ctx.previous_match_end = Some(r_end);
+                                next_offset = r_end.max(candidate + 1);
+                            }
+                        }
+                    }
+                    offset = next_offset;
                 } else if let Some(skip_pos) = ctx.skip_position.take() {
                     // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
                     offset = skip_pos.max(candidate + 1);
@@ -2343,7 +2389,36 @@ impl RegexVM {
                         last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
                     });
                     ctx.previous_match_end = Some(m_end);
-                    start = m_end.max(candidate + 1);
+                    let mut next_start = m_end.max(candidate + 1);
+                    if m_start == m_end {
+                        ctx.notempty_atstart = true;
+                        ctx.pos = candidate;
+                        ctx.match_start = candidate;
+                        ctx.match_start_override = None;
+                        ctx.code_result = None;
+                        ctx.current_alternative = None;
+                        Self::reset_captures(ctx);
+                        let retry_matched = self.execute_at(ctx, candidate);
+                        ctx.notempty_atstart = false;
+                        if retry_matched {
+                            let r_start = ctx.match_start_override.unwrap_or(candidate);
+                            let r_end = ctx.pos;
+                            if r_start != r_end || r_start != candidate {
+                                last_match_end = Some(r_end);
+                                matches.push(Match {
+                                    start: r_start,
+                                    end: r_end,
+                                    groups: self.extract_captures_with_match(ctx, r_start, r_end),
+                                    matched_alternative: ctx.current_alternative,
+                                    code_result: ctx.code_result.clone(),
+                                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
+                                });
+                                ctx.previous_match_end = Some(r_end);
+                                next_start = r_end.max(candidate + 1);
+                            }
+                        }
+                    }
+                    start = next_start;
                 } else if let Some(skip_pos) = ctx.skip_position.take() {
                     // PCRE2: SKIP overrides COMMIT (see find_first_scanning).
                     start = skip_pos.max(start + 1);
@@ -2847,6 +2922,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         }
     }
 
@@ -3310,6 +3386,20 @@ impl RegexVM {
 
                 OpCode::Match => {
                     debug_log!("vm", "  ✓✓ MATCH opcode reached at pos={}", ctx.pos);
+                    // PCRE2 NOTEMPTY_ATSTART: reject zero-byte matches
+                    // anchored exactly at the search-start position. The
+                    // override-form (\K shifted match_start past start)
+                    // is still allowed since it doesn't span zero bytes
+                    // at the start anchor.
+                    if ctx.notempty_atstart
+                        && ctx.match_start_override.is_none()
+                        && ctx.pos == ctx.match_start
+                    {
+                        if self.try_backtrack(ctx, &mut ip) {
+                            continue;
+                        }
+                        return false;
+                    }
                     return true;
                 }
 
@@ -5112,6 +5202,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         let mut matches = Vec::new();
@@ -5153,8 +5244,38 @@ impl RegexVM {
                     };
                     last_match_end = Some(m_end);
                     ctx.previous_match_end = Some(m_end);
-                    start = m_end.max(candidate + 1);
+                    let mut next_start = m_end.max(candidate + 1);
                     matches.push(m);
+                    if m_start == m_end {
+                        ctx.notempty_atstart = true;
+                        ctx.pos = candidate;
+                        ctx.match_start = candidate;
+                        ctx.match_start_override = None;
+                        ctx.code_result = None;
+                        ctx.current_alternative = None;
+                        Self::reset_captures(&mut ctx);
+                        let retry_matched = self.execute_at(&mut ctx, candidate);
+                        ctx.notempty_atstart = false;
+                        if retry_matched {
+                            let r_start = ctx.match_start_override.unwrap_or(candidate);
+                            let r_end = ctx.pos;
+                            if r_start != r_end || r_start != candidate {
+                                let rm = Match {
+                                    start: r_start,
+                                    end: r_end,
+                                    groups: self.extract_captures_with_match(&ctx, r_start, r_end),
+                                    matched_alternative: ctx.current_alternative,
+                                    code_result: ctx.code_result.clone(),
+                                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
+                                };
+                                last_match_end = Some(r_end);
+                                ctx.previous_match_end = Some(r_end);
+                                next_start = r_end.max(candidate + 1);
+                                matches.push(rm);
+                            }
+                        }
+                    }
+                    start = next_start;
                 } else {
                     // PCRE2 semantic: SKIP overrides COMMIT when both
                     // fire in the same branch. See find_first_scanning
@@ -5206,8 +5327,39 @@ impl RegexVM {
                     };
                     last_match_end = Some(m_end);
                     ctx.previous_match_end = Some(m_end);
-                    start = m_end.max(start + 1);
+                    let candidate = start;
+                    let mut next_start = m_end.max(candidate + 1);
                     matches.push(m);
+                    if m_start == m_end {
+                        ctx.notempty_atstart = true;
+                        ctx.pos = candidate;
+                        ctx.match_start = candidate;
+                        ctx.match_start_override = None;
+                        ctx.code_result = None;
+                        ctx.current_alternative = None;
+                        Self::reset_captures(&mut ctx);
+                        let retry_matched = self.execute_at(&mut ctx, candidate);
+                        ctx.notempty_atstart = false;
+                        if retry_matched {
+                            let r_start = ctx.match_start_override.unwrap_or(candidate);
+                            let r_end = ctx.pos;
+                            if r_start != r_end || r_start != candidate {
+                                let rm = Match {
+                                    start: r_start,
+                                    end: r_end,
+                                    groups: self.extract_captures_with_match(&ctx, r_start, r_end),
+                                    matched_alternative: ctx.current_alternative,
+                                    code_result: ctx.code_result.clone(),
+                                    last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
+                                };
+                                last_match_end = Some(r_end);
+                                ctx.previous_match_end = Some(r_end);
+                                next_start = r_end.max(candidate + 1);
+                                matches.push(rm);
+                            }
+                        }
+                    }
+                    start = next_start;
                 } else {
                     // PCRE2 semantic: SKIP overrides COMMIT when both
                     // fire in the same branch.
@@ -5398,6 +5550,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
         };
 
         self.find_first_suspendable_scanning(&mut ctx, text, 0)
@@ -5564,6 +5717,7 @@ impl RegexVM {
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
+            notempty_atstart: false,
             atomic_depth: 0,
             pending_alt_revival: None,
             lazy_iter_save: Vec::new(),
@@ -9043,7 +9197,11 @@ impl OptimizingCompiler {
                 }
             }
 
-            Regex::Lookahead { expr, positive, non_atomic } => {
+            Regex::Lookahead {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 // Cluster 1D residual: when the body unconditionally
                 // succeeds zero-width AND has no captures or MARK
                 // verbs, the assertion is a no-op (positive) or
@@ -9101,7 +9259,11 @@ impl OptimizingCompiler {
                 self.code.extend(sub_code);
             }
 
-            Regex::Lookbehind { expr, positive, non_atomic } => {
+            Regex::Lookbehind {
+                expr,
+                positive,
+                non_atomic,
+            } => {
                 // Mirror of Lookahead's body-trivially-succeeds
                 // elision (Cluster 1D residual). Positive lookbehind
                 // with empty-alt body becomes a no-op; negative
@@ -10781,11 +10943,10 @@ const fn build_opcode_table() -> [Option<OpCode>; 256] {
         Backref, BackrefCaseInsensitive, Call, CallReturning, Char, CharClass, CharClassNeg,
         CodeBlock, Commit, DigitAscii, DigitAsciiNeg, EndLine, EndText, EndTextOrNL, Fail,
         GraphemeCluster, Jump, JumpIfMatch, JumpIfNoMatch, Lookahead, LookaheadNeg, Lookbehind,
-        LookbehindNeg, Mark, Match, MatchReset, NonWordBoundary, PlusGreedy, PlusLazy,
-        PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos, SaveStart,
-        SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
-        NaplaRestorePos, StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine,
-        StartText, Then,
+        LookbehindNeg, Mark, Match, MatchReset, NaplaRestorePos, NonWordBoundary, PlusGreedy,
+        PlusLazy, PreviousMatchEnd, Prune, QuestionGreedy, QuestionLazy, SaveEnd, SaveLazyPos,
+        SaveStart, SetAlternative, SpaceAscii, SpaceAsciiNeg, Split, SplitLazy, StarGreedy,
+        StarGreedyContinue, StarLazy, StarLazyBlock, StarLazyContinue, StartLine, StartText, Then,
         VerbSkip, VerbSkipNamed, WordAscii, WordAsciiNeg, WordBoundary,
     };
     let mut t: [Option<OpCode>; 256] = [None; 256];
