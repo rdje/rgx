@@ -6245,6 +6245,77 @@ impl RegexVM {
                         ctx.atomic_depth = ctx.atomic_depth.saturating_sub(1);
                     }
                 }
+                OpCode::CallReturning => {
+                    // Subexpr-path mirror of the top-level
+                    // `CallReturning` dispatch (line 4001). PCRE2
+                    // `(?N(grouplist))` running inside a quantifier
+                    // body / lookaround / atomic group needs the
+                    // same selective-capture-leak-on-success
+                    // semantic, otherwise the opcode falls through
+                    // and the enclosing subexpr fails. Closes
+                    // testinput2:8092 family — `(?1(1,2)){2,}+` with
+                    // 3+ iterations.
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let target = code[ip] as usize;
+                    let count = code[ip + 1] as usize;
+                    ip += 2;
+                    if ip + count > code.len() {
+                        return false;
+                    }
+                    let returned: Vec<usize> =
+                        code[ip..ip + count].iter().map(|&b| b as usize).collect();
+                    ip += count;
+
+                    let saved_pos = ctx.pos;
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = ctx.call_stack.len();
+                    let saved_code_result = ctx.code_result.clone();
+                    let saved_match_start_override = ctx.match_start_override;
+
+                    if self.invoke_subroutine_inner(ctx, target, false) {
+                        let half = ctx.captures.len() / 2;
+                        let mut snapshot: Vec<(usize, Option<usize>, Option<usize>)> =
+                            Vec::with_capacity(returned.len());
+                        for &g in &returned {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            if s_idx < half {
+                                snapshot.push((g, ctx.captures[s_idx], ctx.captures[e_idx]));
+                            }
+                        }
+                        let advanced_pos = ctx.pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.pos = advanced_pos;
+                        for (g, s, e) in snapshot {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            Self::set_capture(ctx, s_idx, s);
+                            Self::set_capture(ctx, e_idx, e);
+                        }
+                        if ctx.pos > saved_pos
+                            && target < self.program.subroutine_can_match_empty.len()
+                            && self.program.subroutine_can_match_empty[target]
+                        {
+                            ctx.backtrack_stack.push(BacktrackFrame {
+                                ip,
+                                pos: saved_pos,
+                                trail_mark: ctx.capture_trail.len(),
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            });
+                        }
+                        continue;
+                    }
+                    if self.try_backtrack(ctx, &mut ip) {
+                        continue;
+                    }
+                    return false;
+                }
                 OpCode::Call => {
                     if ip < code.len() {
                         let target = code[ip] as usize;
@@ -6985,6 +7056,76 @@ impl RegexVM {
                                 ip,
                                 pos: saved_pos,
                                 trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            });
+                        }
+                        continue;
+                    }
+                    local_backtrack_or_return_false!();
+                }
+
+                OpCode::CallReturning => {
+                    // Mirror of top-level CallReturning dispatch
+                    // (line 4001) for the
+                    // `execute_subexpr_inner_full` path. PCRE2
+                    // `(?N(grouplist))` running inside an assertion
+                    // body / atomic group needs the selective-leak
+                    // semantic; without this dispatch the opcode
+                    // falls through and the subexpr fails. Pushes
+                    // its retry-empty frame onto the LOCAL stack
+                    // (matching the sibling Call dispatch above).
+                    // Closes testinput2:8092 family.
+                    if ip + 1 >= code.len() {
+                        return false;
+                    }
+                    let target = code[ip] as usize;
+                    let count = code[ip + 1] as usize;
+                    ip += 2;
+                    if ip + count > code.len() {
+                        return false;
+                    }
+                    let returned: Vec<usize> =
+                        code[ip..ip + count].iter().map(|&b| b as usize).collect();
+                    ip += count;
+
+                    let saved_pos = ctx.pos;
+                    let trail_mark = ctx.capture_trail.len();
+                    let cs_mark = call_stack.len();
+                    let saved_code_result = ctx.code_result.clone();
+                    let saved_match_start_override = ctx.match_start_override;
+
+                    if self.invoke_subroutine_inner(ctx, target, false) {
+                        let half = ctx.captures.len() / 2;
+                        let mut snapshot: Vec<(usize, Option<usize>, Option<usize>)> =
+                            Vec::with_capacity(returned.len());
+                        for &g in &returned {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            if s_idx < half {
+                                snapshot.push((g, ctx.captures[s_idx], ctx.captures[e_idx]));
+                            }
+                        }
+                        let advanced_pos = ctx.pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        ctx.pos = advanced_pos;
+                        for (g, s, e) in snapshot {
+                            let s_idx = g * 2;
+                            let e_idx = s_idx + 1;
+                            Self::set_capture(ctx, s_idx, s);
+                            Self::set_capture(ctx, e_idx, e);
+                        }
+                        if ctx.pos > saved_pos
+                            && target < self.program.subroutine_can_match_empty.len()
+                            && self.program.subroutine_can_match_empty[target]
+                        {
+                            backtrack_stack.push(BacktrackFrame {
+                                ip,
+                                pos: saved_pos,
+                                trail_mark: ctx.capture_trail.len(),
                                 call_stack_mark: cs_mark,
                                 capture_snapshot: None,
                                 saved_code_result,
