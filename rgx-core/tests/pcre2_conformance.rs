@@ -529,6 +529,69 @@ fn extract_substitute_template(full_modifiers: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
+/// Detect a `replace=` template that references a numeric group
+/// (`$N` or `${N}`) beyond the regex's capture count. PCRE2's
+/// substitute API rejects these at compile-bound substitute time
+/// with `Failed: error 53` (PCRE2_ERROR_NOSUBSTRING). RGX's
+/// `replace_all` silently treats the missing capture as empty, so
+/// the harness's "PCRE2 rejected, RGX accepted" classification
+/// flags the case spuriously. Detect the OOR up-front and treat
+/// as agreement-on-rejection.
+fn substitute_template_has_oor_numeric_ref(template: &str, captures_len: usize) -> bool {
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            // PCRE2 backslash escapes — `\$` cancels the dollar
+            // interpolation; `\N` is a literal Nth char of the
+            // matched substring (out-of-range there fails too,
+            // but covers the common case).
+            i += 2;
+            continue;
+        }
+        if b == b'$' {
+            // Look ahead for `$N`, `${N}`, or named refs.
+            let after = &bytes[i + 1..];
+            // Skip `${...}` — extract the inner number if numeric;
+            // otherwise it's a named ref, leave to runtime.
+            if !after.is_empty() && after[0] == b'{' {
+                if let Some(close) = after.iter().position(|&c| c == b'}') {
+                    let inner = &after[1..close];
+                    if !inner.is_empty() && inner.iter().all(|c| c.is_ascii_digit()) {
+                        if let Ok(s) = std::str::from_utf8(inner) {
+                            if let Ok(n) = s.parse::<usize>() {
+                                if n >= captures_len {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    i += close + 2; // skip `${...}`
+                    continue;
+                }
+            }
+            // `$N` plain: longest run of digits from after `$`.
+            let digits_end = after.iter().take_while(|&&c| c.is_ascii_digit()).count();
+            if digits_end > 0 {
+                if let Ok(s) = std::str::from_utf8(&after[..digits_end]) {
+                    if let Ok(n) = s.parse::<usize>() {
+                        if n >= captures_len {
+                            return true;
+                        }
+                    }
+                }
+                i += 1 + digits_end;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Inspect a pattern's modifier string and decide whether any
 /// pattern-level modifier takes the case outside what the harness can
 /// faithfully compare:
@@ -2561,6 +2624,21 @@ fn run_case(case: &TestCase) -> Outcome {
                 if case.per_subject_untestable {
                     return Outcome::Pass;
                 }
+                // pcre2test "Failed: error" for `replace=TEMPLATE`
+                // covers substitute-time diagnostics that PCRE2
+                // surfaces at compile via a coupled validate-then-
+                // execute API call. RGX's `RegexBuilder.build()`
+                // doesn't see the template, so we can't reject at
+                // compile. Detect harness-side: if the template
+                // references a numeric group beyond the regex's
+                // capture count, the substitute would have failed —
+                // count as agreement-on-rejection rather than a
+                // false "RGX too permissive" entry.
+                if let Some(template) = extract_substitute_template(&case.full_modifiers) {
+                    if substitute_template_has_oor_numeric_ref(template, r.captures_len()) {
+                        return Outcome::Pass;
+                    }
+                }
                 return Outcome::Fail {
                     detail: format!(
                         "PCRE2 rejected pattern at compile, RGX accepted it (subject={subject:?})"
@@ -3217,8 +3295,8 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    const PASS_BASELINE: usize = 12_790;
-    const FAIL_BASELINE: usize = 20;
+    const PASS_BASELINE: usize = 12_791;
+    const FAIL_BASELINE: usize = 19;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

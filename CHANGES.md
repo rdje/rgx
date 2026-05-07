@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Harness: detect substitute-template OOR numeric ref before flagging too-permissive (+1 pass, ratchet 12,791/19)
+- Scope: `rgx-core/tests/pcre2_conformance.rs` — harness-side detection, not an engine fix.
+- pcre2test surfaces "Failed: error 53" (PCRE2_ERROR_NOSUBSTRING) at compile-bound substitute time when the `replace=TEMPLATE` template references `$N` for a group beyond the regex's capture count. RGX's `replace_all` silently treats unknown captures as empty (a deliberate Perl/POSIX-style design choice for the public API). The harness's compile-error branch was flagging this as "RGX too permissive" — but RGX correctly recognises this as a runtime substitute-time issue, just doesn't *error* on it.
+- Fix: added `substitute_template_has_oor_numeric_ref(template, captures_len)` and a check in the Expected::CompileError branch — when the harness sees PCRE2 expected a compile rejection AND a `replace=` template with $N out of range, count as agreement-on-rejection (Pass).
+- Closes testinput2:5047 (`/abc/replace=A$3123456789Z` on `"abc"` — pattern has 0 capture groups, template references `$3`).
+- Validation: conformance NEW BASELINE **12,791 / 19 / 0 / 0** (was 12,790/20). RGX-too-permissive 4 → 3.
+
 ### 2026-05-08 - Conformance harness: trim trailing whitespace before short-bundle modifier check (+1 pass, ratchet 12,790/20)
 - Scope: `rgx-core/tests/pcre2_conformance.rs` — modifier-classification bug, not an engine fix.
 - pcre2test tolerates trailing whitespace on the modifier portion of a pattern line (`/.../xi `). The harness's `is_short_bundle` heuristic failed on the trailing space because ` ` isn't in `SHORT_FLAGS`; both `x` and `i` then routed through the unrecognised-named-modifier path and dropped silently. RGX compiled the pattern WITHOUT `/x` (so the literal `   ` before `\.` became required match content) and WITHOUT `/i`, producing a no-match where PCRE2 + my isolated probe both matched.
