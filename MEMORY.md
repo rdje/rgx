@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-07 — Engine: ANYCRLF treats CRLF as single newline unit (+1 pass, ratchet 12,784/26)
+- `VmNewlineMode::Anycrlf` is_line_start_before/is_line_end_at now mirror `Any`'s CRLF-pair handling: ^/$ don't fire mid-CRLF. Closes testinput2:5122 substitute. Cumulative session: 12,737/73 → 12,784/26 (+47 passes).
+
 ### 2026-05-07 — Engine: ACCEPT scoping inside napla bodies (+2 passes, ratchet 12,783/27)
 - New `OpCode::NaplaScopeBegin = 0x8B` (4-byte LE body-len) replaces the prior `SaveLazyPos` prologue. Pushes `NaplaScope { start_ip, end_ip, saved_pos, backtrack_stack_len, alt_boundaries_len }`. `OpCode::Accept` redirects to `end_ip` and truncates the body's pushed alt-frames on scope hit (PCRE2 commit-at-ACCEPT semantic).
 - `BacktrackFrame.napla_scope_len` rolls back the scope stack on backtrack-past-the-Begin so an outer ACCEPT after the assertion doesn't get mis-scoped.

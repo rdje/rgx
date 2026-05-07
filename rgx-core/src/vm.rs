@@ -537,8 +537,22 @@ impl VmNewlineMode {
             // under this convention, so `^` must only fire after `\n`
             // that is immediately preceded by `\r`.
             VmNewlineMode::Crlf => pos >= 2 && text[pos - 2] == b'\r' && prev == b'\n',
-            // `(*ANYCRLF)` accepts `\r\n`, bare `\r`, or bare `\n`.
-            VmNewlineMode::Anycrlf => prev == b'\r' || prev == b'\n',
+            // `(*ANYCRLF)` recognises `\r\n` as ONE newline unit
+            // plus bare `\r` and bare `\n`. A `\r` immediately
+            // followed by `\n` is only a line start AFTER the `\n`
+            // (not after the `\r`); the pair is a single boundary.
+            // Without this rule, `^$` under `/gm,newline=anycrlf`
+            // matches at every position inside a CRLF (testinput2:
+            // 5122 substitute family).
+            VmNewlineMode::Anycrlf => {
+                if prev == b'\n' {
+                    return true;
+                }
+                if prev == b'\r' {
+                    return pos >= text.len() || text[pos] != b'\n';
+                }
+                false
+            }
             VmNewlineMode::Any => {
                 // `(*ANY)` recognises `\r\n` as ONE newline plus bare
                 // `\r`, bare `\n`, `\v`, `\f`, NEL (0x85), LS (U+2028),
@@ -583,8 +597,18 @@ impl VmNewlineMode {
             // `\r\n` sequence. Bare `\r` or bare `\n` is an ordinary
             // character under this convention.
             VmNewlineMode::Crlf => cur == b'\r' && pos + 1 < text.len() && text[pos + 1] == b'\n',
-            // `(*ANYCRLF)` accepts `\r\n`, bare `\r`, or bare `\n`.
-            VmNewlineMode::Anycrlf => cur == b'\r' || cur == b'\n',
+            // `(*ANYCRLF)`: `$` fires before a newline unit, where
+            // `\r\n` is a single unit. At the `\n` inside a `\r\n`
+            // pair we are still mid-unit, so `$` must NOT fire there.
+            VmNewlineMode::Anycrlf => {
+                if cur == b'\r' {
+                    return true;
+                }
+                if cur == b'\n' {
+                    return pos == 0 || text[pos - 1] != b'\r';
+                }
+                false
+            }
             VmNewlineMode::Any => {
                 // Mirror `is_line_start_before`'s `(*ANY)` logic: `$`
                 // fires before a newline unit, where `\r\n` is a single

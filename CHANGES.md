@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-07 - Engine: ANYCRLF newline mode treats CRLF as single unit (+1 pass, ratchet 12,784/26)
+- Scope: `VmNewlineMode::Anycrlf` was firing `^` after BOTH halves of a `\r\n` pair (and `$` before both halves), producing too many empty-line matches under `^$/gm,newline=anycrlf`. PCRE2 spec: `\r\n` is a single newline UNIT — `^` only fires after `\n` of a CRLF pair, not after the `\r` mid-pair. Family fix.
+- `is_line_start_before` and `is_line_end_at` for `Anycrlf` now mirror `Any`'s CRLF-aware logic: a `\r` immediately followed by `\n` is mid-unit (not a line start after, not a line end before); a bare `\r` (next char ≠ `\n`) and bare `\n` (prev char ≠ `\r`) still fire as boundaries.
+- Closes testinput2:5122 (`/^$/gm,newline=anycrlf,replace=-` on `"X\r\n\r\nY"` → PCRE2 `"X\r\n-\r\nY"`). Family probe: `(*ANYCRLF)^$` find_iter on `"X\r\n\r\nY"` now yields a single match at pos 3 (was three matches at 2/3/4).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,784 / 26 / 0 / 0** (was 12,783/27). "other" residual cleared (was 1).
+
 ### 2026-05-07 - Engine: ACCEPT scoping inside napla bodies (+2 passes, ratchet 12,783/27)
 - Scope: PCRE2 spec for `(*ACCEPT)` inside positive assertions: "the assertion succeeds, and the matching is committed at that point". Previously RGX's inline napla codegen let ACCEPT bubble all the way up to the outer match. Family fix.
 - New opcode `OpCode::NaplaScopeBegin = 0x8B` with 4-byte LE body-length operand. Codegen for `(*napla:...)` (positive non_atomic Lookahead) now emits:
