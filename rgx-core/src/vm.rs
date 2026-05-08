@@ -443,6 +443,14 @@ const MAX_RECURSION_DEPTH: usize = 1024;
 /// `usize::MAX` is well beyond any real bytecode address, so
 /// regular opcode dispatch will never produce it by accident.
 const COMMIT_SENTINEL_IP: usize = usize::MAX;
+/// Sentinel IP for subroutine retry-shorter backtrack frames.
+/// `try_backtrack` recognizes this and re-invokes the saved
+/// subroutine with `must_end_before = max_end_exclusive`. Used by
+/// `OpCode::StarGreedy` (and friends) when the body is a single
+/// `Call` — drives PCRE2's "outer backtrack into subroutine to
+/// find a shorter inner match" semantic for `(?R)*`/`(?N)*`
+/// recursive patterns (testinput1:6823 family).
+const SUBROUTINE_RETRY_SENTINEL_IP: usize = usize::MAX - 1;
 
 /// Bytecode instruction with operands
 #[derive(Debug, Clone)]
@@ -1001,6 +1009,18 @@ pub struct BacktrackFrame {
     /// this rollback, the scope would leak past the assertion and
     /// scope an outer ACCEPT incorrectly.
     pub napla_scope_len: usize,
+    /// Subroutine retry-shorter sentinel data — only meaningful
+    /// when `ip == SUBROUTINE_RETRY_SENTINEL_IP`. Encodes the
+    /// subroutine target, the previous match's end pos, and the
+    /// caller's resume IP for use by `try_backtrack`.
+    pub subroutine_retry: Option<SubroutineRetry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SubroutineRetry {
+    pub target: usize,
+    pub max_end_exclusive: usize,
+    pub caller_resume_ip: usize,
 }
 
 /// Match result with full capture information
@@ -2918,6 +2938,7 @@ impl RegexVM {
             saved_match_start_override: ctx.match_start_override,
             lazy_iter_save_len: ctx.lazy_iter_save.len(),
             napla_scope_len: ctx.napla_scope_stack.len(),
+            subroutine_retry: None,
         }
     }
 
@@ -3033,6 +3054,92 @@ impl RegexVM {
                 ctx.alt_boundaries.clear();
                 ctx.committed = true;
                 return false;
+            }
+            if frame.ip == SUBROUTINE_RETRY_SENTINEL_IP {
+                // Re-invoke the subroutine forcing a strictly
+                // shorter match than the previous one. Closes
+                // testinput1:6823 (`\w(?R)*\w` family).
+                let retry = match frame.subroutine_retry {
+                    Some(r) => r,
+                    None => return self.try_backtrack(ctx, ip),
+                };
+                let saved_pos = frame.pos;
+                let trail_mark = frame.trail_mark;
+                let cs_mark = frame.call_stack_mark;
+                let saved_code_result = frame.saved_code_result.clone();
+                let saved_match_start_override = frame.saved_match_start_override;
+                // Restore state to before the original Call.
+                Self::restore_frame(ctx, &frame);
+                ctx.code_result = saved_code_result.clone();
+                ctx.pos = saved_pos;
+                let target = retry.target;
+                let cap = retry.max_end_exclusive;
+                let Some(sub_code) = self.program.subroutines.get(target).cloned() else {
+                    return self.try_backtrack(ctx, ip);
+                };
+                // Recursion-stack guard: same protection as plain
+                // invoke_subroutine_inner.
+                let effective_limit = if ctx.max_recursion_depth > 0 {
+                    ctx.max_recursion_depth as usize
+                } else {
+                    MAX_RECURSION_DEPTH
+                };
+                if ctx.recursion_stack.len() >= effective_limit {
+                    return self.try_backtrack(ctx, ip);
+                }
+                if ctx
+                    .recursion_stack
+                    .iter()
+                    .any(|&(t, p)| t == target && p == ctx.pos)
+                {
+                    return self.try_backtrack(ctx, ip);
+                }
+                let saved_accept_forced = ctx.accept_forced;
+                ctx.accept_forced = false;
+                let saved_committed = ctx.committed;
+                ctx.committed = false;
+                let saved_alt = ctx.current_alternative;
+                ctx.recursion_stack.push((target, saved_pos));
+                let matched = self.execute_subexpr_with_max_end(ctx, &sub_code, cap);
+                ctx.recursion_stack.pop();
+                ctx.current_alternative = saved_alt;
+                ctx.accept_forced = saved_accept_forced;
+                ctx.committed = saved_committed;
+                if matched && ctx.pos > saved_pos && ctx.pos < cap {
+                    let new_end = ctx.pos;
+                    // Plain `(?N)` semantic: revert captures.
+                    Self::undo_trail(ctx, trail_mark);
+                    ctx.pos = new_end;
+                    ctx.code_result = saved_code_result.clone();
+                    // Push another retry frame for further-shorter
+                    // re-invocations.
+                    ctx.backtrack_stack.push(BacktrackFrame {
+                        ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                        pos: saved_pos,
+                        trail_mark,
+                        call_stack_mark: cs_mark,
+                        capture_snapshot: None,
+                        saved_code_result,
+                        saved_match_start_override,
+                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                        napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: Some(SubroutineRetry {
+                            target,
+                            max_end_exclusive: new_end,
+                            caller_resume_ip: retry.caller_resume_ip,
+                        }),
+                    });
+                    *ip = retry.caller_resume_ip;
+                    return true;
+                }
+                // No shorter match — restore pre-call state and
+                // continue draining the backtrack stack.
+                ctx.pos = saved_pos;
+                Self::undo_trail(ctx, trail_mark);
+                ctx.call_stack.truncate(cs_mark);
+                ctx.code_result = saved_code_result;
+                ctx.match_start_override = saved_match_start_override;
+                return self.try_backtrack(ctx, ip);
             }
             let stack_depth = ctx.backtrack_stack.len() + 1; // depth before pop
             *ip = frame.ip;
@@ -3937,6 +4044,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                         match_count += 1;
                         trace_log!(
@@ -4000,17 +4108,49 @@ impl RegexVM {
                         }
                         // Greedy path consumed one repetition; keep a fallback
                         // to continue after this quantifier without this repetition.
+                        let saved_match_start_override_for_drop = ctx.match_start_override;
+                        let lazy_iter_save_len_for_drop = ctx.lazy_iter_save.len();
+                        let napla_scope_len_for_drop = ctx.napla_scope_stack.len();
                         ctx.backtrack_stack.push(BacktrackFrame {
                             ip: expr_end,
                             pos: before_pos,
                             trail_mark,
                             call_stack_mark: cs_mark,
                             capture_snapshot: None,
-                            saved_code_result,
-                            saved_match_start_override: ctx.match_start_override,
-                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
-                            napla_scope_len: ctx.napla_scope_stack.len(),
+                            saved_code_result: saved_code_result.clone(),
+                            saved_match_start_override: saved_match_start_override_for_drop,
+                            lazy_iter_save_len: lazy_iter_save_len_for_drop,
+                            napla_scope_len: napla_scope_len_for_drop,
+                            subroutine_retry: None,
                         });
+                        // Subroutine retry-shorter frame on top of
+                        // drop-iter, so an outer-failure backtrack
+                        // first tries a SHORTER inner match for
+                        // THIS iter before dropping the iter
+                        // entirely. PCRE2 semantic: backtracking
+                        // into a subroutine call to try its
+                        // alternative. Only push when body is a
+                        // single `Call` op (the `(?R)*`/`(?N)*`
+                        // recursive-pattern shape — testinput1:6823).
+                        if expr_len == 2 && code.get(expr_start) == Some(&(OpCode::Call as u8)) {
+                            let target = code[expr_start + 1] as usize;
+                            ctx.backtrack_stack.push(BacktrackFrame {
+                                ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                pos: before_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override: saved_match_start_override_for_drop,
+                                lazy_iter_save_len: lazy_iter_save_len_for_drop,
+                                napla_scope_len: napla_scope_len_for_drop,
+                                subroutine_retry: Some(SubroutineRetry {
+                                    target,
+                                    max_end_exclusive: ctx.pos,
+                                    caller_resume_ip: expr_end,
+                                }),
+                            });
+                        }
                     }
 
                     ip = expr_end;
@@ -4055,6 +4195,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -4094,6 +4235,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -4137,6 +4279,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -4202,6 +4345,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -4391,6 +4535,7 @@ impl RegexVM {
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: None,
                             });
                         }
                         continue;
@@ -4442,6 +4587,7 @@ impl RegexVM {
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: None,
                             });
                         }
                         continue;
@@ -4471,6 +4617,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     };
                     ctx.backtrack_stack.push(backtrack_frame);
                 }
@@ -4498,6 +4645,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     };
                     let new_idx = ctx.backtrack_stack.len();
                     ctx.backtrack_stack.push(backtrack_frame);
@@ -4525,6 +4673,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     };
                     let new_idx = ctx.backtrack_stack.len();
                     ctx.backtrack_stack.push(backtrack_frame);
@@ -4657,6 +4806,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     ip = block_end;
                 }
@@ -4691,6 +4841,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
                     // Zero-width body or post-push: ip already points
@@ -6335,6 +6486,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     ip = block_end;
                 }
@@ -6358,6 +6510,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
                 }
@@ -6534,6 +6687,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                         ip = target1;
                     } else {
@@ -6558,6 +6712,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     ctx.alt_boundaries.push(ctx.backtrack_stack.len() - 1);
                 }
@@ -6578,6 +6733,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                         ip = target2;
                     } else {
@@ -6860,6 +7016,7 @@ impl RegexVM {
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: None,
                             });
                         }
                         continue;
@@ -6896,6 +7053,7 @@ impl RegexVM {
                                     saved_match_start_override,
                                     lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                     napla_scope_len: ctx.napla_scope_stack.len(),
+                                    subroutine_retry: None,
                                 });
                             }
                         } else {
@@ -7043,7 +7201,7 @@ impl RegexVM {
         code: &[u8],
         target_end: usize,
     ) -> bool {
-        self.execute_subexpr_inner_full(ctx, code, None, Some(target_end))
+        self.execute_subexpr_inner_full(ctx, code, None, Some(target_end), None)
     }
 
     fn execute_subexpr_inner(
@@ -7052,7 +7210,21 @@ impl RegexVM {
         code: &[u8],
         must_advance_from: Option<usize>,
     ) -> bool {
-        self.execute_subexpr_inner_full(ctx, code, must_advance_from, None)
+        self.execute_subexpr_inner_full(ctx, code, must_advance_from, None, None)
+    }
+
+    /// Like `execute_subexpr` but forces the body to finish at a
+    /// position strictly before `must_end_before`. Used by the
+    /// subroutine retry-shorter path (`StarGreedy(Call)` outer
+    /// backtrack into the subroutine to find a shorter inner
+    /// match).
+    fn execute_subexpr_with_max_end(
+        &self,
+        ctx: &mut ExecContext<'_>,
+        code: &[u8],
+        must_end_before: usize,
+    ) -> bool {
+        self.execute_subexpr_inner_full(ctx, code, None, None, Some(must_end_before))
     }
 
     fn execute_subexpr_inner_full(
@@ -7061,6 +7233,7 @@ impl RegexVM {
         code: &[u8],
         must_advance_from: Option<usize>,
         must_end_at: Option<usize>,
+        must_end_before: Option<usize>,
     ) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
@@ -7140,6 +7313,14 @@ impl RegexVM {
                 // ending at the anchor" boundary.
                 if let Some(end) = must_end_at {
                     if ctx.pos != end {
+                        local_backtrack_or_return_false!();
+                    }
+                }
+                if let Some(cap) = must_end_before {
+                    if ctx.pos >= cap {
+                        // Subroutine retry-shorter constraint:
+                        // outer requested a strictly-shorter match
+                        // than the prior one. Force backtrack.
                         local_backtrack_or_return_false!();
                     }
                 }
@@ -7550,6 +7731,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     if matches!(op, OpCode::AltSplit) {
                         local_alt_boundaries.push(pushed_idx);
@@ -7575,6 +7757,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     local_alt_boundaries.push(pushed_idx);
                 }
@@ -7596,6 +7779,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     ip += offset;
                 }
@@ -7658,6 +7842,7 @@ impl RegexVM {
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: None,
                             });
                         }
                         continue;
@@ -7729,6 +7914,7 @@ impl RegexVM {
                                 saved_match_start_override,
                                 lazy_iter_save_len: ctx.lazy_iter_save.len(),
                                 napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: None,
                             });
                         }
                         continue;
@@ -7770,6 +7956,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     } else {
                         ctx.pos = before_pos;
@@ -7809,6 +7996,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -7861,6 +8049,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -7893,6 +8082,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -7955,6 +8145,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -8004,6 +8195,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
 
@@ -8041,6 +8233,7 @@ impl RegexVM {
                         saved_match_start_override: ctx.match_start_override,
                         lazy_iter_save_len: ctx.lazy_iter_save.len(),
                         napla_scope_len: ctx.napla_scope_stack.len(),
+                        subroutine_retry: None,
                     });
                     ip = block_end;
                 }
@@ -8065,6 +8258,7 @@ impl RegexVM {
                             saved_match_start_override: ctx.match_start_override,
                             lazy_iter_save_len: ctx.lazy_iter_save.len(),
                             napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: None,
                         });
                     }
                 }

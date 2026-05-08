@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Engine: subroutine retry-shorter for `StarGreedy(Call)` body (+2 passes, ratchet 12,800/10)
+- Targeted partial subroutine reification. When `OpCode::StarGreedy`'s body is a single `Call`, push a `SUBROUTINE_RETRY_SENTINEL_IP` frame on top of the drop-iter fallback. On pop, re-invoke subroutine with `must_end_before` cap (via new `execute_subexpr_with_max_end`), find shorter match, resume at `expr_end`. New `BacktrackFrame.subroutine_retry` field. Closes testinput1:6823 family (`\w(?R)*\w`). Cumulative session: 12,737/73 → 12,800/10 (+63 passes).
+
 ### 2026-05-08 — Engine: lookbehind body codepoint-length narrowing + SKIP propagation (+1 pass, ratchet 12,798/12)
 - New `lookbehind_body_codepoint_bounds` walker + reverse-byte-walk to byte starts. Narrows lookbehind clone iteration to PCRE2's "valid lengths only" semantic. Variable-length bodies (Star*/Plus*/Backref/Call/Accept/Commit/Prune) fall back to full-byte iteration. New `assertion_skip_blocked` flag for SKIP-in-positive-assertion propagation, checked at OpCode::Match to fail the attempt without aborting try_backtrack. Closes testinput1:6487 (`(?<=a(*SKIP)x)|c` on "abcd"). Sibling 6490 (`|d`) still matches "d" because the codepoint-narrowing limits the lookbehind at pos 3 to start=1, where SKIP doesn't fire. Cumulative session: 12,737/73 → 12,798/12 (+61 passes).
 

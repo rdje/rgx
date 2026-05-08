@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Engine: subroutine retry-shorter for `StarGreedy(Call)` body (+2 passes, ratchet 12,800/10)
+- Scope: PCRE2 backtracks INTO a subroutine call to try its alternatives when an outer continuation fails. RGX's prior behavior was atomic — if subroutine matched greedy-max and the outer regex failed, RGX could only DROP the iter (K-1 reps), never RETRY the subroutine for a SHORTER inner match.
+- Targeted partial subroutine reification: when `OpCode::StarGreedy`'s body is a single `Call` op (the `(?R)*` / `(?N)*` recursive-pattern shape), push a sentinel-IP "retry-shorter" frame ON TOP of the existing drop-iter fallback. On backtrack-pop:
+  - Re-invoke the subroutine with `must_end_before = previous_end` constraint (forces strictly shorter match via internal `local_backtrack_or_return_false!`).
+  - If shorter found, push another retry frame (with the new, smaller cap) and resume at the StarGreedy's `expr_end`.
+  - If no shorter match, fall through to drop-iter.
+- Infrastructure added:
+  - New `OpCode::execute_subexpr_with_max_end(ctx, code, must_end_before)` helper threading through `execute_subexpr_inner_full`'s end-of-bytecode check.
+  - New `BacktrackFrame.subroutine_retry: Option<SubroutineRetry>` field carrying `(target, max_end_exclusive, caller_resume_ip)`.
+  - New `SUBROUTINE_RETRY_SENTINEL_IP` constant (similar to `COMMIT_SENTINEL_IP`).
+  - `try_backtrack` recognizes the sentinel and dispatches to the re-invocation path.
+- Closes testinput1:6823 ×2 (`\w(?R)*\w` on "abcdef" → "abcdef" and on "grtgt" → "grtg" — was returning 2-char matches because outer backtrack couldn't penetrate into subroutine).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,800 / 10 / 0 / 0** (was 12,798/12). SM 5 → 3.
+
 ### 2026-05-08 - Engine: lookbehind body codepoint-length narrowing + SKIP propagation (+1 pass, ratchet 12,798/12)
 - Scope: PCRE2 only attempts a lookbehind body at start positions whose distance from the anchor matches the body's structurally-possible codepoint count. RGX's prior loop iterated every byte position 0..=assertion_end, which let internal verbs (notably `(*SKIP)`) fire from clones at impossible body lengths. Combined with new "all-clones-failed → propagate SKIP" path, closes the FP.
 - New `lookbehind_body_codepoint_bounds(code: &[u8]) -> (usize, Option<usize>)` walks the body bytecode, summing 1-codepoint-per-determinstic-op (Char, Any, CharClass, etc.). Returns `(0, None)` for variable-length bodies (containing `Star*`/`Plus*`/`Backref`/`Call`/etc.) AND for bodies containing `(*ACCEPT)`/`(*COMMIT)`/`(*PRUNE)` (which short-circuit at variable positions). Caller falls back to full-byte iteration when bounds are unknown.
