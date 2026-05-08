@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Engine: SKIP:NAME with MARK inside atomic group preserves outer alt (+3 passes, ratchet 12,797/13)
+- Scope: PCRE2's `(*SKIP:NAME)` semantics depend on whether the matching `(*MARK:NAME)` was set inside an atomic group. When atomic, SKIP doesn't extend its "no further backtracking" contract to the outer alternation's sibling alt — the outer alt-fallback frame survives and can fire at the SAME starting position. When non-atomic, SKIP fully clears the stack, blocking alt-2 at the current pos. Family fix.
+- New `ExecContext.marks_atomic_depths: Vec<u32>` parallel vec to `marks`, recording `ctx.atomic_depth` at each `(*MARK)`-time push. `verb_apply_skip_named` consults it on lookup: if the matching mark was set inside an atomic group, preserves the outer alt-fallback frame on the cleared stack instead of clearing entirely.
+- `verb_apply_mark` signature extended to take the parallel vec + current atomic_depth. All 3 dispatch sites updated.
+- Closes:
+  - testinput1:6318 (`a(?>(*:X))(*SKIP:X)(*F)|(.)` on "abc" → "a"). Atomic group around MARK X.
+  - testinput1:6326 (`(?>a(*:1))(?>b(*:1))(*SKIP:1)x|.*` on "abc" → "abc"). Both MARKs inside atomic groups.
+  - testinput1:6329 (`(?>a(*:1))(?>b)(*SKIP:1)x|.*` on "abc" → "abc"). MARK 1 inside `(?>a(*:1))` atomic.
+- Sibling probe verified: testinput1:6321 `a(?:(*:X))(*SKIP:X)(*F)|(.)` (non-atomic MARK) still returns "b" (alt-2 at advanced pos), and testinput1:5538 `A(*PRUNE:A)A+(*SKIP:A)(B|Z) | AC` still returns no-match (PRUNE-then-SKIP, non-atomic).
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), conformance NEW BASELINE **12,797 / 13 / 0 / 0** (was 12,794/16). SM 8 → 5.
+
 ### 2026-05-08 - Harness: detect invalid-UTF-8 in /utf substitute template (+1 pass, ratchet 12,794/16)
 - Scope: harness-side. PCRE2 in `/utf` mode rejects substitute templates that contain invalid UTF-8. Modifier bytes pass through `String::from_utf8_lossy` upstream in the harness, so invalid sequences surface as the U+FFFD replacement char in `template`. Detect this case in the Expected::CompileError branch and route to Pass.
 - Closes testinput10:447 (`/abc/utf,replace=\xC3` — bare 0xC3 is an invalid UTF-8 lead byte that becomes U+FFFD after lossy decode).

@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Engine: SKIP:NAME with MARK inside atomic group preserves outer alt (+3 passes, ratchet 12,797/13)
+- New parallel vec `ExecContext.marks_atomic_depths` records `ctx.atomic_depth` at each MARK push. `verb_apply_skip_named` checks the matching mark's depth: > 0 → preserve outer alt-fallback frame on the cleared stack (PCRE2's "atomic-MARKed SKIP doesn't extend to outer alt-2"); 0 → clear entirely (existing behavior). Closes testinput1:6318 / 6326 / 6329. Cumulative session: 12,737/73 → 12,797/13 (+60 passes).
+
 ### 2026-05-08 — Harness: detect invalid-UTF-8 /utf substitute template (+1 pass, ratchet 12,794/16)
 - Modifier bytes pass through from_utf8_lossy upstream; invalid UTF-8 surfaces as U+FFFD in the template string. In Expected::CompileError branch, when /utf is set and template contains \u{FFFD}, count as agreement-on-rejection. Closes testinput10:447. Cumulative session: 12,737/73 → 12,794/16 (+57 passes). RGX-too-permissive bucket fully cleared.
 

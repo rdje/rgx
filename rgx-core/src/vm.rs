@@ -861,6 +861,15 @@ pub struct ExecContext<'a> {
     /// of `ctx.pos`. Cleared on match attempt reset alongside the rest
     /// of the per-attempt context state.
     pub marks: Vec<(String, usize)>,
+    /// Cluster — `ctx.atomic_depth` snapshot at the time each
+    /// corresponding `marks[i]` entry was pushed. PCRE2's
+    /// `(*SKIP:NAME)` semantics differ depending on whether the
+    /// MARK was set inside an atomic group: when atomic, SKIP
+    /// permits a sibling outer-alternation alt-2 to fire at the
+    /// SAME starting position; when non-atomic, SKIP fully
+    /// abandons the current attempt at this position. Closes
+    /// testinput1:6318 / 6326 / 6329.
+    pub marks_atomic_depths: Vec<u32>,
     /// When `true`, unregistered native callbacks cause suspension instead of
     /// being treated as errors. Set by `find_first_suspendable`; defaults to
     /// `false` for zero overhead on the synchronous path.
@@ -1441,6 +1450,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1594,6 +1604,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1684,6 +1695,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -1757,6 +1769,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -2731,10 +2744,44 @@ impl RegexVM {
         alt_boundaries: &[usize],
         pending_alt_revival: &mut Option<BacktrackFrame>,
         marks: &[(String, usize)],
+        marks_atomic_depths: &[u32],
         name: &str,
         pos: usize,
     ) {
-        if let Some(mark_pos) = marks.iter().rev().find(|(n, _)| n == name).map(|(_, p)| *p) {
+        let mark_lookup = marks
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, (n, _))| n == name)
+            .map(|(idx, (_, p))| (idx, *p));
+        if let Some((mark_idx, mark_pos)) = mark_lookup {
+            let mark_was_in_atomic = marks_atomic_depths.get(mark_idx).copied().unwrap_or(0) > 0;
+            if mark_was_in_atomic {
+                // PCRE2 — when the matching MARK was set inside an
+                // atomic group, SKIP:NAME's "no further backtracking"
+                // contract DOESN'T extend to the outer alternation's
+                // sibling alt. The outer alt-fallback frame survives;
+                // the scanner-advance to MARK position only matters if
+                // alt-2 also fails. Closes testinput1:6318/6326/6329:
+                // `(?>a(*:1))(?>b(*:1))(*SKIP:1)x|.*` lets `.*` (alt-2)
+                // match at the SAME starting position despite SKIP:1
+                // firing inside alt-1.
+                let preserve_idx = alt_boundaries
+                    .last()
+                    .copied()
+                    .filter(|&i| i < backtrack_stack.len());
+                if let Some(idx) = preserve_idx {
+                    let alt_frame = backtrack_stack[idx].clone();
+                    *pending_alt_revival = Some(alt_frame.clone());
+                    backtrack_stack.clear();
+                    backtrack_stack.push(alt_frame);
+                } else {
+                    backtrack_stack.clear();
+                }
+                *skip_position = Some(mark_pos);
+                *committed = false;
+                return;
+            }
             // Phase 3 — snapshot alt-fallback for THEN-revival.
             if let Some(&alt_idx) = alt_boundaries.last() {
                 if alt_idx < backtrack_stack.len() {
@@ -2830,8 +2877,15 @@ impl RegexVM {
     /// per-attempt and is reset by `execute_at` between scanning
     /// positions.
     #[inline]
-    fn verb_apply_mark(marks: &mut Vec<(String, usize)>, name: String, pos: usize) {
+    fn verb_apply_mark(
+        marks: &mut Vec<(String, usize)>,
+        marks_atomic_depths: &mut Vec<u32>,
+        name: String,
+        pos: usize,
+        atomic_depth: u32,
+    ) {
         marks.push((name, pos));
+        marks_atomic_depths.push(atomic_depth);
     }
 
     /// Build the COMMIT sentinel frame from the current ExecContext
@@ -3010,6 +3064,7 @@ impl RegexVM {
             lazy_iter_save: ctx.lazy_iter_save.clone(),
             accept_forced: ctx.accept_forced,
             marks: ctx.marks.clone(),
+            marks_atomic_depths: ctx.marks_atomic_depths.clone(),
             suspendable: ctx.suspendable,
             suspension: None,
             step_count: ctx.step_count,
@@ -3640,7 +3695,13 @@ impl RegexVM {
                     if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
                         let owned = name.to_string();
                         ip = new_ip;
-                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
+                        Self::verb_apply_mark(
+                            &mut ctx.marks,
+                            &mut ctx.marks_atomic_depths,
+                            owned,
+                            ctx.pos,
+                            ctx.atomic_depth,
+                        );
                     }
                 }
 
@@ -3655,6 +3716,7 @@ impl RegexVM {
                             &ctx.alt_boundaries,
                             &mut ctx.pending_alt_revival,
                             &ctx.marks,
+                            &ctx.marks_atomic_depths,
                             &name,
                             ctx.pos,
                         );
@@ -5402,6 +5464,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: false,
             suspension: None,
             step_count: 0,
@@ -5751,6 +5814,7 @@ impl RegexVM {
             lazy_iter_save: Vec::new(),
             accept_forced: false,
             marks: Vec::new(),
+            marks_atomic_depths: Vec::new(),
             suspendable: true,
             suspension: None,
             step_count: 0,
@@ -5919,6 +5983,7 @@ impl RegexVM {
             skip_position: state.skip_position,
             accept_forced: false,
             marks: state.marks,
+            marks_atomic_depths: Vec::new(),
             suspendable: true,
             suspension: None,
             step_count: 0,
@@ -6883,6 +6948,7 @@ impl RegexVM {
                             &ctx.alt_boundaries,
                             &mut ctx.pending_alt_revival,
                             &ctx.marks,
+                            &ctx.marks_atomic_depths,
                             &name,
                             ctx.pos,
                         );
@@ -6892,7 +6958,13 @@ impl RegexVM {
                     if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
                         let owned = name.to_string();
                         ip = new_ip;
-                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
+                        Self::verb_apply_mark(
+                            &mut ctx.marks,
+                            &mut ctx.marks_atomic_depths,
+                            owned,
+                            ctx.pos,
+                            ctx.atomic_depth,
+                        );
                     }
                 }
                 _ => {
@@ -8126,6 +8198,7 @@ impl RegexVM {
                             &local_alt_boundaries,
                             &mut ctx.pending_alt_revival,
                             &ctx.marks,
+                            &ctx.marks_atomic_depths,
                             &name,
                             pos,
                         );
@@ -8136,7 +8209,13 @@ impl RegexVM {
                     if let Some((name, new_ip)) = Self::decode_verb_name(code, ip) {
                         let owned = name.to_string();
                         ip = new_ip;
-                        Self::verb_apply_mark(&mut ctx.marks, owned, ctx.pos);
+                        Self::verb_apply_mark(
+                            &mut ctx.marks,
+                            &mut ctx.marks_atomic_depths,
+                            owned,
+                            ctx.pos,
+                            ctx.atomic_depth,
+                        );
                     }
                 }
 
