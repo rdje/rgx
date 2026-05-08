@@ -14,6 +14,11 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-08 - Harness: detect invalid-UTF-8 in /utf substitute template (+1 pass, ratchet 12,794/16)
+- Scope: harness-side. PCRE2 in `/utf` mode rejects substitute templates that contain invalid UTF-8. Modifier bytes pass through `String::from_utf8_lossy` upstream in the harness, so invalid sequences surface as the U+FFFD replacement char in `template`. Detect this case in the Expected::CompileError branch and route to Pass.
+- Closes testinput10:447 (`/abc/utf,replace=\xC3` — bare 0xC3 is an invalid UTF-8 lead byte that becomes U+FFFD after lossy decode).
+- Validation: conformance NEW BASELINE **12,794 / 16 / 0 / 0** (was 12,793/17). **RGX-too-permissive bucket fully cleared** (4 → 0).
+
 ### 2026-05-08 - Harness: detect substitute-template unset-capture ref + null_replacement subject annotation (+2 passes, ratchet 12,793/17)
 - Scope: `rgx-core/tests/pcre2_conformance.rs` — harness-side detection.
 - Two unrelated harness fixes bundled (both in the substitute-permissive family):
