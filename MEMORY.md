@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-08 — Engine: lookbehind body codepoint-length narrowing + SKIP propagation (+1 pass, ratchet 12,798/12)
+- New `lookbehind_body_codepoint_bounds` walker + reverse-byte-walk to byte starts. Narrows lookbehind clone iteration to PCRE2's "valid lengths only" semantic. Variable-length bodies (Star*/Plus*/Backref/Call/Accept/Commit/Prune) fall back to full-byte iteration. New `assertion_skip_blocked` flag for SKIP-in-positive-assertion propagation, checked at OpCode::Match to fail the attempt without aborting try_backtrack. Closes testinput1:6487 (`(?<=a(*SKIP)x)|c` on "abcd"). Sibling 6490 (`|d`) still matches "d" because the codepoint-narrowing limits the lookbehind at pos 3 to start=1, where SKIP doesn't fire. Cumulative session: 12,737/73 → 12,798/12 (+61 passes).
+
 ### 2026-05-08 — Engine: SKIP:NAME with MARK inside atomic group preserves outer alt (+3 passes, ratchet 12,797/13)
 - New parallel vec `ExecContext.marks_atomic_depths` records `ctx.atomic_depth` at each MARK push. `verb_apply_skip_named` checks the matching mark's depth: > 0 → preserve outer alt-fallback frame on the cleared stack (PCRE2's "atomic-MARKed SKIP doesn't extend to outer alt-2"); 0 → clear entirely (existing behavior). Closes testinput1:6318 / 6326 / 6329. Cumulative session: 12,737/73 → 12,797/13 (+60 passes).
 

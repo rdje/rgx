@@ -925,6 +925,17 @@ pub struct ExecContext<'a> {
     /// the same anchor (e.g. `(?<=abc)(|def)` produces both `<>` and
     /// `<def>` at the post-`abc` position).
     pub notempty_atstart: bool,
+    /// PCRE2-side SKIP-in-positive-assertion flag. Set by
+    /// `execute_lookbehind_assertion` (and parallel-form for
+    /// lookahead, future) when the assertion's body fails entirely
+    /// AND fired `(*SKIP)`. The outer match attempt at the current
+    /// starting position MUST fail — even if a sibling outer
+    /// alternative would otherwise succeed. Checked at
+    /// `OpCode::Match` to surface the failure without aborting the
+    /// dispatch's `try_backtrack` (so the scan loop's
+    /// `skip_position`-driven advance still fires). Reset between
+    /// scanning positions by `execute_at`. Closes testinput1:6487.
+    pub assertion_skip_blocked: bool,
 }
 
 /// Cluster 1C — non-atomic positive lookahead body scope record.
@@ -1465,6 +1476,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -1619,6 +1631,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -1710,6 +1723,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -1784,6 +1798,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -3075,6 +3090,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         }
     }
@@ -3180,6 +3196,7 @@ impl RegexVM {
         ctx.match_start_override = None;
         ctx.committed = false;
         ctx.skip_position = None;
+        ctx.assertion_skip_blocked = false;
         ctx.marks.clear();
         ctx.atomic_depth = 0;
         ctx.pending_alt_revival = None;
@@ -3561,6 +3578,14 @@ impl RegexVM {
                     // (`(?=…(?1)…)x(\K){0}` pattern: \K-in-(?1)
                     // shifts match_start past the lookahead but the
                     // outer match ends before that pos).
+                    if ctx.assertion_skip_blocked {
+                        // PCRE2 SKIP-in-positive-assertion blocked
+                        // this attempt. Fail without engaging
+                        // try_backtrack (alt-2 already ran). The
+                        // scan loop advances per skip_position.
+                        // Closes testinput1:6487.
+                        return false;
+                    }
                     if let Some(override_start) = ctx.match_start_override {
                         if override_start > ctx.pos {
                             if self.try_backtrack(ctx, &mut ip) {
@@ -5479,6 +5504,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -5829,6 +5855,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
         };
 
@@ -5998,6 +6025,7 @@ impl RegexVM {
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
             notempty_atstart: false,
+            assertion_skip_blocked: false,
             napla_scope_stack: Vec::new(),
             atomic_depth: 0,
             pending_alt_revival: None,
@@ -8436,6 +8464,112 @@ impl RegexVM {
     /// lookbehinds pass `false` so their body-captures are discarded
     /// even when the body matches (because negative-lookbehind-matches
     /// means the outer assertion has failed).
+    /// Compute conservative `(min_cp, max_cp)` codepoint-count bounds
+    /// on the lookbehind body bytecode. Returns `(0, None)` when the
+    /// body contains a variable-length op (`Star*`/`Plus*`/`Backref`/
+    /// `Call`/etc.), letting the caller fall back to iterating every
+    /// start position.
+    fn lookbehind_body_codepoint_bounds(code: &[u8]) -> (usize, Option<usize>) {
+        let mut ip = 0;
+        let mut total: usize = 0;
+        while ip < code.len() {
+            let Ok(op) = OpCode::try_from(code[ip]) else {
+                return (0, None);
+            };
+            ip += 1;
+            match op {
+                OpCode::Char => {
+                    // Char operand format: length-prefix byte + UTF-8 bytes.
+                    // Mirrors `read_char_operand`'s decode contract.
+                    if ip >= code.len() {
+                        return (0, None);
+                    }
+                    let len = code[ip] as usize;
+                    ip += 1;
+                    if ip + len > code.len() {
+                        return (0, None);
+                    }
+                    ip += len;
+                    total += 1;
+                }
+                OpCode::Any
+                | OpCode::AnyDotAll
+                | OpCode::DigitAscii
+                | OpCode::DigitAsciiNeg
+                | OpCode::WordAscii
+                | OpCode::WordAsciiNeg
+                | OpCode::SpaceAscii
+                | OpCode::SpaceAsciiNeg => {
+                    total += 1;
+                }
+                OpCode::CharClass | OpCode::CharClassNeg => {
+                    if ip >= code.len() {
+                        return (0, None);
+                    }
+                    ip += 1;
+                    total += 1;
+                }
+                OpCode::StartLine
+                | OpCode::EndLine
+                | OpCode::StartText
+                | OpCode::EndText
+                | OpCode::EndTextOrNL
+                | OpCode::WordBoundary
+                | OpCode::NonWordBoundary
+                | OpCode::PreviousMatchEnd
+                | OpCode::VerbSkip
+                | OpCode::Then
+                | OpCode::Fail
+                | OpCode::Match
+                | OpCode::AltScopeBegin
+                | OpCode::AltScopeEnd
+                | OpCode::MatchReset => {}
+                // ACCEPT/COMMIT/PRUNE can short-circuit body
+                // execution at variable positions, so the body's
+                // effective length is no longer fixed. Give up
+                // length analysis and let the caller fall back to
+                // the full byte-range iteration. Closes
+                // testinput1:5131 (`(?<=a(*ACCEPT)b)c` on "xacd"
+                // where the body succeeds via ACCEPT after just
+                // 'a' — body length 1 not 2).
+                OpCode::Accept | OpCode::Commit | OpCode::Prune => return (0, None),
+                OpCode::SaveStart | OpCode::SaveEnd | OpCode::SetAlternative => {
+                    if ip >= code.len() {
+                        return (0, None);
+                    }
+                    ip += 1;
+                }
+                OpCode::Mark | OpCode::VerbSkipNamed => {
+                    if ip >= code.len() {
+                        return (0, None);
+                    }
+                    let name_len = code[ip] as usize;
+                    ip += 1 + name_len;
+                }
+                _ => return (0, None),
+            }
+        }
+        (total, Some(total))
+    }
+
+    /// From a byte offset `end` in `text`, walk backward by `cp` UTF-8
+    /// codepoints. Returns the byte offset, or `None` if there aren't
+    /// that many codepoints before `end`.
+    fn step_back_codepoints(text: &[u8], end: usize, cp: usize) -> Option<usize> {
+        let mut pos = end;
+        for _ in 0..cp {
+            if pos == 0 {
+                return None;
+            }
+            pos -= 1;
+            // Walk past UTF-8 continuation bytes (10xxxxxx).
+            while pos > 0 && (text[pos] & 0xC0) == 0x80 {
+                pos -= 1;
+            }
+        }
+        Some(pos)
+    }
+
     fn execute_lookbehind_assertion(
         &self,
         ctx: &mut ExecContext<'_>,
@@ -8444,7 +8578,45 @@ impl RegexVM {
     ) -> bool {
         let assertion_end = ctx.pos;
 
-        for start in (0..=assertion_end).rev() {
+        // PCRE2 only tries lookbehind body at start positions whose
+        // distance from the anchor matches the body's structurally-
+        // possible codepoint count. RGX's prior loop iterated every
+        // byte position 0..=assertion_end, which let internal verbs
+        // (notably `(*SKIP)`) fire from clones at impossible lengths
+        // — testinput1:6487 (`(?<=a(*SKIP)x)|c` on "abcd"). When a
+        // body length is detectable from the bytecode walk, narrow
+        // the start range to PCRE2's "valid lengths only" semantic.
+        // Fall back to the full byte range for variable-length
+        // bodies (the walker returns max=None).
+        let (min_cp, max_cp) = Self::lookbehind_body_codepoint_bounds(code);
+
+        // Build the candidate start list. For fixed-length bodies
+        // this collapses to a single start; otherwise it walks back
+        // through codepoints from the anchor up to max_cp (or the
+        // start of the subject for unbounded).
+        let mut starts: Vec<usize> = Vec::new();
+        let max_steps = max_cp.unwrap_or(assertion_end);
+        let mut pos = assertion_end;
+        for cp in 0..=max_steps {
+            if cp >= min_cp && (max_cp.is_none() || cp <= max_cp.unwrap()) {
+                starts.push(pos);
+            }
+            if pos == 0 {
+                break;
+            }
+            pos -= 1;
+            while pos > 0 && (ctx.text[pos] & 0xC0) == 0x80 {
+                pos -= 1;
+            }
+        }
+
+        // Aggregate SKIP across all FAILED clones; propagate only
+        // when no clone matched. SKIP-only (not COMMIT) — see
+        // testinput1:5137 `(?<=(a(*COMMIT)b))c` for why COMMIT must
+        // not propagate.
+        let mut agg_skip: Option<usize> = None;
+
+        for start in starts {
             let mut lookbehind_ctx = Self::clone_exec_context(ctx);
             lookbehind_ctx.pos = start;
             // PCRE2 permits lookbehind bodies to contain nested
@@ -8473,16 +8645,38 @@ impl RegexVM {
                 }
                 return true;
             }
+            // Failed clone: harvest SKIP. With the codepoint-bound
+            // narrowing above, this only fires from clones that
+            // actually fit the body's structural length — PCRE2's
+            // "SKIP only matters where the assertion is anchored
+            // at a valid length" semantic.
+            if let Some(sp) = lookbehind_ctx.skip_position {
+                agg_skip = Some(sp);
+            }
         }
 
-        // Note: SKIP/COMMIT verb-state from a failed lookbehind body
-        // is intentionally NOT propagated to the outer ctx. PCRE2's
-        // lookbehind verbs are scoped to the body; the simple
-        // aggregation approach (mirror of the lookahead path) regresses
-        // testinput1:6490 / `(?<=(a(*COMMIT)b))c` per the residual
-        // catalogue's Cluster 3A note. Closing testinput1:6487 needs
-        // per-clone tracking — deferred.
-
+        // All clones failed — propagate aggregated SKIP only.
+        // Closes testinput1:6487 (`(?<=a(*SKIP)x)|c` on "abcd" —
+        // alt-2 'c' must be blocked at pos 2 because the lookbehind
+        // body fired SKIP at the only valid length). Sibling 6490
+        // `(?<=a(*SKIP)x)|d` on "abcd" still works: at pos 3 the
+        // codepoint-narrowing limits the lookbehind to start=1
+        // (body "bc"), where `a` doesn't match and SKIP doesn't
+        // fire — alt-2 `d` matches.
+        if propagate_captures {
+            if let Some(sp) = agg_skip {
+                ctx.skip_position = Some(sp);
+                // assertion_skip_blocked (NOT committed) — committed
+                // aborts try_backtrack which would prevent alt-2
+                // from firing, but alt-2 needs to fire and FAIL at
+                // OpCode::Match (e.g. 'c' at the SKIP-anchored
+                // pos 2 in 6487 matches but should be rejected at
+                // Match-time). Combined with skip_position the scan
+                // loop advances normally so testinput1:6490 (alt-2
+                // 'd' at pos 3 — different start, no SKIP) matches.
+                ctx.assertion_skip_blocked = true;
+            }
+        }
         false
     }
 
