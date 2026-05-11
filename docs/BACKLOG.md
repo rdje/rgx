@@ -388,16 +388,14 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 - **How**: Add benchmark step to CI workflow with threshold comparison.
 - **Dependencies**: None.
 
-### C5. Remove scaffold files
-- **What**: Delete `cache.rs`, `simd.rs`, `javascript.rs`, `wasm.rs` placeholder files.
-- **Effort**: `trivial`
-- **Rationale**: Code hygiene. These 1-line files serve no purpose.
-- **Dependencies**: None.
+### C5. Remove scaffold files ✅ DONE (2026-04 sometime)
+- **What**: Originally tracked deletion of `cache.rs`, `simd.rs`, `javascript.rs`, `wasm.rs` placeholders. All scaffold files now either deleted or grown into real modules: `cache.rs` is the working 231-line `RegexCache`; `lua.rs`/`rhai.rs` are 21-24 line feature-gated re-exports (type alias to `RgxError` when feature is off, real engine when on); `simd.rs`/`javascript.rs`/`wasm.rs` no longer exist as separate files (SIMD lives inline in hot paths, JS lowered to JIT codegen, wasm lives in its own `rgx-wasm` workspace crate).
+- **Status**: closed. Entry retained as a forward-search anchor.
 
 ### C6. Clean remaining clippy warnings
-- **What**: Fix ~25 remaining warnings (mostly trace-gated unused variables).
-- **Effort**: `trivial`
-- **Rationale**: Clean CI output.
+- **What**: Fix the ~479 remaining lint warnings in `rgx-core` (most are doc-string nits, trace-gated unused variables, and `clippy::pedantic` opinions that don't affect correctness). Audit the lint surface and either fix or `#[allow]` with rationale.
+- **Effort**: `small` (1-2 days for the lint pass plus a follow-up commit to refresh CI baselines).
+- **Rationale**: Clean CI output and reduce the noise floor when reviewing diffs. Original BACKLOG entry claimed ~25 warnings; the lint cliff has grown since the C2 sprint (multi-thousand-line files mean more pedantic hits per file) and the count now reads ~479. Most are repetitive (missing `# Errors` doc on internal helpers, `must_use` on builder methods); a single pass cleans the bulk.
 - **Dependencies**: None.
 
 ---
