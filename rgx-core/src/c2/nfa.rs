@@ -515,15 +515,49 @@ impl Nfa {
     /// Returns `true` if any epsilon edge in the NFA carries a
     /// zero-width assertion (`\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`,
     /// `\G`). Used by [`crate::c2::dfa::LazyDfa::new`] to refuse
-    /// construction for assertion-bearing NFAs at C2 step 5a — the
-    /// lazy DFA's subset construction doesn't yet handle context-
-    /// dependent transitions. Patterns with assertions continue to
-    /// run on the Pike-VM via dispatch.
+    /// construction for assertion-bearing NFAs that the DFA cannot
+    /// yet handle.
     #[must_use]
     pub fn has_assertions(&self) -> bool {
         self.states
             .iter()
             .any(|s| s.epsilons.iter().any(|e| e.assertion.is_some()))
+    }
+
+    /// Returns `true` if any epsilon edge in the NFA carries a
+    /// zero-width assertion *other than* `\b` / `\B`. The DFA can
+    /// handle word-boundary assertions by extending its state key
+    /// with a `prev_byte_was_word` flag and evaluating the boundary
+    /// condition during subset construction — so the DFA accepts
+    /// NFAs that contain only word-boundary assertions. All other
+    /// assertions (`\A`, `\z`, `\Z`, `^`, `$`, `\G`) remain
+    /// DFA-ineligible.
+    #[must_use]
+    pub fn has_non_word_boundary_assertions(&self) -> bool {
+        self.states.iter().any(|s| {
+            s.epsilons.iter().any(|e| match e.assertion {
+                Some(ZeroWidthAssertion::WordBoundary)
+                | Some(ZeroWidthAssertion::NotWordBoundary) => false,
+                Some(_) => true,
+                None => false,
+            })
+        })
+    }
+
+    /// Returns `true` if any epsilon edge carries a `\b` or `\B`
+    /// assertion. The DFA needs this signal to decide whether to
+    /// allocate the `prev_byte_was_word`-augmented state space.
+    #[must_use]
+    pub fn has_word_boundary_assertions(&self) -> bool {
+        self.states.iter().any(|s| {
+            s.epsilons.iter().any(|e| {
+                matches!(
+                    e.assertion,
+                    Some(ZeroWidthAssertion::WordBoundary)
+                        | Some(ZeroWidthAssertion::NotWordBoundary)
+                )
+            })
+        })
     }
 }
 

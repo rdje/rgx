@@ -208,6 +208,33 @@ impl ByteClassMap {
     pub fn num_classes(&self) -> u16 {
         self.num_classes
     }
+
+    /// Returns `true` if every byte in the class is an ASCII word
+    /// byte (`a-z`, `A-Z`, `0-9`, `_`). Used by the DFA when
+    /// evaluating `\b` / `\B` word-boundary assertions during subset
+    /// construction: a byte class is unambiguously word or non-word
+    /// because `Regex::WordBoundary` contributes the word-byte
+    /// oracle (so the partition never mixes word with non-word).
+    #[must_use]
+    pub fn class_is_word(&self, cls: u8) -> bool {
+        // Find the first byte assigned to this class and inspect it.
+        // The partition invariant guarantees every other byte in the
+        // class has identical word-ness.
+        for byte in 0u8..=255u8 {
+            if self.table[byte as usize] == cls {
+                return is_ascii_word_byte(byte);
+            }
+        }
+        false
+    }
+}
+
+/// Returns `true` iff `b` is an ASCII word byte (matches `\w` /
+/// `[A-Za-z0-9_]`). Used as the source of truth for the DFA's
+/// word-boundary evaluation. Mirrors `vm::is_word_byte`.
+#[must_use]
+pub fn is_ascii_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Walk the AST in pre-order and collect each construct's membership
@@ -297,9 +324,18 @@ fn collect_oracles(ast: &Regex, oracles: &mut Vec<Vec<(u8, u8)>>) {
         }
 
         // ============================================================
-        // Zero-width assertions — no byte contribution.
+        // Zero-width assertions — most contribute no byte ranges.
+        // `\b` / `\B` are the exception: the DFA evaluates them by
+        // comparing the previous byte's word-ness against the current
+        // byte's word-ness, so the byte-class partition must keep word
+        // and non-word bytes in separate classes. We contribute the
+        // word-byte oracle here (same as `\w`) so the resulting byte
+        // classes never mix word and non-word bytes.
         // ============================================================
-        Regex::Anchor(_) | Regex::WordBoundary { .. } | Regex::Empty | Regex::MatchReset => {}
+        Regex::WordBoundary { .. } => {
+            oracles.push(vec![(b'0', b'9'), (b'A', b'Z'), (b'_', b'_'), (b'a', b'z')]);
+        }
+        Regex::Anchor(_) | Regex::Empty | Regex::MatchReset => {}
 
         // ============================================================
         // Structural nodes — descend into children.
@@ -702,6 +738,58 @@ mod tests {
         // A non-word byte must be in a different class.
         assert_ne!(map.class_of(b' '), word_class);
         assert_ne!(map.class_of(b'#'), word_class);
+    }
+
+    #[test]
+    fn word_boundary_partitions_word_bytes_into_separate_class() {
+        // `\babc\b` — even though the only literal characters are `a`,
+        // `b`, `c`, the `\b` assertion must contribute the word-byte
+        // oracle so the DFA can later evaluate the boundary condition
+        // against unambiguous word / non-word classes. After this
+        // change, `\b`-only patterns now produce a partition where
+        // every byte class is consistently word OR non-word.
+        let ast = Regex::Sequence(vec![
+            Regex::WordBoundary { positive: true },
+            Regex::Char('a'),
+            Regex::Char('b'),
+            Regex::Char('c'),
+            Regex::WordBoundary { positive: true },
+        ]);
+        let map = ByteClassMap::build_from_ast(&ast);
+        // `a`/`b`/`c` are word bytes; `_` is too.
+        assert!(map.class_is_word(map.class_of(b'a')));
+        assert!(map.class_is_word(map.class_of(b'b')));
+        assert!(map.class_is_word(map.class_of(b'_')));
+        assert!(map.class_is_word(map.class_of(b'9')));
+        // ` `, `#`, `\n` are not.
+        assert!(!map.class_is_word(map.class_of(b' ')));
+        assert!(!map.class_is_word(map.class_of(b'#')));
+        assert!(!map.class_is_word(map.class_of(b'\n')));
+    }
+
+    #[test]
+    fn class_is_word_is_consistent_for_every_class() {
+        // Sanity: for any pattern, every byte class is either
+        // consistently word or consistently non-word. The partition
+        // never mixes them (this is the DFA word-boundary
+        // prerequisite).
+        let map = ByteClassMap::build_from_ast(&Regex::Sequence(vec![
+            Regex::WordBoundary { positive: true },
+            Regex::Word { negated: false },
+            Regex::Char('@'),
+            Regex::Word { negated: false },
+            Regex::Char('.'),
+            Regex::Word { negated: false },
+        ]));
+        for byte in 0u8..=255u8 {
+            let cls = map.class_of(byte);
+            let class_word = map.class_is_word(cls);
+            let byte_word = is_ascii_word_byte(byte);
+            assert_eq!(
+                class_word, byte_word,
+                "byte {byte:#04x}: class_is_word({cls}) = {class_word} but is_ascii_word_byte = {byte_word}"
+            );
+        }
     }
 
     #[test]
