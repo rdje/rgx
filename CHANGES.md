@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-11 - Docs: end-of-cycle ratchet snapshot (12,806 / 4 ≈ 99.97%)
+- Scope: comprehensive docs sync for the 2026-05-08 → 2026-05-11 conformance run that took the ratchet from 12,737/73 → 12,806/4 (+69 passes, ~95% reduction in residual failures, 18 family fixes). User direction: log into the live docs/book and pause; resume the remaining 3 non-PGEN failures at a later time.
+- `book/src/internals/pcre2-conformance-audit.md` §1 executive summary refreshed (12,720 → 12,806; pass-count progression updated through commit 0ba42b1). New §7B "End-of-cycle snapshot — 2026-05-11" enumerates all 18 family fixes shipped this cycle and characterises the residual 4 across two cohorts: 1 PGEN-blocked (PGEN-RGX-0084) and 3 engine-frontier (cross-subexpr alt-frame promotion — same architectural prerequisite as Cluster 1A).
+- `docs/BACKLOG.md` C7 entry rewritten: status moved from "12,716 / 94 (~99.3%)" to "12,806 / 4 (~99.97%)"; the residual is now small enough that each case is named individually rather than catalogued by cluster. The engine-fix family-tree from 2026-05-07 onward is listed inline so the BACKLOG entry alone tells the rollup story.
+- `MEMORY.md` session-close entry captures: final ratchet, residual breakdown by cohort, architectural prerequisite for the engine-frontier 3, and pointers to the relevant `vm.rs` line ranges so a resuming session can drop in without re-deriving the call-graph.
+- No code changes in this commit. No tests run — pure docs.
+
 ### 2026-05-11 - Engine: scope `(*THEN)` to its subroutine call (+1 pass, ratchet 12,806/4)
 - Scope: pcre2pattern(3) — "If `(*THEN)` is in a subpattern called by a subroutine call, it applies only to that subpattern." RGX's subexpr `OpCode::Then` handler, when `verb_apply_then` returned `FullyDegraded` (no enclosing alternation) with empty outer `ctx.alt_boundaries`, was clearing `ctx.backtrack_stack` to prevent `(*PRUNE)` from being backed-into. That cross-context cleanup destroyed the caller's retry state — e.g. a lazy `.*?` quantifier in the outer pattern could not retry with more characters after a `(*THEN)` inside `(?N)`.
 - Fix: gate the `ctx.backtrack_stack.clear()` in the FullyDegraded branch on `ctx.recursion_stack.is_empty()`. When we are inside an active subroutine call, the body's failure stays local; the caller sees a normal subroutine-call failure and proceeds with its own backtrack frames intact.

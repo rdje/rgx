@@ -499,6 +499,49 @@ The clusters with **very high or high** whack-a-mole risk if approached per-case
 
 ---
 
+## 7B. End-of-cycle snapshot — 2026-05-11
+
+Between the 2026-05-05 audit baseline (12,716 pass / 94 fail) and the 2026-05-11 ratchet (**12,806 pass / 4 fail**), the engine track shipped 18 family fixes — **+90 passes, 96% reduction in residual failures**, no panics, no skips. The fixes, in chronological order:
+
+| Date | Family / cluster | Δ pass | Commit / mechanism |
+|---|---|---:|---|
+| 2026-05-07 | Cluster 1C napla family fix | +6 | Napla compiles as re-enterable; ACCEPT exits via NaplaRestorePos epilogue |
+| 2026-05-07 | CallReturning subexpr dispatch | +1 | Mirrors top-level `CallReturning` for assertion/atomic bodies (testinput2:8092) |
+| 2026-05-07 | Pike-VM dispatch gate (limits vacuous on linear-time engines) | +n | Linear-time fallback no longer rejected by backtrack-step limits |
+| 2026-05-07 | `+` greedy empty-capable first-iter zero-width | +n | Terminate the unrolled `+` correctly when first iteration is zero-width |
+| 2026-05-07/08 | Conditional lookahead in repeated alt (Cluster 1E) | +3 | StarGreedyBlock generalised to + ? lazy/greedy |
+| 2026-05-07/08 | Empty-alternative lazy quantifier (Cluster 2B) | +4 | OpCode::StarLazy/PlusLazy codegen fix |
+| 2026-05-07/08 | StarGreedyBlock symmetric extension (Cluster 1E + 2H) | +4 | One coherent dispatch decision across alt-position variants |
+| 2026-05-07/08 | Generalize alt-aware block to + ?, lazy/greedy | (family) | Cluster-1E + 2H unified |
+| 2026-05-08 | Assertion-scoped `(*COMMIT)`/`(*SKIP)` per PCRE2 spec | +n | Per-verb effects model; verbs in assertion don't escape |
+| 2026-05-08 | Stricter compile-time pattern validation | +4 | Rejects 4 RGX-too-permissive cases (Bucket 5) |
+| 2026-05-08 | ANYCRLF treats CRLF as a single newline unit | +1 | Newline-mode awareness for the `\R` family |
+| 2026-05-08 | Suppress `\K` inside lookarounds/subroutines | +n | Match-start override scoped per spec |
+| 2026-05-08 | `AltSplitLong` + `JumpLong` for >64KB alt bodies | (infra) | Counted-quantifier unrolling for `(?:[^X]{28500}){4}` |
+| 2026-05-08 | Substitute empty-match retry at same pos (NOTEMPTY_ATSTART) | +n | PCRE2 substitute semantic for zero-byte matches |
+| 2026-05-08 | ACCEPT scoping inside napla bodies | +n | Napla scope IP-range check on ACCEPT redirection |
+| 2026-05-08 | SKIP:NAME with mark inside atomic group | +3 | Atomic-MARK awareness preserves outer alt |
+| 2026-05-08 | Lookbehind body codepoint-length narrowing + SKIP propagation | +1 | Variable-length body fallback + `assertion_skip_blocked` flag |
+| 2026-05-08 | Subroutine retry-shorter for `StarGreedy(Call)` body (Cluster 1A first beachhead) | +2 | New `SUBROUTINE_RETRY_SENTINEL_IP` sentinel + `execute_subexpr_with_max_end` helper; closes testinput1:6823 `\w(?R)*\w` family |
+| 2026-05-11 | Narrow retry-different on `Call`-followed-by-backref | +1 | Generalises retry-shorter to plain `Call`; gate = next opcode is `Backref` / `BackrefCaseInsensitive`. Closes testinput1:5971 palindrome `^((.)(?1)\2|.?)$` |
+| 2026-05-11 | `SubroutineRetryMode::{Shorter,Different}` split with `attempts_left` budget | +4 | Splits accept-criteria: `Shorter` (`< cap`) for StarGreedy, `Different` (`!= cap`) for plain Call. Budget bounds chain cost on subroutine-heavy patterns. Closes deep-palindrome family `^(.|(.)(?1)\2)$` on `abcdcba` and 3 siblings |
+| 2026-05-11 | Scope `(*THEN)` FullyDegraded to its subroutine call | +1 | Per pcre2pattern(3): `(*THEN)` inside `(?N)` is local to that subpattern. Gate the cross-context `ctx.backtrack_stack.clear()` on `ctx.recursion_stack.is_empty()`. Closes testinput2:3350 (`(?(DEFINE)(a(*THEN)b))`) |
+
+### Residual 4 (2026-05-11)
+
+These fall into two distinct cohorts:
+
+1. **PGEN-blocked (1 case)** — `testinput1:3910`: `()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+`. PGEN parses `\10` as a backref to group 10 when only 9 capturing groups have been seen at the parse position. PCRE2's compile-time rule reads `\NN` as octal when N exceeds the seen-so-far group count. Filed as **PGEN-RGX-0084** with the full structured-bundle artifact in `pgen-issues/artifacts/PGEN-RGX-0084/`. **No RGX-side workaround** per the no-PGEN-workarounds doctrine. Ratchet ticks +1 when PGEN ships the parse-position fix.
+
+2. **Engine-frontier (3 cases)** — all three require a capability the engine does not yet have: **cross-subexpr alt-frame promotion** (outer backtrack reaches into a subroutine body's internal alternation frames to explore a different completion). The 2026-05-11 `SubroutineRetryMode::Different` mechanism handles "subroutine made progress, wrong end position" (palindrome family); these three need "subroutine matched empty, caller needs progress" — same architectural prerequisite as Cluster 1A (recursive captures) flagged in §5.
+   - `testinput2:6592`: `\G(?:(?=(\1.|)(.))){1,13}?(?!.*\2.*\2)\1\K\2/g`. Complex multi-iter lookahead with self-referencing backref; needs the lookahead's captured `\2` to be tried at multiple depths.
+   - `testinput2:6595`: `|(?0)./endanchored`. PCRE2 finds `"abcd"` (4-level recursive `(?0)` depth); RGX finds empty match at pos 0. Additionally needs an engine `ANCHORED_END` option — the harness's current `\z`-wrap propagates the end-anchor into every recursive `(?0)` invocation, which is the wrong semantic. PCRE2's ANCHORED_END is an external constraint on the OUTER match only.
+   - `testinput2:6601`: `(?:|(?0).)(?(R)|\z)`. PCRE2 finds `"abcd"` (recursive `(?0)` depth 4); RGX finds `"d"` (single-char match at end). The `(?(R)|\z)` conditional is correct in RGX — the issue is that the `(?0)` recursion is not being driven to depth.
+
+The three engine-frontier cases share the same architectural prerequisite (subroutine-internal alt-frame reification / cross-subexpr alt-frame promotion). Tackled together they likely close as a family fix; tackled separately they risk the per-case whack-a-mole pattern this audit catalogued in §4.
+
+---
+
 ## 8. Cross-references
 
 - **Companion residual chapter**: [PCRE2 Conformance Residual](./pcre2-conformance-residual.md). Per-case map of the 91 remaining failures.

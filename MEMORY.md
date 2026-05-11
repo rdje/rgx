@@ -294,6 +294,16 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-11 — End-of-cycle: ~100% PCRE2 parity reached (12,806 / 4); session paused
+- Final ratchet: **12,806 pass / 4 fail / 0 panic / 0 skip ≈ 99.97%**. Cumulative two-day arc (2026-05-08 entry-point → 2026-05-11 close): 12,737/73 → **12,806/4** (+69 passes, ~95% reduction in residual failures, ~18 family fixes shipped). User direction was to log into live docs and pause; resume the remaining 3 non-PGEN failures at a later time.
+- **Residual breakdown** (the 4 still-failing cases):
+  1. `testinput1:3910` — **BLOCKED on PGEN** (PGEN-RGX-0084 \10 forward-ref). PGEN owns the fix; RGX side already has the structured bundle filed in `pgen-issues/artifacts/PGEN-RGX-0084/`. PGEN will feedback later. No RGX-side workaround per the no-PGEN-workarounds doctrine.
+  2. `testinput2:6592` — complex multi-iter lookahead with self-referencing backref `\G(?:(?=(\1.|)(.))){1,13}?(?!.*\2.*\2)\1\K\2`. Cross-subexpr alt-frame promotion required.
+  3. `testinput2:6595` — `|(?0)./endanchored`. Needs both cross-subexpr alt-frame promotion AND an engine `ANCHORED_END` option (the harness `\z`-wrap propagates incorrectly into recursive `(?0)`).
+  4. `testinput2:6601` — `(?:|(?0).)(?(R)|\z)`. Cross-subexpr alt-frame promotion (recursive `(?0)` not driven to depth).
+- **Architectural prerequisite for the three engine-frontier cases**: subroutine-internal alt-frame reification, a.k.a. cross-subexpr alt-frame promotion. The 2026-05-11 `SubroutineRetryMode::Different` mechanism handles "subroutine made progress, wrong end position" (palindrome family); these three need "subroutine matched empty, caller needs progress" — same architectural prerequisite as Cluster 1A recursive captures (long-flagged in the audit's §5 systemic gaps). When a future session attempts them, tackle as a single family fix to avoid the per-case whack-a-mole pattern.
+- **Where the work lives**: `rgx-core/src/vm.rs` retry-different mechanism — `SUBROUTINE_RETRY_SENTINEL_IP` (line ~453), `SubroutineRetry` struct (line ~1019), `SubroutineRetryMode::{Shorter,Different}` (line ~1007), retry handlers in `try_backtrack` (line ~3060) and `local_backtrack_or_return_false!` macro (line ~7349 inside `execute_subexpr_inner_full`). Four `Call` dispatch sites push retry sentinels under the narrow `next_opcode == Backref / BackrefCaseInsensitive` gate: main (line ~4549), `execute_at_continuation` (line ~7051), `execute_subexpr_inner_full` (line ~7911), and `StarGreedy(Call)` (line ~4148) which uses Shorter mode.
+
 ### 2026-05-11 — Engine: scope `(*THEN)` FullyDegraded to its subroutine call (+1, ratchet 12,806/4)
 - pcre2pattern(3) rule: `(*THEN)` inside `(?N)` subpattern applies ONLY to that subpattern; outer caller retains its retry state. Subexpr Then handler's FullyDegraded branch was clearing `ctx.backtrack_stack` when outer alt_boundaries was empty — that destroyed the caller's `.*?` retry frames. Fix: gate the cross-context clear on `ctx.recursion_stack.is_empty()`. Closes testinput2:3350 (DEFINE+*THEN). Cumulative session: 12,737/73 → 12,806/4 (+69, 95% reduction in failures).
 
