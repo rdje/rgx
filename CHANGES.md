@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-11 - Engine: subroutine retry-different on Call-followed-by-backref (+1 pass, ratchet 12,801/9)
+- Scope: PCRE2 palindrome family `^((.)(?1)\2|.?)$` requires backtracking *into* a recursive subroutine call to find an alternate-end match when the outer backref check fails. RGX previously could not penetrate into a non-`StarGreedy`-wrapped `Call`; the whole subroutine was atomic on outer backtrack.
+- Generalizes the StarGreedy(Call) retry-shorter mechanism (commit 61b7b8f) to plain `Call` opcodes in both the main and subexpr dispatch paths. To bound cost, the retry-different sentinel is pushed only when the **immediately-following opcode is `Backref` / `BackrefCaseInsensitive`** — i.e. the caller's continuation depends on the Call's end position. Non-palindrome subroutine calls pay no retry cost. The subexpr-side push additionally requires `target` already in `ctx.recursion_stack` (self-recursive call only) so non-recursive subroutine calls inside a body are skipped.
+- Infrastructure: extended `local_backtrack_or_return_false!` macro with a `'drain`-labeled loop so it can handle `SUBROUTINE_RETRY_SENTINEL_IP` frames inline without recursive macro expansion. Retry handler re-invokes via `execute_subexpr_with_max_end` with `must_end_before = previous_end` (different-end constraint).
+- Closes testinput1:5971 (`^((.)(?1)\2|.?)$` on "ababa"). testinput1:5964 (`^(.|(.)(?1)\2)$` on "abcdcba") still fails — odd-length pat-1 palindromes need a wider retry, deferred.
+- Validation: `cargo fmt -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm`, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-cli` (30/30), `cargo clippy -p rgx-core --all-targets` clean, conformance NEW BASELINE **12,801 / 9 / 0 / 0** in 289.75s (no runtime regression vs 280s baseline).
+
 ### 2026-05-08 - Engine: subroutine retry-shorter for `StarGreedy(Call)` body (+2 passes, ratchet 12,800/10)
 - Scope: PCRE2 backtracks INTO a subroutine call to try its alternatives when an outer continuation fails. RGX's prior behavior was atomic — if subroutine matched greedy-max and the outer regex failed, RGX could only DROP the iter (K-1 reps), never RETRY the subroutine for a SHORTER inner match.
 - Targeted partial subroutine reification: when `OpCode::StarGreedy`'s body is a single `Call` op (the `(?R)*` / `(?N)*` recursive-pattern shape), push a sentinel-IP "retry-shorter" frame ON TOP of the existing drop-iter fallback. On backtrack-pop:

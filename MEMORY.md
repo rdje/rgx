@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-11 — Engine: subroutine retry-different on Call-followed-by-backref (+1 pass, ratchet 12,801/9)
+- Generalized the StarGreedy(Call) retry-shorter sentinel (commit 61b7b8f) to plain `Call` opcodes in both main and subexpr dispatch paths. Narrow gate: only when the next opcode is `Backref`/`BackrefCaseInsensitive`. Subexpr-side additionally requires `target` already in `ctx.recursion_stack`. Extended `local_backtrack_or_return_false!` with `'drain`-labeled loop so it can handle `SUBROUTINE_RETRY_SENTINEL_IP` inline. Closes testinput1:5971 palindrome `^((.)(?1)\2|.?)$` on "ababa". pat-1 `^(.|(.)(?1)\2)$` on "abcdcba" still fails (odd-length recursion depth > 1; deferred). Earlier broader-gate attempts (no Backref check) caused 3×+ runtime explosion on subroutine-heavy patterns; narrow gate keeps suite at 289.75s (baseline 280s). Cumulative session: 12,737/73 → 12,801/9 (+64 passes, 88% reduction in failures).
+
 ### 2026-05-08 — Engine: subroutine retry-shorter for `StarGreedy(Call)` body (+2 passes, ratchet 12,800/10)
 - Targeted partial subroutine reification. When `OpCode::StarGreedy`'s body is a single `Call`, push a `SUBROUTINE_RETRY_SENTINEL_IP` frame on top of the drop-iter fallback. On pop, re-invoke subroutine with `must_end_before` cap (via new `execute_subexpr_with_max_end`), find shorter match, resume at `expr_end`. New `BacktrackFrame.subroutine_retry` field. Closes testinput1:6823 family (`\w(?R)*\w`). Cumulative session: 12,737/73 → 12,800/10 (+63 passes).
 

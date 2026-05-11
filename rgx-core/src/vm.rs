@@ -4559,20 +4559,42 @@ impl RegexVM {
                     let saved_code_result = ctx.code_result.clone();
                     let saved_match_start_override = ctx.match_start_override;
 
+                    // Retry-different gate (palindrome family): only
+                    // when the immediately-following opcode is a
+                    // backref. Narrow gate so non-palindrome patterns
+                    // pay no retry cost.
+                    let next_is_backref = code
+                        .get(ip)
+                        .copied()
+                        .map(|b| {
+                            b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
+                        })
+                        .unwrap_or(false);
+
                     if self.invoke_subroutine(ctx, target) {
-                        // Subroutine matched. If its body can
-                        // match the empty string AND the call
-                        // consumed characters (`ctx.pos > saved`),
-                        // push a retry backtrack frame. On
-                        // backtrack, we resume at `ip` with
-                        // `pos = saved_pos`, effectively treating
-                        // the subroutine as having matched empty —
-                        // what PCRE2 would do when backtracking
-                        // into a subroutine to try its shorter
-                        // alternative. Covers the common
-                        // `(?1)`-into-`(a?)` / `(?&name)`-into-
-                        // optional-group cluster without needing
-                        // full subroutine-stack reification.
+                        if ctx.pos > saved_pos && next_is_backref {
+                            ctx.backtrack_stack.push(BacktrackFrame {
+                                ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                pos: saved_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result: saved_code_result.clone(),
+                                saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: Some(SubroutineRetry {
+                                    target,
+                                    max_end_exclusive: ctx.pos,
+                                    caller_resume_ip: ip,
+                                }),
+                            });
+                        }
+                        // Existing retry-empty: subroutine matched
+                        // and body can match the empty string AND
+                        // the call consumed characters; push a
+                        // retry-resume frame so outer backtracking
+                        // can try the zero-match alternative.
                         if ctx.pos > saved_pos
                             && target < self.program.subroutine_can_match_empty.len()
                             && self.program.subroutine_can_match_empty[target]
@@ -7247,29 +7269,110 @@ impl RegexVM {
         let mut local_alt_boundaries: Vec<usize> = Vec::new();
 
         macro_rules! local_backtrack_or_return_false {
-            () => {
-                // Phase-2 verb-state contract: a pending `(*COMMIT)`
-                // from the subexpr body forbids further backtracking
-                // — the body fails immediately so the assertion-
-                // propagation code (`execute_assertion_subexpr`) can
-                // surface the flag to the outer match attempt.
-                // (`skip_position` is per-attempt scanner-signal,
-                // not an intra-attempt abort, so it does not gate
-                // backtracking — see `try_backtrack`'s comment.)
+            () => {{
                 if ctx.committed {
                     backtrack_stack.clear();
                     local_alt_boundaries.clear();
                     return false;
                 }
-                if let Some(frame) = backtrack_stack.pop() {
+                let mut __resumed = false;
+                'drain: loop {
+                    let Some(frame) = backtrack_stack.pop() else {
+                        break 'drain;
+                    };
                     if frame.ip == COMMIT_SENTINEL_IP {
-                        // COMMIT inside an atomic group inside this
-                        // subexpr; escalate to a committed abort so
-                        // the assertion-propagation site sees it.
                         backtrack_stack.clear();
                         local_alt_boundaries.clear();
                         ctx.committed = true;
                         return false;
+                    }
+                    if frame.ip == SUBROUTINE_RETRY_SENTINEL_IP {
+                        // Retry-different (palindrome family).
+                        // Re-invoke the subroutine forcing a
+                        // different end position; continue at the
+                        // caller resume IP on success, or drain
+                        // further frames on failure.
+                        let Some(retry) = frame.subroutine_retry else {
+                            return false;
+                        };
+                        let saved_pos = frame.pos;
+                        let trail_mark = frame.trail_mark;
+                        let cs_mark = frame.call_stack_mark;
+                        let saved_code_result = frame.saved_code_result.clone();
+                        let saved_match_start_override = frame.saved_match_start_override;
+                        Self::undo_trail(ctx, trail_mark);
+                        call_stack.truncate(cs_mark);
+                        ctx.pos = saved_pos;
+                        ctx.code_result = saved_code_result.clone();
+                        ctx.match_start_override = saved_match_start_override;
+                        let target = retry.target;
+                        let cap = retry.max_end_exclusive;
+                        let Some(sub_code) = self.program.subroutines.get(target).cloned() else {
+                            return false;
+                        };
+                        let effective_limit = if ctx.max_recursion_depth > 0 {
+                            ctx.max_recursion_depth as usize
+                        } else {
+                            MAX_RECURSION_DEPTH
+                        };
+                        let blocked = ctx.recursion_stack.len() >= effective_limit
+                            || ctx
+                                .recursion_stack
+                                .iter()
+                                .any(|&(t, p)| t == target && p == ctx.pos);
+                        if blocked {
+                            let new_len = backtrack_stack.len();
+                            while local_alt_boundaries.last().map_or(false, |&b| b >= new_len) {
+                                local_alt_boundaries.pop();
+                            }
+                            continue 'drain;
+                        }
+                        let saved_accept = ctx.accept_forced;
+                        ctx.accept_forced = false;
+                        let saved_committed = ctx.committed;
+                        ctx.committed = false;
+                        let saved_alt = ctx.current_alternative;
+                        ctx.recursion_stack.push((target, saved_pos));
+                        let matched = self.execute_subexpr_with_max_end(ctx, &sub_code, cap);
+                        ctx.recursion_stack.pop();
+                        ctx.current_alternative = saved_alt;
+                        ctx.accept_forced = saved_accept;
+                        ctx.committed = saved_committed;
+                        if matched && ctx.pos > saved_pos && ctx.pos != cap {
+                            let new_end = ctx.pos;
+                            Self::undo_trail(ctx, trail_mark);
+                            ctx.pos = new_end;
+                            ctx.code_result = saved_code_result.clone();
+                            backtrack_stack.push(BacktrackFrame {
+                                ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                pos: saved_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result,
+                                saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: Some(SubroutineRetry {
+                                    target,
+                                    max_end_exclusive: new_end,
+                                    caller_resume_ip: retry.caller_resume_ip,
+                                }),
+                            });
+                            ip = retry.caller_resume_ip;
+                            __resumed = true;
+                            break 'drain;
+                        }
+                        ctx.pos = saved_pos;
+                        Self::undo_trail(ctx, trail_mark);
+                        call_stack.truncate(cs_mark);
+                        ctx.code_result = saved_code_result;
+                        ctx.match_start_override = saved_match_start_override;
+                        let new_len = backtrack_stack.len();
+                        while local_alt_boundaries.last().map_or(false, |&b| b >= new_len) {
+                            local_alt_boundaries.pop();
+                        }
+                        continue 'drain;
                     }
                     ip = frame.ip;
                     ctx.pos = frame.pos;
@@ -7281,18 +7384,18 @@ impl RegexVM {
                     }
                     call_stack.truncate(frame.call_stack_mark);
                     ctx.code_result = frame.saved_code_result;
-                    // Sync local_alt_boundaries with the current
-                    // stack length so stale entries referring to
-                    // popped frames don't survive and mislead a
-                    // later `(*THEN)`.
                     let new_len = backtrack_stack.len();
                     while local_alt_boundaries.last().map_or(false, |&b| b >= new_len) {
                         local_alt_boundaries.pop();
                     }
+                    __resumed = true;
+                    break 'drain;
+                }
+                if __resumed {
                     continue;
                 }
                 return false;
-            };
+            }};
         }
 
         loop {
@@ -7818,16 +7921,48 @@ impl RegexVM {
                     let saved_code_result = ctx.code_result.clone();
                     let saved_match_start_override = ctx.match_start_override;
 
+                    // Retry-different gate: only when the
+                    // immediately-following opcode is a backref AND
+                    // this Call is itself inside an active recursion
+                    // of the same target. This narrowly targets the
+                    // palindrome family — `(?N)\K` shape where the
+                    // backref's match position depends on the Call's
+                    // return position — while skipping every plain
+                    // (non-recursive) `(?N)` so the suite doesn't
+                    // pay any retry cost.
+                    let next_is_backref = code
+                        .get(ip)
+                        .copied()
+                        .map(|b| {
+                            b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
+                        })
+                        .unwrap_or(false);
+                    let is_recursive_self = ctx.recursion_stack.iter().any(|&(t, _)| t == target);
+
                     if self.invoke_subroutine(ctx, target) {
-                        // Mirror of the top-level Call retry-empty
-                        // frame: when the subroutine actually
-                        // advanced AND its body can match empty,
-                        // push a retry to the LOCAL stack so an
-                        // inner backtrack into this subroutine
-                        // call tries the zero-match alternative
-                        // (needed for palindrome / self-referential
-                        // recursion where inner `(?1)` calls run
-                        // through this dispatch path).
+                        if ctx.pos > saved_pos && next_is_backref && is_recursive_self {
+                            backtrack_stack.push(BacktrackFrame {
+                                ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                pos: saved_pos,
+                                trail_mark,
+                                call_stack_mark: cs_mark,
+                                capture_snapshot: None,
+                                saved_code_result: saved_code_result.clone(),
+                                saved_match_start_override,
+                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                napla_scope_len: ctx.napla_scope_stack.len(),
+                                subroutine_retry: Some(SubroutineRetry {
+                                    target,
+                                    max_end_exclusive: ctx.pos,
+                                    caller_resume_ip: ip,
+                                }),
+                            });
+                        }
+                        // Existing retry-empty: subroutine advanced
+                        // AND its body can match empty, so push a
+                        // retry to the LOCAL stack so an inner
+                        // backtrack into this subroutine call tries
+                        // the zero-match alternative.
                         if ctx.pos > saved_pos
                             && target < self.program.subroutine_can_match_empty.len()
                             && self.program.subroutine_can_match_empty[target]
