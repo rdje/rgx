@@ -1016,12 +1016,41 @@ pub struct BacktrackFrame {
     pub subroutine_retry: Option<SubroutineRetry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubroutineRetryMode {
+    /// StarGreedy(Call) outer-backtrack-into-body. Body must finish
+    /// at a position **strictly before** `max_end_exclusive`. Used
+    /// for `(?R)*` / `(?N)*` family where outer needs MORE room
+    /// after the call.
+    Shorter,
+    /// Plain `Call`-followed-by-backref. Body must finish at a
+    /// position **different** from `max_end_exclusive` (longer or
+    /// shorter). Used for palindrome family where the backref's
+    /// match position depends on the Call's return position and any
+    /// alternate end might satisfy the continuation.
+    Different,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SubroutineRetry {
     pub target: usize,
     pub max_end_exclusive: usize,
     pub caller_resume_ip: usize,
+    pub mode: SubroutineRetryMode,
+    /// Remaining retry attempts for `Different` mode chains. Each
+    /// successful retry decrements; once it reaches zero no further
+    /// retry sentinels are pushed. Bounds the worst-case cost on
+    /// deeply self-recursive patterns where the body has many
+    /// possible end positions. `Shorter` mode ignores this since
+    /// the cap monotonically decreases and naturally terminates.
+    pub attempts_left: u16,
 }
+
+/// Initial retry budget for `Different`-mode chains. 16 covers the
+/// common palindrome depth with headroom; recursive subroutine
+/// calls inside `Different` retries each see a fresh budget from
+/// their own outer pushes, so total cost stays bounded.
+const SUBROUTINE_DIFFERENT_RETRY_BUDGET: u16 = 16;
 
 /// Match result with full capture information
 #[derive(Debug, Clone, PartialEq)]
@@ -3100,35 +3129,51 @@ impl RegexVM {
                 ctx.committed = false;
                 let saved_alt = ctx.current_alternative;
                 ctx.recursion_stack.push((target, saved_pos));
-                let matched = self.execute_subexpr_with_max_end(ctx, &sub_code, cap);
+                let matched = self.execute_subexpr_with_max_end(ctx, &sub_code, cap, retry.mode);
                 ctx.recursion_stack.pop();
                 ctx.current_alternative = saved_alt;
                 ctx.accept_forced = saved_accept_forced;
                 ctx.committed = saved_committed;
-                if matched && ctx.pos > saved_pos && ctx.pos < cap {
+                let accept = matched
+                    && ctx.pos > saved_pos
+                    && match retry.mode {
+                        SubroutineRetryMode::Shorter => ctx.pos < cap,
+                        SubroutineRetryMode::Different => ctx.pos != cap,
+                    };
+                if accept {
                     let new_end = ctx.pos;
                     // Plain `(?N)` semantic: revert captures.
                     Self::undo_trail(ctx, trail_mark);
                     ctx.pos = new_end;
                     ctx.code_result = saved_code_result.clone();
-                    // Push another retry frame for further-shorter
-                    // re-invocations.
-                    ctx.backtrack_stack.push(BacktrackFrame {
-                        ip: SUBROUTINE_RETRY_SENTINEL_IP,
-                        pos: saved_pos,
-                        trail_mark,
-                        call_stack_mark: cs_mark,
-                        capture_snapshot: None,
-                        saved_code_result,
-                        saved_match_start_override,
-                        lazy_iter_save_len: ctx.lazy_iter_save.len(),
-                        napla_scope_len: ctx.napla_scope_stack.len(),
-                        subroutine_retry: Some(SubroutineRetry {
-                            target,
-                            max_end_exclusive: new_end,
-                            caller_resume_ip: retry.caller_resume_ip,
-                        }),
-                    });
+                    // Push another retry frame for further re-
+                    // invocations, decrementing the budget for
+                    // `Different` mode; `Shorter` keeps its u16::MAX
+                    // sentinel since the cap monotonically shrinks.
+                    let next_attempts = match retry.mode {
+                        SubroutineRetryMode::Shorter => retry.attempts_left,
+                        SubroutineRetryMode::Different => retry.attempts_left.saturating_sub(1),
+                    };
+                    if matches!(retry.mode, SubroutineRetryMode::Shorter) || next_attempts > 0 {
+                        ctx.backtrack_stack.push(BacktrackFrame {
+                            ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                            pos: saved_pos,
+                            trail_mark,
+                            call_stack_mark: cs_mark,
+                            capture_snapshot: None,
+                            saved_code_result,
+                            saved_match_start_override,
+                            lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                            napla_scope_len: ctx.napla_scope_stack.len(),
+                            subroutine_retry: Some(SubroutineRetry {
+                                target,
+                                max_end_exclusive: new_end,
+                                caller_resume_ip: retry.caller_resume_ip,
+                                mode: retry.mode,
+                                attempts_left: next_attempts,
+                            }),
+                        });
+                    }
                     *ip = retry.caller_resume_ip;
                     return true;
                 }
@@ -4148,6 +4193,8 @@ impl RegexVM {
                                     target,
                                     max_end_exclusive: ctx.pos,
                                     caller_resume_ip: expr_end,
+                                    mode: SubroutineRetryMode::Shorter,
+                                    attempts_left: u16::MAX,
                                 }),
                             });
                         }
@@ -4587,6 +4634,8 @@ impl RegexVM {
                                     target,
                                     max_end_exclusive: ctx.pos,
                                     caller_resume_ip: ip,
+                                    mode: SubroutineRetryMode::Different,
+                                    attempts_left: SUBROUTINE_DIFFERENT_RETRY_BUDGET,
                                 }),
                             });
                         }
@@ -7057,7 +7106,36 @@ impl RegexVM {
                         let cs_mark = ctx.call_stack.len();
                         let saved_code_result = ctx.code_result.clone();
                         let saved_match_start_override = ctx.match_start_override;
+                        // Retry-different gate (palindrome family).
+                        let next_is_backref = code
+                            .get(ip)
+                            .copied()
+                            .map(|b| {
+                                b == OpCode::Backref as u8
+                                    || b == OpCode::BackrefCaseInsensitive as u8
+                            })
+                            .unwrap_or(false);
                         if self.invoke_subroutine(ctx, target) {
+                            if ctx.pos > saved_pos && next_is_backref {
+                                ctx.backtrack_stack.push(BacktrackFrame {
+                                    ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                    pos: saved_pos,
+                                    trail_mark,
+                                    call_stack_mark: cs_mark,
+                                    capture_snapshot: None,
+                                    saved_code_result: saved_code_result.clone(),
+                                    saved_match_start_override,
+                                    lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                    napla_scope_len: ctx.napla_scope_stack.len(),
+                                    subroutine_retry: Some(SubroutineRetry {
+                                        target,
+                                        max_end_exclusive: ctx.pos,
+                                        caller_resume_ip: ip,
+                                        mode: SubroutineRetryMode::Different,
+                                        attempts_left: SUBROUTINE_DIFFERENT_RETRY_BUDGET,
+                                    }),
+                                });
+                            }
                             // Same retry-empty path as the top-level
                             // `Call` dispatch — continue-path after
                             // subroutine advance.
@@ -7223,7 +7301,7 @@ impl RegexVM {
         code: &[u8],
         target_end: usize,
     ) -> bool {
-        self.execute_subexpr_inner_full(ctx, code, None, Some(target_end), None)
+        self.execute_subexpr_inner_full(ctx, code, None, Some(target_end), None, None)
     }
 
     fn execute_subexpr_inner(
@@ -7232,21 +7310,30 @@ impl RegexVM {
         code: &[u8],
         must_advance_from: Option<usize>,
     ) -> bool {
-        self.execute_subexpr_inner_full(ctx, code, must_advance_from, None, None)
+        self.execute_subexpr_inner_full(ctx, code, must_advance_from, None, None, None)
     }
 
-    /// Like `execute_subexpr` but forces the body to finish at a
-    /// position strictly before `must_end_before`. Used by the
-    /// subroutine retry-shorter path (`StarGreedy(Call)` outer
-    /// backtrack into the subroutine to find a shorter inner
-    /// match).
+    /// Like `execute_subexpr` but constrains the body's end
+    /// position based on `mode`:
+    /// - `Shorter`: body must finish at pos < `cap` (used by
+    ///   `StarGreedy(Call)` retry-shorter path).
+    /// - `Different`: body must finish at pos != `cap` (used by
+    ///   the palindrome retry-different path on plain `Call`).
     fn execute_subexpr_with_max_end(
         &self,
         ctx: &mut ExecContext<'_>,
         code: &[u8],
-        must_end_before: usize,
+        cap: usize,
+        mode: SubroutineRetryMode,
     ) -> bool {
-        self.execute_subexpr_inner_full(ctx, code, None, None, Some(must_end_before))
+        match mode {
+            SubroutineRetryMode::Shorter => {
+                self.execute_subexpr_inner_full(ctx, code, None, None, Some(cap), None)
+            }
+            SubroutineRetryMode::Different => {
+                self.execute_subexpr_inner_full(ctx, code, None, None, None, Some(cap))
+            }
+        }
     }
 
     fn execute_subexpr_inner_full(
@@ -7256,6 +7343,7 @@ impl RegexVM {
         must_advance_from: Option<usize>,
         must_end_at: Option<usize>,
         must_end_before: Option<usize>,
+        must_end_at_not: Option<usize>,
     ) -> bool {
         let mut ip = 0;
         let mut backtrack_stack: Vec<BacktrackFrame> = Vec::new();
@@ -7333,32 +7421,51 @@ impl RegexVM {
                         ctx.committed = false;
                         let saved_alt = ctx.current_alternative;
                         ctx.recursion_stack.push((target, saved_pos));
-                        let matched = self.execute_subexpr_with_max_end(ctx, &sub_code, cap);
+                        let matched =
+                            self.execute_subexpr_with_max_end(ctx, &sub_code, cap, retry.mode);
                         ctx.recursion_stack.pop();
                         ctx.current_alternative = saved_alt;
                         ctx.accept_forced = saved_accept;
                         ctx.committed = saved_committed;
-                        if matched && ctx.pos > saved_pos && ctx.pos != cap {
+                        let accept = matched
+                            && ctx.pos > saved_pos
+                            && match retry.mode {
+                                SubroutineRetryMode::Shorter => ctx.pos < cap,
+                                SubroutineRetryMode::Different => ctx.pos != cap,
+                            };
+                        if accept {
                             let new_end = ctx.pos;
                             Self::undo_trail(ctx, trail_mark);
                             ctx.pos = new_end;
                             ctx.code_result = saved_code_result.clone();
-                            backtrack_stack.push(BacktrackFrame {
-                                ip: SUBROUTINE_RETRY_SENTINEL_IP,
-                                pos: saved_pos,
-                                trail_mark,
-                                call_stack_mark: cs_mark,
-                                capture_snapshot: None,
-                                saved_code_result,
-                                saved_match_start_override,
-                                lazy_iter_save_len: ctx.lazy_iter_save.len(),
-                                napla_scope_len: ctx.napla_scope_stack.len(),
-                                subroutine_retry: Some(SubroutineRetry {
-                                    target,
-                                    max_end_exclusive: new_end,
-                                    caller_resume_ip: retry.caller_resume_ip,
-                                }),
-                            });
+                            let next_attempts = match retry.mode {
+                                SubroutineRetryMode::Shorter => retry.attempts_left,
+                                SubroutineRetryMode::Different => {
+                                    retry.attempts_left.saturating_sub(1)
+                                }
+                            };
+                            if matches!(retry.mode, SubroutineRetryMode::Shorter)
+                                || next_attempts > 0
+                            {
+                                backtrack_stack.push(BacktrackFrame {
+                                    ip: SUBROUTINE_RETRY_SENTINEL_IP,
+                                    pos: saved_pos,
+                                    trail_mark,
+                                    call_stack_mark: cs_mark,
+                                    capture_snapshot: None,
+                                    saved_code_result,
+                                    saved_match_start_override,
+                                    lazy_iter_save_len: ctx.lazy_iter_save.len(),
+                                    napla_scope_len: ctx.napla_scope_stack.len(),
+                                    subroutine_retry: Some(SubroutineRetry {
+                                        target,
+                                        max_end_exclusive: new_end,
+                                        caller_resume_ip: retry.caller_resume_ip,
+                                        mode: retry.mode,
+                                        attempts_left: next_attempts,
+                                    }),
+                                });
+                            }
                             ip = retry.caller_resume_ip;
                             __resumed = true;
                             break 'drain;
@@ -7424,6 +7531,14 @@ impl RegexVM {
                         // Subroutine retry-shorter constraint:
                         // outer requested a strictly-shorter match
                         // than the prior one. Force backtrack.
+                        local_backtrack_or_return_false!();
+                    }
+                }
+                if let Some(forbidden) = must_end_at_not {
+                    if ctx.pos == forbidden {
+                        // Subroutine retry-different constraint:
+                        // outer requested a different-end match.
+                        // Force backtrack through body alternatives.
                         local_backtrack_or_return_false!();
                     }
                 }
@@ -7955,6 +8070,8 @@ impl RegexVM {
                                     target,
                                     max_end_exclusive: ctx.pos,
                                     caller_resume_ip: ip,
+                                    mode: SubroutineRetryMode::Different,
+                                    attempts_left: SUBROUTINE_DIFFERENT_RETRY_BUDGET,
                                 }),
                             });
                         }
