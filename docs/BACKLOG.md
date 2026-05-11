@@ -274,19 +274,18 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Dependencies**: Stable bytecode format. C2 should land first so C1 has both engines to JIT.
 - **Open design questions**: binary-size impact, debug story, cross-platform validation matrix, fallback path when JIT compilation itself fails.
 
-### C2. NFA/DFA hybrid for simple patterns — ACTIVE FOCUS 2026-04-09 (first)
+### C2. NFA/DFA hybrid for simple patterns — ✅ SHIPPED 2026-04-11, Step 8 finalised 2026-05-11
 - **What**: Detect patterns that don't use backtracking-only features and run them through a Thompson NFA + lazy DFA cache instead of the backtracking VM.
 - **Effort**: `major`
-- **Status**: `active focus`. Promoted from Tier 4 to top priority on 2026-04-09 because RGX is currently too slow on the patterns where most users live. C2 changes the algorithmic class, gives RGX the "can't hang" property the Rust `regex` crate uses as its primary differentiator, and typically delivers 10x-100x improvement on regular patterns where it applies.
+- **Status**: Steps 0–8 complete. Public introspection `Regex::uses_c2()` / `Regex::classification()` promoted from doc-hidden in `f8dda9e` (2026-05-11). Multi-byte memmem inner-literal prefilter (two-stage memchr → memmem) shipped in `fd50b63` (2026-05-11). Conformance ratchet holds at 12,806 / 4 throughout the C2 work. Book chapter at `book/src/internals/nfa-dfa-engine.md` documents dispatch.
 - **Rationale**: Guarantees O(nm) for the common case while keeping backtracking for advanced features.
-- **How**:
-  1. Pattern-analysis pass at compile time: classify each compiled program as "no-backtracking subset" (no backrefs, no recursion, no lookaround, no inline code blocks, no atomic groups, no possessive quantifiers, no `\K`, no backtracking verbs) vs "needs the VM."
-  2. For the no-backtracking subset, build a Thompson NFA from the AST.
-  3. Run a lazy DFA cache (RE2-style) over the NFA. The DFA delivers the match span.
-  4. **Capture handling**: the standard solution (per the Rust `regex` crate) is to use the DFA only for *finding* the overall match, then re-run a small bounded NFA simulation over the matched span to recover capture group positions. This avoids the full DFA-with-captures complexity.
-  5. Engine dispatch in `Regex::find_first` etc. picks NFA/DFA or VM based on the compiled program's classification.
+- **Open C2 perf levers (future sessions)**:
+  - **DFA `\b` / `\B` word-boundary support** — currently `\b` patterns fall off the DFA tier and route to backtracking VM (`is_c2_dfa_eligible` rejects all zero-width assertions). Adding word boundaries to the DFA requires extending `DfaStateKey` with a `prev_byte_was_word: bool` flag and evaluating `ZeroWidthAssertion::WordBoundary` during epsilon closure with the (prev-word, curr-word) context. Effectively doubles state count but unlocks DFA dispatch for `\b\w+@\w+\.\w+\b` and other word-boundary-rich patterns. Effort: `medium` (3-5 days). Expected gain: closes the 3.7× `email_basic` gap vs PCRE2. Reference: Rust `regex-automata::dfa` does exactly this; RE2 too.
+  - **Tagged DFA (Laurikari TDFA) for captures** — current pipeline runs DFA for the match span then re-runs Pike-VM for capture recovery (~75% of `capture_groups.find_first` self-time is the Pike-VM pass). A tagged DFA captures in one pass. Effort: `major` (2-3 weeks). Expected gain: ~4× on capture-heavy workloads.
+  - **SIMD byte-class lookup in DFA hot loop** — the inner `transitions[state * num_classes + cls]` lookup is scalar; widening it to SIMD-gather or 64-byte vectorised lookup could give 2-4× on DFA-bound workloads. Effort: `small-medium`. Reference: `regex-automata::dfa::dense` uses similar tricks.
+  - **DFA minimization (Hopcroft)** — smaller state count reduces cache pressure. Effort: `medium`. Currently the lazy DFA grows on demand without minimization.
+  - **Materialized DFA for small patterns** — when the full DFA fits in <64 states, flatten into a lock-free array instead of the Mutex-protected lazy cache. Effort: `small`. Removes the Mutex lock on the hot path for short patterns.
 - **Dependencies**: Significant new engine code, but the existing AST is sufficient — no parser changes needed.
-- **Open design questions**: DFA cache eviction policy, when to bail out of the lazy DFA back to NFA simulation, how to expose runtime stats, whether to run NFA/DFA + VM in parallel for comparison during development.
 
 ### C7. PCRE2 10.47 differential conformance — bug triage
 - **What**: Triage the bugs uncovered by the `rgx-core/tests/pcre2_conformance.rs` differential harness (introduced 2026-04-13).
