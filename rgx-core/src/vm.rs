@@ -8638,11 +8638,22 @@ impl RegexVM {
                         // alt-boundaries so subsequent local THEN/
                         // PRUNE don't see stale entries.
                         local_alt_boundaries.clear();
-                        if ctx.alt_boundaries.is_empty() {
+                        // Per pcre2pattern(3): "If (*THEN) is in a
+                        // subpattern called by a subroutine call, it
+                        // applies only to that subpattern." So when
+                        // we are executing inside an active
+                        // subroutine recursion, the FullyDegraded
+                        // failure stays local — the body fails as a
+                        // unit, and the caller's outer backtrack
+                        // stack must be preserved so e.g. `.*?` can
+                        // retry. Closes testinput2:3350 family.
+                        let inside_subroutine = !ctx.recursion_stack.is_empty();
+                        if !inside_subroutine && ctx.alt_boundaries.is_empty() {
                             // Cross-context cleanup: no outer
-                            // alternation to rescue — clear the
-                            // outer stack so the committed failure
-                            // isn't backed-into by `.*?` etc.
+                            // alternation to rescue and not inside a
+                            // subroutine — clear the outer stack so
+                            // the committed failure isn't backed-into
+                            // by `.*?` etc.
                             ctx.backtrack_stack.clear();
                         }
                     }

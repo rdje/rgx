@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-11 - Engine: scope `(*THEN)` to its subroutine call (+1 pass, ratchet 12,806/4)
+- Scope: pcre2pattern(3) — "If `(*THEN)` is in a subpattern called by a subroutine call, it applies only to that subpattern." RGX's subexpr `OpCode::Then` handler, when `verb_apply_then` returned `FullyDegraded` (no enclosing alternation) with empty outer `ctx.alt_boundaries`, was clearing `ctx.backtrack_stack` to prevent `(*PRUNE)` from being backed-into. That cross-context cleanup destroyed the caller's retry state — e.g. a lazy `.*?` quantifier in the outer pattern could not retry with more characters after a `(*THEN)` inside `(?N)`.
+- Fix: gate the `ctx.backtrack_stack.clear()` in the FullyDegraded branch on `ctx.recursion_stack.is_empty()`. When we are inside an active subroutine call, the body's failure stays local; the caller sees a normal subroutine-call failure and proceeds with its own backtrack frames intact.
+- Closes testinput2:3350 (`^.*? (?1) c (?(DEFINE)(a(*THEN)b))/x` on "aabc" — now matches "aabc" 0..4 as PCRE2 expects). Non-subroutine `(*THEN)` semantics preserved (verified with sibling `^.*?a(*THEN)bc` which correctly reports no match on "aabc").
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1118/1118), `cargo clippy -p rgx-core --all-targets` clean, conformance NEW BASELINE **12,806 / 4 / 0 / 0** in 284.98s.
+
 ### 2026-05-11 - Engine: SubroutineRetryMode (Shorter | Different) closes deeper palindromes (+4 passes, ratchet 12,805/5)
 - Scope: The original retry-shorter handler (commit 61b7b8f) used `pos < cap` to accept retried-body results, which is correct for `StarGreedy(Call)` (outer needs more room) but wrong for `Call`-followed-by-backref (palindrome family — any *different* end can satisfy the continuation). Plain `Call` retries kept failing for odd-length palindromes ≥ 5 chars because the body's alt-2 path produced `pos > cap`, which the `< cap` filter rejected.
 - New `SubroutineRetryMode` enum on `SubroutineRetry`: `Shorter` keeps the legacy `< cap` semantics, `Different` uses `!= cap`. `execute_subexpr_with_max_end` now takes the mode and dispatches the body's end-of-bytecode filter to the matching new parameter (`must_end_before` for Shorter, `must_end_at_not` for Different). Retry handlers (try_backtrack at the main level, local_backtrack_or_return_false! macro at the subexpr level) both branch on mode in their accept check.

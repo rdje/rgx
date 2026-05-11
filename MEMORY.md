@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-11 — Engine: scope `(*THEN)` FullyDegraded to its subroutine call (+1, ratchet 12,806/4)
+- pcre2pattern(3) rule: `(*THEN)` inside `(?N)` subpattern applies ONLY to that subpattern; outer caller retains its retry state. Subexpr Then handler's FullyDegraded branch was clearing `ctx.backtrack_stack` when outer alt_boundaries was empty — that destroyed the caller's `.*?` retry frames. Fix: gate the cross-context clear on `ctx.recursion_stack.is_empty()`. Closes testinput2:3350 (DEFINE+*THEN). Cumulative session: 12,737/73 → 12,806/4 (+69, 95% reduction in failures).
+
 ### 2026-05-11 — Engine: SubroutineRetryMode (Shorter | Different) closes deeper palindromes (+4, ratchet 12,805/5)
 - Split `SubroutineRetry` accept-criteria by mode: `Shorter` uses `< cap` (StarGreedy(Call), outer needs more room), `Different` uses `!= cap` (palindrome family, any different end satisfies the continuation). `execute_subexpr_with_max_end` now dispatches to `must_end_before` or `must_end_at_not` parameters. Added `attempts_left: u16` budget on `SubroutineRetry`: `Different` mode = 16 initial, decremented per chain step; `Shorter` = u16::MAX (cap shrinks monotonically). Budget bounds worst-case cost on email-DEFINE / subroutine-heavy patterns where unbounded chains otherwise hit multi-GB memory. Closes testinput1:5964 + 3 sibling palindromes. Cumulative session: 12,737/73 → 12,805/5 (+68 passes, 93% reduction in failures). Remaining 5: 1 PGEN-tracked (`\10` forward-ref → PGEN-RGX-0084), 1 DEFINE+*THEN (testinput2:3350), 3 recursive `(?R)` / `(?0)` edge cases.
 
