@@ -14,6 +14,11 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-12 - Perf: extend inner-literal fast-fail to JIT dispatch tier
+- Scope: `try_jit_is_match`, `try_jit_find_first`, `try_jit_find_all` previously had no inner-literal fast-fail — the JIT'd function was called even when the input was guaranteed not to contain the pattern's required byte / substring. The DFA and Pike-VM tiers shipped this filter in 2026-05-11 (`fd50b63`); extending it to the JIT tier closes the parity gap so any tier the engine routes to enjoys the same SIMD-accelerated no-match shortcut.
+- Same two-stage filter as the DFA tier: memchr on the single rare byte first (cheap), memmem on the longest required substring as a secondary stage that fires only when stage 1 passes. Saves the entire JIT'd function call on no-match inputs.
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --features jit --lib` (1127 + 262 C1 = 1389 tests all green), `cargo clippy -p rgx-core --features jit --all-targets` clean, conformance ratchet holds at **12,806 / 4 / 0 / 0** in 289.86s (+6s vs baseline — within noise).
+
 ### 2026-05-12 - C2 prep: byte-class word partition + assertion helpers for upcoming DFA `\b` support
 - Scope: groundwork for the next major C2 lever — DFA word-boundary (`\b` / `\B`) support. The full DFA extension requires `DfaStateKey` to carry a `prev_byte_was_word` flag plus an evaluation context for `WordBoundary` epsilon edges during subset construction. This commit lands the prerequisite invariants and helpers without changing dispatch behavior, so the follow-up DFA commit can focus on the closure logic.
 - `byte_class.rs`: `Regex::WordBoundary` now contributes the word-byte oracle (same set as `\w`: `[0-9A-Z_a-z]`). Without this, a pattern like `\babc\b` produces byte classes determined only by the literals — the partition can mix word and non-word bytes within one class, which would prevent the DFA from evaluating word boundaries unambiguously. After this change, every byte class is consistently word or non-word. New `ByteClassMap::class_is_word(cls) -> bool` helper queries the partition; new `is_ascii_word_byte(b) -> bool` is the source of truth.

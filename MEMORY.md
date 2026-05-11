@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — Perf: extend inner-literal fast-fail to JIT tier
+- `try_jit_{is_match,find_first,find_all}` each now run the same two-stage memchr→memmem filter that `try_dfa_*` and `try_pike_*` got in 2026-05-11. No-match inputs short-circuit before invoking the JIT'd function. Conformance 12,806/4 unchanged; lib 1127/1127; C1 JIT tests 262/262; clippy clean.
+
 ### 2026-05-12 — C2 prep: byte-class word partition + assertion helpers (DFA `\b` Phase 1)
 - Step 1 of multi-commit DFA word-boundary support. Three changes: (1) `Regex::WordBoundary` now contributes the word-byte oracle in `byte_class.rs`, so every byte class in a `\b`-bearing pattern is unambiguously word or non-word. (2) `ByteClassMap::class_is_word(cls) -> bool` + `is_ascii_word_byte(b) -> bool` helpers added — the DFA's future closure code uses these to evaluate `\b` against (state's prev-word, current-byte's word) without re-scanning bytes. (3) `Nfa::has_non_word_boundary_assertions()` and `Nfa::has_word_boundary_assertions()` — the DFA constructor will use the former to keep anchors / `\A` / `\z` / `\G` rejected while accepting `\b`-only NFAs. No dispatch behavior changes; conformance ratchet 12,806 / 4 unchanged in 283.27s. Lib 1127/1127. Two follow-up commits needed to complete DFA `\b`: (a) extend `DfaStateKey` with `prev_byte_was_word`, evaluate `WordBoundary` in `epsilon_close` with (pw, curr_word) context, double cache space; (b) flip `is_c2_dfa_eligible` to allow word-boundary patterns and update `LazyDfa::new` to use `has_non_word_boundary_assertions` as the new gate. Expected payoff: closes `email_basic` 3.7× perf gap vs PCRE2 since `\b\w+@\w+\.\w+\b` would dispatch through DFA instead of backtracking VM.
 

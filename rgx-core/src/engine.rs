@@ -1483,6 +1483,21 @@ impl Engine {
         // pattern); we return Some(false) directly, matching
         // what the interpreter would have done.
         let jit_mutex = self.should_use_jit()?;
+        // Inner-literal fast-fail (same two-stage filter as the DFA
+        // and Pike-VM tiers — see `try_dfa_is_match` for rationale).
+        // Saves the JIT'd function call entirely when the input is
+        // guaranteed not to contain the pattern's required byte /
+        // substring.
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(false);
+            }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(false);
+                }
+            }
+        }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
@@ -1563,6 +1578,16 @@ impl Engine {
     pub fn try_jit_find_first(&self, input: &[u8]) -> Option<Option<MatchResult>> {
         const LIMIT_SENTINEL: isize = crate::c1::JIT_LIMIT_EXCEEDED_SENTINEL as isize;
         let jit_mutex = self.should_use_jit()?;
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(None);
+            }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(None);
+                }
+            }
+        }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
@@ -1649,6 +1674,16 @@ impl Engine {
     pub fn try_jit_find_all(&self, input: &[u8]) -> Option<Vec<MatchResult>> {
         const LIMIT_SENTINEL: isize = crate::c1::JIT_LIMIT_EXCEEDED_SENTINEL as isize;
         let jit_mutex = self.should_use_jit()?;
+        if let Some(b) = self.required_inner_byte_for_dispatch() {
+            if memchr::memchr(b, input).is_none() {
+                return Some(Vec::new());
+            }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(Vec::new());
+                }
+            }
+        }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
         let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
