@@ -451,6 +451,19 @@ fn build_reverse_dfa_if_eligible(
     if !crate::c2::program::is_c2_dfa_eligible(ast) {
         return None;
     }
+    // Reverse-walk word-boundary semantics differ from the forward
+    // direction (the "previous byte" in walk-order is the byte at
+    // pos+1 textually, not pos-1), and the bounded reverse driver
+    // doesn't yet plumb the context-aware accept check. For
+    // `\b` / `\B`-bearing patterns we therefore refuse the reverse
+    // DFA — the engine falls back to the per-position forward
+    // anchored scan, which is still strictly better than the
+    // backtracking VM. The reverse-DFA pipeline shortcut will be
+    // re-enabled in a follow-up commit once the direction-aware
+    // pw/cw plumbing lands.
+    if c2.reverse_anchored.has_word_boundary_assertions() {
+        return None;
+    }
     // Build the lazy DFA from the reverse-anchored NFA. Same
     // construction path as the forward DFA — just a different
     // input NFA. The byte-class map is shared with the forward

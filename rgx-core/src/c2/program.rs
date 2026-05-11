@@ -470,51 +470,55 @@ fn contains_multi_byte_char_class(ast: &Regex) -> bool {
 /// the lazy DFA's subset construction can't express two regex
 /// semantics that Pike-VM handles correctly:
 ///
-/// - **Zero-width assertions** (`\A`, `\z`, `\Z`, `^`, `$`, `\b`, `\B`,
-///   `\G`): subset construction has no notion of "context" between
-///   transitions. The DFA could be extended to track look-behind bytes
-///   per state, but that's a significant refactor not yet done.
+/// - **Positional / `\G` zero-width assertions** (`\A`, `\z`, `\Z`,
+///   `^`, `$`, `\G`): subset construction has no notion of position
+///   between transitions, so these still route to Pike-VM. **Word
+///   boundaries** (`\b` / `\B`) ARE handled by the DFA now via the
+///   `prev_byte_was_word` state extension and context-aware accept
+///   check (`is_accept_with_word_boundary_context`).
 /// - **Lazy quantifiers** (`a*?`, `a+?`, `a??`, `{n,m}?`): the DFA is
 ///   leftmost-longest by construction; it cannot express the priority
 ///   order Pike-VM uses for lazy semantics. For `a+?` on `"baaab"` the
 ///   DFA returns end=4 but PCRE2/Pike-VM return end=2.
 ///
 /// Patterns excluded from DFA dispatch continue to run on the Pike-VM
-/// (which handles both assertions and lazy quantifiers correctly).
+/// (which handles all assertions and lazy quantifiers correctly).
 /// As the DFA gains support for each excluded feature, the
 /// corresponding check can be removed.
 pub fn is_c2_dfa_eligible(ast: &Regex) -> bool {
     is_c2_dispatch_eligible(ast)
-        && !contains_zero_width_assertion(ast)
+        && !contains_non_word_boundary_zero_width_assertion(ast)
         && !contains_lazy_quantifier(ast)
 }
 
 /// Recursively walks the AST and returns `true` if any node is a
-/// zero-width assertion: `Regex::Anchor` (any kind), `Regex::WordBoundary`,
-/// or `\G` (`AnchorType::PreviousMatchEnd`, already excluded by
-/// `is_c2_dispatch_eligible` but included here for completeness so
-/// the check is self-contained).
-fn contains_zero_width_assertion(ast: &Regex) -> bool {
+/// **positional or `\G`** zero-width assertion — i.e., everything
+/// EXCEPT word boundaries (`\b` / `\B`), which the DFA now handles
+/// via `prev_byte_was_word` state extension and the context-aware
+/// `is_accept_with_word_boundary_context` check. Returns `false`
+/// for `Regex::WordBoundary`.
+fn contains_non_word_boundary_zero_width_assertion(ast: &Regex) -> bool {
     match ast {
-        Regex::Anchor(_) | Regex::WordBoundary { .. } => true,
-        Regex::Sequence(items) | Regex::Alternation(items) => {
-            items.iter().any(contains_zero_width_assertion)
-        }
-        Regex::Quantified { expr, .. } => contains_zero_width_assertion(expr),
-        Regex::Group { expr, .. } => contains_zero_width_assertion(expr),
-        Regex::FlagGroup { expr, .. } => contains_zero_width_assertion(expr),
+        Regex::Anchor(_) => true,
+        Regex::WordBoundary { .. } => false,
+        Regex::Sequence(items) | Regex::Alternation(items) => items
+            .iter()
+            .any(contains_non_word_boundary_zero_width_assertion),
+        Regex::Quantified { expr, .. } => contains_non_word_boundary_zero_width_assertion(expr),
+        Regex::Group { expr, .. } => contains_non_word_boundary_zero_width_assertion(expr),
+        Regex::FlagGroup { expr, .. } => contains_non_word_boundary_zero_width_assertion(expr),
         Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
-            contains_zero_width_assertion(expr)
+            contains_non_word_boundary_zero_width_assertion(expr)
         }
         Regex::Conditional {
             true_branch,
             false_branch,
             ..
         } => {
-            contains_zero_width_assertion(true_branch)
+            contains_non_word_boundary_zero_width_assertion(true_branch)
                 || false_branch
                     .as_ref()
-                    .is_some_and(|fb| contains_zero_width_assertion(fb))
+                    .is_some_and(|fb| contains_non_word_boundary_zero_width_assertion(fb))
         }
         _ => false,
     }

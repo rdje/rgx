@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — Perf: DFA `\b` / `\B` support closes the email_basic perf gap (1.49× faster than PCRE2)
+- DFA tier now handles word-boundary assertions. `DfaStateKey` extended with `prev_byte_was_word`; the stored NFA set excludes WordBoundary epsilon expansion (those edges evaluate at transition with context). Two start states pre-allocated (pw=false / pw=true); `start_state_for(input, start)` picks per-call based on `is_word(input[start-1])`. **Critical optimisation**: `accept_when_fire_wb` and `accept_when_not_fire_wb` precomputed per state at allocation — the prototype attempt without precomputation regressed `email_basic` by ~7× (per-byte epsilon closure). Headline benchmark: `find_first` on `\b\w+@\w+\.\w+\b` is now **159 ns vs PCRE2's 236 ns = 1.49× faster** (was 3.7× SLOWER). Throughput on 100/1000-byte: ~1.5× faster than PCRE2. `is_c2_dfa_eligible` switched to `contains_non_word_boundary_zero_width_assertion` so positional anchors (`\A`, `\z`, `^`, `$`, `\G`) still route to Pike-VM. Reverse DFA refuses `\b`-bearing patterns for now (walk-order semantics differ; deferred). Lib 1127/1127, c2_classifier 26/26, c2_pike_differential 12/12, c1 JIT 262/262, clippy clean, conformance 12806/4 in 277.16s.
+
 ### 2026-05-12 — Perf: extend inner-literal fast-fail to JIT tier
 - `try_jit_{is_match,find_first,find_all}` each now run the same two-stage memchr→memmem filter that `try_dfa_*` and `try_pike_*` got in 2026-05-11. No-match inputs short-circuit before invoking the JIT'd function. Conformance 12,806/4 unchanged; lib 1127/1127; C1 JIT tests 262/262; clippy clean.
 
