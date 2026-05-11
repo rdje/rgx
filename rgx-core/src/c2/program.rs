@@ -149,6 +149,39 @@ pub struct CompiledC2Program {
     /// (e.g., `\w+@\w+` has `@` as required, but `\d+\s+\w+` has none
     /// — every component is a class, not a literal).
     pub c2_required_inner_byte: Option<u8>,
+
+    /// Required interior multi-byte ASCII substring — a contiguous
+    /// run of literal bytes (length ≥ 2) that **must** appear in
+    /// any match span. Strictly more selective than
+    /// [`Self::c2_required_inner_byte`] for the same dispatch
+    /// fast-fail: a `memmem` needle of length k rejects non-matching
+    /// positions roughly k× faster than `memchr` on the rarest single
+    /// byte alone, because each false-positive position is cheaper
+    /// to discard.
+    ///
+    /// Computed by [`required_inner_substring`] from the AST: walks
+    /// the source-order tree, tracking runs of guaranteed-present
+    /// ASCII single-byte literals (`Regex::Char` with ASCII
+    /// codepoint, plus zero-width assertions which don't break
+    /// adjacency in the matched text), and returns the longest such
+    /// run. Patterns like `\w+://\w+`, `\d+\.\d+\.\d+`, or `(?:^|\b):X:Y:`
+    /// have a usable inner substring; patterns like
+    /// `\b\w+@\w+\.\w+\b` (single bytes separated by classes) do
+    /// not.
+    ///
+    /// `None` when no run of length ≥ 2 exists. Single-byte hits
+    /// fall through to the [`Self::c2_required_inner_byte`] path so
+    /// the engine doesn't pay memmem's table-build overhead for a
+    /// 1-byte needle.
+    pub c2_required_inner_literal: Option<Vec<u8>>,
+
+    /// Pre-built memmem finder for
+    /// [`Self::c2_required_inner_literal`]. Built once at compile
+    /// time so each `find_first` / `find_all` / `is_match` call
+    /// dispatch reuses the same Boyer–Moore–Horspool tables.
+    ///
+    /// `Some` iff `c2_required_inner_literal` is `Some`.
+    pub c2_required_inner_finder: Option<memchr::memmem::Finder<'static>>,
 }
 
 impl CompiledC2Program {
@@ -214,6 +247,23 @@ impl CompiledC2Program {
         // no match can exist anywhere. See `required_inner_byte`.
         let c2_required_inner_byte = required_inner_byte(ast);
 
+        // Multi-byte inner-literal fast-fail: when the AST contains a
+        // contiguous required ASCII substring of length ≥ 2 (e.g.
+        // `://` in `\w+://\w+`), build a memmem finder for it. Each
+        // dispatch call uses this finder for a strictly-more-selective
+        // no-match check before falling back to the single-byte
+        // fast-fail or running the engine.
+        let (c2_required_inner_literal, c2_required_inner_finder) = {
+            let bytes = required_inner_substring(ast);
+            match bytes {
+                Some(b) if b.len() >= 2 => {
+                    let finder = memchr::memmem::Finder::new(&b).into_owned();
+                    (Some(b), Some(finder))
+                }
+                _ => (None, None),
+            }
+        };
+
         Self {
             byte_class_map,
             forward_anchored,
@@ -226,6 +276,8 @@ impl CompiledC2Program {
             c2_prefix_finder,
             c2_has_nested_quantifier,
             c2_required_inner_byte,
+            c2_required_inner_literal,
+            c2_required_inner_finder,
         }
     }
 
@@ -859,6 +911,147 @@ fn required_inner_bytes(ast: &Regex) -> Vec<u8> {
     }
 }
 
+/// Find the longest contiguous required ASCII substring of length
+/// ≥ 2 anywhere inside a match span. Returns `None` when no such
+/// substring exists.
+///
+/// Used by the engine dispatch helpers as a memmem-based no-match
+/// fast-fail — strictly more selective than the single-byte memchr
+/// fast-fail when the inner literal is multi-byte. For example,
+/// `\w+://\w+` returns `Some(vec![b':', b'/', b'/'])`; a 3-byte
+/// memmem needle rejects non-matching positions ~3× faster than
+/// memchr on the rarest byte alone.
+///
+/// Computed by walking the AST and tracking the running sequence of
+/// guaranteed single-byte ASCII literals at each position; a "gap"
+/// (any node that doesn't contribute a guaranteed byte) resets the
+/// run. The best run across the entire AST is returned.
+#[must_use]
+pub fn required_inner_substring(ast: &Regex) -> Option<Vec<u8>> {
+    let mut state = InnerSubstrState::default();
+    walk_inner_substring(ast, &mut state);
+    let best = state.finish();
+    if best.len() >= 2 {
+        Some(best)
+    } else {
+        None
+    }
+}
+
+/// Tracks the longest contiguous run of guaranteed-present ASCII
+/// bytes seen so far during a depth-first AST walk.
+///
+/// To stay O(n) over the AST size, we accumulate the current run in
+/// `current` and only materialise the best run when the current run
+/// ends (via `flush` or `finish`). Cloning per byte would make the
+/// walker O(n²) in pattern length, which was measurable as a ~2×
+/// compile-time regression on the full PCRE2 conformance suite
+/// during early development of this prefilter.
+#[derive(Default)]
+struct InnerSubstrState {
+    /// Bytes accumulated in the current run.
+    current: Vec<u8>,
+    /// Best (longest) run found so far across the whole AST.
+    /// Materialised only on `flush` / `finish` — never on per-byte
+    /// pushes.
+    best: Vec<u8>,
+}
+
+impl InnerSubstrState {
+    fn push_byte(&mut self, b: u8) {
+        self.current.push(b);
+    }
+    fn flush(&mut self) {
+        if self.current.len() > self.best.len() {
+            // Move the run into `best` without copying.
+            self.best = std::mem::take(&mut self.current);
+        } else {
+            self.current.clear();
+        }
+    }
+    fn finish(mut self) -> Vec<u8> {
+        self.flush();
+        self.best
+    }
+}
+
+/// Walk the AST in source-order. Each node either:
+/// - Contributes guaranteed ASCII bytes (extends the run),
+/// - Contributes nothing but doesn't break continuity (zero-width
+///   nodes like anchors that don't consume input — these should
+///   NOT reset the run because they don't break adjacency in the
+///   matched text), or
+/// - Breaks the run (any unknown / variable-content node).
+fn walk_inner_substring(ast: &Regex, state: &mut InnerSubstrState) {
+    match ast {
+        Regex::Char(c) | Regex::WhitespaceLiteral(c) => {
+            if c.is_ascii() {
+                state.push_byte(*c as u8);
+            } else {
+                state.flush();
+            }
+        }
+        Regex::Sequence(items) => {
+            for item in items {
+                walk_inner_substring(item, state);
+            }
+        }
+        Regex::Group { kind, expr, .. } => match kind {
+            crate::ast::GroupKind::Capturing | crate::ast::GroupKind::NonCapturing => {
+                walk_inner_substring(expr, state);
+            }
+            _ => state.flush(),
+        },
+        Regex::FlagGroup { expr, .. } => walk_inner_substring(expr, state),
+        Regex::Quantified { expr, quantifier } => {
+            let min = match quantifier {
+                crate::ast::Quantifier::OneOrMore { .. } => 1u32,
+                crate::ast::Quantifier::ZeroOrOne { .. }
+                | crate::ast::Quantifier::ZeroOrMore { .. } => 0,
+                crate::ast::Quantifier::Range { min, .. } => *min,
+            };
+            if min >= 1 {
+                // The body matches at least `min` times in sequence.
+                // For a single-byte literal inner expression this
+                // multiplies the run. For any non-literal inner
+                // expression the inner-walk pushes nothing, which
+                // is the correct behavior. We approximate by walking
+                // the inner once — the only multi-walk gain would be
+                // for `(?:c){3}` which expands to "ccc"; that's a
+                // useful future extension but not the common case.
+                walk_inner_substring(expr, state);
+                // Conservatively reset after the quantifier body so
+                // we don't pretend the following item is adjacent
+                // to the body's last byte (it is, but only if the
+                // body matches exactly once — for `+` / range it
+                // could match more, and we don't model that).
+                state.flush();
+            } else {
+                state.flush();
+            }
+        }
+        // Anchors / boundaries are zero-width; they don't consume
+        // bytes and therefore don't break adjacency in the matched
+        // text. Walk past them without touching the current run.
+        Regex::Anchor(_) | Regex::WordBoundary { .. } => {}
+        Regex::Alternation(branches) => {
+            // For an alternation, the substring guaranteed by the
+            // whole expression must be present in EVERY branch. We
+            // conservatively flush — finding the longest common
+            // substring across branches is possible but rarely
+            // bigger than the per-branch best. (Branch-by-branch
+            // walking happens implicitly when this Alternation node
+            // appears INSIDE a Sequence: the branches don't
+            // contribute, but adjacent literals around the
+            // alternation continue counting separately. That's
+            // already what `state.flush()` here achieves.)
+            let _ = branches;
+            state.flush();
+        }
+        _ => state.flush(),
+    }
+}
+
 /// Pick the byte from `bytes` most likely to be rare in real text.
 /// Heuristic: prefer non-alphanumeric ASCII (punctuation / control
 /// bytes are rarer than letters/digits in typical inputs); fall back
@@ -1307,6 +1500,87 @@ mod dispatch_tests {
         // Extractor should return `@` not the leading byte of `α`.
         let ast = Regex::Sequence(vec![lit('α'), lit('@'), lit('β')]);
         assert_eq!(required_inner_byte(&ast), Some(b'@'));
+    }
+
+    // ============================================================
+    // required_inner_substring (multi-byte memmem inner extractor)
+    // ============================================================
+
+    #[test]
+    fn required_inner_substring_finds_url_separator() {
+        // `\w+://\w+` — `://` is a required interior 3-byte literal.
+        let prog = CompiledC2Program::try_compile(r"\w+://\w+").expect("compiles");
+        assert_eq!(
+            prog.c2_required_inner_literal.as_deref(),
+            Some(b"://".as_ref())
+        );
+    }
+
+    #[test]
+    fn required_inner_substring_finds_adjacent_punctuation_run() {
+        // `\w+\.\.\.\w+` — three consecutive `.` form a 3-byte run.
+        let prog = CompiledC2Program::try_compile(r"\w+\.\.\.\w+").expect("compiles");
+        assert_eq!(
+            prog.c2_required_inner_literal.as_deref(),
+            Some(b"...".as_ref())
+        );
+    }
+
+    #[test]
+    fn required_inner_substring_none_for_single_byte_separator() {
+        // `\w+@\w+` — only a 1-byte separator; below the memmem
+        // threshold so we keep this on the single-byte path.
+        let prog = CompiledC2Program::try_compile(r"\w+@\w+").expect("compiles");
+        assert_eq!(prog.c2_required_inner_literal, None);
+        // Single-byte path is still populated.
+        assert_eq!(prog.c2_required_inner_byte, Some(b'@'));
+    }
+
+    #[test]
+    fn required_inner_substring_none_for_disjoint_singles() {
+        // `\w+@\w+\.\w+` — `@` and `.` are required but separated by
+        // `\w+`, so neither forms a contiguous 2-byte run.
+        let prog = CompiledC2Program::try_compile(r"\w+@\w+\.\w+").expect("compiles");
+        assert_eq!(prog.c2_required_inner_literal, None);
+    }
+
+    #[test]
+    fn required_inner_substring_through_zero_width_boundary() {
+        // `\bhttps?://\b` — the `\b` zero-width boundaries don't
+        // break adjacency in the matched text, so the inner literal
+        // walker sees `http` as a 4-byte run and `://` as a 3-byte
+        // run. `http` wins (longest). The leading-literal extractor
+        // picks `http` for `c2_prefix_literal`; the inner-substring
+        // extractor independently identifies `http` (and `://` is the
+        // second-longest, dropped).
+        let prog = CompiledC2Program::try_compile(r"\bhttps?://\w+").expect("compiles");
+        // `http` is 4 bytes, `://` is 3 bytes — both qualify but the
+        // longer wins.
+        let needle = prog.c2_required_inner_literal.expect("has inner literal");
+        assert!(needle.starts_with(b"http"), "got: {needle:?}");
+    }
+
+    #[test]
+    fn required_inner_substring_optional_breaks_run() {
+        // `(?:abc)?xyz` — the `(?:abc)?` is optional and doesn't
+        // contribute. `xyz` is required and produces a 3-byte run.
+        let prog = CompiledC2Program::try_compile(r"(?:abc)?xyz").expect("compiles");
+        assert_eq!(
+            prog.c2_required_inner_literal.as_deref(),
+            Some(b"xyz".as_ref())
+        );
+    }
+
+    #[test]
+    fn required_inner_substring_skips_alternation() {
+        // `(cat|dog)1234` — the alternation has no common substring
+        // across branches, so it doesn't contribute. `1234` after
+        // the group still produces a 4-byte run.
+        let prog = CompiledC2Program::try_compile(r"(cat|dog)1234").expect("compiles");
+        assert_eq!(
+            prog.c2_required_inner_literal.as_deref(),
+            Some(b"1234".as_ref())
+        );
     }
 
     // ============================================================

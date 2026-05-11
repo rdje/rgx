@@ -818,9 +818,21 @@ impl Engine {
         // for a date pattern), and the input doesn't contain that
         // byte, no match can exist. memchr is SIMD-accelerated and
         // ~10-30x faster than the DFA walk on bulk no-match inputs.
+        // Two-stage: memchr on the rarest required byte (cheap);
+        // memmem on the longest required substring as a secondary,
+        // strictly-more-selective filter that fires only when stage
+        // 1 lets the input through. Memmem-second is critical for
+        // throughput on short subjects — memmem's per-call setup
+        // cost is amortised across long inputs but dominates on
+        // short inputs typical of the PCRE2 conformance suite.
         if let Some(b) = self.required_inner_byte_for_dispatch() {
             if memchr::memchr(b, input).is_none() {
                 return Some(false);
+            }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(false);
+                }
             }
         }
         // Reverse-DFA-pipeline fast path: one O(n) walk of the
@@ -890,6 +902,11 @@ impl Engine {
             if memchr::memchr(b, input).is_none() {
                 return Some(None);
             }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(None);
+                }
+            }
         }
         // Reverse-DFA pipeline fast path. Only prefer it when the
         // per-position scan has no prefix hint — otherwise the scan's
@@ -952,6 +969,25 @@ impl Engine {
             return None;
         }
         self.vm.program.c2_program.as_ref()?.c2_required_inner_byte
+    }
+
+    /// Multi-byte inner-literal finder companion to
+    /// [`Self::required_inner_byte_for_dispatch`]. When the AST
+    /// contains a contiguous required ASCII substring of length ≥ 2,
+    /// returns the pre-built memmem `Finder`. Used as a secondary
+    /// (strictly more selective) fast-fail filter after the
+    /// single-byte memchr check passes.
+    #[inline]
+    fn required_inner_finder_for_dispatch(&self) -> Option<&memchr::memmem::Finder<'static>> {
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        self.vm
+            .program
+            .c2_program
+            .as_ref()?
+            .c2_required_inner_finder
+            .as_ref()
     }
 
     /// True when the reverse-DFA pipeline is preferred over the
@@ -1095,6 +1131,11 @@ impl Engine {
         if let Some(b) = self.required_inner_byte_for_dispatch() {
             if memchr::memchr(b, input).is_none() {
                 return Some(Vec::new());
+            }
+            if let Some(finder) = self.required_inner_finder_for_dispatch() {
+                if finder.find(input).is_none() {
+                    return Some(Vec::new());
+                }
             }
         }
         // Reverse-DFA pipeline fast path for find_all. Same gate as
