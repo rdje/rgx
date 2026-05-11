@@ -14,6 +14,13 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-11 - API: promote `Regex::classification()` to public + add `Regex::uses_c2()` (C2 Step 8a)
+- Scope: the C2 dispatch chain (Aho–Corasick → lazy DFA → Pike-VM → backtracking VM) has been fully wired through `engine.try_ac_*` / `engine.try_dfa_*` / `engine.try_pike_*` and dispatched from `Regex::find_first`, `find_all`, `is_match` since 2026-04-11. The `Regex::classification()` accessor was however still doc-hidden, gated on "design doc Q8 / C2 step 8" — the public introspection promise from the C2 design.
+- Promote `classification()` from `#[doc(hidden)]` to public; restate its purpose in terms of the shipped 3-tier dispatch + `Classification::NeedsVm.reason` introspection (so callers can distinguish *why* a pattern falls off the fast path: backreference, lookaround, recursion, etc.).
+- Add `Regex::uses_c2() -> bool` per design doc Q8 — the yes/no convenience form. Equivalent to `matches!(classification(), Classification::NoBacktracking)`. Both methods carry doctests.
+- Refresh stale `c2/mod.rs` status block: Steps 4c–8 are now marked ✅ with a one-line description each, reflecting the actual shipped pipeline. The previous status text claimed Steps 4c–8 were "planned", which has been wrong since the 2026-04-11 cutover.
+- Validation: `cargo build -p rgx-core` clean, `cargo test -p rgx-core --lib` (1118/1118), `cargo test -p rgx-core --test c2_classifier` (26/26), `cargo test -p rgx-core --test c2_pike_differential` (12/12), `cargo test -p rgx-core --doc -- uses_c2 classification` (2/2 new doctests pass), `cargo clippy -p rgx-core --all-targets` clean, conformance ratchet holds at **12,806 / 4 / 0 / 0** in 286.41s.
+
 ### 2026-05-11 - Docs: end-of-cycle ratchet snapshot (12,806 / 4 ≈ 99.97%)
 - Scope: comprehensive docs sync for the 2026-05-08 → 2026-05-11 conformance run that took the ratchet from 12,737/73 → 12,806/4 (+69 passes, ~95% reduction in residual failures, 18 family fixes). User direction: log into the live docs/book and pause; resume the remaining 3 non-PGEN failures at a later time.
 - `book/src/internals/pcre2-conformance-audit.md` §1 executive summary refreshed (12,720 → 12,806; pass-count progression updated through commit 0ba42b1). New §7B "End-of-cycle snapshot — 2026-05-11" enumerates all 18 family fixes shipped this cycle and characterises the residual 4 across two cohorts: 1 PGEN-blocked (PGEN-RGX-0084) and 3 engine-frontier (cross-subexpr alt-frame promotion — same architectural prerequisite as Cluster 1A).

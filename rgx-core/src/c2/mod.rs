@@ -13,27 +13,33 @@
 //!
 //! # Implementation status
 //!
-//! C2 is being built incrementally per the §15 phased plan. Each step
-//! ships production-quality code; nothing here is throwaway.
+//! C2 has shipped through Step 8. The public `Regex` API dispatches
+//! through a 3-tier C2 chain — Aho–Corasick literal prefix
+//! (`try_ac_*`), lazy DFA (`try_dfa_*`), and sparse-set Pike-VM
+//! (`try_pike_*`) — before falling back to the backtracking VM.
+//! Classifier-positive patterns reach the appropriate tier
+//! automatically. The Book chapter
+//! `book/src/internals/nfa-dfa-engine.md` documents the design and
+//! dispatch logic in detail.
 //!
 //! - **Step 0**: design proposal landed. ✅
-//! - **Step 1**: pattern classifier — metadata only, no runtime dispatch. ✅
-//! - **Step 2**: byte-class equivalence partitioning — standalone module. ✅
-//! - **Step 3a**: forward Thompson NFA construction (anchored + unanchored). ✅
-//! - **Step 3b**: reverse NFA construction + `CompiledC2Program` assembly. ✅
+//! - **Step 1**: pattern classifier — metadata + runtime dispatch gate. ✅
+//! - **Step 2**: byte-class equivalence partitioning. ✅
+//! - **Step 3a**: forward Thompson NFA construction. ✅
+//! - **Step 3b**: reverse NFA construction + `CompiledC2Program`. ✅
 //! - **Step 4a**: sparse-set Pike-VM (`is_match` / `find_first` /
-//!   `find_all` without captures) plus a differential test against the
-//!   existing backtracking VM for match spans. ✅
-//! - **Step 4b (this commit)**: Pike-VM capture tracking via per-thread
-//!   capture buffers. New `pike_captures` / `pike_captures_all` API
-//!   plus extended differential test that compares capture group
-//!   positions byte-for-byte against the existing VM. ✅
-//! - **Step 4c**: engine dispatch wiring (route classifier-positive
-//!   patterns through Pike-VM via the public `Regex` API). (planned)
-//! - **Step 5**: lazy forward DFA cache. (planned)
-//! - **Step 6**: lazy reverse DFA cache. (planned)
-//! - **Step 7**: literal prefix integration. (planned)
-//! - **Step 8**: production cutover, benchmarks, Book chapter. (planned)
+//!   `find_all`) with differential test against the VM. ✅
+//! - **Step 4b**: Pike-VM capture tracking with per-thread buffers
+//!   (`pike_captures` / `pike_captures_all`). ✅
+//! - **Step 4c**: engine dispatch wiring (`engine.try_pike_*` routes
+//!   through `Regex::find_first`, `find_all`, `is_match`). ✅
+//! - **Step 5**: lazy forward DFA cache (`LazyDfa`, `try_dfa_*`). ✅
+//! - **Step 6**: lazy reverse DFA cache + reverse-DFA pipeline for
+//!   leftmost-first `find_first` / `find_all`. ✅
+//! - **Step 7**: Aho–Corasick literal-prefix tier (`try_ac_*`). ✅
+//! - **Step 8**: production cutover — public `Regex::uses_c2()` /
+//!   `Regex::classification()` introspection promoted from
+//!   doc-hidden (2026-05-11); Book chapter shipped. ✅
 
 pub mod byte_class;
 pub mod classifier;

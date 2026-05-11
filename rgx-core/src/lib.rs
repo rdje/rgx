@@ -1086,22 +1086,61 @@ impl Regex {
 
     /// C2 engine classification for this compiled pattern.
     ///
-    /// Returns the `Classification` decided by the C2 pattern classifier
-    /// at compile time. At C2 step 1 this is metadata only — the engine
-    /// still always dispatches through the backtracking VM. Runtime
-    /// dispatch on this field lands in C2 step 4 (Pike-VM).
+    /// Returns the [`Classification`](crate::c2::Classification)
+    /// decided by the C2 pattern classifier at compile time. The
+    /// classifier decides whether this pattern is eligible for the
+    /// linear-time NFA/DFA hybrid path or must run on the
+    /// backtracking VM.
     ///
-    /// This accessor is doc-hidden because the public introspection API
-    /// (e.g. `uses_c2() -> bool`) is design doc Q8 and lands in C2 step 8
-    /// alongside the production cutover. Until then, this method exists
-    /// for tests, internal callers, and the differential testing harness.
+    /// Use [`Self::uses_c2`] for the boolean form when you only need
+    /// the yes/no answer; reach for `classification()` when you want
+    /// to inspect *why* a pattern fell off the fast path
+    /// ([`Classification::NeedsVm`](crate::c2::Classification::NeedsVm)
+    /// carries an
+    /// [`ExclusionReason`](crate::c2::ExclusionReason)).
     ///
-    /// See `docs/C2_NFA_DFA_DESIGN.md` §4 for the no-backtracking subset
-    /// definition.
-    #[doc(hidden)]
+    /// See `book/src/internals/nfa-dfa-engine.md` for the dispatch
+    /// chain and the no-backtracking subset definition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rgx_core::{Regex, c2::Classification};
+    ///
+    /// let re = Regex::compile(r"\d+").unwrap();
+    /// assert!(matches!(re.classification(), Classification::NoBacktracking));
+    ///
+    /// let bt = Regex::compile(r"(a+)\1").unwrap();
+    /// assert!(matches!(bt.classification(), Classification::NeedsVm { .. }));
+    /// ```
     #[must_use]
     pub fn classification(&self) -> &c2::Classification {
         self.engine.classification()
+    }
+
+    /// Whether this pattern uses the C2 NFA/DFA hybrid engine at run
+    /// time.
+    ///
+    /// Equivalent to checking that
+    /// [`Self::classification`] returns
+    /// [`Classification::NoBacktracking`](crate::c2::Classification::NoBacktracking).
+    /// Returns `true` if the pattern is eligible for the
+    /// Aho–Corasick / lazy-DFA / Pike-VM dispatch tiers; `false` if
+    /// it can only run on the backtracking VM (because it contains
+    /// features like backreferences, lookaround, recursion, or
+    /// backtracking verbs).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rgx_core::Regex;
+    ///
+    /// assert!(Regex::compile(r"^\d+$").unwrap().uses_c2());
+    /// assert!(!Regex::compile(r"(a+)\1").unwrap().uses_c2());
+    /// ```
+    #[must_use]
+    pub fn uses_c2(&self) -> bool {
+        matches!(self.classification(), c2::Classification::NoBacktracking)
     }
 
     /// Compile a regex with specific execution mode.

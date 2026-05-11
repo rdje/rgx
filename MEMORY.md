@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-11 — API: `Regex::uses_c2()` + public `Regex::classification()` (C2 Step 8a closes design Q8)
+- Promoted `Regex::classification()` from `#[doc(hidden)]` to public; added `Regex::uses_c2() -> bool` convenience form. Both with doctests. Refreshed `rgx-core/src/c2/mod.rs` status block — Steps 4c–8 were stale "planned" but have been shipped since 2026-04-11 (engine.try_ac_* / try_dfa_* / try_pike_* dispatched from `Regex::find_first` / `find_all` / `is_match`). Conformance ratchet 12,806 / 4 unchanged; lib 1118/1118; c2_classifier 26/26; c2_pike_differential 12/12; new doctests 2/2; clippy clean.
+
 ### 2026-05-11 — End-of-cycle: ~100% PCRE2 parity reached (12,806 / 4); session paused
 - Final ratchet: **12,806 pass / 4 fail / 0 panic / 0 skip ≈ 99.97%**. Cumulative two-day arc (2026-05-08 entry-point → 2026-05-11 close): 12,737/73 → **12,806/4** (+69 passes, ~95% reduction in residual failures, ~18 family fixes shipped). User direction was to log into live docs and pause; resume the remaining 3 non-PGEN failures at a later time.
 - **Residual breakdown** (the 4 still-failing cases):
