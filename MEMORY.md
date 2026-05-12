@@ -4043,3 +4043,40 @@ Kahn's algorithm with cycle detection. Dependency rule: if Copy_j writes the reg
 **Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1172/1172 (1163 baseline + 9 new). Differential 12/12. Clippy correctness clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged, TDFA module still dead code from dispatch's perspective.
 
 **Next step.** Phase 2d — the simulator + differential gate. `TdfaSimulator::find_match_at(input, start) -> Option<(usize, Vec<Option<usize>>)>` runs the simulator with the start RegOps, then a per-byte loop reading transitions, executing their RegOps, advancing state. At accept, reads `accept_register_map` to produce the captures vector. Differential test runs every TDFA-eligible pattern through both the TDFA and `pike_match_at_with_captures`, asserting `(start, end, groups[..])` parity.
+
+## 2026-05-13 session — TDFA Phase 2d: simulator + differential gate
+
+Sixth commit on the TDFA track. The first hard-correctness commit: the TDFA simulator now produces identical `(start, end, captures)` to `pike_match_at_with_captures` on a curated differential corpus. **Phase 2 is feature-complete.**
+
+**Simulator API.** `find_match_at(tdfa, input, start) -> Option<TdfaMatch>` where `TdfaMatch { start, end, captures: Vec<Option<usize>> }`. captures is indexed by tag slot: 0/1 = whole-match span, 2g/2g+1 = group g start/end. Same shape as Pike-VM's capture buffer.
+
+**Hot loop.**
+1. Allocate `Vec<Option<usize>>` for live registers (length num_registers).
+2. Run start RegOps at pos=start. All Saves (no Copies pre-byte).
+3. State = TDFA[0]. Snapshot if accept.
+4. Per byte: lookup transition (`tdfa.transition(state, cls)`); if dead, break; apply RegOps at pos+1; advance state; snapshot on accept.
+5. After loop: if any accept was visited, build captures vector from the snapshot via the last-accept state's `accept_register_map`.
+
+**Differential gate.** `assert_tdfa_matches_pike(ast, input)` builds a `CompiledC2Program` from the AST, runs both the TDFA and Pike-VM, and asserts byte-for-byte capture equality. Corpus: simple capture (`(a)`), sequential `(a)(b)`, alternation `(a)|(b)`, greedy repeat `(a)+`, nested captures `((a)b)`, empty pattern `(())`. Each pattern × 4-6 inputs = 30+ assertions. **All pass.**
+
+**Bug caught by test.** Initial simulator allocated registers based on `tdfa.num_registers()` at entry. But `transition` is LAZY — the first call to `transition` from the start state allocates new registers during the ε-closure firing. The registers Vec was too short and the inner-loop bounds check silently dropped Saves. EVERY simulator test failed with `None` captures where `Some(n)` was expected.
+
+Fix: resize the registers Vec after each transition to match the current `num_registers`. Cost: O(1) when no growth (Vec::resize is a no-op if len equals new_len).
+
+**Hand-verified trace for `(a)` on "a".**
+1. Initial: registers = [None] (1 register: R0 from start state's GroupStart firing).
+2. Run start_reg_ops at pos 0: Save R0 → registers = [Some(0)].
+3. State = TDFA[0] (start). Not accept. No snapshot.
+4. Loop pos=0: byte 'a'. transition(TDFA[0], cls_a) computes lazily, allocating R1 during the ε-closure. Returns (target=TDFA[1], reg_ops=[Save R1]).
+5. Resize registers from 1 to 2: registers = [Some(0), None].
+6. Apply Save R1 at pos 1: registers = [Some(0), Some(1)].
+7. State = TDFA[1] (accept). Snapshot: last_accept = (1, TDFA[1], [Some(0), Some(1)]).
+8. End of input. last_accept = Some.
+9. accept_register_map for TDFA[1] = [_, _, R0, R1]. Read captures[2] = registers[R0] = Some(0). Read captures[3] = registers[R1] = Some(1). captures[0]/captures[1] = (start=0, end=1).
+10. TdfaMatch { start: 0, end: 1, captures: [Some(0), Some(1), Some(0), Some(1)] } ✓
+
+**Hand-verified trace for `(a)+` on "aaa".** Greedy: longest match is "aaa" (end=3). Group 1 captures the LAST iteration ((2, 3)). The simulator advances through TDFA[0] → TDFA[1] (cache miss, accept at end=1) → TDFA[2] (cache miss, accept at end=2) → TDFA[2] again (cache hit, accept at end=3). At each accept visit, snapshot. Final snapshot is from end=3. Captures read from TDFA[2]'s `accept_register_map` against the snapshot: group 1 = (2, 3). ✓ Matches Pike-VM and PCRE2.
+
+**Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1186/1186 (1172 baseline + 14 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged.
+
+**Next step.** Phase 3 — engine dispatch wiring. Add `tdfa_eligible: bool` field on `CompiledC2Program`, a TDFA classifier visitor (capture groups present, no lazy-in-capture, no `\b`-in-capture-closure, LeftmostFirst only), `c2_tdfa: OnceLock<Option<TdfaCell>>` on `Regex`, `should_dispatch_to_tdfa()` runtime gate, and dispatch sites in `engine.rs` (`try_dfa_find_first`, etc.) that try the TDFA before the existing DFA → Pike pipeline. The TDFA returns `(start, end, captures)` directly; the existing two-pass capture recovery is skipped on the TDFA path. Differential gate at the public `Regex::find_first` level then verifies engine-level parity.

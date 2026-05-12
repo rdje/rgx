@@ -1091,6 +1091,177 @@ impl TaggedDfa {
 }
 
 // ============================================================
+// Phase 2d: simulator
+// ============================================================
+
+/// A successful TDFA match at a fixed start position.
+///
+/// `captures` is indexed by tag index (the same numbering the
+/// Pike-VM's capture buffer uses): slot 0/1 are the whole-match
+/// span, slots 2g/2g+1 are group g's start/end. The simulator
+/// fills slots 0/1 from the scan span; slots 2..num_tags() come
+/// from registers via the accept state's `accept_register_map`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TdfaMatch {
+    /// Start byte position the match was anchored at.
+    pub start: usize,
+    /// End byte position of the longest match found.
+    pub end: usize,
+    /// Per-tag-slot capture positions. Length equals
+    /// [`TaggedDfa::num_tags`].
+    pub captures: Vec<Option<usize>>,
+}
+
+/// Run the TDFA simulator from `start` over `input`, returning the
+/// **longest match** anchored at `start` along with the captures
+/// recorded at that match's accept point.
+///
+/// The simulator allocates a `Vec<Option<usize>>` of length
+/// [`TaggedDfa::num_registers`] for the live register array and a
+/// second of the same length for the "last accept snapshot."
+/// `start_reg_ops` fire at position `start`. Each byte transition's
+/// RegOps fire at the position *after* the consumed byte (matching
+/// the Pike-VM's `apply_capture_tag` convention).
+///
+/// **Leftmost-longest by construction.** The DFA model is leftmost-
+/// longest. For patterns where leftmost-first semantics matter
+/// (lazy quantifiers, prioritised alternation with overlap), the
+/// TDFA classifier (Phase 3) rejects the pattern at compile time
+/// and the engine falls back to the Pike-VM. The simulator does
+/// not implement leftmost-first prioritisation.
+///
+/// `tdfa` is `&mut` because transitions are constructed lazily on
+/// first use. Phase 3 may add a materialised variant that takes
+/// `&self`.
+///
+/// # Returns
+///
+/// - `Some(TdfaMatch)` if at least one accept state is reached
+///   during the scan. The match's `end` is the position of the
+///   *last* accept visited (longest match wins).
+/// - `None` if no accept state is reached.
+pub fn find_match_at(tdfa: &mut TaggedDfa, input: &[u8], start: usize) -> Option<TdfaMatch> {
+    let num_tags = tdfa.num_tags();
+    let mut registers: Vec<Option<usize>> = vec![None; tdfa.num_registers() as usize];
+
+    // Run start RegOps at position `start`. These are all Saves
+    // (no Copies before the first byte by construction).
+    let start_ops: Vec<RegOp> = tdfa.start_reg_ops().to_vec();
+    for op in &start_ops {
+        apply_reg_op(*op, start, &mut registers);
+    }
+
+    // Track the last accept state visited and its register
+    // snapshot. If the start state itself is accept, snapshot
+    // immediately — the empty match at `start` is a valid match
+    // (it'll only stick if no later accept overtakes it).
+    let mut state: TaggedDfaStateId = tdfa.start_state();
+    let mut last_accept: Option<(usize, TaggedDfaStateId, Vec<Option<usize>>)> = None;
+    if tdfa.state(state).is_accept {
+        last_accept = Some((start, state, registers.clone()));
+    }
+
+    // Per-byte scan. Lookup transition, execute RegOps at pos+1,
+    // advance state, snapshot on accept.
+    //
+    // Note: `transition` is lazy and may allocate new registers
+    // (via the ε-closure firing fresh tags) on first lookup. After
+    // each transition we resize `registers` to match the current
+    // num_registers — the cost is O(1) when no growth happens
+    // (Vec::resize is a no-op if the new length equals the old).
+    let mut pos = start;
+    while pos < input.len() {
+        let cls = tdfa.byte_class_map.class_of(input[pos]);
+        let trans = tdfa.transition(state, cls);
+        if TaggedDfa::is_dead(trans) {
+            break;
+        }
+        // Grow the live register array if lazy construction
+        // allocated new physical registers during this transition.
+        let current_num_registers = tdfa.num_registers() as usize;
+        if registers.len() < current_num_registers {
+            registers.resize(current_num_registers, None);
+        }
+        let new_pos = pos + 1;
+        // Snapshot reg_ops as Vec before mutating registers (slice
+        // is borrowed from the TDFA; mutation of registers doesn't
+        // alias but we can't hold the slice across reg_op apply).
+        let reg_ops: Vec<RegOp> = tdfa.transition_reg_ops(trans).to_vec();
+        for op in &reg_ops {
+            apply_reg_op(*op, new_pos, &mut registers);
+        }
+        state = trans.target;
+        if tdfa.state(state).is_accept {
+            last_accept = Some((new_pos, state, registers.clone()));
+        }
+        pos = new_pos;
+    }
+
+    let (end, accept_state_id, accept_registers) = last_accept?;
+    let accept_state = tdfa.state(accept_state_id);
+    debug_assert_eq!(
+        accept_state.accept_register_map.len(),
+        num_tags,
+        "accept register map must have one entry per tag"
+    );
+
+    // Build the captures vector. Slots 0/1 are the whole-match
+    // span. Slots 2..num_tags read from registers via the accept
+    // state's accept_register_map.
+    let mut captures: Vec<Option<usize>> = vec![None; num_tags];
+    if num_tags >= 2 {
+        captures[0] = Some(start);
+        captures[1] = Some(end);
+    }
+    for (tag_idx, &reg_id) in accept_state.accept_register_map.iter().enumerate() {
+        if tag_idx < 2 {
+            continue; // group 0 — filled above
+        }
+        if reg_id == REGISTER_NONE {
+            continue;
+        }
+        let r = reg_id as usize;
+        if r < accept_registers.len() {
+            captures[tag_idx] = accept_registers[r];
+        }
+    }
+
+    Some(TdfaMatch {
+        start,
+        end,
+        captures,
+    })
+}
+
+/// Apply a single RegOp to the live registers at the simulator's
+/// current position.
+///
+/// `Save { dst }` writes `Some(pos)` to register `dst`. `Copy
+/// { src, dst }` writes `registers[src]`'s value to `registers[dst]`.
+/// Both operations are bounds-checked defensively — out-of-bounds
+/// register IDs are silently skipped, which should be unreachable
+/// for correctly-built TDFAs and protects against any future
+/// construction-side bug.
+#[inline]
+fn apply_reg_op(op: RegOp, pos: usize, registers: &mut [Option<usize>]) {
+    match op {
+        RegOp::Copy { src, dst } => {
+            let s = src as usize;
+            let d = dst as usize;
+            if s < registers.len() && d < registers.len() {
+                registers[d] = registers[s];
+            }
+        }
+        RegOp::Save { dst } => {
+            let d = dst as usize;
+            if d < registers.len() {
+                registers[d] = Some(pos);
+            }
+        }
+    }
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
@@ -1785,5 +1956,252 @@ mod tests {
             accept.accept_register_map[tag_end_1], REGISTER_NONE,
             "group-1 end must be fired at accept"
         );
+    }
+
+    // ============================================================
+    // Phase 2d — simulator: end-to-end matching + capture recovery
+    // ============================================================
+
+    #[test]
+    fn simulator_simple_capture() {
+        // (a) on "a" — group 1 = (0, 1).
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"a", 0).expect("simulator must find match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 1);
+        // Slots: [0]=match_start, [1]=match_end, [2]=group1_start, [3]=group1_end
+        assert_eq!(m.captures[0], Some(0));
+        assert_eq!(m.captures[1], Some(1));
+        assert_eq!(m.captures[2], Some(0), "group 1 start");
+        assert_eq!(m.captures[3], Some(1), "group 1 end");
+    }
+
+    #[test]
+    fn simulator_no_match() {
+        // (a) on "b" — no match.
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        assert_eq!(find_match_at(&mut tdfa, b"b", 0), None);
+    }
+
+    #[test]
+    fn simulator_sequential_captures() {
+        // (a)(b) on "ab" — group 1 = (0, 1), group 2 = (1, 2).
+        let (nfa, bcm) = build_components(&seq(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"ab", 0).expect("simulator must match");
+        assert_eq!(m.end, 2);
+        assert_eq!(m.captures[2], Some(0), "group 1 start");
+        assert_eq!(m.captures[3], Some(1), "group 1 end");
+        assert_eq!(m.captures[4], Some(1), "group 2 start");
+        assert_eq!(m.captures[5], Some(2), "group 2 end");
+    }
+
+    #[test]
+    fn simulator_greedy_repeat_keeps_last_iteration_captures() {
+        // (a)+ on "aaa" — leftmost-longest: match = "aaa" (end=3),
+        // group 1 = last iteration's "a" (positions 2-3).
+        let pattern = quantified_one_or_more(group_capturing(1, lit('a')));
+        let (nfa, bcm) = build_components(&pattern);
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"aaa", 0).expect("simulator must match");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 3);
+        assert_eq!(m.captures[2], Some(2), "group 1 start: last iteration");
+        assert_eq!(m.captures[3], Some(3), "group 1 end: last iteration");
+    }
+
+    #[test]
+    fn simulator_alternation_branch_a() {
+        // (a)|(b) on "a" — group 1 = (0, 1), group 2 = unset.
+        let (nfa, bcm) = build_components(&alt(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"a", 0).expect("simulator must match");
+        assert_eq!(m.end, 1);
+        assert_eq!(m.captures[2], Some(0));
+        assert_eq!(m.captures[3], Some(1));
+        // Group 2 unset.
+        assert_eq!(m.captures[4], None);
+        assert_eq!(m.captures[5], None);
+    }
+
+    #[test]
+    fn simulator_alternation_branch_b() {
+        // (a)|(b) on "b" — group 1 = unset, group 2 = (0, 1).
+        let (nfa, bcm) = build_components(&alt(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"b", 0).expect("simulator must match");
+        assert_eq!(m.captures[2], None, "group 1 unset");
+        assert_eq!(m.captures[4], Some(0), "group 2 start");
+        assert_eq!(m.captures[5], Some(1), "group 2 end");
+    }
+
+    #[test]
+    fn simulator_empty_pattern_matches_at_start() {
+        // (()) on "" — empty match at position 0 with both group 1
+        // and group 2 = (0, 0).
+        let (nfa, bcm) = build_components(&group_capturing(1, group_capturing(2, Regex::Empty)));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"", 0).expect("simulator must match empty pattern");
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, 0);
+        assert_eq!(m.captures[2], Some(0), "group 1 start");
+        assert_eq!(m.captures[3], Some(0), "group 1 end");
+        assert_eq!(m.captures[4], Some(0), "group 2 start");
+        assert_eq!(m.captures[5], Some(0), "group 2 end");
+    }
+
+    #[test]
+    fn simulator_match_at_non_zero_start() {
+        // (a) anchored at start=2 on "bba" — match at (2, 3).
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        let m = find_match_at(&mut tdfa, b"bba", 2).expect("simulator must match");
+        assert_eq!(m.start, 2);
+        assert_eq!(m.end, 3);
+        assert_eq!(m.captures[2], Some(2));
+        assert_eq!(m.captures[3], Some(3));
+    }
+
+    // ============================================================
+    // Phase 2d — differential gate against the Pike-VM
+    // ============================================================
+
+    /// Run the TDFA and the Pike-VM on the same anchored pattern +
+    /// input. Compare match outcome and per-tag captures. Any
+    /// disagreement is a hard failure.
+    ///
+    /// The Pike-VM is the project's reference simulator (already
+    /// used for the lazy DFA's two-pass capture recovery). If the
+    /// TDFA matches it on `(start, end, captures)` for a corpus of
+    /// inputs, the TDFA is correct for those patterns.
+    fn assert_tdfa_matches_pike(ast: &Regex, input: &[u8]) {
+        use crate::c2::pike::pike_captures_at_with_scratch;
+        use crate::c2::program::CompiledC2Program;
+
+        // Build a CompiledC2Program directly from the AST so the
+        // TDFA and Pike share the same NFA + byte class map.
+        let program = CompiledC2Program::build_from_ast(ast);
+        let bcm = Arc::new(program.byte_class_map.clone());
+        let nfa_arc = Arc::new(program.forward_anchored.clone());
+
+        let mut scratch = crate::c2::pike::PikeScratch::new(&program);
+        let pike_result = pike_captures_at_with_scratch(&program, input, 0, &mut scratch);
+
+        let mut tdfa = TaggedDfa::try_build(nfa_arc, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("tdfa build must succeed for differential corpus");
+        let tdfa_result = find_match_at(&mut tdfa, input, 0);
+
+        match (tdfa_result, pike_result) {
+            (None, None) => {}
+            (Some(t), Some(p)) => {
+                assert_eq!(
+                    t.end,
+                    p.end,
+                    "end mismatch: TDFA={} Pike={} pattern={:?} input={:?}",
+                    t.end,
+                    p.end,
+                    ast,
+                    std::str::from_utf8(input).unwrap_or("<non-utf8>")
+                );
+                assert_eq!(t.start, p.start);
+                // Compare per-group captures. PikeMatch.groups is
+                // a Vec<Option<(usize, usize)>> indexed by group
+                // number (0 = whole match). TdfaMatch.captures is
+                // a Vec<Option<usize>> indexed by tag slot
+                // (2g = start, 2g+1 = end).
+                for g in 0..p.groups.len() {
+                    let pike_g = p.groups[g];
+                    let tdfa_start = t.captures.get(2 * g).copied().flatten();
+                    let tdfa_end = t.captures.get(2 * g + 1).copied().flatten();
+                    let tdfa_g = match (tdfa_start, tdfa_end) {
+                        (Some(s), Some(e)) => Some((s, e)),
+                        _ => None,
+                    };
+                    assert_eq!(
+                        tdfa_g,
+                        pike_g,
+                        "group {} mismatch: TDFA={:?} Pike={:?} pattern={:?} input={:?}",
+                        g,
+                        tdfa_g,
+                        pike_g,
+                        ast,
+                        std::str::from_utf8(input).unwrap_or("<non-utf8>")
+                    );
+                }
+            }
+            (tdfa_result, pike_result) => panic!(
+                "match outcome divergence: TDFA={:?} Pike={:?} pattern={:?} input={:?}",
+                tdfa_result.is_some(),
+                pike_result.is_some(),
+                ast,
+                std::str::from_utf8(input).unwrap_or("<non-utf8>")
+            ),
+        }
+    }
+
+    #[test]
+    fn differential_simple_capture() {
+        let pat = group_capturing(1, lit('a'));
+        for input in [b"a".as_slice(), b"b", b"", b"ab", b"aa"] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
+    }
+
+    #[test]
+    fn differential_sequential_captures() {
+        let pat = seq(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]);
+        for input in [b"ab".as_slice(), b"a", b"ac", b"abc", b""] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
+    }
+
+    #[test]
+    fn differential_alternation() {
+        let pat = alt(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]);
+        for input in [b"a".as_slice(), b"b", b"c", b"", b"ab", b"ba"] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
+    }
+
+    #[test]
+    fn differential_greedy_repeat() {
+        let pat = quantified_one_or_more(group_capturing(1, lit('a')));
+        for input in [b"a".as_slice(), b"aa", b"aaa", b"aaab", b"b", b""] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
+    }
+
+    #[test]
+    fn differential_nested_captures() {
+        // ((a)b) — outer wraps inner-a + literal b.
+        let pat = group_capturing(1, seq(vec![group_capturing(2, lit('a')), lit('b')]));
+        for input in [b"ab".as_slice(), b"a", b"abc", b"", b"abb"] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
+    }
+
+    #[test]
+    fn differential_empty_pattern() {
+        let pat = group_capturing(1, Regex::Empty);
+        for input in [b"".as_slice(), b"a", b"abc"] {
+            assert_tdfa_matches_pike(&pat, input);
+        }
     }
 }
