@@ -25,12 +25,8 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How**: Add `MatchLimits { max_backtrack_frames, max_trail_entries, max_recursion_depth }` configurable on `Regex`.
 - **Dependencies**: None.
 
-### A3. `tail_file` — file watching/streaming
-- **What**: `Regex::tail_file(path, options)` that watches a file for new content and triggers callbacks on matches.
-- **Effort**: `medium`
-- **Rationale**: Key use case for log monitoring. Documented in HOST_INTEGRATION_ARCHITECTURE.md Layer 6.
-- **How**: Platform-specific file watching (`kqueue` on macOS, `inotify` on Linux, polling fallback). Chunked reading with overlap for cross-chunk matches.
-- **Dependencies**: Layer 6 core (shipped).
+### A3. `tail_file` — file watching/streaming ✅ DONE
+- **Status**: shipped. `Regex::tail_file(path, options, on_match)` lives in `rgx-core/src/file.rs` with `TailHandle` / `TailOptions` types and integration tests (`tail_file_detects_appended_content`, `tail_file_from_beginning`).
 
 ### ~~A4. CLI `--follow` mode~~ ✅ Shipped
 - **What**: `rgx-cli --file app.log --follow` that tails a file like `tail -f | grep`.
@@ -82,12 +78,8 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **How (when reactivated)**: Python via `pyo3`/`maturin`. Node via `napi-rs`. C via `cbindgen` + `extern "C"` wrapper.
 - **Dependencies**: A8 (stable public API).
 
-### A10. `\X` extended grapheme cluster
-- **What**: `\X` matches a full Unicode grapheme cluster (base + combining marks).
-- **Effort**: `medium`
-- **Rationale**: PCRE2 parity gap. Needed for correct Unicode text processing.
-- **How**: Use `unicode-segmentation` crate. Compile `\X` as a VM opcode that advances by one grapheme cluster.
-- **Dependencies**: Add `unicode-segmentation` dependency.
+### A10. `\X` extended grapheme cluster ✅ DONE
+- **Status**: shipped. `OpCode::GraphemeCluster = 0x08` emitted by the compiler from `RegexAst::GraphemeCluster`; VM dispatch uses `unicode-segmentation`'s `graphemes(true)` to advance by one cluster per `\X`. Verified end-to-end on ASCII, accented (`é`), single-codepoint emoji (`🦀`), ZWJ family emoji (`👨‍👩‍👧‍👦`, 25 bytes one cluster), and combining marks (`e\u{301}`, 3 bytes one cluster).
 
 ### A11. `(*SKIP:name)` named skip ✅ DONE (2026-04-12)
 - **What**: `(*SKIP:name)` interacts with `(*MARK:name)` to skip back to a specific mark position.
@@ -101,12 +93,8 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **What**: Branch on engine version.
 - **Shipped**: RGX-side parser-level short-circuit landed 2026-04-12; PGEN 1.1.10 shipped the grammar recognition on 2026-04-13, closing `PGEN-RGX-0016`. Submodule bumped from `ac2acb3` (1.1.9) to `8783757` (1.1.10), the three integration tests in `parsing::tests::version_conditional_*` now run unmodified.
 
-### A14. Partial matching API
-- **What**: `PCRE2_PARTIAL_SOFT` / `PCRE2_PARTIAL_HARD` — report when the input ends mid-potential-match.
-- **Effort**: `medium`
-- **Rationale**: Useful for streaming/incremental matching. Connects to `tail_file`.
-- **How**: When the VM reaches end-of-input while matching could continue, return `PartialMatch` instead of failure.
-- **Dependencies**: None.
+### A14. Partial matching API ✅ DONE
+- **Status**: shipped. `Regex::find_first_partial(text) -> PartialMatchResult` lives in `rgx-core/src/lib.rs` (line 2049) with `Complete` / `Partial` / `NoMatch` variants and unit tests at the bottom of the file (`partial_match_full`, `partial_match_partial`, `partial_match_no_match`).
 
 ---
 
