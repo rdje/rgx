@@ -3953,3 +3953,32 @@ The design doc still describes the original `2g` formula. Will be amended in the
 **Validation.** `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1147/1147 (1140 baseline + 7 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo test -p rgx-cli` 30/30. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — purely additive change, no behavioural impact.
 
 **Next step.** Phase 2 — tagged subset construction. New `c2/tdfa.rs` module with `TaggedDfa::try_build(nfa, byte_class_map, state_limit) -> Option<TaggedDfa>`. The determinizer iterates `tagged_epsilons` during ε-closure to collect tag firings, allocates registers, canonicalises register maps (Laurikari's reorder rule), and emits dependency-ordered `RegOp` lists on transitions. Estimated 4-7 days of work per the staging plan. Not yet wired to the engine; that's Phase 3.
+
+## 2026-05-08 session — TDFA Phase 2a: data types + start state
+
+Third commit of the day on the TDFA track. Phase 2a delivers the foundational data types and the start-state construction with tag firing. The module is dead code from the engine's perspective until Phase 2d wires the simulator in.
+
+**New module `rgx-core/src/c2/tdfa.rs`** (~700 lines including 9 unit tests). Exports:
+
+- `RegOp { Copy { src, dst }, Save { dst } }`. `Copy` for register canonicalisation reshuffles (Phase 2c). `Save` for tag firings. Order matters: copies before saves at construction time.
+- `TaggedTransition { target, reg_op_idx, reg_op_len }`. 10-byte struct, lives in the flat transition table at index `state * num_classes + cls`. `reg_op_len == 0` is the common case (most transitions don't cross a tag).
+- `TaggedDfaState { nfa_states, register_map, is_accept, accept_register_map }`. The register_map is a flat `Vec<u16>` indexed as `i * num_tags + tag.index()` where `i` is the position of the NFA state in the sorted set. `REGISTER_NONE = u16::MAX` for unfired tags.
+- `TaggedDfa` (the construction-time container). Owns `Arc<Nfa>` + `Arc<ByteClassMap>`, states + flat transition table + RegOp pool + cache. Default state limit 4096 (double the lazy DFA, per design doc §11).
+- `TdfaBuildError { UnsupportedAssertion, NoCaptureTags, StateLimit }`. Conservative Phase 2a eligibility: must have capture tags, no non-`\b` assertions.
+
+**Start-state algorithm.** `TaggedDfa::try_build` validates eligibility then runs a tagged ε-closure from `nfa.start()`. The closure walks ε-edges in epsilon-slot order via reverse-push-then-pop DFS — this preserves leftmost-first priority because the first map to reach a target state wins (subsequent paths to the same state skip via the `per_state_register_map.contains_key` guard).
+
+When the closure crosses a tagged ε-edge:
+1. Allocate a fresh register (Phase 2a uses monotonic allocation; Phase 2c adds the reorder rule for register reuse).
+2. Append `RegOp::Save { dst: r }` to `start_reg_ops` (start-state firing context — Phase 2b will route non-start firings to a transition-RegOp accumulator instead).
+3. Update the target NFA state's per-tag register assignment in `per_state_register_map`.
+
+After the closure completes, the per-state map is flattened into the cache-friendly flat layout. If the NFA accept state is in the set, the start state is also accept and `accept_register_map` is populated with the accept-NFA-state's register assignment (this happens for empty-matching patterns like `(())`).
+
+**Hand-verified trace for `(a)`.** Start state contains NFA states {wrapper_start (state 2), body_start (state 0)}. body_start has `Tag::start_of(1) = Tag(2)` mapped to register R0. start_reg_ops = `[Save { dst: 0 }]`. When Phase 2d's simulator runs `find_match_at` on input "a", it will: (1) run start_reg_ops at pos 0, setting register R0 = Some(0); (2) consume 'a' via transition to next state (built in Phase 2b) which fires `Tag::end_of(1) = Tag(3)` saving to register R1 = Some(1); (3) at accept, read `accept_register_map[2] = R0 = 0` (group 1 start) and `accept_register_map[3] = R1 = 1` (group 1 end). Group 1 = "a". No second pass.
+
+**Bug caught by test.** Initial test for `(a)(b)` asserted `num_registers() >= 2` (assuming both `GroupStart(1)` and `GroupStart(2)` fire in the start ε-closure). Test failed: only 1 register fires. Correct: `GroupStart(2)` is reachable only AFTER consuming the 'a' byte, so it's a Phase 2b firing, not a start-state firing. Updated assertion to `num_registers() == 1`. Algorithm verified correct.
+
+**Validation.** `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1156/1156 (1147 baseline + 9 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — the TDFA module is not wired to engine dispatch yet, so the engine behaviour is unchanged.
+
+**Next step.** Phase 2b — byte transitions with tag propagation. Need to add `compute_transition_set(state, byte_class) -> Vec<(NfaStateId, register_map)>` analogous to `c2/dfa.rs::compute_transition_set`, but threaded with register-map propagation. Each transition's RegOps go into the `reg_op_pool` and the transition's `reg_op_idx` / `reg_op_len` reference the slice. The closure walker extends to accept a transition-RegOp accumulator (replaces `is_start_state` flag with an `Option<&mut Vec<RegOp>>` enum).

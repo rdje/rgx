@@ -48,6 +48,7 @@ pub mod nfa;
 pub mod pike;
 pub mod program;
 pub mod simd_scan;
+pub mod tdfa;
 
 pub use byte_class::ByteClassMap;
 pub use classifier::{classify, Classification, ExclusionReason};
