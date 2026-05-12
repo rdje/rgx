@@ -236,6 +236,23 @@ And vs PCRE2 (10.45):
 
 The capture-groups win is pure DFA dispatch. The literal_simple win is the existing VM's `memmem::Finder` fast path being preserved by the dispatch gates. The email_basic improvement comes from the existing VM running unchanged plus the trend capture's natural variance — `\b\w+@\w+\.\w+\b` uses the existing backtracking VM by construction (no nested quantifier).
 
+## What's next: the Tagged DFA (TDFA)
+
+The two-pass capture-recovery trick described above — DFA locates the span, Pike-VM recovers captures over that span — is correct but pays for it. On capture-heavy patterns (`email_basic`, `url_simple`, `capture_groups`) the Pike-VM second pass dominates wall time: samply consistently attributes 30-60% of `find_all` self-time to `pike_match_at_with_captures` even with the DFA fully materialised.
+
+The next major C2 lever is a **Laurikari Tagged DFA** that propagates capture-position information through the DFA subset construction itself. Instead of two passes, the simulator walks the input once and reads capture positions directly out of per-state **tag registers** at match end.
+
+The design is laid out in `docs/C2_TDFA_DESIGN.md`. Highlights:
+
+- Capture group boundaries are already emitted as tagged epsilon edges in the NFA — `CaptureTag::GroupStart(n)` / `CaptureTag::GroupEnd(n)` (see `c2/nfa.rs:292`). The Pike-VM already consumes them; the TDFA extends the same machinery to subset construction.
+- Each TDFA state carries a register assignment per (NFA-state, tag) pair; each transition carries a list of `Copy { src, dst }` and `Save { dst }` register operations that fire when the transition is taken.
+- Leftmost-first semantics are preserved by following the NFA's existing epsilon slot order during determinization. No runtime priority comparison; the priority order is baked into the offline construction.
+- The TDFA accepts a strict subset of the lazy DFA's eligibility set: capture-bearing patterns with no lazy quantifier *inside* a capture and no word-boundary inside a capture's epsilon closure (the latter is first-pass conservatism, to be lifted).
+
+Per-bench targets after the TDFA lands: `email_basic.find_all` ≥ 3×, `url_simple.find_all` ≥ 2×, `capture_groups.find_all` ≥ 50× over PCRE2. Differential testing against the Pike-VM is the merge gate — any disagreement on `(start, end, groups[..])` on any input is a blocker.
+
+The TDFA work is staged across Phases 1–4 (NFA tag helpers, tagged subset construction, simulator + dispatch, perf gate). Phase 0 (the design doc) is the current artifact; production code lands phase by phase, each gated on the previous one.
+
 ## What's not in C2 yet
 
 Three things on the C2 roadmap are deliberately deferred:

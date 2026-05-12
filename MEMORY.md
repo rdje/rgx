@@ -3908,3 +3908,23 @@ Applied to today's lazy/greedy `*` cluster-1E/2B/2H fix: probed the family axes 
 Result: zero regression. Conformance ratchet UNCHANGED 12,760/50 — but distribution shifted FN 26 → 20, SM 13 → 19. Six tests previously no-match now produce a match (just wrong-span), surfacing the next sub-cluster (backref-interaction, dupnames-name-stability) for follow-up.
 
 Key insight: family fix shipped even without raw-pass progress because the family doctrine demands consistency. Future fixes on the SM cases now happen on a clean foundation.
+
+## 2026-05-08 session — TDFA Phase 0: design doc landed
+
+The next major C2 perf lever is the Laurikari tagged DFA. Today is Phase 0 — the design doc, before any production code lands.
+
+**The problem.** After the materialised-DFA commit landed on 2026-05-12, RGX beats PCRE2 on all 7 headline benches. Subsequent samply runs identified the remaining hot spot on capture-bearing benches: the Pike-VM second pass that runs after the lazy DFA finds the match span. `email_basic.find_all` spends 30-40% of self-time in `pike_match_at_with_captures`; `url_simple.find_all` spends 50-60%. The DFA gave us a span; the Pike-VM gave us captures over that span; both walks scanned the same bytes.
+
+**The fix.** A Laurikari tagged DFA propagates capture-position information through subset construction. Each TDFA state carries a per-(NFA-state, tag) register assignment; each transition carries a `[RegOp]` list that fires when the transition is taken. At match time, the simulator reads captures directly from the accept state's `accept_register_map`. One pass.
+
+The NFA already emits capture-group tags on epsilon edges (`CaptureTag::GroupStart(n)` / `GroupEnd(n)` at `c2/nfa.rs:292`, populated by `build_group` at `c2/nfa.rs:1151-1152`). The Pike-VM already consumes them at `c2/pike.rs:583-589`. The DFA currently ignores them entirely. The TDFA is the missing piece.
+
+**The design.** `docs/C2_TDFA_DESIGN.md`, 732 lines, structured like `docs/C2_NFA_DFA_DESIGN.md`. Covers Laurikari semantics, the tagged subset-construction algorithm with leftmost-first slot-ordered priority resolution, register allocation and canonicalisation (the reorder rule that makes determinization terminate), dependency-ordered `RegOp` emission, the simulator hot loop, engine dispatch wiring (`TdfaCell::{Materialized,Lazy}` mirrors the existing `DfaCell`), cache eviction and exhaustion fallback to the existing two-pass path, 4-phase staging (Phase 1 NFA helpers, Phase 2 tagged subset construction, Phase 3 simulator + dispatch, Phase 4 perf gate), differential test gate, perf targets, risks/mitigations.
+
+**TDFA eligibility is narrower than C2 eligibility on purpose.** First-pass: capture-bearing C2 patterns, no lazy quantifier wrapping a capture, no `\b` inside a capture's epsilon closure, LeftmostFirst semantics only. Patterns the TDFA rejects fall back to the existing DFA → Pike pipeline. The change is purely additive — strictly more performant on what it accepts, identical on everything else.
+
+**Differential gate is the merge contract.** Every TDFA-eligible pattern in `tests/c2_pike_differential.rs` (plus the PCRE2 conformance corpus filtered by `Regex::uses_tdfa()`) must match the Pike-VM on `(start, end, groups[..])`. One mismatch on one input is a blocker. Perf targets are stated (`email_basic ≥ 3×`, `url_simple ≥ 2×`) but they are goals, not the contract.
+
+**Updates.** `docs/BACKLOG.md` line 270 marked with Phase-0-landed status. `CHANGES.md` entry for the doc landing. `book/src/internals/nfa-dfa-engine.md` "What's next: the Tagged DFA (TDFA)" section added between the dispatch chapter and the "What's not in C2 yet" tail. No behavioural change.
+
+**Next step.** Phase 1 — NFA tag-enumeration helpers (`has_capture_tags()`, `num_tags()`, `tagged_epsilons(state)` accessor). ~1 day of work. Pure read-side API addition, no semantic change to the NFA. Then Phase 2: the tagged subset construction itself, the bulk of the engineering work.
