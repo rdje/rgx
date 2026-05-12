@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — Perf: parking_lot::Mutex on engine hot paths
+- 5 Mutex fields converted: c2_dfa, c2_forward_unanchored_dfa, c2_reverse_dfa, jit_program, pike_scratch. parking_lot::Mutex is ~3× faster on uncontended fast path (no poisoning, adaptive spinning). API collapses .lock().ok()? → .lock() at every site. **`digit_sequence` ratio 1.29 → 1.17** (-9% — the largest beneficiary; was the only DFA-bound bench still slower than PCRE2). Smaller wins on email_basic, url_simple, capture_groups. No regressions. Baseline updated in same commit. Lib 1137/1137, c2_pike_differential 12/12, conformance 12806/4 in 288s.
+
 ### 2026-05-12 — Engine: reverse-DFA `\b` plumbing (gated off pending dispatch policy)
 - Plumbing complete: `LazyDfa::start_state_for_reverse(input, end)` picks state 0/1 based on `is_word(input[end])`; `find_match_start_at_reverse_bounded` uses context-aware accept with reverse-walk operands (`pw = is_word(input[pos])`, `cw = is_word(input[pos - 1])`). Symmetric fire-wb formula means existing helpers work for both walks. **Gated off in `build_reverse_dfa_if_eligible`** because activation regressed `email_basic find_first` by 25-29% — the reverse-DFA pipeline shortcut (forward-unanchored O(n) walk + reverse anchored recovery) is slower than the per-position scan with `PrefixFilter::Word` SIMD skip for that workload. Bench regression check (today's C4) caught this in 3 consecutive runs and is now actively earning its keep. The plumbing stays in place for a future dispatch policy that decides per-call.
 

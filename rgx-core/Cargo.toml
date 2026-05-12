@@ -23,6 +23,13 @@ memchr = { workspace = true }
 # backtracking VM (top-level alternation excluded from C2 dispatch);
 # AC handles the multi-literal case in O(n) instead of O(n × m).
 aho-corasick = { workspace = true }
+# Faster Mutex implementation. parking_lot::Mutex's uncontended
+# acquisition is ~3× faster than std::sync::Mutex (no poisoning,
+# adaptive spinning, smaller guard). Matters on the DFA hot path
+# where every `find_first` / `find_all` call locks the cache —
+# measurable on short-match workloads like `digit_sequence`. Used
+# by rust-regex's `regex-automata::hybrid` internally.
+parking_lot = "0.12"
 
 # Error handling
 thiserror = { workspace = true }

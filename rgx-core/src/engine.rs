@@ -8,7 +8,8 @@ use crate::execution::{
 use crate::pattern::CompiledPattern;
 use crate::vm::{CompiledCharClass, PrefixFilter, RegexVM};
 use crate::{trace_decision, trace_enter, trace_exit};
-use std::sync::{Arc, Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::{Arc, OnceLock};
 
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -652,7 +653,8 @@ impl Engine {
         start: usize,
     ) -> Option<crate::c2::PikeMatch> {
         if let Some(scratch_mutex) = self.pike_scratch_mutex() {
-            if let Ok(mut scratch) = scratch_mutex.lock() {
+            {
+                let mut scratch = scratch_mutex.lock();
                 return crate::c2::pike::pike_captures_at_with_scratch(
                     c2,
                     input,
@@ -851,7 +853,8 @@ impl Engine {
         // Reverse-DFA-pipeline fast path: one O(n) walk of the
         // forward-unanchored DFA answers is_match directly.
         if let Some(forward_mutex) = self.should_dispatch_to_forward_unanchored_dfa() {
-            if let Ok(mut forward) = forward_mutex.lock() {
+            {
+                let mut forward = forward_mutex.lock();
                 match forward.find_match_at(input, 0) {
                     DfaSearchOutcome::Match(_) => return Some(true),
                     DfaSearchOutcome::NoMatch => return Some(false),
@@ -862,7 +865,7 @@ impl Engine {
             }
         }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
-        let mut dfa = dfa_mutex.lock().ok()?;
+        let mut dfa = dfa_mutex.lock();
         // Per-position anchored scan (pre-pipeline fallback). The
         // simulator might exhaust its cache mid-scan; in that case
         // bail and let the caller fall back further.
@@ -941,7 +944,7 @@ impl Engine {
         }
         let dfa_mutex = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
-        let mut dfa = dfa_mutex.lock().ok()?;
+        let mut dfa = dfa_mutex.lock();
         let mut start = 0usize;
         while start <= input.len() {
             let Some(candidate) = scanner.next_candidate(input, start) else {
@@ -1057,7 +1060,7 @@ impl Engine {
         reverse_mutex: &Mutex<LazyDfa>,
     ) -> Option<Option<MatchResult>> {
         let first_accept_end = {
-            let mut forward = forward_mutex.lock().ok()?;
+            let mut forward = forward_mutex.lock();
             match forward.find_first_accept_at(input, 0) {
                 DfaSearchOutcome::Match(end) => end,
                 DfaSearchOutcome::NoMatch => return Some(None),
@@ -1065,7 +1068,7 @@ impl Engine {
             }
         };
         let start = {
-            let mut reverse = reverse_mutex.lock().ok()?;
+            let mut reverse = reverse_mutex.lock();
             match reverse.find_match_start_at_reverse(input, first_accept_end) {
                 DfaSearchOutcome::Match(start) => start,
                 // Forward found a match but reverse couldn't locate the
@@ -1081,7 +1084,7 @@ impl Engine {
         // extends the match as far as the body allows.
         let anchored_dfa = self.should_dispatch_to_dfa()?;
         let greedy_end = {
-            let mut dfa = anchored_dfa.lock().ok()?;
+            let mut dfa = anchored_dfa.lock();
             match dfa.find_match_at(input, start) {
                 DfaSearchOutcome::Match(end) => end,
                 DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
@@ -1179,7 +1182,7 @@ impl Engine {
         // doesn't re-enter into DFA dispatch. Distinct from the
         // pipeline find_all path (which locks three DFAs and re-enters
         // pike_captures_at_cached); that path stays per-iteration.
-        let mut dfa = dfa_mutex.lock().ok()?;
+        let mut dfa = dfa_mutex.lock();
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
@@ -1245,7 +1248,7 @@ impl Engine {
         let mut prev_non_empty_end: Option<usize> = None;
         while pos <= input.len() {
             let first_accept_end = {
-                let mut forward = forward_mutex.lock().ok()?;
+                let mut forward = forward_mutex.lock();
                 match forward.find_first_accept_at(input, pos) {
                     DfaSearchOutcome::Match(end) => end,
                     DfaSearchOutcome::NoMatch => break,
@@ -1253,14 +1256,14 @@ impl Engine {
                 }
             };
             let start = {
-                let mut reverse = reverse_mutex.lock().ok()?;
+                let mut reverse = reverse_mutex.lock();
                 match reverse.find_match_start_at_reverse_bounded(input, first_accept_end, pos) {
                     DfaSearchOutcome::Match(start) => start,
                     DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
                 }
             };
             let greedy_end = {
-                let mut dfa = anchored_dfa.lock().ok()?;
+                let mut dfa = anchored_dfa.lock();
                 match dfa.find_match_at(input, start) {
                     DfaSearchOutcome::Match(end) => end,
                     DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
@@ -1772,7 +1775,7 @@ impl Engine {
         &self,
         jit_mutex: &Mutex<crate::c1::JitProgram>,
     ) -> crate::c1::Step3aJittedFn {
-        let jit = jit_mutex.lock().expect("JitProgram mutex poisoned");
+        let jit = jit_mutex.lock();
         let raw = jit.raw_fn_ptr();
         // SAFETY: the function pointer was finalized by
         // `compile_program_to_jit_program` and points at executable

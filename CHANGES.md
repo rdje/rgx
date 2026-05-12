@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-12 - Perf: `parking_lot::Mutex` replaces `std::sync::Mutex` on DFA / Pike-VM / JIT hot paths
+- Scope: every `Regex::find_first` / `find_all` / `is_match` call locks the lazy DFA cache, Pike-VM scratch, or JIT program. `std::sync::Mutex` carries poisoning state and lacks adaptive spinning; `parking_lot::Mutex` is the regex-automata / rust-regex / tokio drop-in that's ~3× faster on the uncontended hot path. Five engine fields converted: `c2_dfa`, `c2_forward_unanchored_dfa`, `c2_reverse_dfa`, `jit_program`, `pike_scratch`.
+- API simplification: `parking_lot::Mutex::lock()` returns the guard directly (no `Result<_, PoisonError>`), so the `.lock().ok()?` pattern collapses to `.lock()` at every call site. Two `if let Ok(mut x) = mutex.lock()` blocks became explicit `let mut x = mutex.lock();` blocks. The JIT call's `.expect("poisoned")` is gone — there's no poisoning to handle.
+- Bench impact (median-of-11 × 10 000 iter, 3 consecutive runs): `digit_sequence` ratio **1.29 → 1.17** (-9% — the largest single beneficiary; was the only DFA-bound bench still slower than PCRE2). `email_basic` -2.7% to -7.7%; `url_simple` -3.8% to -6.3%; `capture_groups` -1.3% to -3.5%. No regressions detected by the C4 gate; baseline updated in this commit.
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1137/1137), `cargo test -p rgx-core --test c2_pike_differential` (12/12), `cargo clippy -p rgx-core --all-targets` clean, conformance ratchet holds at **12,806 / 4 / 0 / 0** in 288.03s.
+
 ### 2026-05-12 - Engine: reverse-DFA `\b` plumbing (gated off pending dispatch policy)
 - Scope: the DFA `\b` Phase 3 follow-up flagged in BACKLOG. Adds the direction-aware accept-check and start-state selection so the reverse-anchored DFA can correctly evaluate word boundaries in walk-direction terms. The plumbing is complete and locally correct; it is **gated off in `build_reverse_dfa_if_eligible`** because activation regressed `email_basic find_first` by 25-29% on the benchmark gate.
 - New `LazyDfa::start_state_for_reverse(input, end)` picks state 0 / state 1 based on `is_word(input[end])` (or false at end-of-input). This is the mirror of `start_state_for` for forward walks — the reverse walk's pw represents "byte just consumed in walk direction" which at the start of a reverse walk is the byte to the right of the start position textually.
