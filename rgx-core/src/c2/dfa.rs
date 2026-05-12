@@ -326,10 +326,10 @@ impl LazyDfa {
         0
     }
 
-    /// Pick the appropriate start state given the byte immediately
-    /// before `start` in `input`. Returns state 0 (pw=false) if
-    /// `start == 0` or `input[start-1]` is a non-word byte, state 1
-    /// (pw=true) otherwise.
+    /// Pick the appropriate **forward-walk** start state given the
+    /// byte immediately before `start` in `input`. Returns state 0
+    /// (pw=false) if `start == 0` or `input[start-1]` is a non-word
+    /// byte, state 1 (pw=true) otherwise.
     ///
     /// For NFAs without word-boundary edges the two start states are
     /// behaviourally identical; the choice doesn't affect the match
@@ -341,6 +341,30 @@ impl LazyDfa {
         if start == 0 {
             0
         } else if Self::word_ness_at(input, start - 1) {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Pick the **reverse-walk** start state given the byte at
+    /// `end` in `input`. In reverse-walk semantics the state's
+    /// `prev_byte_was_word` represents the byte just consumed in
+    /// walk direction — which at the start of a reverse walk is
+    /// the byte to the *right* of position `end` (i.e. `input[end]`),
+    /// or "no byte" (treated as non-word) when `end >= input.len()`.
+    ///
+    /// The fire-wb formula `pw != cw` is symmetric between forward
+    /// and reverse walks (the operands swap roles), so the
+    /// `is_accept_with_word_boundary_context` and
+    /// `epsilon_close_with_word_boundary` helpers don't need to
+    /// know which direction they're called from — only the initial
+    /// pw and per-position cw differ.
+    #[inline]
+    fn start_state_for_reverse(&self, input: &[u8], end: usize) -> DfaStateId {
+        if end >= input.len() {
+            0
+        } else if Self::word_ness_at(input, end) {
             1
         } else {
             0
@@ -489,13 +513,32 @@ impl LazyDfa {
     ) -> DfaSearchOutcome {
         debug_assert!(end <= input.len(), "end out of bounds for input");
         debug_assert!(min_start <= end, "min_start must not exceed end");
-        let mut state = self.start_state();
-        // The DFA could already accept the empty string at the end
-        // position (e.g., for patterns like `a*` matching the empty
-        // span at any position). Record that as a tentative match —
-        // but only if `end >= min_start` (the caller-supplied lower
-        // bound on valid starts).
-        let mut leftmost_start = if self.is_accept(state) && end >= min_start {
+        // Reverse walk: state.pw = is_word(byte just consumed in
+        // walk direction) = is_word(input[pos]) when at position pos.
+        // At the start of the walk no byte has been consumed; the
+        // implicit "previous byte in walk direction" is `input[end]`
+        // (the byte to the right of the start position textually).
+        let mut state = self.start_state_for_reverse(input, end);
+        // The DFA could already accept the empty span at the end
+        // position. Use the context-aware accept check so
+        // `\b`-bearing patterns whose accept is only reachable via
+        // a satisfied WordBoundary epsilon are recognised here.
+        // At position `end`, the boundary check needs:
+        //   pw = state.pw  (set above from input[end])
+        //   cw = is_word(input[end - 1])  (byte to the LEFT — the
+        //                                  next byte in reverse walk)
+        // or false at start-of-input.
+        let cw_at_end = if end == 0 {
+            false
+        } else {
+            Self::word_ness_at(input, end - 1)
+        };
+        let mut leftmost_start = if end >= min_start
+            && self.is_accept_with_word_boundary_context(
+                state,
+                self.states[state as usize].prev_byte_was_word,
+                cw_at_end,
+            ) {
             Some(end)
         } else {
             None
@@ -508,7 +551,21 @@ impl LazyDfa {
             match self.transition(state, cls) {
                 TransitionResult::Next(next_state) => {
                     state = next_state;
-                    if self.is_accept(state) {
+                    // Post-transition we're at position `pos`. For
+                    // the boundary at this textual position the
+                    // operands are:
+                    //   pw = state.pw = is_word(input[pos])  (byte
+                    //        just consumed in walk direction — set
+                    //        by `transition` via class_is_word(cls))
+                    //   cw = is_word(input[pos - 1])  (next byte in
+                    //        walk direction; non-word at pos == 0)
+                    let pw = self.states[state as usize].prev_byte_was_word;
+                    let cw = if pos == 0 {
+                        false
+                    } else {
+                        Self::word_ness_at(input, pos - 1)
+                    };
+                    if self.is_accept_with_word_boundary_context(state, pw, cw) {
                         leftmost_start = Some(pos);
                     }
                 }

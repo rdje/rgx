@@ -294,6 +294,9 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — Engine: reverse-DFA `\b` plumbing (gated off pending dispatch policy)
+- Plumbing complete: `LazyDfa::start_state_for_reverse(input, end)` picks state 0/1 based on `is_word(input[end])`; `find_match_start_at_reverse_bounded` uses context-aware accept with reverse-walk operands (`pw = is_word(input[pos])`, `cw = is_word(input[pos - 1])`). Symmetric fire-wb formula means existing helpers work for both walks. **Gated off in `build_reverse_dfa_if_eligible`** because activation regressed `email_basic find_first` by 25-29% — the reverse-DFA pipeline shortcut (forward-unanchored O(n) walk + reverse anchored recovery) is slower than the per-position scan with `PrefixFilter::Word` SIMD skip for that workload. Bench regression check (today's C4) caught this in 3 consecutive runs and is now actively earning its keep. The plumbing stays in place for a future dispatch policy that decides per-call.
+
 ### 2026-05-12 — CI: bench regression gate (BACKLOG C4) — protects today's perf push
 - New `rgx-bench/src/bin/regression_check.rs`: times find_first on the 7 shared PATTERNS (median-of-11 × 10 000 iter), computes rgx/PCRE2 ratio, compares vs `rgx-bench/baselines/main.toml`, exits 1 if any ratio regressed >20%. Baseline captured against `eaa2c35`. New CI job `benchmark-regression-check` on every PR + push to main. Output is PR-comment-ready Markdown table with ✅ stable / 🚀 improved / ❌ regressed status. The criterion bench job (push-to-main only, artifact upload) stays for historical capture; the regression gate is the merge condition.
 - Why ratio not absolute time: GHA runners are noisy; Apple Silicon vs cloud x86 differs 2-3×. Rgx-vs-PCRE2 ratio cancels the hardware factor.

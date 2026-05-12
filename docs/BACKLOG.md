@@ -371,19 +371,12 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 
 **Dependencies between items**: C8.1.1 → C8.2.1; C8.1.4 → C8.2.2; C8.2.1 supersedes any future per-verb-pair fix proposal (including the held `commit_saved_alt` work for testinput1:5457).
 
-### C3. Fuzzing infrastructure
-- **What**: `cargo-fuzz` integration for continuous fuzzing.
-- **Effort**: `small`
-- **Rationale**: Finds bugs that property tests and adversarial tests miss.
-- **How**: Create `fuzz/` directory with fuzz targets for compilation, matching, and code block execution.
-- **Dependencies**: None.
+### C3. Fuzzing infrastructure ✅ DONE
+- **Status**: shipped. `fuzz/` directory with 4 cargo-fuzz targets — `fuzz_compile`, `fuzz_match`, `fuzz_replace`, `fuzz_roundtrip` — each runs through libfuzzer-sys + arbitrary. The BACKLOG entry was stale.
+- **Follow-up**: a future task could wire one of the fuzz targets into CI on a short-budget basis (e.g., `cargo fuzz run fuzz_compile -- -max_total_time=60`) to catch regressions on every PR. Not urgent; the local-run path is enabled.
 
-### C4. Benchmark CI
-- **What**: Run criterion benchmarks in CI and fail on significant regressions.
-- **Effort**: `small`
-- **Rationale**: Performance regressions can slip in without automated detection.
-- **How**: Add benchmark step to CI workflow with threshold comparison.
-- **Dependencies**: None.
+### C4. Benchmark CI ✅ DONE (2026-05-12 in `5273de1`)
+- **Status**: shipped. New `rgx-bench/src/bin/regression_check` binary times find_first on the 7 shared PATTERNS, computes the rgx-vs-PCRE2 ratio, compares vs `rgx-bench/baselines/main.toml`, exits 1 if any ratio regressed >20%. New CI job `benchmark-regression-check` runs on every PR + push to main. Update procedure: `cargo run --release -p rgx-bench --bin regression_check -- --update-baseline` then commit the new baseline alongside the intentional perf change. The criterion bench job (push-to-main only, artifact upload) stays for historical capture; the regression gate is the merge condition.
 
 ### C5. Remove scaffold files ✅ DONE (2026-04 sometime)
 - **What**: Originally tracked deletion of `cache.rs`, `simd.rs`, `javascript.rs`, `wasm.rs` placeholders. All scaffold files now either deleted or grown into real modules: `cache.rs` is the working 231-line `RegexCache`; `lua.rs`/`rhai.rs` are 21-24 line feature-gated re-exports (type alias to `RgxError` when feature is off, real engine when on); `simd.rs`/`javascript.rs`/`wasm.rs` no longer exist as separate files (SIMD lives inline in hot paths, JS lowered to JIT codegen, wasm lives in its own `rgx-wasm` workspace crate).

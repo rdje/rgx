@@ -447,16 +447,20 @@ fn build_reverse_dfa_if_eligible(
     if !crate::c2::program::is_c2_dfa_eligible(ast) {
         return None;
     }
-    // Reverse-walk word-boundary semantics differ from the forward
-    // direction (the "previous byte" in walk-order is the byte at
-    // pos+1 textually, not pos-1), and the bounded reverse driver
-    // doesn't yet plumb the context-aware accept check. For
-    // `\b` / `\B`-bearing patterns we therefore refuse the reverse
-    // DFA — the engine falls back to the per-position forward
-    // anchored scan, which is still strictly better than the
-    // backtracking VM. The reverse-DFA pipeline shortcut will be
-    // re-enabled in a follow-up commit once the direction-aware
-    // pw/cw plumbing lands.
+    // **Reverse-DFA `\b` support is laid out but currently gated
+    // off.** `find_match_start_at_reverse_bounded` has the
+    // direction-aware pw/cw accept-check plumbing and
+    // `start_state_for_reverse` picks the correct initial state.
+    // But measurement showed that enabling the reverse DFA for
+    // `\b\w+@\w+\.\w+\b`-shaped patterns regresses
+    // `email_basic find_first` by 25-29% — the forward-unanchored
+    // DFA's O(n) walk in the pipeline shortcut is slower than the
+    // per-position anchored scan with `PrefixFilter::Word`'s
+    // SIMD-accelerated byte-class skip (today's `eaa2c35`).
+    // Until the dispatch layer can decide per-call whether the
+    // pipeline is worth it for THIS input shape, we route `\b`
+    // patterns through the per-position scan. The plumbing stays
+    // in place for the day we re-activate; see BACKLOG `### C2`.
     if c2.reverse_anchored.has_word_boundary_assertions() {
         return None;
     }
