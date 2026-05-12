@@ -77,3 +77,47 @@ jobs:
           name: benchmark-results-${{ github.sha }}
           path: benchmark-results.txt
           retention-days: 90
+
+  benchmark-regression-check:
+    name: Benchmark regression check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Runs on PRs (and pushes) so silent perf regressions are caught
+    # before merge. The check compares the rgx-vs-PCRE2 ratio for
+    # each headline pattern against the checked-in baseline
+    # (`rgx-bench/baselines/main.toml`) with a 20% tolerance — wide
+    # enough to absorb GHA runner noise but tight enough to flag the
+    # kind of regression that would have hidden the 3.7× email_basic
+    # gap before today's DFA `\b` work. Update the baseline in the
+    # same commit as any intentional perf change.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.RGX_SUBMODULES_TOKEN != '' && secrets.RGX_SUBMODULES_TOKEN || github.token }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblua5.4-dev libpcre2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run rgx-vs-PCRE2 regression check
+        run: |
+          cargo run --release -p rgx-bench --bin regression_check 2>&1 | tee regression-check-results.md
+
+      - name: Upload regression check results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-check-${{ github.sha }}
+          path: regression-check-results.md
+          retention-days: 30

@@ -14,6 +14,14 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-12 - CI: benchmark regression check (PR gate) — closes C4
+- Scope: the criterion bench job has been running on push-to-main only and uploading artifacts for offline inspection, but with no automated regression gate. Today's perf push (DFA `\b`, multi-byte memmem prefilter, SIMD byte-class scan) is otherwise unprotected — any future commit could silently undo the `email_basic` 5.5× turnaround and the ratchet only catches correctness.
+- New binary `rgx-bench/src/bin/regression_check.rs`: runs `find_first` on the seven shared `rgx-bench::PATTERNS` against a 1 KB input, times both rgx and PCRE2 with median-of-11 Instant samples × 10 000 iterations each, computes the rgx-vs-PCRE2 ratio per pattern, and compares against a checked-in baseline at `rgx-bench/baselines/main.toml`. Exits with code 1 if any pattern's ratio has regressed by more than the configured tolerance (default 20%).
+- **Ratio not absolute time**: hardware varies (GHA runners noisy, Apple Silicon vs cloud x86 2-3× different). The rgx-vs-PCRE2 ratio cancels the hardware factor — what matters is whether rgx stays as fast *relative to PCRE2* as at baseline capture.
+- Baseline captured today against `eaa2c35` HEAD (post-SIMD-scan, post-DFA-`\b`). Update via `cargo run --release -p rgx-bench --bin regression_check -- --update-baseline` whenever an intentional perf change ships; commit the new baseline in the same PR so the gate stays meaningful.
+- New CI job `benchmark-regression-check` on every PR + push (15 min timeout). Output is a Markdown-formatted table (PR-comment-ready) listing each bench's current vs baseline ratio with ✅ stable / 🚀 improved / ❌ regressed status. Failed runs upload the table as an artifact for offline inspection.
+- Validation: cold run against fresh-captured baseline shows all 7 benches within 1-3% drift (well under the 20% tolerance). `cargo clippy -p rgx-bench --all-targets` clean. Conformance untouched (baseline at 12,806/4).
+
 ### 2026-05-12 - Perf: SIMD byte-class scan for `PrefixScanner` (NEON / AVX2 / SSE2 + scalar fallback)
 - Scope: `PrefixScanner::next_candidate` in `engine.rs` previously walked byte-by-byte for the `Digit`, `Word`, and `Space` predicates. On long inputs with sparse matches (grep-like workloads, large log files) the scalar loop became the dispatch bottleneck — every dispatch call paid a byte-at-a-time scan before the engine could even start.
 - New module `c2/simd_scan.rs` exports `find_first_digit`, `find_first_word`, `find_first_space`. Each function dispatches at runtime to the best implementation: NEON on aarch64 (16-byte blocks via `vld1q_u8` + range compares + `vmaxvq_u8` reduction), AVX2 on x86_64 (32-byte blocks, runtime feature-detected), SSE2 on x86_64 (16-byte blocks, baseline), with a portable scalar fallback for other architectures and for unaligned tail bytes.

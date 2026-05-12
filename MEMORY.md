@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — CI: bench regression gate (BACKLOG C4) — protects today's perf push
+- New `rgx-bench/src/bin/regression_check.rs`: times find_first on the 7 shared PATTERNS (median-of-11 × 10 000 iter), computes rgx/PCRE2 ratio, compares vs `rgx-bench/baselines/main.toml`, exits 1 if any ratio regressed >20%. Baseline captured against `eaa2c35`. New CI job `benchmark-regression-check` on every PR + push to main. Output is PR-comment-ready Markdown table with ✅ stable / 🚀 improved / ❌ regressed status. The criterion bench job (push-to-main only, artifact upload) stays for historical capture; the regression gate is the merge condition.
+- Why ratio not absolute time: GHA runners are noisy; Apple Silicon vs cloud x86 differs 2-3×. Rgx-vs-PCRE2 ratio cancels the hardware factor.
+- Update procedure: when an intentional perf change ships, run `cargo run --release -p rgx-bench --bin regression_check -- --update-baseline` and commit the new baseline in the same PR. Otherwise the gate fails.
+
 ### 2026-05-12 — Perf: SIMD byte-class scan in `PrefixScanner` (NEON / AVX2 / SSE2)
 - New `c2::simd_scan` module with `find_first_{digit,word,space}` — 16-byte (NEON / SSE2) or 32-byte (AVX2) blocks via range / equality compares + reduction. Dispatched at runtime; scalar fallback for unsupported arches and unaligned tails. Wired into `PrefixScanner::next_candidate` replacing the byte-by-byte loops for the three built-in predicates. Synthetic 100KB-no-match prefix scan: **34 GB/s on NEON**. Criterion bench unchanged (existing inputs have matches every ~20 bytes — scalar prefix scan was already negligible there). Real-world log scanning workloads see the full speedup. Lib 1137/1137 (+10 SIMD tests), clippy clean, conformance 12806/4 in 282s.
 
