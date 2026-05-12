@@ -381,6 +381,47 @@ impl TaggedDfa {
         self.num_classes
     }
 
+    /// Borrow the RegOp pool. Indexed by
+    /// [`TaggedTransition::reg_op_idx`] / `reg_op_len`. Phase 2b
+    /// transitions append here; the simulator (Phase 2d) reads
+    /// from here in the hot loop.
+    #[must_use]
+    pub fn reg_op_pool(&self) -> &[RegOp] {
+        &self.reg_op_pool
+    }
+
+    /// Borrow the RegOps for a given transition. Returns an empty
+    /// slice if the transition is dead, uncached, or has no RegOps.
+    /// This is the convenience wrapper the simulator (Phase 2d)
+    /// uses on the hot path.
+    #[must_use]
+    pub fn transition_reg_ops(&self, trans: TaggedTransition) -> &[RegOp] {
+        let start = trans.reg_op_idx as usize;
+        let len = trans.reg_op_len as usize;
+        // Guard against malformed inputs (dead/uncached have
+        // `reg_op_len = 0` so the empty slice is the safe answer).
+        if start.saturating_add(len) > self.reg_op_pool.len() {
+            return &[];
+        }
+        &self.reg_op_pool[start..start + len]
+    }
+
+    /// True iff the transition's target is the dead sentinel.
+    /// Convenience for the simulator's stop-condition check.
+    #[must_use]
+    pub fn is_dead(trans: TaggedTransition) -> bool {
+        trans.target == DEAD_STATE
+    }
+
+    /// True iff the transition slot has never been computed.
+    /// Should be impossible to observe via the public
+    /// [`Self::transition`] API — every call computes and caches —
+    /// but exposed for tests that inspect the raw table.
+    #[must_use]
+    pub fn is_uncached(trans: TaggedTransition) -> bool {
+        trans.target == UNCACHED
+    }
+
     // ----------------------------------------------------------
     // Construction internals
     // ----------------------------------------------------------
@@ -410,18 +451,19 @@ impl TaggedDfa {
     /// NFA state's register map.
     fn build_start_state(&mut self) -> Result<(), TdfaBuildError> {
         let mut nfa_states_in_order: Vec<NfaStateId> = Vec::new();
-        // Per-NFA-state register map for this DFA state. Built up
-        // during the closure walk; collapsed into the flat
-        // `register_map` storage at the end.
         let mut per_state_register_map: HashMap<NfaStateId, Vec<u16>> = HashMap::new();
 
         let start = self.nfa.start();
-        self.tagged_epsilon_closure(
+        // Saves fired during the start ε-closure go straight to
+        // `self.start_reg_ops` — they run once per match attempt
+        // before the first byte. The marker is `None` (= "no
+        // transition accumulator").
+        self.tagged_epsilon_closure_into(
             start,
+            None, // no inherited register map for the start state
+            None, // None = saves route to self.start_reg_ops
             &mut nfa_states_in_order,
             &mut per_state_register_map,
-            None, // no inherited register map for the start state
-            /* is_start_state */ true,
         );
 
         let mut nfa_states_sorted = nfa_states_in_order.clone();
@@ -451,7 +493,18 @@ impl TaggedDfa {
     }
 
     /// Run an ε-closure from `seed` in epsilon-slot order, firing
-    /// tags along tagged ε-edges.
+    /// tags along tagged ε-edges into a chosen sink.
+    ///
+    /// `inherited` is the predecessor's per-tag register map
+    /// (or `None` for the seed of a fresh closure — gets an
+    /// all-`REGISTER_NONE` starting map).
+    ///
+    /// `transition_ops_sink`:
+    /// - `Some(&mut Vec<RegOp>)` — Save ops produced by tag firings
+    ///   are appended here. Used when computing a byte transition's
+    ///   RegOp list (Phase 2b).
+    /// - `None` — Save ops are appended to `self.start_reg_ops`
+    ///   instead, the firing context for the start state.
     ///
     /// `nfa_states_in_order` accumulates the closure's NFA states
     /// in visit order (the canonical slot-priority traversal). The
@@ -461,23 +514,21 @@ impl TaggedDfa {
     /// reached, that state's per-tag register assignment at this
     /// point in the closure. The closure inherits from the
     /// "predecessor" (the state that brought us to the current
-    /// state) and updates on every crossed tagged ε-edge.
+    /// state) and updates on every crossed tagged ε-edge. Leftmost-
+    /// first priority is encoded by the first-to-reach-wins guard:
+    /// if a state already has an entry, subsequent paths to that
+    /// state are ignored.
     ///
-    /// `inherited` is the predecessor's register map (or `None`
-    /// for the seed state — which gets an all-`REGISTER_NONE`
-    /// starting map).
-    ///
-    /// `is_start_state` distinguishes the start-state firing
-    /// context (RegOps go in `self.start_reg_ops`) from a
-    /// transition firing context (RegOps go on the transition,
-    /// added in Phase 2b).
-    fn tagged_epsilon_closure(
+    /// This is the primitive Phase 2a built. Phase 2b extends it
+    /// to accept an explicit RegOp sink so byte-transition firings
+    /// can be routed correctly.
+    fn tagged_epsilon_closure_into(
         &mut self,
         seed: NfaStateId,
+        inherited: Option<&[u16]>,
+        mut transition_ops_sink: Option<&mut Vec<RegOp>>,
         nfa_states_in_order: &mut Vec<NfaStateId>,
         per_state_register_map: &mut HashMap<NfaStateId, Vec<u16>>,
-        inherited: Option<&[u16]>,
-        is_start_state: bool,
     ) {
         // Iterative DFS preserves slot order (lowest-slot edge
         // pushed last so it pops first).
@@ -488,10 +539,7 @@ impl TaggedDfa {
         stack.push((seed, seed_map));
 
         while let Some((state, regs)) = stack.pop() {
-            // Higher-priority paths to the same state win. If the
-            // state already has a register map, we keep the existing
-            // one (it came from a lower-slot path) and don't
-            // overwrite. This is the leftmost-first encoding.
+            // Higher-priority paths to the same state win.
             if per_state_register_map.contains_key(&state) {
                 continue;
             }
@@ -525,12 +573,11 @@ impl TaggedDfa {
                     if tag_idx < child_regs.len() {
                         child_regs[tag_idx] = r;
                     }
-                    if is_start_state {
-                        self.start_reg_ops.push(RegOp::Save { dst: r });
+                    let op = RegOp::Save { dst: r };
+                    match transition_ops_sink.as_deref_mut() {
+                        Some(sink) => sink.push(op),
+                        None => self.start_reg_ops.push(op),
                     }
-                    // If !is_start_state, the firing should land on
-                    // the in-flight transition's RegOp list. Phase
-                    // 2b adds the transition-RegOp accumulator.
                 }
                 stack.push((target, child_regs));
             }
@@ -603,15 +650,169 @@ impl TaggedDfa {
         self.cache.insert(key, id);
         Ok(id)
     }
-}
 
-// Suppress unused-symbol warnings during the phased rollout. The
-// transition sentinels and cache types are wired into the public
-// surface in Phase 2b / 2c; this `_` re-export keeps the compiler
-// from emitting noise without making the symbols ambiguously
-// re-exported.
-#[allow(dead_code)]
-const _UNUSED: (TaggedDfaStateId, TaggedDfaStateId) = (DEAD_STATE, UNCACHED);
+    // ----------------------------------------------------------
+    // Phase 2b: byte transitions with tag propagation
+    // ----------------------------------------------------------
+
+    /// Look up or compute the transition from `state` on byte class
+    /// `cls`. Lazy: a cached transition is returned directly; an
+    /// uncached one is computed, cached, and returned.
+    ///
+    /// The TDFA's behaviour around state-cache exhaustion mirrors
+    /// the lazy DFA's. If construction of the target state fails
+    /// (state limit hit), the transition is recorded as `DEAD_STATE`
+    /// for the slot so subsequent lookups don't re-attempt — and
+    /// the simulator (Phase 2d) treats the dead sentinel as "stop
+    /// here, fall back to the existing two-pass path for this
+    /// match attempt." Phase 2b returns the dead transition
+    /// directly; the simulator wires this in Phase 2d.
+    pub fn transition(&mut self, state: TaggedDfaStateId, cls: u8) -> TaggedTransition {
+        let slot = state as usize * self.num_classes + cls as usize;
+        debug_assert!(
+            slot < self.transitions.len(),
+            "transition slot out of bounds: state={state} cls={cls}"
+        );
+        let cached = self.transitions[slot];
+        if cached.target != UNCACHED {
+            return cached;
+        }
+        let computed = self.compute_transition(state, cls);
+        self.transitions[slot] = computed;
+        computed
+    }
+
+    /// Compute the transition from `state` on byte class `cls` from
+    /// scratch.
+    ///
+    /// 1. For each NFA state `n` in the source `state.nfa_states`,
+    ///    walk byte transitions matching `cls`. For each
+    ///    `n --[cls]--> m` transition, schedule `m` for ε-closure
+    ///    seeded with `n`'s register map.
+    /// 2. Run a tagged ε-closure from each scheduled `m`, threading
+    ///    register-map inheritance and emitting Save ops into a
+    ///    local RegOp accumulator. The closure's first-to-reach-wins
+    ///    guard handles priority within the closure.
+    /// 3. Cross-target priority (which source `n` wins when multiple
+    ///    `n`s lead to the same `m`) is handled by iteration order:
+    ///    we walk source NFA states in their sorted order (the order
+    ///    stored on the source DFA state), and the closure's guard
+    ///    keeps the first map to reach each target.
+    /// 4. If the resulting NFA set is empty, return [`DEAD_STATE`].
+    /// 5. Otherwise allocate or look up the target TDFA state. If
+    ///    the state limit is hit during allocation, fall back to
+    ///    [`DEAD_STATE`] — losing some completeness, gained
+    ///    determinism. The lazy DFA does the same (`c2/dfa.rs`).
+    fn compute_transition(&mut self, state: TaggedDfaStateId, cls: u8) -> TaggedTransition {
+        let mut nfa_states_in_order: Vec<NfaStateId> = Vec::new();
+        let mut per_state_register_map: HashMap<NfaStateId, Vec<u16>> = HashMap::new();
+        let mut transition_ops: Vec<RegOp> = Vec::new();
+
+        // Snapshot the source state's per-NFA-state register slices
+        // so we can iterate without an outstanding borrow on
+        // `self.states` while calling `tagged_epsilon_closure_into`
+        // (which mutates `self`).
+        let source = &self.states[state as usize];
+        let source_nfa_states = source.nfa_states.clone();
+        let source_num_tags = self.num_tags;
+        let source_register_map = source.register_map.clone();
+
+        // For each source NFA state in sorted order, follow byte
+        // transitions matching `cls`. Sorted order is a stable
+        // canonicalisation, not a priority order — that's a Phase
+        // 2c concern.
+        for (i, &n) in source_nfa_states.iter().enumerate() {
+            let inherited = &source_register_map[i * source_num_tags..(i + 1) * source_num_tags];
+            // Snapshot byte transitions so we can call the closure
+            // walker (which mutates `self`) inside the loop.
+            let byte_targets: Vec<NfaStateId> = self.nfa.states()[n as usize]
+                .transitions
+                .iter()
+                .filter_map(|&(tcls, target)| if tcls == cls { Some(target) } else { None })
+                .collect();
+            for target in byte_targets {
+                self.tagged_epsilon_closure_into(
+                    target,
+                    Some(inherited),
+                    Some(&mut transition_ops),
+                    &mut nfa_states_in_order,
+                    &mut per_state_register_map,
+                );
+            }
+        }
+
+        if nfa_states_in_order.is_empty() {
+            // Dead transition. Record and short-circuit on future
+            // lookups via the DEAD_STATE sentinel — no RegOps.
+            return TaggedTransition {
+                target: DEAD_STATE,
+                reg_op_idx: 0,
+                reg_op_len: 0,
+            };
+        }
+
+        let mut nfa_states_sorted = nfa_states_in_order.clone();
+        nfa_states_sorted.sort_unstable();
+        nfa_states_sorted.dedup();
+
+        let is_accept = nfa_states_sorted.contains(&self.nfa.accept());
+        let register_map_flat =
+            self.flatten_register_map(&nfa_states_sorted, &per_state_register_map);
+
+        // Cache hit on (NFA set, register map)? Reuse the existing
+        // TDFA state. Phase 2b uses verbatim register-map equality;
+        // Phase 2c upgrades to Laurikari's canonical comparison.
+        let key = TaggedDfaStateKey {
+            nfa_states: nfa_states_sorted.clone(),
+            register_map: register_map_flat.clone(),
+        };
+        let target = if let Some(&existing) = self.cache.get(&key) {
+            existing
+        } else {
+            let accept_register_map = if is_accept {
+                self.compute_accept_register_map(&nfa_states_sorted, &per_state_register_map)
+            } else {
+                Vec::new()
+            };
+            let new_state = TaggedDfaState {
+                nfa_states: nfa_states_sorted.clone(),
+                register_map: register_map_flat.clone(),
+                is_accept,
+                accept_register_map,
+            };
+            match self.allocate_state_in_cache(new_state, &nfa_states_sorted, &register_map_flat) {
+                Ok(id) => id,
+                Err(_) => {
+                    // State limit hit. Record dead transition so the
+                    // simulator stops cleanly; the engine dispatch
+                    // falls back to the existing two-pass path on
+                    // exhausted matches.
+                    return TaggedTransition {
+                        target: DEAD_STATE,
+                        reg_op_idx: 0,
+                        reg_op_len: 0,
+                    };
+                }
+            }
+        };
+
+        // Append RegOps to the pool. The transition records the
+        // slice indices. Even if reg_ops is empty (common case for
+        // transitions inside a capture body), the slice is
+        // (reg_op_idx, 0) — slicing an empty range is well-defined.
+        let reg_op_idx =
+            u32::try_from(self.reg_op_pool.len()).expect("RegOp pool index overflowed u32::MAX");
+        let reg_op_len =
+            u16::try_from(transition_ops.len()).expect("Transition RegOp count exceeded u16::MAX");
+        self.reg_op_pool.extend(transition_ops);
+
+        TaggedTransition {
+            target,
+            reg_op_idx,
+            reg_op_len,
+        }
+    }
+}
 
 // ============================================================
 // Tests
@@ -852,5 +1053,212 @@ mod tests {
         let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
         let result = TaggedDfa::try_build(nfa, bcm, 0);
         assert_eq!(result.err(), Some(TdfaBuildError::StateLimit));
+    }
+
+    // ============================================================
+    // Phase 2b — byte transitions with tag propagation
+    // ============================================================
+
+    /// Find the byte class for character `c` in `bcm`.
+    fn class_of(bcm: &ByteClassMap, c: char) -> u8 {
+        bcm.class_of(c as u8)
+    }
+
+    #[test]
+    fn transition_for_simple_capture_fires_end_tag() {
+        // (a) — start state contains body-entry (with GroupStart(1)
+        // fired). Byte 'a' transitions into a state containing the
+        // accept (with GroupEnd(1) fired). The transition's RegOps
+        // must contain exactly one Save (for GroupEnd(1)).
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let cls_a = class_of(&bcm, 'a');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        // Before transitioning, the TDFA has just the start state.
+        assert_eq!(tdfa.num_states(), 1);
+
+        let trans = tdfa.transition(tdfa.start_state(), cls_a);
+        assert!(
+            !TaggedDfa::is_dead(trans),
+            "byte 'a' from start must transition"
+        );
+
+        // Target state must exist and must be accept (the (a) accept).
+        let target_state = tdfa.state(trans.target);
+        assert!(target_state.is_accept, "transition target must be accept");
+
+        // Exactly one Save in the transition RegOps — the GroupEnd(1)
+        // firing during the closure from the byte target.
+        let reg_ops = tdfa.transition_reg_ops(trans);
+        assert_eq!(reg_ops.len(), 1, "transition must fire exactly one Save");
+        assert!(matches!(reg_ops[0], RegOp::Save { .. }));
+
+        // Now the TDFA has 2 states.
+        assert_eq!(tdfa.num_states(), 2);
+    }
+
+    #[test]
+    fn transition_caches_on_second_lookup() {
+        // After computing a transition once, the slot is cached;
+        // subsequent lookups return the same transition without
+        // recomputing.
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let cls_a = class_of(&bcm, 'a');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        let trans1 = tdfa.transition(tdfa.start_state(), cls_a);
+        let states_after_first = tdfa.num_states();
+        let pool_after_first = tdfa.reg_op_pool().len();
+
+        let trans2 = tdfa.transition(tdfa.start_state(), cls_a);
+
+        // Same transition recorded — no new states or RegOps allocated.
+        assert_eq!(trans1.target, trans2.target);
+        assert_eq!(trans1.reg_op_idx, trans2.reg_op_idx);
+        assert_eq!(trans1.reg_op_len, trans2.reg_op_len);
+        assert_eq!(tdfa.num_states(), states_after_first);
+        assert_eq!(tdfa.reg_op_pool().len(), pool_after_first);
+    }
+
+    #[test]
+    fn transition_on_dead_byte_class_returns_dead() {
+        // (a) — byte 'b' from the start state has no NFA-reachable
+        // target. The transition is dead.
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let cls_b = class_of(&bcm, 'b');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+        let trans = tdfa.transition(tdfa.start_state(), cls_b);
+        assert!(TaggedDfa::is_dead(trans));
+        assert_eq!(tdfa.transition_reg_ops(trans).len(), 0);
+    }
+
+    #[test]
+    fn transition_for_sequential_captures_propagates_register_map() {
+        // (a)(b) — start fires GroupStart(1) only. Byte 'a' must
+        // produce a transition firing GroupEnd(1) AND GroupStart(2)
+        // (the ε-closure from body-of-(a)'s accept crosses both
+        // tags before reaching body-of-(b)).
+        let (nfa, bcm) = build_components(&seq(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        // Snapshot class IDs before the Arc moves into try_build.
+        let cls_a = class_of(&bcm, 'a');
+        let cls_b = class_of(&bcm, 'b');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)(b)");
+
+        let trans = tdfa.transition(tdfa.start_state(), cls_a);
+        assert!(!TaggedDfa::is_dead(trans));
+
+        // The byte-'a' transition's RegOps fire GroupEnd(1) and
+        // GroupStart(2). Two Saves expected.
+        let reg_ops: Vec<RegOp> = tdfa.transition_reg_ops(trans).to_vec();
+        assert_eq!(
+            reg_ops.len(),
+            2,
+            "byte 'a' transition must fire GroupEnd(1) + GroupStart(2)"
+        );
+        for op in &reg_ops {
+            assert!(matches!(op, RegOp::Save { .. }));
+        }
+
+        // Target state is not accept (we haven't consumed 'b' yet).
+        let target = tdfa.state(trans.target);
+        assert!(!target.is_accept);
+
+        // Now consume 'b'. Target must be accept and fire GroupEnd(2).
+        let trans2 = tdfa.transition(trans.target, cls_b);
+        assert!(!TaggedDfa::is_dead(trans2));
+        let accept = tdfa.state(trans2.target);
+        assert!(accept.is_accept, "(a)(b) target after 'ab' must be accept");
+        let reg_ops_2 = tdfa.transition_reg_ops(trans2);
+        assert_eq!(reg_ops_2.len(), 1, "byte 'b' must fire GroupEnd(2)");
+    }
+
+    #[test]
+    fn alternation_byte_diverges_into_separate_states() {
+        // (a)|(b) — start state contains both branches' body-entry
+        // NFA states. Byte 'a' transitions only the (a) branch;
+        // byte 'b' transitions only the (b) branch. The two target
+        // states are different.
+        let (nfa, bcm) = build_components(&alt(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        let cls_a = class_of(&bcm, 'a');
+        let cls_b = class_of(&bcm, 'b');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)|(b)");
+
+        let trans_a = tdfa.transition(tdfa.start_state(), cls_a);
+        let trans_b = tdfa.transition(tdfa.start_state(), cls_b);
+        assert!(!TaggedDfa::is_dead(trans_a));
+        assert!(!TaggedDfa::is_dead(trans_b));
+        assert_ne!(
+            trans_a.target, trans_b.target,
+            "branches must transition to distinct TDFA states"
+        );
+
+        let target_a = tdfa.state(trans_a.target);
+        let target_b = tdfa.state(trans_b.target);
+        assert!(target_a.is_accept);
+        assert!(target_b.is_accept);
+
+        // Each transition fires exactly one Save (the matching
+        // branch's GroupEnd).
+        assert_eq!(tdfa.transition_reg_ops(trans_a).len(), 1);
+        assert_eq!(tdfa.transition_reg_ops(trans_b).len(), 1);
+    }
+
+    #[test]
+    fn dead_transition_cached() {
+        // Second lookup on a dead transition must NOT recompute —
+        // the dead sentinel is cached.
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let cls_b = class_of(&bcm, 'b');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        let trans1 = tdfa.transition(tdfa.start_state(), cls_b);
+        let pool_after_first = tdfa.reg_op_pool().len();
+        let states_after_first = tdfa.num_states();
+
+        let trans2 = tdfa.transition(tdfa.start_state(), cls_b);
+        assert_eq!(trans1.target, trans2.target);
+        // No new RegOps or states allocated on the second lookup.
+        assert_eq!(tdfa.reg_op_pool().len(), pool_after_first);
+        assert_eq!(tdfa.num_states(), states_after_first);
+    }
+
+    #[test]
+    fn transition_to_accept_populates_accept_register_map() {
+        // (a) — the byte-'a' target is the accept state. Its
+        // accept_register_map must populate both group-1 tags (start
+        // from the start-state firing, end from the transition
+        // firing).
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let cls_a = class_of(&bcm, 'a');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        let trans = tdfa.transition(tdfa.start_state(), cls_a);
+        let accept = tdfa.state(trans.target);
+        assert!(accept.is_accept);
+        assert_eq!(accept.accept_register_map.len(), tdfa.num_tags());
+
+        let tag_start_1 = Tag::start_of(1).index() as usize;
+        let tag_end_1 = Tag::end_of(1).index() as usize;
+        assert_ne!(
+            accept.accept_register_map[tag_start_1], REGISTER_NONE,
+            "group-1 start must be fired at accept"
+        );
+        assert_ne!(
+            accept.accept_register_map[tag_end_1], REGISTER_NONE,
+            "group-1 end must be fired at accept"
+        );
     }
 }

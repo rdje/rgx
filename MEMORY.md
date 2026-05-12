@@ -3982,3 +3982,40 @@ After the closure completes, the per-state map is flattened into the cache-frien
 **Validation.** `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1156/1156 (1147 baseline + 9 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — the TDFA module is not wired to engine dispatch yet, so the engine behaviour is unchanged.
 
 **Next step.** Phase 2b — byte transitions with tag propagation. Need to add `compute_transition_set(state, byte_class) -> Vec<(NfaStateId, register_map)>` analogous to `c2/dfa.rs::compute_transition_set`, but threaded with register-map propagation. Each transition's RegOps go into the `reg_op_pool` and the transition's `reg_op_idx` / `reg_op_len` reference the slice. The closure walker extends to accept a transition-RegOp accumulator (replaces `is_start_state` flag with an `Option<&mut Vec<RegOp>>` enum).
+
+## 2026-05-13 session — TDFA Phase 2b: byte transitions with tag propagation
+
+Fourth commit on the TDFA track. Phase 2b lands the lazy byte-transition computation; the TDFA can now navigate from any state on any byte class, firing tags along the way.
+
+**Key API.** `TaggedDfa::transition(state, cls) -> TaggedTransition` is the public lazy lookup. Mirrors `LazyDfa::transition` in `c2/dfa.rs`: reads the cached slot, computes-and-caches if `UNCACHED`. The two-sentinel discipline (DEAD vs UNCACHED) matches the lazy DFA exactly — dead-transition lookups short-circuit on the second call.
+
+**Algorithm.** `compute_transition(state, cls)`:
+1. Iterate source NFA states in sorted order.
+2. For each, follow byte transitions matching `cls`.
+3. For each byte target, run tagged ε-closure with the source NFA state's register map inherited.
+4. Tag firings during the closure append `Save` ops into a local `Vec<RegOp>`.
+5. Empty result → `DEAD_STATE`. Non-empty → cache lookup on (sorted NFA set, register map). Hit reuses the existing TDFA state; miss allocates a new one. State-limit overflow during allocation → `DEAD_STATE` fallback.
+6. The local RegOp Vec is appended to the global `reg_op_pool`; the transition stores the slice indices.
+
+**Closure-walker refactor.** Phase 2a's `tagged_epsilon_closure` took an `is_start_state: bool` flag to route fired Saves to either `start_reg_ops` or "Phase 2b TODO." Phase 2b replaces this with `Option<&mut Vec<RegOp>>`. `None` → start-state context (saves go to `self.start_reg_ops`). `Some(&mut sink)` → transition context (saves go to `sink`). Cleaner separation; the leftmost-first first-to-reach-wins guard is preserved verbatim.
+
+**Hand-verified trace for `(a)`.** Start state contains {wrapper_start, body_entry} with GroupStart(1) fired at body_entry → register R0. start_reg_ops = `[Save R0]`.
+
+byte-'a' transition from start state:
+- For wrapper_start (no byte transitions): nothing.
+- For body_entry (byte 'a' → body_accept): closure from body_accept fires GroupEnd(1) → register R1, then reaches wrapper_accept (the NFA accept).
+- Target TDFA state contains {body_accept, wrapper_accept} with register map (body_accept: tag2=R0, tag3=R1) and (wrapper_accept: tag2=R0, tag3=R1).
+- is_accept = true. accept_register_map = [_, _, R0, R1] (with slots 0/1 being the unused group-0 reservation).
+- Transition RegOps = `[Save R1]` (length 1).
+
+Simulation on "a" (Phase 2d, future):
+1. Init registers `[None, None]`. Run start_reg_ops at pos 0 → registers `[Some(0), None]` (R0 = 0).
+2. Byte 'a' at pos 0 → transition to accept, run RegOps at pos 1 → registers `[Some(0), Some(1)]` (R1 = 1).
+3. Read accept_register_map: tag2 (group 1 start) = R0 = 0, tag3 (group 1 end) = R1 = 1.
+4. Captures: group 1 = (0, 1) = "a". ✓
+
+**Phase 2b correctness limitation.** Overlapping alternation like `((a)|(ab))` may produce wrong captures because the iteration order over the sorted NFA state set is not the leftmost-first priority order. This is what Phase 2c's canonicalisation will fix. For Phase 2b's test patterns (`(a)`, `(a)(b)`, `(a)|(b)` — non-overlapping), the algorithm is correct.
+
+**Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1163/1163 (1156 baseline + 7 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged.
+
+**Next step.** Phase 2c — register canonicalisation + dependency-ordered RegOp emission. The Laurikari reorder rule collapses equivalent register configurations into one TDFA state; `Copy` ops on the transition reshuffle live registers into the canonical layout when needed. Topological sort orders Copies before Saves that share a destination. This is what unlocks correct handling of overlapping alternation captures, and bounds the TDFA state count via Laurikari §4.5.
