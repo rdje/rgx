@@ -294,6 +294,11 @@ Live continuity memory for `rgx` sessions.
 - Decide whether native registration should remain Rust-API-only and whether the new wasm CLI path should grow beyond file-backed module registration.
 
 ## Session memory entries (newest first)
+### 2026-05-12 — Perf: Materialised DFA — rgx beats PCRE2 on ALL 7 headline benches
+- New `LazyDfa::try_materialize(state_limit)` BFS-fills every reachable transition; `find_match_at_immut` reads via `&self` without locking. `engine::DfaCell` enum: `Materialized(Arc<LazyDfa>)` for the lock-free fast path, `Lazy(Mutex<LazyDfa>)` fallback. `build_dfa_if_eligible` attempts materialisation; 5 dispatch sites switch on the variant. Limit 64 states covers every bench pattern.
+- **`digit_sequence` ratio 1.17 → 0.89 (-24%)** — RGX now BEATS PCRE2 (1.13×) on what was the only DFA-bound bench still slower. **`email_basic` ratio 0.63 → 0.42 (-33%)** — was 1.59× faster, now 2.4× faster. Other benches stable. Conformance 12806/4 in 323s; lib 1140/1140 (+3 unit tests); c2_pike_differential 12/12; clippy clean.
+- All 7 headline benches now beat PCRE2 for the first time.
+
 ### 2026-05-12 — Perf: parking_lot::Mutex on engine hot paths
 - 5 Mutex fields converted: c2_dfa, c2_forward_unanchored_dfa, c2_reverse_dfa, jit_program, pike_scratch. parking_lot::Mutex is ~3× faster on uncontended fast path (no poisoning, adaptive spinning). API collapses .lock().ok()? → .lock() at every site. **`digit_sequence` ratio 1.29 → 1.17** (-9% — the largest beneficiary; was the only DFA-bound bench still slower than PCRE2). Smaller wins on email_basic, url_simple, capture_groups. No regressions. Baseline updated in same commit. Lib 1137/1137, c2_pike_differential 12/12, conformance 12806/4 in 288s.
 

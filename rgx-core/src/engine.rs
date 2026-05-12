@@ -11,6 +11,51 @@ use crate::{trace_decision, trace_enter, trace_exit};
 use parking_lot::Mutex;
 use std::sync::{Arc, OnceLock};
 
+/// State limit for eager DFA materialisation. Patterns whose
+/// reachable DFA fits within this bound have all transitions
+/// pre-filled at engine-build time, after which the dispatch hot
+/// path can read from the DFA via `&Arc<LazyDfa>` and skip the
+/// Mutex entirely (saving ~3 ns per call on top of today's
+/// parking_lot win). Patterns above the bound fall back to the
+/// lazy + Mutex path. 64 covers `\d{3}-\d{2}-\d{4}`, `\b\w+\b`,
+/// most simple literal alternations, and patterns of similar
+/// shape; larger patterns (`url_simple`, multi-class with `\w+`,
+/// counted-quantifier unrolls) typically exceed the limit but
+/// don't lose performance — the Mutex was already cheap with
+/// parking_lot.
+const DFA_MATERIALIZE_STATE_LIMIT: usize = 64;
+
+/// Lock-free or lock-protected access wrapper for a `LazyDfa`.
+/// Built once at engine init; subsequent dispatch picks the right
+/// access path based on the variant.
+///
+/// The `Materialized` variant holds a fully-populated DFA (every
+/// reachable transition cached as `Next` or `Dead`) behind an
+/// `Arc`; calls go through `&LazyDfa` via the `_immut` simulator
+/// variants and never acquire a lock. The `Lazy` variant holds a
+/// `Mutex<LazyDfa>` for patterns whose DFA didn't fit within
+/// [`DFA_MATERIALIZE_STATE_LIMIT`] — the same lazy / locked path
+/// the engine has always used.
+#[derive(Debug)]
+pub(crate) enum DfaCell {
+    Materialized(Arc<LazyDfa>),
+    Lazy(Mutex<LazyDfa>),
+}
+
+impl DfaCell {
+    /// Wrap a freshly-built `LazyDfa` in the appropriate variant.
+    /// Attempts eager materialisation up to
+    /// [`DFA_MATERIALIZE_STATE_LIMIT`]; if successful, returns the
+    /// lock-free `Materialized` variant. Otherwise wraps in a Mutex.
+    fn from_lazy(mut lazy: LazyDfa) -> Self {
+        if lazy.try_materialize(DFA_MATERIALIZE_STATE_LIMIT) {
+            Self::Materialized(Arc::new(lazy))
+        } else {
+            Self::Lazy(Mutex::new(lazy))
+        }
+    }
+}
+
 /// Execution mode that controls performance vs feature tradeoffs
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExecutionMode {
@@ -100,7 +145,7 @@ pub struct Engine {
     /// subset or contains assertions the DFA can't model). Wrapped in
     /// `Mutex` because the DFA's `transition` method mutates its
     /// state cache and public `Regex` API methods are `&self`.
-    c2_dfa: OnceLock<Option<Mutex<LazyDfa>>>,
+    c2_dfa: OnceLock<Option<DfaCell>>,
     /// C2 lazy DFA built over the **forward-unanchored** NFA.
     /// Companion to [`Self::c2_reverse_dfa`] in the **reverse-DFA
     /// pipeline**: a single O(n) forward sweep (via this DFA) finds
@@ -390,7 +435,7 @@ impl<'a> PrefixScanner<'a> {
 fn build_dfa_if_eligible(
     ast: &crate::ast::Regex,
     c2_program: &Option<crate::c2::CompiledC2Program>,
-) -> Option<Mutex<LazyDfa>> {
+) -> Option<DfaCell> {
     let c2 = c2_program.as_ref()?;
     if !crate::c2::program::is_c2_dfa_eligible(ast) {
         return None;
@@ -402,7 +447,7 @@ fn build_dfa_if_eligible(
     let bcm = Arc::new(c2.byte_class_map.clone());
     LazyDfa::new(nfa, bcm, LazyDfa::DEFAULT_STATE_LIMIT)
         .ok()
-        .map(Mutex::new)
+        .map(DfaCell::from_lazy)
 }
 
 /// Build a `Mutex<LazyDfa>` over the **forward-unanchored** NFA for
@@ -571,7 +616,7 @@ impl Engine {
     /// `transition` method mutates its state cache, so the lock is
     /// required even from `&self`.
     #[doc(hidden)]
-    pub fn should_dispatch_to_dfa(&self) -> Option<&Mutex<LazyDfa>> {
+    pub(crate) fn should_dispatch_to_dfa(&self) -> Option<&DfaCell> {
         let dfa = self
             .c2_dfa
             .get_or_init(|| build_dfa_if_eligible(&self.ast, &self.vm.program.c2_program))
@@ -864,16 +909,32 @@ impl Engine {
                 }
             }
         }
-        let dfa_mutex = self.should_dispatch_to_dfa()?;
-        let mut dfa = dfa_mutex.lock();
+        let dfa_cell = self.should_dispatch_to_dfa()?;
         // Per-position anchored scan (pre-pipeline fallback). The
         // simulator might exhaust its cache mid-scan; in that case
-        // bail and let the caller fall back further.
-        for start in 0..=input.len() {
-            match dfa.find_match_at(input, start) {
-                DfaSearchOutcome::Match(_) => return Some(true),
-                DfaSearchOutcome::NoMatch => continue,
-                DfaSearchOutcome::Exhausted => return None,
+        // bail and let the caller fall back further. The
+        // materialised variant skips Mutex acquisition entirely
+        // (~3 ns saved per call on top of today's parking_lot win)
+        // while preserving identical semantics.
+        match dfa_cell {
+            DfaCell::Materialized(arc) => {
+                for start in 0..=input.len() {
+                    match arc.find_match_at_immut(input, start) {
+                        DfaSearchOutcome::Match(_) => return Some(true),
+                        DfaSearchOutcome::NoMatch => continue,
+                        DfaSearchOutcome::Exhausted => return None,
+                    }
+                }
+            }
+            DfaCell::Lazy(mutex) => {
+                let mut dfa = mutex.lock();
+                for start in 0..=input.len() {
+                    match dfa.find_match_at(input, start) {
+                        DfaSearchOutcome::Match(_) => return Some(true),
+                        DfaSearchOutcome::NoMatch => continue,
+                        DfaSearchOutcome::Exhausted => return None,
+                    }
+                }
             }
         }
         Some(false)
@@ -942,26 +1003,41 @@ impl Engine {
                 }
             }
         }
-        let dfa_mutex = self.should_dispatch_to_dfa()?;
+        let dfa_cell = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
-        let mut dfa = dfa_mutex.lock();
         let mut start = 0usize;
-        while start <= input.len() {
-            let Some(candidate) = scanner.next_candidate(input, start) else {
-                return Some(None);
-            };
-            start = candidate;
-            match dfa.find_match_at(input, start) {
-                DfaSearchOutcome::Match(end) => {
-                    // DFA confirms a match starts at this position.
-                    // Recover captures via Pike-VM at this exact start
-                    // — or skip Pike-VM entirely for 0-capture patterns
-                    // (the DFA's `end` is the full match by construction).
-                    drop(dfa);
-                    return Some(self.recover_match_for_dfa_span(c2, input, start, end));
+        match dfa_cell {
+            DfaCell::Materialized(arc) => {
+                while start <= input.len() {
+                    let Some(candidate) = scanner.next_candidate(input, start) else {
+                        return Some(None);
+                    };
+                    start = candidate;
+                    match arc.find_match_at_immut(input, start) {
+                        DfaSearchOutcome::Match(end) => {
+                            return Some(self.recover_match_for_dfa_span(c2, input, start, end));
+                        }
+                        DfaSearchOutcome::NoMatch => start += 1,
+                        DfaSearchOutcome::Exhausted => return None,
+                    }
                 }
-                DfaSearchOutcome::NoMatch => start += 1,
-                DfaSearchOutcome::Exhausted => return None,
+            }
+            DfaCell::Lazy(mutex) => {
+                let mut dfa = mutex.lock();
+                while start <= input.len() {
+                    let Some(candidate) = scanner.next_candidate(input, start) else {
+                        return Some(None);
+                    };
+                    start = candidate;
+                    match dfa.find_match_at(input, start) {
+                        DfaSearchOutcome::Match(end) => {
+                            drop(dfa);
+                            return Some(self.recover_match_for_dfa_span(c2, input, start, end));
+                        }
+                        DfaSearchOutcome::NoMatch => start += 1,
+                        DfaSearchOutcome::Exhausted => return None,
+                    }
+                }
             }
         }
         Some(None)
@@ -1083,11 +1159,17 @@ impl Engine {
         // `first_accept_end`; for greedy patterns (like `a+`) it
         // extends the match as far as the body allows.
         let anchored_dfa = self.should_dispatch_to_dfa()?;
-        let greedy_end = {
-            let mut dfa = anchored_dfa.lock();
-            match dfa.find_match_at(input, start) {
+        let greedy_end = match anchored_dfa {
+            DfaCell::Materialized(arc) => match arc.find_match_at_immut(input, start) {
                 DfaSearchOutcome::Match(end) => end,
                 DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+            },
+            DfaCell::Lazy(mutex) => {
+                let mut dfa = mutex.lock();
+                match dfa.find_match_at(input, start) {
+                    DfaSearchOutcome::Match(end) => end,
+                    DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+                }
             }
         };
         // For 0-capture patterns the Pike-VM cross-check has nothing
@@ -1169,43 +1251,50 @@ impl Engine {
                 }
             }
         }
-        let dfa_mutex = self.should_dispatch_to_dfa()?;
+        let dfa_cell = self.should_dispatch_to_dfa()?;
         let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
-        // Hoist the DFA mutex lock out of the per-candidate loop. The
-        // earlier shape locked-then-unlocked once per scan candidate;
-        // for prefix-rich patterns with many candidates (e.g.,
-        // `capture_groups` with `\d` prefix on a 10K input full of
-        // digits) that's thousands of lock+unlock pairs per `find_all`
-        // call. Holding the lock across the whole scan is safe — this
-        // is the only DFA mutex we touch in this path, and the inner
-        // body (`scanner.next_candidate` + `recover_match_for_dfa_span`)
-        // doesn't re-enter into DFA dispatch. Distinct from the
-        // pipeline find_all path (which locks three DFAs and re-enters
-        // pike_captures_at_cached); that path stays per-iteration.
-        let mut dfa = dfa_mutex.lock();
+        // The Materialized variant skips the Mutex entirely. The Lazy
+        // variant hoists the lock out of the per-candidate loop —
+        // the earlier shape locked-then-unlocked once per candidate,
+        // costly for prefix-rich patterns with thousands of
+        // candidates per call.
         let mut results = Vec::new();
         let mut start = 0usize;
         let mut prev_non_empty_end: Option<usize> = None;
-        while start <= input.len() {
-            let Some(candidate) = scanner.next_candidate(input, start) else {
-                break;
-            };
-            start = candidate;
-            let outcome = dfa.find_match_at(input, start);
-            match outcome {
-                DfaSearchOutcome::Match(end) => {
-                    let is_empty = end == start;
-                    if is_empty && Some(start) == prev_non_empty_end {
-                        start += 1;
-                        continue;
+        macro_rules! scan_loop {
+            ($call_dfa:expr) => {
+                while start <= input.len() {
+                    let Some(candidate) = scanner.next_candidate(input, start) else {
+                        break;
+                    };
+                    start = candidate;
+                    let outcome = $call_dfa(input, start);
+                    match outcome {
+                        DfaSearchOutcome::Match(end) => {
+                            let is_empty = end == start;
+                            if is_empty && Some(start) == prev_non_empty_end {
+                                start += 1;
+                                continue;
+                            }
+                            let match_result =
+                                self.recover_match_for_dfa_span(c2, input, start, end)?;
+                            results.push(match_result);
+                            prev_non_empty_end = if is_empty { None } else { Some(end) };
+                            start = if is_empty { start + 1 } else { end };
+                        }
+                        DfaSearchOutcome::NoMatch => start += 1,
+                        DfaSearchOutcome::Exhausted => return None,
                     }
-                    let match_result = self.recover_match_for_dfa_span(c2, input, start, end)?;
-                    results.push(match_result);
-                    prev_non_empty_end = if is_empty { None } else { Some(end) };
-                    start = if is_empty { start + 1 } else { end };
                 }
-                DfaSearchOutcome::NoMatch => start += 1,
-                DfaSearchOutcome::Exhausted => return None,
+            };
+        }
+        match dfa_cell {
+            DfaCell::Materialized(arc) => {
+                scan_loop!(|i, s| arc.find_match_at_immut(i, s));
+            }
+            DfaCell::Lazy(mutex) => {
+                let mut dfa = mutex.lock();
+                scan_loop!(|i, s| dfa.find_match_at(i, s));
             }
         }
         Some(results)
@@ -1262,11 +1351,17 @@ impl Engine {
                     DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
                 }
             };
-            let greedy_end = {
-                let mut dfa = anchored_dfa.lock();
-                match dfa.find_match_at(input, start) {
+            let greedy_end = match anchored_dfa {
+                DfaCell::Materialized(arc) => match arc.find_match_at_immut(input, start) {
                     DfaSearchOutcome::Match(end) => end,
                     DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+                },
+                DfaCell::Lazy(mutex) => {
+                    let mut dfa = mutex.lock();
+                    match dfa.find_match_at(input, start) {
+                        DfaSearchOutcome::Match(end) => end,
+                        DfaSearchOutcome::NoMatch | DfaSearchOutcome::Exhausted => return None,
+                    }
                 }
             };
             let is_empty = greedy_end == start;

@@ -397,6 +397,72 @@ impl LazyDfa {
     /// - [`TransitionResult::Exhausted`] if a new state would have to
     ///   be allocated but the cache is full (the simulator stops and
     ///   the caller falls back to Pike-VM)
+    /// Pre-fill the transition cache via BFS from the start states,
+    /// stopping early if more than `state_limit` states would be
+    /// allocated. Returns `true` if the entire reachable DFA fits
+    /// within the limit and is now fully materialised — every
+    /// possible transition is either cached as `Next(target)` or
+    /// recorded as `DEAD_STATE`. Once this returns `true`, future
+    /// calls to [`Self::find_match_at`] / [`Self::find_first_accept_at`]
+    /// / [`Self::find_match_start_at_reverse_bounded`] can use the
+    /// immutable `_immut` variants instead, which skip the Mutex
+    /// acquisition on the dispatch hot path.
+    ///
+    /// Returns `false` if the limit was hit before BFS completed.
+    /// The cache is left in a valid partial state (callers can keep
+    /// using the lazy mutable variants).
+    pub fn try_materialize(&mut self, state_limit: usize) -> bool {
+        let mut queue: std::collections::VecDeque<DfaStateId> = std::collections::VecDeque::new();
+        queue.push_back(0);
+        if self.states.len() > 1 {
+            queue.push_back(1);
+        }
+        let num_classes = self.num_classes;
+        while let Some(state) = queue.pop_front() {
+            for cls in 0..num_classes {
+                let prev_state_count = self.states.len();
+                match self.transition(state, cls as u8) {
+                    TransitionResult::Next(target) => {
+                        if self.states.len() > prev_state_count
+                            && (self.states.len() as usize) <= state_limit
+                        {
+                            queue.push_back(target);
+                        }
+                    }
+                    TransitionResult::Dead => {}
+                    TransitionResult::Exhausted => return false,
+                }
+            }
+            if self.states.len() > state_limit {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Immutable companion to [`Self::transition`]. Reads only the
+    /// pre-filled cache; returns `Exhausted` if it hits an UNCACHED
+    /// slot (which means the caller needs the mutable variant to
+    /// allocate fresh state). Designed for use after a successful
+    /// [`Self::try_materialize`] where every reachable transition
+    /// is guaranteed to be cached.
+    #[inline]
+    fn transition_immut(&self, state: DfaStateId, cls: u8) -> TransitionResult {
+        if state == DEAD_STATE {
+            return TransitionResult::Dead;
+        }
+        let trans_idx = (state as usize) * self.num_classes + (cls as usize);
+        let cached = self.transitions[trans_idx];
+        if cached < DEAD_STATE {
+            return TransitionResult::Next(cached);
+        }
+        if cached == DEAD_STATE {
+            return TransitionResult::Dead;
+        }
+        // UNCACHED — fall back to mutable path.
+        TransitionResult::Exhausted
+    }
+
     fn transition(&mut self, state: DfaStateId, cls: u8) -> TransitionResult {
         if state == DEAD_STATE {
             return TransitionResult::Dead;
@@ -686,6 +752,52 @@ impl LazyDfa {
                 TransitionResult::Exhausted => {
                     return DfaSearchOutcome::Exhausted;
                 }
+            }
+        }
+        match matched_end {
+            Some(end) => DfaSearchOutcome::Match(end),
+            None => DfaSearchOutcome::NoMatch,
+        }
+    }
+
+    /// Immutable companion to [`Self::find_match_at`]. Uses
+    /// [`Self::transition_immut`] so a `&self` reference suffices
+    /// (no Mutex acquisition required at the call site). Returns
+    /// `Exhausted` if it encounters an uncached transition — the
+    /// caller should then fall back to the `&mut` variant.
+    ///
+    /// Intended for use after a successful [`Self::try_materialize`]
+    /// where every reachable transition is guaranteed to be cached;
+    /// the `Exhausted` return is then a defensive guard rather than
+    /// the expected outcome.
+    pub fn find_match_at_immut(&self, input: &[u8], start: usize) -> DfaSearchOutcome {
+        let mut state = self.start_state_for(input, start);
+        let start_pw = self.states[state as usize].prev_byte_was_word;
+        let mut matched_end = if self.is_accept_with_word_boundary_context(
+            state,
+            start_pw,
+            Self::word_ness_at(input, start),
+        ) {
+            Some(start)
+        } else {
+            None
+        };
+        let mut pos = start;
+        while pos < input.len() {
+            let byte = input[pos];
+            let cls = self.byte_class_map.class_of(byte);
+            match self.transition_immut(state, cls) {
+                TransitionResult::Next(next_state) => {
+                    state = next_state;
+                    pos += 1;
+                    let pw = self.states[state as usize].prev_byte_was_word;
+                    let cw = Self::word_ness_at(input, pos);
+                    if self.is_accept_with_word_boundary_context(state, pw, cw) {
+                        matched_end = Some(pos);
+                    }
+                }
+                TransitionResult::Dead => break,
+                TransitionResult::Exhausted => return DfaSearchOutcome::Exhausted,
             }
         }
         match matched_end {
@@ -1222,6 +1334,39 @@ mod tests {
             after_first, after_second,
             "second run on same input shouldn't allocate new states"
         );
+    }
+
+    #[test]
+    fn try_materialize_succeeds_for_small_pattern() {
+        let (mut dfa, _) = try_build_dfa(r"\d{3}-\d{2}-\d{4}").expect("buildable");
+        assert!(dfa.try_materialize(64));
+        // After materialisation the find_match_at_immut variant
+        // should produce identical results to the mutable version.
+        let input = b"123-45-6789";
+        let mut mutable = try_build_dfa(r"\d{3}-\d{2}-\d{4}").unwrap().0;
+        let _ = mutable.try_materialize(64);
+        assert_eq!(
+            dfa.find_match_at_immut(input, 0),
+            mutable.find_match_at(input, 0)
+        );
+    }
+
+    #[test]
+    fn try_materialize_reports_failure_under_state_limit() {
+        let (mut dfa, _) = try_build_dfa(r"\d{3}-\d{2}-\d{4}").expect("buildable");
+        // 2 is far below the DFA's actual reachable-state count, so
+        // BFS hits the limit before completion.
+        assert!(!dfa.try_materialize(2));
+    }
+
+    #[test]
+    fn find_match_at_immut_returns_exhausted_on_uncached() {
+        // Without materialising first, the cache is empty (only the
+        // start state populated). The first transition the immut
+        // walker tries hits UNCACHED and returns Exhausted.
+        let (dfa, _) = try_build_dfa(r"\d{3}-\d{2}-\d{4}").expect("buildable");
+        let result = dfa.find_match_at_immut(b"123-45-6789", 0);
+        assert_eq!(result, DfaSearchOutcome::Exhausted);
     }
 
     #[test]

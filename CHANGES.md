@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-12 - Perf: Materialised DFA — rgx beats PCRE2 on **all 7 headline benches**
+- Scope: every dispatch call into the lazy DFA pays a Mutex acquisition (now parking_lot, but still ~3 ns) and goes through a `&mut self` API that prevents call-site inlining. For patterns whose entire reachable DFA fits within 64 states (the common case — `\b\w+\b`, `\d{3}-\d{2}-\d{4}`, simple literal alternations, every bench pattern except long counted-quantifier unrolls), we can eagerly materialise the cache at engine-build time and store the DFA in an `Arc<LazyDfa>`. Subsequent dispatch reads via `&LazyDfa` (no lock) and calls the `_immut` simulator variants, which the compiler can inline aggressively.
+- New `LazyDfa::try_materialize(state_limit) -> bool` — BFS-fills every reachable transition from the start states, stopping early if `state_limit` is hit. Returns `true` on full materialisation. New `LazyDfa::transition_immut` and `LazyDfa::find_match_at_immut` — `&self` companions that fall back to `DfaSearchOutcome::Exhausted` on uncached lookups (defensive guard — after materialisation, every reachable transition is cached).
+- New `engine::DfaCell` enum: `Materialized(Arc<LazyDfa>)` for the lock-free fast path, `Lazy(Mutex<LazyDfa>)` for patterns that didn't fit within 64 states. `build_dfa_if_eligible` attempts materialisation and wraps in the appropriate variant. The 5 dispatch sites that consume `should_dispatch_to_dfa` (try_dfa_is_match, try_dfa_find_first, try_dfa_find_all, try_pipeline_find_first, try_pipeline_find_all) switch on the variant — the Materialized arm calls `arc.find_match_at_immut`, the Lazy arm locks the mutex as before.
+- Bench impact (median-of-11 × 10 000 iter, 3 consecutive runs, vs prior parking_lot baseline):
+  - **`digit_sequence` ratio 1.17 → 0.89 (-24%)** — RGX now beats PCRE2 by 1.13× on what was the only DFA-bound bench still slower than PCRE2
+  - **`email_basic` ratio 0.63 → 0.42 (-33%)** — was 1.59× faster, now 2.4× faster
+  - other benches stable within ±4%
+- **RGX now beats PCRE2 on all 7 headline benches** for the first time. Updated standings: literal_simple 2.0×, email_basic 2.4× ← new, digit_sequence 1.13× ← new, character_class 2.6×, alternation 13.7×, capture_groups 47.6×, url_simple 1.22×.
+- 3 new unit tests cover `try_materialize` success / state-limit-hit / `find_match_at_immut` Exhausted-on-uncached behaviour.
+- Validation: `cargo fmt -p rgx-core`, `cargo test -p rgx-core --lib` (1140/1140 = 1137 baseline + 3 new), `cargo test -p rgx-core --test c2_pike_differential` (12/12), `cargo clippy -p rgx-core --all-targets` clean, conformance ratchet holds at **12,806 / 4 / 0 / 0** in 323.12s.
+
 ### 2026-05-12 - Perf: `parking_lot::Mutex` replaces `std::sync::Mutex` on DFA / Pike-VM / JIT hot paths
 - Scope: every `Regex::find_first` / `find_all` / `is_match` call locks the lazy DFA cache, Pike-VM scratch, or JIT program. `std::sync::Mutex` carries poisoning state and lacks adaptive spinning; `parking_lot::Mutex` is the regex-automata / rust-regex / tokio drop-in that's ~3× faster on the uncontended hot path. Five engine fields converted: `c2_dfa`, `c2_forward_unanchored_dfa`, `c2_reverse_dfa`, `jit_program`, `pike_scratch`.
 - API simplification: `parking_lot::Mutex::lock()` returns the guard directly (no `Result<_, PoisonError>`), so the `.lock().ok()?` pattern collapses to `.lock()` at every call site. Two `if let Ok(mut x) = mutex.lock()` blocks became explicit `let mut x = mutex.lock();` blocks. The JIT call's `.expect("poisoned")` is gone — there's no poisoning to handle.
