@@ -161,7 +161,7 @@ The canonical reference is Laurikari (2001), "NFAs with Tagged Transitions, Thei
 
 ### 5.1 Tags
 
-A **tag** is a label attached to an NFA epsilon transition. For a regex with `g` capture groups, we have `2g` tags: `t_{2i}` marks the start of group `i`, `t_{2i+1}` marks the end. (Same as the existing `CaptureTag::GroupStart(i)` / `CaptureTag::GroupEnd(i)` in `c2/nfa.rs:292` — the tag numbering scheme is identical to what RGX already emits.)
+A **tag** is a label attached to an NFA epsilon transition. The numbering matches the slot convention `c2/pike.rs::apply_capture_tag` already uses: for a regex with `g` capture groups, group `i`'s start is tag index `2i`, end is `2i + 1`. Capture groups in the AST are numbered starting at 1, so the maximum tag index used is `2g + 1` and the tag *index space* has size `2 * (g + 1)`. Slots 0 and 1 are reserved for the whole-match span (group 0), which the TDFA fills in from the simulator's start / accept positions rather than via tagged edge firing — same as the Pike-VM's capture buffer convention. (Tag instances are emitted via the existing `CaptureTag::GroupStart(i)` / `CaptureTag::GroupEnd(i)` in `c2/nfa.rs:292`.)
 
 When the NFA simulator crosses a tagged edge, it "fires" the tag: it records the current input position as the value of that tag.
 

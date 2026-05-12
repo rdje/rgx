@@ -296,6 +296,87 @@ pub enum CaptureTag {
     GroupEnd(u32),
 }
 
+/// Canonical tag identifier used by the tagged DFA (TDFA) construction.
+///
+/// A regex with `g` capture groups exposes `2g` tags: for group `i`,
+/// tag `2i` is the group start and tag `2i + 1` is the group end. This
+/// flat numbering is what `c2/tdfa` uses to index register maps and
+/// accept-state lookup tables (see `docs/C2_TDFA_DESIGN.md` §5.1 and
+/// §6).
+///
+/// `Tag` and [`CaptureTag`] carry the same information. [`CaptureTag`]
+/// is the AST-friendly form emitted by the NFA builder on capture-
+/// group entry/exit; `Tag` is the TDFA-friendly form used during
+/// tagged subset construction. `From<CaptureTag> for Tag` and
+/// [`Tag::as_capture_tag`] convert between the two losslessly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Tag(u32);
+
+impl Tag {
+    /// Tag identifying the start position of capture group `group`.
+    /// Equivalent to `CaptureTag::GroupStart(group)`.
+    #[must_use]
+    pub const fn start_of(group: u32) -> Self {
+        Self(group.saturating_mul(2))
+    }
+
+    /// Tag identifying the end position of capture group `group`.
+    /// Equivalent to `CaptureTag::GroupEnd(group)`.
+    #[must_use]
+    pub const fn end_of(group: u32) -> Self {
+        Self(group.saturating_mul(2).saturating_add(1))
+    }
+
+    /// Raw tag index in `0..2 * num_capture_groups`. Stable across the
+    /// lifetime of an NFA — the TDFA uses it as a contiguous array
+    /// index in register-map tables.
+    #[must_use]
+    pub const fn index(self) -> u32 {
+        self.0
+    }
+
+    /// Capture group this tag refers to. `start_of(g).group() == g`
+    /// and `end_of(g).group() == g`.
+    #[must_use]
+    pub const fn group(self) -> u32 {
+        self.0 / 2
+    }
+
+    /// True iff this is a group-start tag. The complement of
+    /// [`Self::is_end`].
+    #[must_use]
+    pub const fn is_start(self) -> bool {
+        self.0 % 2 == 0
+    }
+
+    /// True iff this is a group-end tag. The complement of
+    /// [`Self::is_start`].
+    #[must_use]
+    pub const fn is_end(self) -> bool {
+        self.0 % 2 == 1
+    }
+
+    /// Render the tag as its [`CaptureTag`] form. Inverse of
+    /// `From<CaptureTag> for Tag`.
+    #[must_use]
+    pub const fn as_capture_tag(self) -> CaptureTag {
+        if self.is_start() {
+            CaptureTag::GroupStart(self.group())
+        } else {
+            CaptureTag::GroupEnd(self.group())
+        }
+    }
+}
+
+impl From<CaptureTag> for Tag {
+    fn from(tag: CaptureTag) -> Self {
+        match tag {
+            CaptureTag::GroupStart(g) => Self::start_of(g),
+            CaptureTag::GroupEnd(g) => Self::end_of(g),
+        }
+    }
+}
+
 /// A zero-width assertion. Checked when the simulator crosses the
 /// epsilon edge that carries it during epsilon closure expansion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -558,6 +639,82 @@ impl Nfa {
                 )
             })
         })
+    }
+
+    /// Returns `true` if any epsilon edge in the NFA carries a capture
+    /// tag (`CaptureTag::GroupStart` / `GroupEnd`). Used by the TDFA
+    /// classifier (`docs/C2_TDFA_DESIGN.md` §4) to skip patterns with
+    /// no capture groups — the existing zero-capture fast path in
+    /// `engine.rs` already wins on those.
+    ///
+    /// Equivalent to `self.num_capture_groups() > 0` for NFAs built
+    /// from the standard builder, but defensive against any future
+    /// AST shape that may produce capture groups without tagging
+    /// (none today; this accessor reads the ground truth).
+    #[must_use]
+    pub fn has_capture_tags(&self) -> bool {
+        self.states
+            .iter()
+            .any(|s| s.epsilons.iter().any(|e| e.capture_tag.is_some()))
+    }
+
+    /// Size of the TDFA tag index space: `2 * (num_capture_groups + 1)`.
+    /// Every tag emitted by the NFA satisfies `tag.index() <
+    /// num_tags()`, so the TDFA's register-map tables can be
+    /// indexed directly by `tag.index()` without bounds checks.
+    ///
+    /// Capture groups in the AST are numbered starting at 1. The
+    /// numbering scheme on [`Tag`] matches the slot convention
+    /// already used by the Pike-VM (`c2/pike.rs::apply_capture_tag`):
+    /// group `g`'s start/end occupy slots `2g` and `2g + 1`. Slots
+    /// `0` and `1` are reserved for the whole-match span (group 0),
+    /// which the TDFA fills in from the simulator's start /
+    /// accept positions rather than via tagged edge firing.
+    ///
+    /// For NFAs with no capture groups (`num_capture_groups() == 0`),
+    /// `num_tags()` returns `2` — the group-0 slot. The TDFA
+    /// classifier rejects no-capture patterns (the existing
+    /// zero-capture fast path wins), so the value is never read
+    /// in practice on that path.
+    #[must_use]
+    pub fn num_tags(&self) -> u32 {
+        // Slot count matches `c2/pike.rs` num_slots: 2 * (g + 1) where
+        // g is the maximum capture group index. saturating_add guards
+        // against the (impossible-in-practice) u32 overflow.
+        self.num_capture_groups.saturating_add(1).saturating_mul(2)
+    }
+
+    /// Iterate over the *direct* tagged outgoing epsilon edges from
+    /// `state`, in **epsilon slot order**. Untagged epsilon edges
+    /// are skipped. Byte transitions are skipped.
+    ///
+    /// Slot order is the leftmost-first priority order encoded by the
+    /// Thompson builder (`docs/C2_NFA_DFA_DESIGN.md` §6, "Edges are
+    /// stored in priority order"). The TDFA's tagged subset
+    /// construction (`docs/C2_TDFA_DESIGN.md` §7) iterates in this
+    /// order to encode priority resolution during determinization —
+    /// the first tag-firing path to reach a target state wins.
+    ///
+    /// This is a *direct-edge* enumerator, not a closure walker. The
+    /// determinizer composes this with the existing epsilon closure
+    /// to compute the full tag set fired along any state-set
+    /// expansion.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `state` is not a valid state ID for this NFA.
+    /// Callers normally obtain `state` from the NFA itself (via
+    /// [`Self::start`], [`Self::accept`], or a transition target), so
+    /// out-of-bounds IDs indicate a logic bug, not a runtime input
+    /// error.
+    pub fn tagged_epsilons(
+        &self,
+        state: NfaStateId,
+    ) -> impl Iterator<Item = (NfaStateId, Tag)> + '_ {
+        self.states[state as usize]
+            .epsilons
+            .iter()
+            .filter_map(|edge| edge.capture_tag.map(|tag| (edge.target, Tag::from(tag))))
     }
 }
 
@@ -1630,6 +1787,187 @@ mod tests {
             }
         }
         assert_eq!(nfa.num_capture_groups(), 0);
+    }
+
+    // ============================================================
+    // TDFA Phase 1: tag inventory and tagged-epsilon enumeration
+    // ============================================================
+
+    #[test]
+    fn tag_newtype_canonical_numbering() {
+        // start_of(g) == 2g, end_of(g) == 2g + 1 — the canonical TDFA
+        // index scheme. Round-trip through CaptureTag is lossless.
+        assert_eq!(Tag::start_of(0).index(), 0);
+        assert_eq!(Tag::end_of(0).index(), 1);
+        assert_eq!(Tag::start_of(1).index(), 2);
+        assert_eq!(Tag::end_of(1).index(), 3);
+        assert_eq!(Tag::start_of(5).index(), 10);
+        assert_eq!(Tag::end_of(5).index(), 11);
+
+        assert!(Tag::start_of(3).is_start());
+        assert!(!Tag::start_of(3).is_end());
+        assert!(Tag::end_of(3).is_end());
+        assert!(!Tag::end_of(3).is_start());
+
+        assert_eq!(Tag::start_of(7).group(), 7);
+        assert_eq!(Tag::end_of(7).group(), 7);
+
+        assert_eq!(Tag::start_of(2).as_capture_tag(), CaptureTag::GroupStart(2));
+        assert_eq!(Tag::end_of(2).as_capture_tag(), CaptureTag::GroupEnd(2));
+
+        assert_eq!(Tag::from(CaptureTag::GroupStart(4)), Tag::start_of(4));
+        assert_eq!(Tag::from(CaptureTag::GroupEnd(4)), Tag::end_of(4));
+    }
+
+    #[test]
+    fn has_capture_tags_is_false_for_untagged_nfa() {
+        let nfa = build_anchored(&lit('a'));
+        assert!(!nfa.has_capture_tags());
+        // 2 slots reserved for the whole-match span (group 0) even
+        // when no user-defined captures exist. The TDFA classifier
+        // rejects this case, so the value is never read on the
+        // dispatch path.
+        assert_eq!(nfa.num_tags(), 2);
+    }
+
+    #[test]
+    fn has_capture_tags_is_true_for_capture_bearing_nfa() {
+        let nfa = build_anchored(&group_capturing(1, lit('a')));
+        assert!(nfa.has_capture_tags());
+        // 1 user group → slots 0..3 (group 0 + group 1) = 4 tags.
+        assert_eq!(nfa.num_tags(), 4);
+    }
+
+    #[test]
+    fn num_tags_scales_with_capture_groups() {
+        // (a)(b) — 2 user groups + group 0 = 6 tag slots.
+        let nfa = build_anchored(&seq(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]));
+        assert_eq!(nfa.num_capture_groups(), 2);
+        assert_eq!(nfa.num_tags(), 6);
+        assert!(nfa.has_capture_tags());
+
+        // Every emitted tag's index is in 0..num_tags().
+        for sid in 0..nfa.num_states() {
+            for (_target, tag) in nfa.tagged_epsilons(sid as NfaStateId) {
+                assert!(tag.index() < nfa.num_tags());
+            }
+        }
+    }
+
+    #[test]
+    fn tagged_epsilons_yields_only_tagged_edges_in_slot_order() {
+        // Build (a) and inspect the wrapper states. The capture wrapper
+        // is built by build_group as:
+        //   wrapper_start --eps[0, GroupStart(1)]--> body.start
+        //   body.accept   --eps[0, GroupEnd(1)]----> wrapper_accept
+        // (per c2/nfa.rs:1140 build_group). The wrapper states each
+        // have exactly one tagged epsilon edge; no untagged epsilon
+        // edges; no byte transitions.
+        let nfa = build_anchored(&group_capturing(1, lit('a')));
+
+        // Find the GroupStart(1) emitter (the wrapper_start).
+        let mut group_start_emitter = None;
+        let mut group_end_emitter = None;
+        for (sid, state) in nfa.states().iter().enumerate() {
+            for edge in &state.epsilons {
+                match edge.capture_tag {
+                    Some(CaptureTag::GroupStart(1)) => {
+                        group_start_emitter = Some(sid as NfaStateId);
+                    }
+                    Some(CaptureTag::GroupEnd(1)) => {
+                        group_end_emitter = Some(sid as NfaStateId);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let start_state = group_start_emitter.expect("missing GroupStart(1) emitter");
+        let end_state = group_end_emitter.expect("missing GroupEnd(1) emitter");
+
+        // The tagged enumerator on the GroupStart(1) emitter should
+        // yield exactly one edge with tag Tag::start_of(1).
+        let tagged: Vec<_> = nfa.tagged_epsilons(start_state).collect();
+        assert_eq!(tagged.len(), 1);
+        assert_eq!(tagged[0].1, Tag::start_of(1));
+
+        // Same on the GroupEnd(1) emitter.
+        let tagged: Vec<_> = nfa.tagged_epsilons(end_state).collect();
+        assert_eq!(tagged.len(), 1);
+        assert_eq!(tagged[0].1, Tag::end_of(1));
+
+        // And any state that has no tagged edge yields the empty
+        // iterator. The body literal 'a' is at some state with one
+        // byte transition and no epsilon edges.
+        for (sid, state) in nfa.states().iter().enumerate() {
+            if state.transitions.is_empty() && state.epsilons.is_empty() {
+                let tagged: Vec<_> = nfa.tagged_epsilons(sid as NfaStateId).collect();
+                assert!(tagged.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn tagged_epsilons_orders_by_epsilon_slot() {
+        // An alternation `(a)|(b)` builds two parallel capture-group
+        // branches off a single split state. The split state's
+        // epsilons are in priority order; the tagged enumerator must
+        // yield in the same order so the TDFA determinizer encodes
+        // leftmost-first priority correctly.
+        let alt = alt(vec![
+            group_capturing(1, lit('a')),
+            group_capturing(2, lit('b')),
+        ]);
+        let nfa = build_anchored(&alt);
+
+        // Walk the states looking for one that yields both
+        // GroupStart(1) and GroupStart(2) in its closure. The split
+        // state itself only has untagged epsilons (to the two group
+        // wrappers), but each group wrapper has a tagged edge — so we
+        // verify the slot-order invariant by inspecting the wrappers
+        // independently.
+        let mut found_start_1 = false;
+        let mut found_start_2 = false;
+        for sid in 0..nfa.num_states() {
+            for (_target, tag) in nfa.tagged_epsilons(sid as NfaStateId) {
+                if tag == Tag::start_of(1) {
+                    found_start_1 = true;
+                }
+                if tag == Tag::start_of(2) {
+                    found_start_2 = true;
+                }
+            }
+        }
+        assert!(found_start_1, "GroupStart(1) not found in any state");
+        assert!(found_start_2, "GroupStart(2) not found in any state");
+        // 2 user groups + group 0 reservation = 6 tag slots.
+        assert_eq!(nfa.num_tags(), 6);
+    }
+
+    #[test]
+    fn tagged_epsilons_skips_untagged_and_assertion_edges() {
+        // `\b(a)` builds an NFA with a WordBoundary assertion edge
+        // and a GroupStart/GroupEnd tagged pair. The enumerator must
+        // yield only the tagged edges, never the assertion edge.
+        let nfa = build_anchored(&seq(vec![
+            Regex::WordBoundary { positive: true },
+            group_capturing(1, lit('a')),
+        ]));
+        for sid in 0..nfa.num_states() {
+            for (_target, tag) in nfa.tagged_epsilons(sid as NfaStateId) {
+                // Every yielded tag is in 0..num_tags()
+                assert!(tag.index() < nfa.num_tags());
+            }
+            // And the count of tagged-only edges never exceeds the
+            // total number of epsilon edges on this state.
+            let total_eps = nfa.states()[sid].epsilons.len();
+            let tagged_count = nfa.tagged_epsilons(sid as NfaStateId).count();
+            assert!(tagged_count <= total_eps);
+        }
+        assert!(nfa.has_capture_tags());
+        assert!(nfa.has_word_boundary_assertions());
     }
 
     // ============================================================

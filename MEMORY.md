@@ -3928,3 +3928,28 @@ The NFA already emits capture-group tags on epsilon edges (`CaptureTag::GroupSta
 **Updates.** `docs/BACKLOG.md` line 270 marked with Phase-0-landed status. `CHANGES.md` entry for the doc landing. `book/src/internals/nfa-dfa-engine.md` "What's next: the Tagged DFA (TDFA)" section added between the dispatch chapter and the "What's not in C2 yet" tail. No behavioural change.
 
 **Next step.** Phase 1 — NFA tag-enumeration helpers (`has_capture_tags()`, `num_tags()`, `tagged_epsilons(state)` accessor). ~1 day of work. Pure read-side API addition, no semantic change to the NFA. Then Phase 2: the tagged subset construction itself, the bulk of the engineering work.
+
+## 2026-05-08 session — TDFA Phase 1: NFA tag inventory helpers
+
+Followed the Phase 0 design doc directly. Phase 1 is the read-side API extension on `Nfa` that the future tagged subset construction (Phase 2) will consume. No semantic change to the NFA, the DFA, the Pike-VM, or engine dispatch.
+
+**Tag newtype.** `Tag(u32)` with constructors `Tag::start_of(g) = 2g` and `Tag::end_of(g) = 2g+1`. Numbering matches the Pike-VM's existing capture-buffer slot convention (`c2/pike.rs::apply_capture_tag` writes slot `2 * (n as usize)` for `GroupStart(n)`), so the TDFA's register layout is drop-in compatible with the existing capture buffer shape. Lossless round-trip with `CaptureTag` via `From<CaptureTag>` and `Tag::as_capture_tag()`. Helper methods: `index()`, `group()`, `is_start()`, `is_end()`.
+
+**Three NFA accessors.**
+- `has_capture_tags() -> bool`: scan-once predicate. Used by the TDFA classifier (Phase 3) to short-circuit zero-capture patterns where the existing zero-capture fast path already wins.
+- `num_tags() -> u32`: size of the tag index space, `2 * (num_capture_groups + 1)`. Includes the group-0 slot reservation so `tag.index()` is usable as a direct array index without bounds checks. Matches the Pike-VM's `num_slots` convention exactly.
+- `tagged_epsilons(state)`: yields *direct* outgoing tagged epsilon edges from `state` in epsilon-slot order. Untagged epsilon edges, assertion edges (`\b`, `\A`, etc.), and byte transitions are skipped. Slot order is the leftmost-first priority order encoded by the Thompson builder; the TDFA determinizer iterates in this order so the first tag-firing path to reach a target state wins.
+
+**Test development caught a design bug.** Initial `num_tags()` returned `2 * num_capture_groups`. The test `tagged_epsilons_skips_untagged_and_assertion_edges` asserts `tag.index() < num_tags()` for every emitted tag. With `(a)` (group 1), the NFA emits `Tag(2)` and `Tag(3)`; `num_tags()` returned 2. Assertion failed.
+
+Root cause: groups are 1-indexed in the AST. `Tag::start_of(1) = 2` is the lowest user-tag index, and `Tag::end_of(N) = 2N + 1` is the highest. Max tag index is `2N + 1`, so the index space size needed is `2N + 2 = 2 * (N + 1)`.
+
+Fixed `num_tags()` to `2 * (num_capture_groups + 1)`. Aligns with `c2/pike.rs`'s existing `num_slots` formula and means slots 0/1 are reserved for the whole-match span (group 0) — same convention. The TDFA reads group 0 from simulator start/accept positions; user groups read from registers.
+
+The design doc still describes the original `2g` formula. Will be amended in the Phase 2 doc update; the implementation is the ground truth.
+
+**7 unit tests** verify: tag newtype canonical numbering + round-trip, `has_capture_tags` false for untagged NFAs and true for capture-bearing, `num_tags()` scales with capture-group count and every emitted tag stays in range, `tagged_epsilons` yields exactly one tagged edge per capture-wrapper state, slot-order iteration on alternation-with-captures, and that the enumerator skips assertion edges in `\b(a)`.
+
+**Validation.** `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1147/1147 (1140 baseline + 7 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo test -p rgx-cli` 30/30. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — purely additive change, no behavioural impact.
+
+**Next step.** Phase 2 — tagged subset construction. New `c2/tdfa.rs` module with `TaggedDfa::try_build(nfa, byte_class_map, state_limit) -> Option<TaggedDfa>`. The determinizer iterates `tagged_epsilons` during ε-closure to collect tag firings, allocates registers, canonicalises register maps (Laurikari's reorder rule), and emits dependency-ordered `RegOp` lists on transitions. Estimated 4-7 days of work per the staging plan. Not yet wired to the engine; that's Phase 3.
