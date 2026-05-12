@@ -4019,3 +4019,27 @@ Simulation on "a" (Phase 2d, future):
 **Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1163/1163 (1156 baseline + 7 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged.
 
 **Next step.** Phase 2c — register canonicalisation + dependency-ordered RegOp emission. The Laurikari reorder rule collapses equivalent register configurations into one TDFA state; `Copy` ops on the transition reshuffle live registers into the canonical layout when needed. Topological sort orders Copies before Saves that share a destination. This is what unlocks correct handling of overlapping alternation captures, and bounds the TDFA state count via Laurikari §4.5.
+
+## 2026-05-13 session — TDFA Phase 2c: register canonicalisation + dep-ordered Copies
+
+Fifth commit of the day on the TDFA track. Phase 2c lands the Laurikari reorder rule and the dependency-ordered `Copy` emission. With this commit, the TDFA construction algorithm is feature-complete for Phase 2; only the simulator (Phase 2d) remains before engine wiring (Phase 3).
+
+**Canonicalisation.** Two TDFA states with the same NFA state set and the same *canonical* register signature are equivalent up to register renaming. Without canonicalisation, the state space for patterns like `(a)+` grows linearly with input length because each iteration allocates fresh physical registers. With it, the state space converges quickly — `(a)+` hits a 3-state TDFA that stabilises after the second byte.
+
+Canonicalisation algorithm: walk the flat register map in cell order. First physical register encountered → canonical id 0. Second distinct physical → canonical id 1. Etc. `REGISTER_NONE` stays. The canonical map is the cache key; the original physical map is stored on the state for runtime use.
+
+**Cache hits emit Copy ops.** When a transition's freshly-computed (NFA set, canonical signature) matches an existing state, the existing state's physical register layout is the truth; the new transition's freshly-allocated registers are transient. We emit `Copy { src: new_phys, dst: existing_phys }` RegOps for every cell where the physicals differ. Multiple cells sharing the same `(new_phys, existing_phys)` pair → one Copy each via HashSet dedup.
+
+**Topological ordering.** When a transition has both Saves and Copies, ordering matters. Saves run first (per Phase 2b's closure walker order — Saves are appended during the walk). Copies run second, topologically sorted so each Copy reads its source register before any other Copy overwrites it.
+
+Kahn's algorithm with cycle detection. Dependency rule: if Copy_j writes the register Copy_i reads (`dst_j == src_i`), then Copy_i must run before Copy_j — j depends on i. Edge `i → j`. Got the direction wrong on the first try (had `j → i` causing dependent copies to emit in source order); caught by the unit test and fixed with an explanatory comment.
+
+**Cycle handling.** Two-cycle (mutual swap `(A→B), (B→A)`) is broken by allocating a scratch register: emit `(A→scratch)`, then `(B→A)` (reads original B because B hasn't been overwritten yet — wait, this needs the cycle walked in the correct direction). The unit test verifies the emitted Copies execute to the expected swap when simulated against a HashMap of register values.
+
+**Hand-verified trace for `(a)+`.** Built via `Quantified { ... OneOrMore { lazy: false } }`. Thompson NFA has 6 states (body_a_start, body_a_accept, wrapper_start, wrapper_accept, split, final_accept). Start state TDFA[0] fires GroupStart(1) → R0. Byte 'a' #1 (cache miss, TDFA[1] allocated): fires GroupEnd(1) → R1, loops back to fire GroupStart(1) → R2. Byte 'a' #2 (cache miss, TDFA[2] allocated): body_a_accept inherits {R2, R1} from body_a_start, fires GroupEnd(1) → R3, loops to fire GroupStart(1) → R4. Byte 'a' #3 (CACHE HIT on TDFA[2]): freshly computes physicals (R5, R3, R4, R6, ...) for the same canonical signature; emits 4 Copies to move them into TDFA[2]'s (R4, R3, R2, R1) layout.
+
+**Why iter 1 and iter 2 are both misses.** Because body_a_accept's tag3 inheritance differs across the first three states: in TDFA[0] (start) body_a_accept doesn't exist; in TDFA[1] body_a_accept has tag3=NONE (no prior iteration); in TDFA[2] body_a_accept has tag3=R1 (inherited from prior iter's GroupEnd firing). After TDFA[2] the inheritance pattern stabilises and the cache hits.
+
+**Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1172/1172 (1163 baseline + 9 new). Differential 12/12. Clippy correctness clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged, TDFA module still dead code from dispatch's perspective.
+
+**Next step.** Phase 2d — the simulator + differential gate. `TdfaSimulator::find_match_at(input, start) -> Option<(usize, Vec<Option<usize>>)>` runs the simulator with the start RegOps, then a per-byte loop reading transitions, executing their RegOps, advancing state. At accept, reads `accept_register_map` to produce the captures vector. Differential test runs every TDFA-eligible pattern through both the TDFA and `pike_match_at_with_captures`, asserting `(start, end, groups[..])` parity.

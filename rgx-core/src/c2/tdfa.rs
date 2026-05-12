@@ -157,6 +157,18 @@ pub struct TaggedDfaState {
     /// Stored flat for cache locality.
     pub register_map: Vec<u16>,
 
+    /// The canonical signature of [`Self::register_map`] (see
+    /// [`canonicalise_register_map`]). Two states with the same
+    /// `nfa_states` and the same `canonical_register_map` are
+    /// equivalent up to register renaming — a transition reaching
+    /// such a configuration can be redirected to this state via a
+    /// short list of `Copy` RegOps (Phase 2c).
+    ///
+    /// Stored alongside `register_map` so the cache lookup and the
+    /// register-correspondence computation on cache hits don't
+    /// need to recompute it.
+    pub canonical_register_map: Vec<u16>,
+
     /// True iff the NFA's accept state is in `nfa_states`.
     pub is_accept: bool,
 
@@ -170,23 +182,62 @@ pub struct TaggedDfaState {
     pub accept_register_map: Vec<u16>,
 }
 
-/// Cache key for the (NFA state set + register configuration) → DFA
-/// state lookup.
+/// Cache key for the (NFA state set + canonical register configuration)
+/// → DFA state lookup.
 ///
 /// Two TDFA states with the same NFA state set *and* the same
-/// canonicalised register configuration are the same state. The
+/// **canonicalised** register configuration are the same state. The
 /// canonicalisation step (Phase 2c) ensures equivalent register
 /// permutations don't create distinct states — without it, the
 /// state space would blow up exponentially. With it, Laurikari's
-/// algorithm terminates.
-///
-/// Phase 2a uses the trivial canonicalisation (compare the
-/// register map verbatim). Phase 2c upgrades to the Laurikari
-/// reorder rule.
+/// algorithm terminates with a bounded state count (§4.5 of the
+/// 2001 paper).
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct TaggedDfaStateKey {
     nfa_states: Vec<NfaStateId>,
-    register_map: Vec<u16>,
+    canonical_register_map: Vec<u16>,
+}
+
+/// Canonicalise a per-(NFA-state, tag) register map.
+///
+/// Walks the cells in flat order; the first physical register
+/// encountered is renamed to canonical id 0, the second distinct
+/// physical register to canonical id 1, and so on. `REGISTER_NONE`
+/// entries stay as `REGISTER_NONE` (they're not registers).
+///
+/// Returns:
+/// - The canonical map: same shape as the input, with renamed cells.
+/// - The reverse mapping `physical_for_canonical[k] = physical register
+///   id used by the input map for canonical id `k`. Length equals
+///   the number of distinct physical registers in the input.
+///
+/// Two maps are **equivalent** (i.e., differ only by a register
+/// permutation) iff their canonical signatures are bitwise equal.
+fn canonicalise_register_map(register_map: &[u16]) -> (Vec<u16>, Vec<u16>) {
+    let mut canonical = Vec::with_capacity(register_map.len());
+    let mut physical_for_canonical: Vec<u16> = Vec::new();
+    // physical → canonical lookup. The TDFA's register namespace is
+    // u16, so a small Vec indexed by physical id is faster than a
+    // HashMap for the common case. We cap the inline Vec at the
+    // observed max + 1 to avoid wasting memory on sparse usage.
+    let mut physical_to_canonical: HashMap<u16, u16> = HashMap::new();
+    for &cell in register_map {
+        if cell == REGISTER_NONE {
+            canonical.push(REGISTER_NONE);
+            continue;
+        }
+        let canonical_id = if let Some(&id) = physical_to_canonical.get(&cell) {
+            id
+        } else {
+            let id = u16::try_from(physical_for_canonical.len())
+                .expect("TDFA canonical register count exceeded u16::MAX");
+            physical_for_canonical.push(cell);
+            physical_to_canonical.insert(cell, id);
+            id
+        };
+        canonical.push(canonical_id);
+    }
+    (canonical, physical_for_canonical)
 }
 
 /// A tagged DFA built from a Thompson NFA and a byte-class map.
@@ -480,14 +531,19 @@ impl TaggedDfa {
             Vec::new()
         };
 
+        let (canonical_register_map, _physical_for_canonical) =
+            canonicalise_register_map(&register_map_flat);
+
         let state = TaggedDfaState {
             nfa_states: nfa_states_sorted.clone(),
-            register_map: register_map_flat.clone(),
+            register_map: register_map_flat,
+            canonical_register_map: canonical_register_map.clone(),
             is_accept,
             accept_register_map,
         };
 
-        let id = self.allocate_state_in_cache(state, &nfa_states_sorted, &register_map_flat)?;
+        let id =
+            self.allocate_state_in_cache(state, &nfa_states_sorted, &canonical_register_map)?;
         debug_assert_eq!(id, 0, "start state must always be allocated at index 0");
         Ok(())
     }
@@ -624,7 +680,7 @@ impl TaggedDfa {
         &mut self,
         state: TaggedDfaState,
         nfa_states: &[NfaStateId],
-        register_map: &[u16],
+        canonical_register_map: &[u16],
     ) -> Result<TaggedDfaStateId, TdfaBuildError> {
         if self.states.len() >= self.state_limit {
             return Err(TdfaBuildError::StateLimit);
@@ -645,7 +701,7 @@ impl TaggedDfa {
         }
         let key = TaggedDfaStateKey {
             nfa_states: nfa_states.to_vec(),
-            register_map: register_map.to_vec(),
+            canonical_register_map: canonical_register_map.to_vec(),
         };
         self.cache.insert(key, id);
         Ok(id)
@@ -759,14 +815,27 @@ impl TaggedDfa {
         let register_map_flat =
             self.flatten_register_map(&nfa_states_sorted, &per_state_register_map);
 
-        // Cache hit on (NFA set, register map)? Reuse the existing
-        // TDFA state. Phase 2b uses verbatim register-map equality;
-        // Phase 2c upgrades to Laurikari's canonical comparison.
+        // Canonicalise for cache lookup. The Laurikari reorder rule
+        // says: two TDFA states with the same NFA set and the same
+        // canonical register signature are equivalent — a transition
+        // reaching such a configuration can be redirected to the
+        // existing state via Copy RegOps that move the freshly
+        // computed register values into the existing state's
+        // physical register layout.
+        let (canonical_register_map, _new_physical_for_canonical) =
+            canonicalise_register_map(&register_map_flat);
+
         let key = TaggedDfaStateKey {
             nfa_states: nfa_states_sorted.clone(),
-            register_map: register_map_flat.clone(),
+            canonical_register_map: canonical_register_map.clone(),
         };
         let target = if let Some(&existing) = self.cache.get(&key) {
+            // Cache hit. Emit Copy ops to move our just-computed
+            // register values into the existing state's physical
+            // register layout. These run AFTER the Saves
+            // accumulated during the closure walk.
+            let copy_ops = self.build_copy_ops(&register_map_flat, existing);
+            transition_ops.extend(copy_ops);
             existing
         } else {
             let accept_register_map = if is_accept {
@@ -777,10 +846,15 @@ impl TaggedDfa {
             let new_state = TaggedDfaState {
                 nfa_states: nfa_states_sorted.clone(),
                 register_map: register_map_flat.clone(),
+                canonical_register_map: canonical_register_map.clone(),
                 is_accept,
                 accept_register_map,
             };
-            match self.allocate_state_in_cache(new_state, &nfa_states_sorted, &register_map_flat) {
+            match self.allocate_state_in_cache(
+                new_state,
+                &nfa_states_sorted,
+                &canonical_register_map,
+            ) {
                 Ok(id) => id,
                 Err(_) => {
                     // State limit hit. Record dead transition so the
@@ -811,6 +885,208 @@ impl TaggedDfa {
             reg_op_idx,
             reg_op_len,
         }
+    }
+
+    /// Build the list of `Copy` RegOps that redirect the just-
+    /// computed transition into an existing TDFA state's physical
+    /// register layout.
+    ///
+    /// For every (nfa_state, tag) cell where the new map uses
+    /// physical register `new_phys` and the existing state uses
+    /// `existing_phys`, the value currently in `new_phys` must end
+    /// up in `existing_phys` before the transition completes.
+    /// Multiple cells often share the same (new_phys, existing_phys)
+    /// pair (the same physical register holds the same tag value
+    /// across multiple NFA states in the set); the Copy is emitted
+    /// exactly once per distinct pair via a `seen` HashSet.
+    ///
+    /// `REGISTER_NONE` cells are skipped — they represent unfired
+    /// tags and have no live value to move.
+    ///
+    /// The returned Copies are topologically sorted by
+    /// [`Self::topologically_sort_copies`]; cycles are broken via
+    /// a fresh scratch register allocated from the global pool.
+    fn build_copy_ops(
+        &mut self,
+        new_register_map: &[u16],
+        existing_state_id: TaggedDfaStateId,
+    ) -> Vec<RegOp> {
+        let existing_map = self.states[existing_state_id as usize].register_map.clone();
+        debug_assert_eq!(existing_map.len(), new_register_map.len());
+
+        let mut seen: std::collections::HashSet<(u16, u16)> = std::collections::HashSet::new();
+        let mut copies: Vec<RegOp> = Vec::new();
+        for (&new_phys, &existing_phys) in new_register_map.iter().zip(existing_map.iter()) {
+            if new_phys == REGISTER_NONE || existing_phys == REGISTER_NONE {
+                continue;
+            }
+            if new_phys == existing_phys {
+                continue;
+            }
+            if seen.insert((new_phys, existing_phys)) {
+                copies.push(RegOp::Copy {
+                    src: new_phys,
+                    dst: existing_phys,
+                });
+            }
+        }
+
+        self.topologically_sort_copies(copies)
+    }
+
+    /// Reorder a list of Copy ops so that every Copy reads its
+    /// source register *before* that source is overwritten by
+    /// another Copy in the list.
+    ///
+    /// Dependency rule: Copy `(src=A, dst=B)` must execute before
+    /// Copy `(src=B, dst=C)` if both are present — otherwise the
+    /// second Copy reads the value `A` just wrote, not the original
+    /// `B`. Kahn's algorithm produces a valid execution order when
+    /// the dependency graph is acyclic.
+    ///
+    /// **Cycle handling.** A cycle (e.g. `(A→B), (B→A)`) needs a
+    /// scratch register. The algorithm walks the cycle, copies the
+    /// "earliest" node's source value into a fresh scratch register,
+    /// then emits the cycle's copies in execution order so each
+    /// copy reads its source before that source is overwritten;
+    /// the final write reads from the scratch.
+    ///
+    /// Scratch registers are allocated from the global pool, so
+    /// each cycle costs one extra register at simulator time. In
+    /// practice cycles are rare — they require alternation+capture
+    /// patterns where two captures' physical registers swap roles
+    /// across a transition.
+    fn topologically_sort_copies(&mut self, copies: Vec<RegOp>) -> Vec<RegOp> {
+        if copies.len() <= 1 {
+            return copies;
+        }
+
+        let extracted: Vec<(u16, u16)> = copies
+            .iter()
+            .map(|op| match op {
+                RegOp::Copy { src, dst } => (*src, *dst),
+                RegOp::Save { .. } => {
+                    unreachable!("topologically_sort_copies given a Save op")
+                }
+            })
+            .collect();
+
+        let n = extracted.len();
+        // Dependency rule: Copy_i (src_i, dst_i) reads src_i and
+        // writes dst_i. If another Copy_j writes the register that
+        // Copy_i reads (i.e., dst_j == src_i), then Copy_i must run
+        // BEFORE Copy_j — otherwise Copy_i reads the post-overwrite
+        // value instead of the original.
+        //
+        // In Kahn's-algorithm terms: Copy_j depends on Copy_i. The
+        // edge points i → j; in_degree[j] += 1. We process Copy_i
+        // first, then drain the edge so Copy_j's in-degree drops
+        // and it becomes available next.
+        let mut succ: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut in_degree: Vec<usize> = vec![0; n];
+        for (i, &(src_i, _)) in extracted.iter().enumerate() {
+            for (j, &(_, dst_j)) in extracted.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                if dst_j == src_i {
+                    // j writes the register i reads → i must run
+                    // before j → j depends on i → edge i → j.
+                    succ[i].push(j);
+                    in_degree[j] += 1;
+                }
+            }
+        }
+
+        let mut ready: Vec<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+        let mut ordered: Vec<RegOp> = Vec::with_capacity(n);
+        let mut emitted = vec![false; n];
+
+        while let Some(i) = ready.pop() {
+            if emitted[i] {
+                continue;
+            }
+            emitted[i] = true;
+            ordered.push(RegOp::Copy {
+                src: extracted[i].0,
+                dst: extracted[i].1,
+            });
+            // Drain successors (those that depended on i).
+            for k in 0..succ[i].len() {
+                let j = succ[i][k];
+                in_degree[j] = in_degree[j].saturating_sub(1);
+                if in_degree[j] == 0 && !emitted[j] {
+                    ready.push(j);
+                }
+            }
+        }
+
+        if ordered.len() == n {
+            return ordered;
+        }
+
+        // A cycle remains. Find a cycle, break it with a scratch
+        // register, then resume with Kahn's algorithm.
+        //
+        // Cycles in Copy dependency graphs always have in-degree
+        // and out-degree exactly 1 per node (every node has one
+        // source it reads from and one destination it writes to,
+        // and the cycle invariant means both source and destination
+        // are within the cycle). We walk the cycle from any
+        // un-emitted node, following the predecessor link.
+        let mut remaining: Vec<usize> = (0..n).filter(|&i| !emitted[i]).collect();
+        while let Some(&start) = remaining.first() {
+            // Walk predecessors until we loop back.
+            let mut cycle: Vec<usize> = vec![start];
+            let mut current = start;
+            loop {
+                let src_current = extracted[current].0;
+                let prev = remaining
+                    .iter()
+                    .copied()
+                    .find(|&j| j != current && extracted[j].1 == src_current && !emitted[j])
+                    .expect("cycle invariant: every node has a predecessor in the cycle");
+                if prev == start {
+                    break;
+                }
+                cycle.push(prev);
+                current = prev;
+            }
+            // cycle = [start, pred(start), pred(pred(start)),
+            //         ..., earliest_unique_pred].
+            //
+            // Break the cycle: save the source register of the
+            // last copy in execution order (== `start`) into a
+            // scratch register, then emit the remaining copies in
+            // execution order (predecessors first so each reads
+            // its source pre-overwrite), and finally emit a Copy
+            // from scratch to start's destination.
+            let scratch = self.allocate_register();
+            ordered.push(RegOp::Copy {
+                src: extracted[start].0,
+                dst: scratch,
+            });
+            // Emit predecessors in reverse — earliest first, so
+            // each predecessor reads its original source before
+            // its destination is overwritten by the next copy in
+            // the cycle.
+            for &idx in cycle.iter().skip(1).rev() {
+                ordered.push(RegOp::Copy {
+                    src: extracted[idx].0,
+                    dst: extracted[idx].1,
+                });
+                emitted[idx] = true;
+            }
+            // Final: redirect `start` to read from scratch.
+            ordered.push(RegOp::Copy {
+                src: scratch,
+                dst: extracted[start].1,
+            });
+            emitted[start] = true;
+            remaining.retain(|&i| !emitted[i]);
+        }
+
+        ordered
     }
 }
 
@@ -843,6 +1119,13 @@ mod tests {
             kind: GroupKind::Capturing,
             index: Some(index),
             name: None,
+        }
+    }
+
+    fn quantified_one_or_more(expr: Regex) -> Regex {
+        Regex::Quantified {
+            expr: Box::new(expr),
+            quantifier: crate::ast::Quantifier::OneOrMore { lazy: false },
         }
     }
 
@@ -1232,6 +1515,248 @@ mod tests {
         // No new RegOps or states allocated on the second lookup.
         assert_eq!(tdfa.reg_op_pool().len(), pool_after_first);
         assert_eq!(tdfa.num_states(), states_after_first);
+    }
+
+    // ============================================================
+    // Phase 2c — register canonicalisation + dep-ordered Copy ops
+    // ============================================================
+
+    #[test]
+    fn canonicalise_renumbers_physical_to_canonical() {
+        // Map with physical registers 5, 5, 7, REGISTER_NONE, 5.
+        // Canonical signature: 0, 0, 1, REGISTER_NONE, 0.
+        // physical_for_canonical = [5, 7].
+        let input = vec![5, 5, 7, REGISTER_NONE, 5];
+        let (canonical, physical) = canonicalise_register_map(&input);
+        assert_eq!(canonical, vec![0, 0, 1, REGISTER_NONE, 0]);
+        assert_eq!(physical, vec![5, 7]);
+    }
+
+    #[test]
+    fn canonicalise_two_equivalent_maps_match() {
+        // Different physical registers, same shape → same canonical
+        // signature.
+        let a = vec![10, 20, 10, REGISTER_NONE];
+        let b = vec![99, 4, 99, REGISTER_NONE];
+        let (canon_a, _) = canonicalise_register_map(&a);
+        let (canon_b, _) = canonicalise_register_map(&b);
+        assert_eq!(canon_a, canon_b);
+    }
+
+    #[test]
+    fn canonicalise_distinguishes_non_equivalent_maps() {
+        // Same registers but in different positions → different
+        // canonical signatures.
+        let a = vec![5, 7]; // canonical = [0, 1]
+        let b = vec![7, 5]; // canonical = [0, 1] too actually... wait
+                            // Let me redo: a = [5, 7] → first sees 5 → canon 0, then 7 → canon 1 → [0, 1].
+                            // b = [7, 5] → first sees 7 → canon 0, then 5 → canon 1 → [0, 1].
+                            // So they ARE equivalent (both have two distinct registers in two positions).
+                            // Use a truly non-equivalent example instead:
+        let a = vec![5, 5, 7]; // canon [0, 0, 1]
+        let b = vec![5, 7, 7]; // canon [0, 1, 1]
+        let (canon_a, _) = canonicalise_register_map(&a);
+        let (canon_b, _) = canonicalise_register_map(&b);
+        assert_ne!(canon_a, canon_b);
+    }
+
+    #[test]
+    fn canonicalise_empty_map_yields_empty_canonical() {
+        let (canonical, physical) = canonicalise_register_map(&[]);
+        assert!(canonical.is_empty());
+        assert!(physical.is_empty());
+    }
+
+    #[test]
+    fn canonicalisation_bounds_state_count_for_capture_plus() {
+        // (a)+ — without canonicalisation, each iteration of the
+        // greedy `+` loop would allocate fresh registers and the
+        // state space would grow with input length. With Laurikari's
+        // reorder rule, the second iteration is recognised as
+        // equivalent to the first and a small bounded TDFA results.
+        let pattern = quantified_one_or_more(group_capturing(1, lit('a')));
+        let (nfa, bcm) = build_components(&pattern);
+        let cls_a = class_of(&bcm, 'a');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)+");
+
+        // Drive 5 iterations of byte 'a'. State count must stay
+        // bounded (canonicalisation kicks in within the first 2-3
+        // iterations).
+        let mut state = tdfa.start_state();
+        for _ in 0..5 {
+            let trans = tdfa.transition(state, cls_a);
+            assert!(!TaggedDfa::is_dead(trans));
+            state = trans.target;
+        }
+        assert!(
+            tdfa.num_states() <= 4,
+            "(a)+ TDFA must have ≤ 4 states with canonicalisation; got {}",
+            tdfa.num_states()
+        );
+    }
+
+    #[test]
+    fn cache_hit_emits_copy_ops_when_registers_differ() {
+        // (a)+ — iterations 1 and 2 of the byte 'a' transition
+        // both allocate new states (the body_a_accept thread has
+        // different per-iteration tag3 inheritance, defeating
+        // canonical equality across iterations 1↔2). Iteration 3
+        // is structurally identical to iteration 2 modulo register
+        // renaming, so its canonical signature matches and the
+        // cache hits. The TDFA must emit Copy ops to move
+        // freshly-allocated registers into the existing state's
+        // physical layout.
+        let pattern = quantified_one_or_more(group_capturing(1, lit('a')));
+        let (nfa, bcm) = build_components(&pattern);
+        let cls_a = class_of(&bcm, 'a');
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)+");
+
+        let trans1 = tdfa.transition(tdfa.start_state(), cls_a);
+        let trans2 = tdfa.transition(trans1.target, cls_a);
+        // After two iterations the convergence-point state is
+        // allocated. Iteration 3 must be a cache hit on that state.
+        let states_before_iter_3 = tdfa.num_states();
+        let trans3 = tdfa.transition(trans2.target, cls_a);
+        assert_eq!(
+            tdfa.num_states(),
+            states_before_iter_3,
+            "iter 3 must hit the cache (no new state); got num_states={}",
+            tdfa.num_states()
+        );
+        assert_eq!(
+            trans3.target, trans2.target,
+            "iter 3 must target the same TDFA state as iter 2 (cache hit on canonical signature)"
+        );
+
+        let ops_3 = tdfa.transition_reg_ops(trans3);
+        let copy_count = ops_3
+            .iter()
+            .filter(|op| matches!(op, RegOp::Copy { .. }))
+            .count();
+        assert!(
+            copy_count >= 1,
+            "cache-hit iteration of (a)+ must emit ≥ 1 Copy; got {} copies in {:?}",
+            copy_count,
+            ops_3
+        );
+    }
+
+    #[test]
+    fn topo_sort_orders_dependent_copies_correctly() {
+        // Direct test of topologically_sort_copies. Given
+        // Copy(A, B), Copy(B, C), the C-writing copy must come
+        // FIRST (so it reads the original B before B is
+        // overwritten by Copy(A, B)).
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        let copies = vec![
+            RegOp::Copy { src: 10, dst: 11 },
+            RegOp::Copy { src: 11, dst: 12 },
+        ];
+        let sorted = tdfa.topologically_sort_copies(copies);
+        assert_eq!(sorted.len(), 2);
+        // Copy(11, 12) must come before Copy(10, 11).
+        match (&sorted[0], &sorted[1]) {
+            (RegOp::Copy { src: 11, dst: 12 }, RegOp::Copy { src: 10, dst: 11 }) => {}
+            _ => panic!(
+                "topo sort produced wrong order: {:?}. Expected [Copy(11,12), Copy(10,11)]",
+                sorted
+            ),
+        }
+    }
+
+    #[test]
+    fn topo_sort_handles_independent_copies() {
+        // Two Copies with no dependency between them — either order
+        // is valid.
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+            .expect("build tdfa for (a)");
+
+        let copies = vec![
+            RegOp::Copy { src: 10, dst: 11 },
+            RegOp::Copy { src: 20, dst: 21 },
+        ];
+        let sorted = tdfa.topologically_sort_copies(copies);
+        assert_eq!(sorted.len(), 2);
+        // Both must be Copies; order is unspecified.
+        for op in &sorted {
+            assert!(matches!(op, RegOp::Copy { .. }));
+        }
+    }
+
+    #[test]
+    fn topo_sort_breaks_two_cycle_with_scratch() {
+        // Cycle: Copy(A, B), Copy(B, A) — swap. Needs a scratch
+        // register. Result must be 3 Copies: save A to scratch,
+        // do A→B's old (i.e., read B), do scratch→A. Wait — let
+        // me think.
+        //
+        // We want B to hold A's old value AND A to hold B's old
+        // value. With scratch:
+        //   scratch = A   (Copy A → scratch)
+        //   A = B         (Copy B → A; reads original B)
+        //   B = scratch   (Copy scratch → B; reads original A)
+        let (nfa, bcm) = build_components(&group_capturing(1, lit('a')));
+        let initial_registers = {
+            let tdfa = TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+            tdfa.num_registers()
+        };
+        // Rebuild fresh for the test so we can inspect register
+        // allocation effects.
+        let (nfa2, bcm2) = build_components(&group_capturing(1, lit('a')));
+        let mut tdfa = TaggedDfa::try_build(nfa2, bcm2, TaggedDfa::DEFAULT_STATE_LIMIT).unwrap();
+        assert_eq!(tdfa.num_registers(), initial_registers);
+
+        let copies = vec![
+            RegOp::Copy { src: 30, dst: 31 },
+            RegOp::Copy { src: 31, dst: 30 },
+        ];
+        let sorted = tdfa.topologically_sort_copies(copies);
+
+        // 3 Copies: one to save into scratch, two to complete
+        // the swap.
+        assert_eq!(
+            sorted.len(),
+            3,
+            "two-cycle must produce 3 Copies; got {:?}",
+            sorted
+        );
+
+        // A fresh scratch register must have been allocated.
+        assert!(tdfa.num_registers() > initial_registers);
+
+        // Verify the swap semantics: simulate executing the Copies
+        // against an initial register state and confirm the final
+        // state has registers 30 and 31 swapped.
+        let mut registers: std::collections::HashMap<u16, u32> = std::collections::HashMap::new();
+        registers.insert(30, 100); // original A
+        registers.insert(31, 200); // original B
+        for op in &sorted {
+            match op {
+                RegOp::Copy { src, dst } => {
+                    let v = *registers
+                        .get(src)
+                        .expect("Copy reads from allocated register");
+                    registers.insert(*dst, v);
+                }
+                RegOp::Save { .. } => unreachable!(),
+            }
+        }
+        assert_eq!(
+            registers.get(&30),
+            Some(&200),
+            "register 30 must hold B's old value"
+        );
+        assert_eq!(
+            registers.get(&31),
+            Some(&100),
+            "register 31 must hold A's old value"
+        );
     }
 
     #[test]
