@@ -14,6 +14,22 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - Docs: "Beyond regex" book chapter + embedded-host design rationale
+- Scope: documentation-only change. Adds a new top-level book chapter that positions rgx as a programmable text-processing platform (not "just another regex engine") and lands the design rationale for which embedded scripting hosts rgx runs and why. Triggered by user feedback: the differentiator landscape and the embedded-vs-FFI distinction were under-documented; the rationales should be user-visible, not just in internal BACKLOG notes.
+- New chapter `book/src/why-rgx.md` (~250 lines) — "Beyond regex: what rgx adds". Seven sections:
+  - Positioning statement (programmable text-processing platform).
+  - The differentiator stack with code examples: inline code blocks (5 langs), match steering, `code_result`, structured events, async I/O / `tail_file`, sandbox modes (`Pure`/`Safe`/`Full`), PCRE2 conformance.
+  - "The embedded language set: why these five, not others?" — the design rationale, with a three-axis test (embed cost / sandboxability / design-space niche), a rejection table for C / CPython / libjulia, and a "WASM back door" note explaining that C/C++/Go/AssemblyScript inline is technically already addressable via compile-to-WASM.
+  - Comparison table vs PCRE2 / Oniguruma / RE2 / Rust `regex` / Python `re` / `regex` pkg / JS `RegExp`.
+  - "When rgx is the right choice" — 5 concrete use cases (log scanning, conditional patterns, DSL parsing, untrusted regex, portable PCRE2).
+  - "From other languages" — FFI translation table: 5 of 7 differentiators cross FFI cleanly (inline scripting, `tail_file`, sandbox modes, structured events, `code_result`); 2 don't (host-language predicate callbacks, host-language match steering — both because cgo/ctypes per-call dominates).
+- `SUMMARY.md` wires the chapter in as a top-level entry between Introduction and Part I.
+- `book/src/introduction.md` cross-links to the new chapter for users deciding whether rgx fits their use case.
+- `book/src/host-integration/predicate-callbacks.md` opens with a pointer to the design-rationale section in `why-rgx.md`, so users learning the embedded scripting surface immediately see why this specific set of five was chosen.
+- `docs/BACKLOG.md` § A6 (inline-language steering) expanded to make the embedded-vs-FFI distinction explicit and explain why C/Python/Julia aren't candidates for the embedded set (they're FFI-axis languages — A9 territory). The principled boundary: embedded host = sandboxable + lightweight + fills a unique design-space niche.
+- Validation: `mdbook build` clean. No engine code touched, no tests affected, conformance ratchet untouched at 12,806 / 4 / 0 / 0.
+- Notes/impact: the embedded-vs-FFI distinction was previously implicit; users encountering the BACKLOG's A6 vs A9 split couldn't easily see why the language sets differed. The book chapter is the canonical landing; future docs (binding announcements, blog posts, README updates) should cross-link rather than restate the rationale.
+
 ### 2026-05-13 - C2 TDFA Phase 4: find_all wiring + perf gate + baseline refresh
 - Scope: completes the TDFA project (Phases 0-4). Wires TDFA dispatch into `Regex::find_all`, extends `regression_check` with `find_all` benches, snapshots a new baseline at the TDFA-deployed HEAD, and updates the book chapter to document the shipped TDFA.
 - `engine.rs::try_dfa_find_all` now tries the TDFA path FIRST via a new `try_tdfa_find_all` helper. The helper mirrors `try_tdfa_find_first` but iterates the per-position scan loop, emitting one `MatchResult` per non-overlapping match. Empty-match adjacency handling matches the existing DFA implementation: an empty match immediately after a previous non-empty match is dropped (scanner advances one byte; empty match itself suppressed) to avoid the `find_all("a*", "ab")` infinite-loop hazard.

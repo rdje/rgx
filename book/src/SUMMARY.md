@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](./introduction.md)
+[Beyond regex: what rgx adds](./why-rgx.md)
 
 ---
 

@@ -2,7 +2,7 @@
 
 Welcome to **rgx** — a high-performance, programmable regex engine for Rust.
 
-rgx does everything a traditional regex engine does: find patterns, extract captures, replace text, split strings. But it goes further. With rgx, you can run code *inside* a match, steer the engine's behavior from callbacks, watch the engine work with structured events, suspend matching for async I/O, and monitor files in real time.
+rgx does everything a traditional regex engine does: find patterns, extract captures, replace text, split strings. But it goes further. With rgx, you can run code *inside* a match, steer the engine's behavior from callbacks, watch the engine work with structured events, suspend matching for async I/O, and monitor files in real time. If you're trying to decide whether rgx is the right choice for your project — especially if you're coming from a non-Rust language — read [Beyond regex: what rgx adds](./why-rgx.md) first.
 
 ## Who is this book for?
 

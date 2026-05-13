@@ -4160,3 +4160,34 @@ Fix: pre-gate the TDFA call on `c2.num_capture_groups > 0` at BOTH dispatch site
 Conformance ratchet held through every one of the 8 commits. No tests regressed. End users of `Regex::find_first` and `Regex::find_all` now benefit from the TDFA on every capture-bearing C2-eligible pattern.
 
 **What's NOT in this commit.** `is_match` still uses the existing DFA path (TDFA captures aren't needed for is_match — DFA is strictly faster). The reverse-DFA pipeline (`try_pipeline_find_*`) still uses the existing path; the TDFA pre-empts it. Lifting the `\b`-in-capture restriction (currently rejected by `is_c2_tdfa_eligible`) is a future eligibility-broadening commit; the `prev_byte_was_word` state extension the DFA uses can be adapted but wasn't needed for Phase 4's shipping criteria.
+
+## 2026-05-13 session — Documentation: "Beyond regex" chapter + embedded-vs-FFI design rationale
+
+User-facing documentation pass. Added the rgx differentiator analysis and the embedded-host design rationale to the book in two passes.
+
+**New top-level book chapter `book/src/why-rgx.md`** — "Beyond regex: what rgx adds". Positions rgx as a programmable text-processing platform (not just a regex engine). Covers:
+- Seven differentiators with code examples: inline code blocks (5 languages), match steering, `code_result`, structured events, async I/O, sandboxing, PCRE2 conformance.
+- Comparison table vs PCRE2 / Oniguruma / RE2 / Rust regex / Python re / regex pkg / JS RegExp on two axes: PCRE2 syntax × programmable primitives.
+- "When rgx is the right choice" — 5 concrete use cases.
+- "The embedded language set: why these five, not others?" — the design rationale for the embedded scripting hosts (Lua/JS/Rhai/WASM/native).
+- "From other languages" — the FFI translation analysis: 5 of 7 differentiators FFI cleanly; only host-language predicate callbacks and native steering hit the cgo wall.
+
+Wired into SUMMARY.md as a top-level entry between Introduction and Part I. Introduction cross-links to it.
+
+**Design rationale for the embedded scripting host set.** The user asked why A6 (inline-language steering) covers Lua/JS/Rhai but not C/Python/Julia. Answer: two orthogonal axes, conflated.
+
+- **Embedded host axis** — languages rgx runs *inside* the regex pattern. Must be sandboxable + lightweight + fill a unique design-space niche. Current set covers: tiny/fast (Lua, ~200KB), familiar (JS via QuickJS, ~2MB), Rust-native (Rhai, no FFI), compile-target catch-all (WASM), zero-overhead (native Rust callbacks).
+- **FFI host axis** — languages that call rgx from outside. Anything is acceptable. Python/Go/Julia/C/Zig belong here.
+
+C/Python/Julia are bad embedded hosts because (a) cannot be sandboxed safely (C has no runtime; CPython has GIL + no real isolation; libjulia is ~100MB JIT-heavy), and (b) their value vs rgx is the FFI direction. WASM is the back door for C/C++/Go/AssemblyScript embedded — compile to WASM, use `(?{wasm:...})`.
+
+Documented this design rationale in three places:
+1. `book/src/why-rgx.md` § "The embedded language set: why these five, not others?" — full user-facing explanation with the three-axis test (embed cost / sandboxability / design-space niche).
+2. `book/src/host-integration/predicate-callbacks.md` — cross-link from where users first encounter the 5-language set.
+3. `docs/BACKLOG.md` § A6 — expanded the BACKLOG entry to include the "why this set" explanation so future maintainers don't drift from the principle.
+
+The user emphasized that rationales should be in user-visible documentation, not just internal notes. The book chapter is the canonical public landing.
+
+**Validation.** `mdbook build` clean. No engine code touched, no tests affected.
+
+**Open follow-up.** If a new embedded host is ever added, the three-axis test (embed cost ≤ ~5MB, real sandbox, unique design-space niche) is the gate. Candidates that *could* clear it in principle but lack demand: Chibi-Scheme, Wren, Mun. Current five cover the space adequately.

@@ -42,10 +42,11 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Dependencies**: None.
 
 ### A6. Inline-language steering
-- **What**: `rgx.steer_skip(n)` / `rgx.steerSkip(n)` from Lua/JS/Rhai code blocks.
+- **What**: `rgx.steer_skip(n)` / `rgx.steerSkip(n)` from Lua / JS / Rhai / WASM code blocks. (Native Rust callbacks already have steering — they return `ExecResult::Steer` directly.)
 - **Effort**: `small`
-- **Rationale**: Currently steering is native-callback-only. Inline languages should have the same power.
-- **How**: Add `rgx.steer_*` helper functions to each language's execution context, returning special `ExecResult::Steer` values.
+- **Rationale**: Currently steering is native-callback-only. The four *embedded* scripting hosts should have the same power.
+- **How**: Add `rgx.steer_*` helper functions to each embedded host's execution context, returning special `ExecResult::Steer` values.
+- **Why this set and not C / Python / Julia**: A6 is about *embedded* hosts — languages rgx runs *inside* the regex pattern. The embedded set (Lua, JS, Rhai, WASM, native) was chosen for sandboxability + low embed cost. C lacks a sandboxable runtime; CPython is ~10MB + GIL + not safely sandboxable; libjulia is ~100MB + JIT-heavy. WASM is the back door for anyone wanting C/Go/AssemblyScript inline: compile to WASM, use `(?{wasm:...})`. Calling rgx *from* C/Python/Julia is the FFI direction (A9), a different axis.
 - **Dependencies**: Layer 3 (shipped).
 
 ### ~~A7. Full Unicode case folding for `(?i)`~~ ✅ Shipped

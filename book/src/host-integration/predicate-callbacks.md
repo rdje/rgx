@@ -2,6 +2,8 @@
 
 A predicate callback is code that runs *during* matching. When the regex engine reaches a code block, it evaluates the callback and uses its result to decide whether matching should continue or backtrack. This makes patterns programmable without leaving the regex.
 
+rgx hosts **five** embedded scripting environments for callbacks: native Rust, Lua, JavaScript, Rhai, and WASM. For the design rationale behind this set — why these five and not Python / C / Julia — see [Beyond regex: what rgx adds → The embedded language set](../why-rgx.md#the-embedded-language-set-why-these-five-not-others).
+
 ## Native callbacks
 
 Native callbacks are Rust closures registered by name. They receive an `ExecContext` with full match state and return an `ExecResult`.
