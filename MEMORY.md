@@ -4236,3 +4236,23 @@ User asked me to PNT through the B-list ("Features to port from Rust's regex cra
 - A5 CLI --color
 - A6 inline-language steering (documented as Lua/JS/Rhai/WASM)
 - C6 clippy noise cleanup
+
+## 2026-05-13 session — BACKLOG A1 (step limits) + A2 (memory limits) audit
+
+User asked me to PNT into A1 ("configurable max-step counter, production blocker for DoS"). Audit shows A1 is fully shipped — `Regex::set_max_steps(Some(limit))` at lib.rs:2040, 4 unit tests at lib.rs:8160-8192, dedicated book chapter at `book/src/core-api/safety-limits.md`.
+
+**A1 status verification**:
+- API: `set_max_steps(Option<u64>)`. `None` = unbounded (default). `Some(n)` = abort the match attempt after n opcode steps, return `None` for that start position; scanning loop continues.
+- Tests cover: pathological-input-aborts (`(a+)+b` against long 'a' input), valid-match-not-blocked (normal patterns work fine under a generous limit), `None` is explicitly unlimited, low-limit blocks every start position.
+- Docs: book chapter "Safety Limits" walks through the use cases, has working examples.
+
+**Sibling A2 (memory limits) checked simultaneously**: 2 of 3 limits shipped.
+- `set_max_backtrack_frames` at lib.rs:2048 ✅
+- `set_max_recursion_depth` at lib.rs:2056 ✅ (default hard ceiling 1024 when None)
+- `set_max_trail_entries` ❌ not implemented. Trivial to add — same pattern — but defer until a real workload surfaces a trail-size DoS shape. The two shipped limits + A1's step limit give adequate production defense.
+
+**BACKLOG cleanup**: A1 entry collapsed from full What/Effort/Rationale/How/Dependencies to a single ✅ Shipped status line with implementation locations, test references, book cross-link, and production-gate framing. A2 entry updated to "partially shipped — 2 of 3" with clear remaining-work explanation.
+
+**Production-readiness summary**: A1 + 2/3 A2 limits = adequate DoS defense for servers accepting user-supplied regex patterns. Defaults remain unbounded (existing user behavior unchanged); production deployments must set limits explicitly. Pattern matches `regex` crate's `RegexBuilder::size_limit` / `dfa_size_limit` convention but covers a broader set of resource axes (steps + backtrack frames + recursion depth, with trail entries as future defense-in-depth).
+
+**No code touched**. Conformance ratchet untouched at 12,806 / 4 / 0 / 0.
