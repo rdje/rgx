@@ -4540,3 +4540,60 @@ Same pattern as TDFA Phase 0 / C1 Step 0: **design doc first**, implementation g
 **Strategic note for future sessions**: when closing major items (TDFA phases, C1 JIT, A9 phases, conformance ratchet moves), do NOT frame them as "release-blockers cleared" or "publication is closer." Per `feedback_publish_readiness_bar`, those framings are wrong — closures are work toward the bar, the bar doesn't move until every checklist item is green AND the user calls it done. The user's quality-bar framing ("do it right") is consistent with `feedback_sota_first_time` and `feedback_accuracy_first_then_speed`.
 
 **User instruction**: "You can commit the first version. We amend it when needed." First version is intentionally rough; expect criteria to be added, refined, or removed as the publication picture clarifies.
+
+## 2026-05-13 session — Roadmap inventory: what remains (excluding PGEN-gated work)
+
+**Trigger**: user asked "Is there anything else in the roadmap that remains to be address, besides PGEN gated stuff." This entry captures the BACKLOG audit so a future session can resume without re-deriving it.
+
+**PGEN-gated items (excluded from this inventory)**: A8 crate publishing (needs PGEN published or vendored), PGEN-RGX-0073 compile-time perf (lives in PGEN), PGEN-RGX-0084 `\10` forward-ref (BACKLOG #60, conformance residual blocked on PGEN).
+
+### A9 language bindings — Phases 2 through 7 (biggest open block)
+
+Phase 1 shipped 2026-05-13 (rgx-capi crate + cbindgen + C smoke test). Remaining per `docs/A9_LANGUAGE_BINDINGS_DESIGN.md`:
+
+- **Phase 2** — captures + iterators + replace (buffer-too-small retry convention)
+- **Phase 3** — configuration + safety limits + execution-mode introspection (`rgx_uses_c2`, `rgx_uses_tdfa`, `rgx_uses_jit`)
+- **Phase 4** — `tail_file` streaming
+- **Phase 5** — observers / structured events
+- **Phase 6** — embedded scripting hosts (Lua / JS / Rhai / WASM / native) pass-through
+- **Phase 7** — per-language wrappers (Go → Python → Julia → Zig → Ruby/PHP); each is a SEPARATE project
+
+Multi-month if pursued in full.
+
+### Engine-frontier conformance — BACKLOG #59
+
+3 cases (`testinput2:6592/6595/6601`) — cross-subexpr alt-frame promotion. The 2026-05-11 `SubroutineRetryMode` mechanism handles "subroutine made progress, wrong end position" but not "subroutine matched empty, caller needs progress." 6595 additionally needs an engine `ANCHORED_END` option. Substantial new engine work; flagged as relevant for the "no showstopper bugs" publication gate.
+
+### C8 conformance-audit items — what's left
+
+Per `docs/BACKLOG.md::C8`:
+
+- **C8.1.1** Per-verb effects table — doc-only, 0.5 day. Trivial.
+- **C8.1.4** Boundary-policy doc — doc-only, 1 day.
+- **C8.2.2** Boundary-policy refactor — `medium`, 5-10 days. Closes 5 Cluster 1C cases.
+- **C8.2.3** Pike-VM step-limit threading — `medium`, 2-5 days. Closes testinput2:6244/6249 (2 cases).
+- **C8.2.4** PGEN walker silent-shape audit — `small-medium`, 2-3 days. Preventive.
+- **C8.3.1-4** Speculative larger redesigns: subroutine-stack reification (Cluster 1A residual + 2A balanced-bracket); compile-time `(*NUL)`/`(*CRLF)` newline-mode threading (~3 cases); `\K`-from-lookaround propagation (Cluster 2C, 3 cases); reverse-DFA unanchored extension (perf headroom, not conformance).
+
+### C2 perf levers — explicitly deferred (with written rationale in BACKLOG)
+
+- **Materialized DFA for small patterns** (<64 states, lock-free array) — `small`, the only explicitly open one.
+- **TDFA `\b`-in-capture broadening** — deferred; needs deeper closure-walker rework to carry per-WB-context register maps. Current DFA→Pike pipeline handles these patterns correctly, just without the inline-capture TDFA win.
+- **SIMD char-class lookup** — deferred; DFA inner loop is inherently sequential, SIMD doesn't parallelise across input bytes. Re-investigate if a future use case generates very large DFAs.
+- **Reverse-DFA `\b` dispatch policy** — deferred; needs larger benchmark corpus to extract a defensible heuristic. Existing per-position scan with `PrefixFilter::Word` SIMD skip handles `\b` patterns adequately (email_basic is 1.49× faster than PCRE2 today).
+
+### Publish-readiness gates — per `docs/PUBLISH_READINESS.md`
+
+Six non-PGEN gates: (1) API contract stabilization (`rgx-capi/STABILITY.md` first), (2) book cumulative audit, (3) cross-platform CI (Linux + Windows), (4) docs-beyond-the-book audit (CONTRIBUTING, SECURITY, templates), (5) performance baseline write-up, (6) security/safety review (SECURITY.md + C ABI fuzzing).
+
+### Honest summary
+
+The feature roadmap is essentially done. What's left is breadth (A9 bindings expansion), one conformance residual cluster (#59), C8 audit polish items (mostly small/medium), and the publication-readiness gates. The engine itself is feature-complete for PCRE2 parity at 12,806/4/0/0. The remaining work is polish (contract docs, CI matrix, audits) and reach (more languages), not depth.
+
+### Next-step pickers for future sessions
+
+- **Quick wins (under 1 day each)**: C8.1.1 (per-verb effects doc), C8.1.4 (boundary-policy doc), C2 materialized DFA for small patterns.
+- **Medium engine wins (days)**: C8.2.2 boundary-policy refactor (closes 5 Cluster 1C cases), C8.2.3 Pike-VM step-limit threading (closes 2 cases), C8.2.4 walker silent-shape audit (preventive).
+- **Frontier engine work (weeks)**: BACKLOG #59 cross-subexpr alt-frame promotion.
+- **A9 expansion (weeks per phase)**: Phase 2 (captures + iterators + replace) is the natural next phase.
+- **Publish-readiness work**: `rgx-capi/STABILITY.md` is the highest-priority readiness item (top of `PUBLISH_READINESS.md`).
