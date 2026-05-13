@@ -3,37 +3,72 @@
 # Times are median ns/op across 11 samples × 10000 iterations.
 
 ["find_first/literal_simple"]
-rgx_ns = 16.7875
-pcre2_ns = 33.2333
-ratio = 0.5051409279247021
+rgx_ns = 16.8583
+pcre2_ns = 33.3583
+ratio = 0.5053704775123432
+
+["find_all/literal_simple"]
+rgx_ns = 1734.4334
+pcre2_ns = 5159.4209
+ratio = 0.33616823159358833
 
 ["find_first/email_basic"]
-rgx_ns = 103.8416
-pcre2_ns = 235.9833
-ratio = 0.4400379179374133
+rgx_ns = 106.2417
+pcre2_ns = 238.4041
+ratio = 0.4456370507050843
+
+["find_all/email_basic"]
+rgx_ns = 3909.2375
+pcre2_ns = 8913.1375
+ratio = 0.4385927514301221
 
 ["find_first/digit_sequence"]
-rgx_ns = 36.3
-pcre2_ns = 39.05
-ratio = 0.9295774647887324
+rgx_ns = 35.175
+pcre2_ns = 38.8833
+ratio = 0.9046300082554721
+
+["find_all/digit_sequence"]
+rgx_ns = 3042.4958
+pcre2_ns = 4828.6458
+ratio = 0.6300929755502049
 
 ["find_first/character_class"]
-rgx_ns = 11.7833
-pcre2_ns = 31.3
-ratio = 0.3764632587859425
+rgx_ns = 11.6875
+pcre2_ns = 31.7834
+ratio = 0.36772340278258464
+
+["find_all/character_class"]
+rgx_ns = 11.6959
+pcre2_ns = 31.6042
+ratio = 0.37007423064023137
 
 ["find_first/alternation"]
-rgx_ns = 72.6125
-pcre2_ns = 992.6958
-ratio = 0.07314677870098775
+rgx_ns = 73.4084
+pcre2_ns = 1002.0708
+ratio = 0.07325670002558701
+
+["find_all/alternation"]
+rgx_ns = 72.475
+pcre2_ns = 997.9375
+ratio = 0.07262478862654224
 
 ["find_first/capture_groups"]
-rgx_ns = 11.9875
-pcre2_ns = 563.075
-ratio = 0.021289348665808283
+rgx_ns = 11.9042
+pcre2_ns = 557.1625
+ratio = 0.02136575954052902
+
+["find_all/capture_groups"]
+rgx_ns = 11.5625
+pcre2_ns = 561.3958
+ratio = 0.02059598593363185
 
 ["find_first/url_simple"]
-rgx_ns = 26.9625
-pcre2_ns = 32.7083
-ratio = 0.8243320502747008
+rgx_ns = 27.2708
+pcre2_ns = 34.1
+ratio = 0.7997302052785924
+
+["find_all/url_simple"]
+rgx_ns = 25.2875
+pcre2_ns = 34.5875
+ratio = 0.7311167329237442
 

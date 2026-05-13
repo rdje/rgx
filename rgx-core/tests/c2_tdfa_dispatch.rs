@@ -152,6 +152,54 @@ fn two_digit_groups_via_tdfa() {
 }
 
 #[test]
+fn find_all_via_tdfa() {
+    // Every match in "ab cd ef" via the TDFA find_all path. Each
+    // (\w+) match captures the alphabetic run.
+    let regex = Regex::compile(r"(\w+)").expect("compile");
+    assert!(regex.uses_tdfa(), "expected TDFA eligibility");
+    let matches = regex.find_all("ab cd ef");
+    assert_eq!(matches.len(), 3, "expected 3 matches, got {:?}", matches);
+    let expected = [(0, 2, 0, 2), (3, 5, 3, 5), (6, 8, 6, 8)];
+    for (m, (ms, me, gs, ge)) in matches.iter().zip(expected.iter()) {
+        assert_eq!(m.start, *ms);
+        assert_eq!(m.end, *me);
+        assert_eq!(m.groups, vec![Some((*ms, *me)), Some((*gs, *ge))]);
+    }
+}
+
+#[test]
+fn find_all_no_match_via_tdfa() {
+    let regex = Regex::compile(r"(\d+)").expect("compile");
+    assert!(regex.uses_tdfa());
+    let matches = regex.find_all("abc def");
+    assert!(
+        matches.is_empty(),
+        "expected zero matches, got {:?}",
+        matches
+    );
+}
+
+#[test]
+fn find_all_empty_match_handling_via_tdfa() {
+    // (a*) — first match consumes 'aa', then empty matches at every
+    // subsequent position. The empty-adjacent-to-previous rule
+    // suppresses an empty match immediately after a non-empty one;
+    // every byte position after that produces an empty match.
+    let regex = Regex::compile(r"(a*)").expect("compile");
+    assert!(regex.uses_tdfa());
+    let matches = regex.find_all("aab");
+    // Conventional output: [("aa",0,2), ("",3,3)] — the empty match
+    // immediately after the non-empty one is suppressed, but an
+    // empty match between non-empty matches and at the end is kept.
+    // Exact behaviour depends on the engine's policy; the assertion
+    // here is just "we got *some* result and no panic". The strict
+    // policy comparison is in the c2_pike_differential.
+    assert!(!matches.is_empty());
+    assert_eq!(matches[0].start, 0);
+    assert_eq!(matches[0].end, 2);
+}
+
+#[test]
 fn uses_tdfa_rejects_non_eligible_patterns() {
     // No captures — eligible for DFA but not for TDFA (zero-capture
     // fast path wins).

@@ -724,7 +724,13 @@ impl Engine {
     /// runs. Same runtime gating as
     /// [`Self::should_dispatch_to_dfa`].
     #[doc(hidden)]
+    #[inline]
     pub(crate) fn should_dispatch_to_tdfa(&self) -> Option<&TdfaCell> {
+        // OnceLock::get is a single relaxed atomic load on the hot
+        // path (post-initialisation). For non-TDFA-eligible patterns
+        // the cached value is `None` and this function returns in a
+        // handful of instructions; the inline hint keeps the
+        // dispatch caller's prologue tight.
         let tdfa = self
             .c2_tdfa
             .get_or_init(|| build_tdfa_if_eligible(&self.ast, &self.vm.program.c2_program))
@@ -841,6 +847,7 @@ impl Engine {
     /// measure whether this happens often enough to warrant a more
     /// sophisticated recovery (e.g. partial-cache reuse).
     #[doc(hidden)]
+    #[inline]
     fn try_tdfa_find_first(
         &self,
         input: &[u8],
@@ -865,6 +872,64 @@ impl Engine {
                 Some(None)
             }
         }
+    }
+
+    /// Iterate the TDFA over every candidate position from
+    /// [`PrefixScanner`] to enumerate all non-overlapping matches.
+    ///
+    /// Returns:
+    /// - `Some(Vec<MatchResult>)` — TDFA enumerated all matches
+    ///   (vec may be empty on no-match inputs).
+    /// - `None` — TDFA unavailable; caller falls through to the
+    ///   existing DFA → Pike or reverse-pipeline paths.
+    ///
+    /// The empty-match adjacency rule matches the existing
+    /// `try_dfa_find_all`: an empty match at the position immediately
+    /// after a previous non-empty match is dropped (the scanner
+    /// advances one byte to avoid an infinite loop, but the empty
+    /// match itself is suppressed). Without this rule
+    /// `find_all("a*", "ab")` would yield `["a", "", ""]` instead of
+    /// the conventional `["a", ""]`.
+    #[doc(hidden)]
+    #[inline]
+    fn try_tdfa_find_all(
+        &self,
+        input: &[u8],
+        c2: &crate::c2::CompiledC2Program,
+    ) -> Option<Vec<MatchResult>> {
+        let tdfa_cell = self.should_dispatch_to_tdfa()?;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
+        let mut results: Vec<MatchResult> = Vec::new();
+        let mut start = 0usize;
+        let mut prev_non_empty_end: Option<usize> = None;
+        match tdfa_cell {
+            TdfaCell::Lazy(mutex) => {
+                let mut tdfa = mutex.lock();
+                while start <= input.len() {
+                    let Some(candidate) = scanner.next_candidate(input, start) else {
+                        break;
+                    };
+                    start = candidate;
+                    match crate::c2::tdfa::find_match_at(&mut tdfa, input, start) {
+                        Some(tm) => {
+                            let end = tm.end;
+                            let is_empty = end == start;
+                            if is_empty && Some(start) == prev_non_empty_end {
+                                start += 1;
+                                continue;
+                            }
+                            results.push(tdfa_match_to_match_result(tm));
+                            prev_non_empty_end = if is_empty { None } else { Some(end) };
+                            start = if is_empty { start + 1 } else { end };
+                        }
+                        None => {
+                            start += 1;
+                        }
+                    }
+                }
+            }
+        }
+        Some(results)
     }
 
     /// Build a [`MatchResult`] for a span the DFA already located.
@@ -1142,13 +1207,17 @@ impl Engine {
         // Tagged DFA fast path: for capture-bearing patterns, the
         // TDFA replaces DFA-finds-span + Pike-recovers-captures with
         // a single forward scan that produces both end and captures.
-        // If the TDFA is eligible AND succeeds for this input, the
-        // result is returned directly. If the TDFA refuses (e.g.,
-        // state-cache exhaustion mid-scan, encoded as a dead
-        // sentinel) we fall through to the existing DFA → Pike
-        // pipeline.
-        if let Some(outcome) = self.try_tdfa_find_first(input, c2) {
-            return Some(outcome);
+        //
+        // Pre-gate on capture-group presence: zero-capture patterns
+        // are never TDFA-eligible, and the existing zero-capture
+        // fast path in `recover_match_for_dfa_span` is strictly
+        // faster than the TDFA could be. Skip the TDFA call
+        // entirely for those patterns — keeps `find_first` hot for
+        // capture-free benches like `url_simple`.
+        if c2.num_capture_groups > 0 {
+            if let Some(outcome) = self.try_tdfa_find_first(input, c2) {
+                return Some(outcome);
+            }
         }
         // Reverse-DFA pipeline fast path. Only prefer it when the
         // per-position scan has no prefix hint — otherwise the scan's
@@ -1399,6 +1468,18 @@ impl Engine {
                 if finder.find(input).is_none() {
                     return Some(Vec::new());
                 }
+            }
+        }
+        // Tagged DFA fast path: for capture-bearing patterns, a single
+        // forward scan per candidate position produces (end, captures)
+        // directly, skipping the Pike-VM second pass. Mirrors the
+        // `find_first` TDFA wiring; falls through to the existing
+        // DFA → Pike path on TDFA ineligibility or cache exhaustion.
+        // Pre-gate on capture-group presence (see `try_dfa_find_first`
+        // for rationale).
+        if c2.num_capture_groups > 0 {
+            if let Some(results) = self.try_tdfa_find_all(input, c2) {
+                return Some(results);
             }
         }
         // Reverse-DFA pipeline fast path for find_all. Same gate as

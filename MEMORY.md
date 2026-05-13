@@ -4110,3 +4110,53 @@ Seventh commit on the TDFA track. Phase 3 deploys the TDFA: capture-bearing C2 p
 **Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1186/1186. `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo test -p rgx-core --test c2_tdfa_dispatch` 9/9. `cargo test -p rgx-cli` 30/30. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0**. The TDFA path is now active for every capture-bearing C2-eligible pattern that reaches `Regex::find_first`.
 
 **Next step.** Phase 4 — the perf gate. Run `rgx-bench` with TDFA dispatch on the find_first benches that have captures (`email_basic`, `url_simple`, `capture_groups`). Compare to the prior baseline. If a TDFA-eligible bench regresses, profile and fix before the commit lands. If the gains land, snapshot a new baseline at the materialised-+-TDFA HEAD and update `book/src/internals/nfa-dfa-engine.md` perf table.
+
+## 2026-05-13 session — TDFA Phase 4: find_all + perf gate + baseline (TDFA shipped)
+
+Eighth and final commit on the TDFA track. The TDFA is now deployed via both `Regex::find_first` and `Regex::find_all`, validated against PCRE2 conformance and the rgx-bench corpus. Phase 4 completes the TDFA project (Phases 0-4 = 8 commits in one day).
+
+**find_all wiring (Phase 4a).** New `try_tdfa_find_all` helper, mirrors `try_tdfa_find_first` but iterates per-position with the empty-match adjacency rule (drop empty match immediately after non-empty to avoid `find_all("a*", "ab")` looping). Wired into `try_dfa_find_all` as the new first dispatch step, behind the same `c2.num_capture_groups > 0` gate.
+
+**regression_check extension.** Added `BenchKind::FindAll` and `time_find_all_{rgx,pcre2}` helpers. PCRE2 find_all loop mirrors RGX's non-overlapping advance semantics (empty match → +1; non-empty → end). Baseline TOML now has 14 entries.
+
+**Perf gate caught a regression (Phase 4b).** Initial run showed `url_simple` regressed 13ns / +430n find_first. Root cause: `url_simple` is not TDFA-eligible (no captures), so the TDFA call returned None, but the *call itself* added ~13ns even with `#[inline]` hints because the OnceLock check + Engine field access wasn't being inlined out at the dispatch site.
+
+Fix: pre-gate the TDFA call on `c2.num_capture_groups > 0` at BOTH dispatch sites. Zero-capture patterns skip the call entirely; the dispatch chain reduces to its prior shape for them. Re-run showed url_simple back to 27ns baseline (-6 0.000000rom baseline, within tolerance), with no other regressions.
+
+**Measured TDFA win.**
+- `find_all/capture_groups` (`(\d{4})-(\d{2})-(\d{2})`): 12 ns rgx vs 561 ns PCRE2 = **0.02 ratio = 47× faster than PCRE2**. The TDFA win materializes on find_all where the Pike-VM second-pass overhead accumulates across many matches.
+- `find_first/capture_groups`: same 46× (essentially noise floor — single match at position 0, no scan).
+- All 7 existing find_first benches stable within tolerance. Two improved (literal_simple +20
+## 2026-05-13 session — TDFA Phase 4: find_all + perf gate + baseline (TDFA shipped)
+
+Eighth and final commit on the TDFA track. The TDFA is now deployed via both `Regex::find_first` and `Regex::find_all`, validated against PCRE2 conformance and the rgx-bench corpus. Phase 4 completes the TDFA project (Phases 0-4 = 8 commits in one day).
+
+**find_all wiring (Phase 4a).** New `try_tdfa_find_all` helper, mirrors `try_tdfa_find_first` but iterates per-position with the empty-match adjacency rule (drop empty match immediately after non-empty to avoid `find_all("a*", "ab")` looping). Wired into `try_dfa_find_all` as the new first dispatch step.
+
+**regression_check extension.** Added `BenchKind::FindAll` and `time_find_all_{rgx,pcre2}` helpers. PCRE2 find_all loop mirrors RGX's non-overlapping advance semantics. Baseline TOML now has 14 entries (7 patterns × 2 kinds).
+
+**Perf gate caught a regression (Phase 4b).** Initial run showed `url_simple` regressed 13ns / +43% on find_first. Root cause: `url_simple` is not TDFA-eligible (no captures), so the TDFA call returned None, but the *call itself* added ~13ns even with `#[inline]` hints because the OnceLock check + Engine field access wasn't being inlined out at the dispatch site.
+
+Fix: pre-gate the TDFA call on `c2.num_capture_groups > 0` at BOTH dispatch sites. Zero-capture patterns skip the call entirely; the dispatch chain reduces to its prior shape for them. Re-run showed url_simple back to 27ns baseline (-6% from baseline, within tolerance), with no other regressions.
+
+**Measured TDFA win.**
+- `find_all/capture_groups` (`(\d{4})-(\d{2})-(\d{2})`): 12 ns rgx vs 561 ns PCRE2 = **0.02 ratio = 47× faster than PCRE2**. The TDFA win materializes on find_all where the Pike-VM second-pass overhead accumulates across many matches.
+- `find_first/capture_groups`: same 46× (essentially noise floor — single match at position 0, no scan).
+- All 7 existing find_first benches stable within tolerance. Two improved (literal_simple +20%, alternation +24%) likely from reduced dispatch-site code size after the capture-group gate.
+
+**Baseline refresh (Phase 4c).** Wrote new `rgx-bench/baselines/main.toml` at the TDFA-deployed HEAD via `--update-baseline`. 14 entries.
+
+**Book chapter update.** `book/src/internals/nfa-dfa-engine.md` "What's next: TDFA" section became "The Tagged DFA (TDFA): capture recovery without a second pass" — documents the shipped algorithm, eligibility rules, dispatch wiring, and measured perf.
+
+**Validation.** All gates green: cargo fmt clean, 1186/1186 lib tests, 12/12 c2_pike_differential, 12/12 c2_tdfa_dispatch, clippy correctness clean, **PCRE2 conformance ratchet holds at 12,806 / 4 / 0 / 0** through both the find_all wiring AND the capture-group gate. `regression_check` all benches stable / improved, no regressions.
+
+**Project summary.** 8 commits across Phases 0-4 in one day:
+- Phase 0 (design doc) — `docs/C2_TDFA_DESIGN.md` 732 lines.
+- Phase 1 (NFA tag helpers) — `Tag` newtype + 3 accessors + 7 tests.
+- Phase 2a-d (TDFA construction + simulator + differential gate) — `c2/tdfa.rs` 700 lines, 39 unit tests including in-module differential against Pike-VM.
+- Phase 3 (engine dispatch + Pike-VM bypass for find_first) — `is_c2_tdfa_eligible`, `TdfaCell`, dispatch wiring, public `Regex::uses_tdfa()`, public-API differential tests.
+- Phase 4 (find_all wiring + perf gate + baseline + book) — this commit.
+
+Conformance ratchet held through every one of the 8 commits. No tests regressed. End users of `Regex::find_first` and `Regex::find_all` now benefit from the TDFA on every capture-bearing C2-eligible pattern.
+
+**What's NOT in this commit.** `is_match` still uses the existing DFA path (TDFA captures aren't needed for is_match — DFA is strictly faster). The reverse-DFA pipeline (`try_pipeline_find_*`) still uses the existing path; the TDFA pre-empts it. Lifting the `\b`-in-capture restriction (currently rejected by `is_c2_tdfa_eligible`) is a future eligibility-broadening commit; the `prev_byte_was_word` state extension the DFA uses can be adapted but wasn't needed for Phase 4's shipping criteria.

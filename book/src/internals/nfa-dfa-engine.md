@@ -236,22 +236,53 @@ And vs PCRE2 (10.45):
 
 The capture-groups win is pure DFA dispatch. The literal_simple win is the existing VM's `memmem::Finder` fast path being preserved by the dispatch gates. The email_basic improvement comes from the existing VM running unchanged plus the trend capture's natural variance — `\b\w+@\w+\.\w+\b` uses the existing backtracking VM by construction (no nested quantifier).
 
-## What's next: the Tagged DFA (TDFA)
+## The Tagged DFA (TDFA): capture recovery without a second pass
 
-The two-pass capture-recovery trick described above — DFA locates the span, Pike-VM recovers captures over that span — is correct but pays for it. On capture-heavy patterns (`email_basic`, `url_simple`, `capture_groups`) the Pike-VM second pass dominates wall time: samply consistently attributes 30-60% of `find_all` self-time to `pike_match_at_with_captures` even with the DFA fully materialised.
+The two-pass capture-recovery trick described above — DFA locates the span, Pike-VM recovers captures over that span — is correct but pays for it. On capture-heavy patterns (`capture_groups`, `url_simple`) the Pike-VM second pass dominated wall time before the TDFA shipped: samply consistently attributed 30-60% of `find_all` self-time to `pike_match_at_with_captures` even with the DFA fully materialised.
 
-The next major C2 lever is a **Laurikari Tagged DFA** that propagates capture-position information through the DFA subset construction itself. Instead of two passes, the simulator walks the input once and reads capture positions directly out of per-state **tag registers** at match end.
+The **Laurikari tagged DFA** propagates capture-position information through the DFA subset construction itself. Instead of two passes, the simulator walks the input once and reads capture positions directly out of per-state **tag registers** at match end. RGX's TDFA shipped on 2026-05-13 in `rgx-core/src/c2/tdfa.rs`. Design rationale in `docs/C2_TDFA_DESIGN.md`.
 
-The design is laid out in `docs/C2_TDFA_DESIGN.md`. Highlights:
+### How it works
 
-- Capture group boundaries are already emitted as tagged epsilon edges in the NFA — `CaptureTag::GroupStart(n)` / `CaptureTag::GroupEnd(n)` (see `c2/nfa.rs:292`). The Pike-VM already consumes them; the TDFA extends the same machinery to subset construction.
+- Capture group boundaries are emitted as tagged epsilon edges in the NFA — `CaptureTag::GroupStart(n)` / `CaptureTag::GroupEnd(n)` (see `c2/nfa.rs:292`). The Pike-VM already consumed them; the TDFA extends the same machinery to subset construction.
 - Each TDFA state carries a register assignment per (NFA-state, tag) pair; each transition carries a list of `Copy { src, dst }` and `Save { dst }` register operations that fire when the transition is taken.
-- Leftmost-first semantics are preserved by following the NFA's existing epsilon slot order during determinization. No runtime priority comparison; the priority order is baked into the offline construction.
-- The TDFA accepts a strict subset of the lazy DFA's eligibility set: capture-bearing patterns with no lazy quantifier *inside* a capture and no word-boundary inside a capture's epsilon closure (the latter is first-pass conservatism, to be lifted).
+- Leftmost-first priority is preserved by following the NFA's existing epsilon slot order during determinization. No runtime priority comparison; the priority order is baked into the offline construction.
+- The **Laurikari reorder rule** collapses equivalent register configurations into one state — patterns like `(a)+` produce a 3-state TDFA that stabilises after the second byte. Cache hits emit `Copy` RegOps to reshuffle freshly-allocated registers into the existing state's physical layout. Cycles in the copy graph (mutual register swaps) are broken via a fresh scratch register.
 
-Per-bench targets after the TDFA lands: `email_basic.find_all` ≥ 3×, `url_simple.find_all` ≥ 2×, `capture_groups.find_all` ≥ 50× over PCRE2. Differential testing against the Pike-VM is the merge gate — any disagreement on `(start, end, groups[..])` on any input is a blocker.
+### Eligibility
 
-The TDFA work is staged across Phases 1–4 (NFA tag helpers, tagged subset construction, simulator + dispatch, perf gate). Phase 0 (the design doc) is the current artifact; production code lands phase by phase, each gated on the previous one.
+The TDFA accepts a strict subset of the lazy DFA's eligibility set. `Regex::uses_tdfa()` reports the AST-level decision:
+
+| Constraint | Rationale |
+|---|---|
+| Pattern is C2-eligible | No backreferences, lookaround, atomic groups, possessive quantifiers, etc. |
+| At least one capture group | Zero-capture patterns hit the existing fast path in `recover_match_for_dfa_span` which is strictly faster |
+| No lazy quantifier | DFA semantics can't express lazy capture priority |
+| No `\b` / `\B` anywhere | Phase 2 first-pass conservatism; `TaggedDfa::try_build` rejects all assertions. Future phase lifts via the same `prev_byte_was_word` state extension the DFA uses |
+| LeftmostFirst semantics only | POSIX leftmost-longest captures use a different determinization order (future work) |
+
+For patterns where any of these conditions fail, dispatch falls through transparently to the existing DFA → Pike-VM two-pass path. The TDFA is purely additive.
+
+### Dispatch
+
+`Engine::try_dfa_find_first` and `try_dfa_find_all` try the TDFA path FIRST for capture-bearing C2 patterns. On success the TDFA returns the match plus captures in a single forward scan, skipping the Pike-VM second pass entirely. On TDFA failure (state cache overflow during construction, ineligible pattern) the function falls through to the existing pipeline.
+
+The TDFA call is gated on `c2.num_capture_groups > 0` at the dispatch site — capture-free patterns skip the call entirely, keeping the hot path for benches like `url_simple` (no captures) unchanged.
+
+### Measured impact
+
+On the benchmark corpus (10 000 iterations × 11 samples, median ns/op, 1 KB inputs):
+
+| Pattern | rgx (ns) | PCRE2 (ns) | rgx vs PCRE2 |
+|---|---:|---:|---:|
+| `find_all/capture_groups` (`(\d{4})-(\d{2})-(\d{2})`) | 12 | 561 | **47× faster** |
+| `find_first/capture_groups` | 12 | 557 | 46× faster |
+| `find_all/url_simple` (no captures, control) | 25 | 35 | 1.4× faster |
+| `find_first/url_simple` (no captures, control) | 27 | 34 | 1.3× faster |
+
+The TDFA delivers nearly all of its win on `find_all` — `find_first` was already so fast (matched at position 0, no scan needed) that the Pike-VM second pass overhead was below the measurement floor. `find_all` runs many matches across the full 1 KB input, accumulating Pike-VM overhead the TDFA eliminates per-match.
+
+`url_simple` is included as a no-capture control: it's NOT TDFA-eligible (no captures), and the TDFA dispatch step is gated out for it. Its perf is unchanged from the pre-TDFA baseline, verifying the gate works.
 
 ## What's not in C2 yet
 

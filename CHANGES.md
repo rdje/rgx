@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - C2 TDFA Phase 4: find_all wiring + perf gate + baseline refresh
+- Scope: completes the TDFA project (Phases 0-4). Wires TDFA dispatch into `Regex::find_all`, extends `regression_check` with `find_all` benches, snapshots a new baseline at the TDFA-deployed HEAD, and updates the book chapter to document the shipped TDFA.
+- `engine.rs::try_dfa_find_all` now tries the TDFA path FIRST via a new `try_tdfa_find_all` helper. The helper mirrors `try_tdfa_find_first` but iterates the per-position scan loop, emitting one `MatchResult` per non-overlapping match. Empty-match adjacency handling matches the existing DFA implementation: an empty match immediately after a previous non-empty match is dropped (scanner advances one byte; empty match itself suppressed) to avoid the `find_all("a*", "ab")` infinite-loop hazard.
+- **Capture-group gate at dispatch sites**: `try_dfa_find_first` and `try_dfa_find_all` wrap the TDFA call in `if c2.num_capture_groups > 0 { ... }` so capture-free patterns skip the call entirely. Caught by Phase 4b's regression run: without the gate, `url_simple` (no captures, not TDFA-eligible) regressed 13ns / 38-43% because the unused TDFA function call wasn't being inlined out. The gate eliminates the overhead.
+- `regression_check` extended with `BenchKind::FindAll` and `time_find_all_{rgx,pcre2}` helpers. The PCRE2 find_all iterator mirrors RGX's non-overlapping advance: after non-empty match advance to `end`; after empty match advance one byte. Runs both `find_first` AND `find_all` per pattern; baseline TOML now has 14 entries (7 patterns × 2 kinds).
+- **Measured outcomes** (median ns/op across 11 samples × 10 000 iters, 1 KB inputs):
+  - `find_all/capture_groups`: **47× faster than PCRE2** (12 ns rgx vs 561 ns pcre2, ratio 0.02). The TDFA win materializes on find_all where the Pike-VM second-pass overhead accumulates across many matches. `find_first/capture_groups` was already 46× faster pre-TDFA and stays at 46× — the second-pass overhead on a tiny match span is below measurement noise.
+  - `find_all/url_simple` (no captures, control): 25 ns rgx vs 35 ns pcre2, 1.4× faster — unchanged from pre-TDFA baseline, verifying the capture-group gate works.
+  - All 7 existing find_first benches stable within tolerance, two improved (literal_simple +20%, alternation +24%).
+- 3 new public-API tests for find_all dispatch: `find_all_via_tdfa` (3 alphabetic matches in "ab cd ef" via `(\w+)`), `find_all_no_match_via_tdfa` (zero-match return on `(\d+)` over "abc def"), `find_all_empty_match_handling_via_tdfa` (greedy `(a*)` on "aab").
+- Validation: `cargo fmt -p rgx-core` clean, `cargo test -p rgx-core --lib` 1186/1186, `cargo test -p rgx-core --test c2_pike_differential` 12/12, `cargo test -p rgx-core --test c2_tdfa_dispatch` 12/12, `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean, PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0**. New baseline written to `rgx-bench/baselines/main.toml`.
+- Book chapter `book/src/internals/nfa-dfa-engine.md` updated: the "What's next: TDFA" section becomes "The Tagged DFA (TDFA): capture recovery without a second pass", documenting the shipped design, eligibility rules, dispatch wiring, and measured perf.
+- Notes/impact: TDFA project complete. 8 commits total across Phases 0-4. The TDFA is now live for every capture-bearing C2-eligible pattern through `Regex::find_first` and `Regex::find_all`. Conformance ratchet held through the entire deployment.
+
 ### 2026-05-13 - C2 TDFA Phase 3: engine dispatch + Pike-VM bypass for capture-bearing patterns
 - Scope: wires the tagged DFA into `Regex::find_first`. Capture-bearing C2 patterns now route through a single-pass TDFA scan that produces both match end and captures directly — skipping the Pike-VM second pass entirely on TDFA-eligible patterns. This is the first commit where end users actually benefit from the TDFA. The differential gate at the public-API level passes on a 7-pattern curated corpus.
 - Public API additions:

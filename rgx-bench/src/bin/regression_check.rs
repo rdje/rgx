@@ -75,12 +75,14 @@ impl SampleResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BenchKind {
     FindFirst,
+    FindAll,
 }
 
 impl BenchKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::FindFirst => "find_first",
+            Self::FindAll => "find_all",
         }
     }
 }
@@ -158,11 +160,23 @@ fn run_all_benches() -> Vec<SampleResult> {
         let input = generate_test_data(1_024, pattern.pattern);
         let rgx = Regex::compile(pattern.pattern).expect("rgx compile");
         let pcre2 = PcreRegex::new(pattern.pattern).expect("pcre2 compile");
+
+        // find_first
         let rgx_ns = time_find_first_rgx(&rgx, &input);
         let pcre2_ns = time_find_first_pcre2(&pcre2, input.as_bytes());
         out.push(SampleResult {
             pattern: pattern.name.to_string(),
             kind: BenchKind::FindFirst,
+            rgx_ns,
+            pcre2_ns,
+        });
+
+        // find_all
+        let rgx_ns = time_find_all_rgx(&rgx, &input);
+        let pcre2_ns = time_find_all_pcre2(&pcre2, input.as_bytes());
+        out.push(SampleResult {
+            pattern: pattern.name.to_string(),
+            kind: BenchKind::FindAll,
             rgx_ns,
             pcre2_ns,
         });
@@ -188,6 +202,52 @@ fn time_find_first_pcre2(re: &PcreRegex, input: &[u8]) -> f64 {
         let start = Instant::now();
         for _ in 0..ITERS_PER_SAMPLE {
             black_box(re.find(black_box(input)).ok().flatten());
+        }
+        samples.push(start.elapsed().as_nanos() as f64 / ITERS_PER_SAMPLE as f64);
+    }
+    median(&mut samples)
+}
+
+fn time_find_all_rgx(re: &Regex, input: &str) -> f64 {
+    let mut samples = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let start = Instant::now();
+        for _ in 0..ITERS_PER_SAMPLE {
+            black_box(re.find_all(black_box(input)));
+        }
+        samples.push(start.elapsed().as_nanos() as f64 / ITERS_PER_SAMPLE as f64);
+    }
+    median(&mut samples)
+}
+
+fn time_find_all_pcre2(re: &PcreRegex, input: &[u8]) -> f64 {
+    let mut samples = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let start = Instant::now();
+        for _ in 0..ITERS_PER_SAMPLE {
+            // Iterate find_iter to mirror rgx's find_all semantics:
+            // non-overlapping matches, advance one byte past each
+            // match.
+            let mut count = 0usize;
+            let mut pos = 0usize;
+            while pos <= input.len() {
+                match re.find_at(black_box(input), pos) {
+                    Ok(Some(m)) => {
+                        count += 1;
+                        let next = if m.end() == m.start() {
+                            m.start() + 1
+                        } else {
+                            m.end()
+                        };
+                        if next > input.len() {
+                            break;
+                        }
+                        pos = next;
+                    }
+                    _ => break,
+                }
+            }
+            black_box(count);
         }
         samples.push(start.elapsed().as_nanos() as f64 / ITERS_PER_SAMPLE as f64);
     }
