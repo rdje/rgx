@@ -212,7 +212,7 @@ A summary of how each differentiator behaves across FFI:
 
 Five of the seven differentiators are FFI-friendly. The two that aren't are the rgx-specific extensions to Rust's `Fn` closure model that, by their nature, require a native-language hot path.
 
-Language-binding status is tracked in [Project Status & Roadmap](./internals/project-status.md). The current strategy is to ship a stable C API first (via `cbindgen`), then layer thin idiomatic wrappers in the languages where the differentiator stack has the largest gap relative to the language's existing regex offering.
+Language-binding status is tracked in [Project Status & Roadmap](./internals/project-status.md). The current strategy is to ship a stable C API first (via `cbindgen`), then layer thin idiomatic wrappers in the languages where the differentiator stack has the largest gap relative to the language's existing regex offering. The full design — C ABI surface, error/memory/threading models, 7-phase staging plan, per-language priority list — is documented in `docs/A9_LANGUAGE_BINDINGS_DESIGN.md` (Phase 0 landed 2026-05-13).
 
 ## Next
 

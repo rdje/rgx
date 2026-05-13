@@ -67,13 +67,14 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Rationale**: Users can't use what they can't install. Critical for adoption.
 - **Dependencies**: pgen-publish strategy (above) + API stability decision + explicit user authorization to actually publish.
 
-### A9. Language bindings (Python, Node, C) — DEFERRED 2026-04-09
-- **What**: Use rgx from Python, JavaScript/Node, and C/C++ programs.
-- **Effort**: `large` per language
-- **Status**: `deferred pending demand signal`. The "10x user base" rationale is generic and doesn't fit RGX specifically — RGX's killer feature is host integration (predicates, steering, events, async I/O, embedded scripting), and that surface translates poorly across FFI: Python callbacks become GIL territory, the async story assumes Rust's model, and the "embed Lua inside a regex from Python" pitch is weaker than from C/C++ because Python users already have a scripting host. Plus A9 is gated on A8 (publish, also deferred), is `large` per language, and the maintenance tail (packaging, version skew, prebuilds, per-binding CI) competes for time against engine work that strengthens the actual differentiator.
-- **Reactivation criteria**: a real user or use case pulling for a specific binding. **If reactivated, start with C bindings via cbindgen** — cheapest of the three and unlocks every other FFI host (PHP, Ruby, etc.) for free.
-- **How (when reactivated)**: Python via `pyo3`/`maturin`. Node via `napi-rs`. C via `cbindgen` + `extern "C"` wrapper.
-- **Dependencies**: A8 (stable public API).
+### A9. Language bindings — Phase 0 (design doc) landed 2026-05-13
+- **What**: Use rgx from Python, Go, Julia, Zig, Ruby, PHP, Swift, etc. via a C ABI foundation + per-language wrappers.
+- **Effort**: `major` (multi-month for the full surface).
+- **Status**: **Phase 0 (design doc) shipped 2026-05-13 at `docs/A9_LANGUAGE_BINDINGS_DESIGN.md`** — comprehensive design covering: C ABI as the universal entry point (one implementation effort unlocks ~10 host languages via cbindgen-generated `rgx.h`); error model (out-params + thread-local error string + panic catching); memory model (opaque pointers + retain/release); threading; ABI stability; a 7-phase staging plan from C ABI scaffolding through embedded-scripting pass-through and `tail_file`; correctness gates (Valgrind, ABI-diff CI, cross-platform matrix); risk/mitigation table; open design questions. Phases 1-6 of implementation gated on user sign-off of Phase 0.
+- **Earlier framing was right but incomplete**: A9 was deferred 2026-04-09 pending demand signal. The "Beyond regex" book chapter (`book/src/why-rgx.md`) clarified that 5 of rgx's 7 differentiators *do* translate cleanly across FFI (only host-language predicate callbacks and host-language match steering hit the cgo/ctypes per-call overhead wall). That widened the value-prop argument. The C bindings strategy still holds: one cbindgen-based effort unlocks Go (real PCRE2-vs-RE2 gap), Python (no embedded scripting in `re`/`regex`), Julia, Zig, etc.
+- **Per-language wrappers are SEPARATE projects**, not part of A9. A9 ships the C ABI foundation; idiomatic wrappers ship on demand. Initial priority per the design doc §5 Phase 7: Go → Python → Julia → Zig → Ruby/PHP.
+- **A8 dependency**: A8 publishing (crates.io) is parked pending PGEN compile-time work per `project_release_strategy` memory. A9's C ABI artefact (`librgx.so` / `librgx.dylib` / `librgx.a` + `rgx.h`) ships independently — users can clone + build today. Crate publication waits for A8.
+- **Reactivation criteria for Phase 1+ implementation**: user sign-off on the Phase 0 design doc, OR a real user pulling for a specific binding.
 
 ### A10. `\X` extended grapheme cluster ✅ DONE
 - **Status**: shipped. `OpCode::GraphemeCluster = 0x08` emitted by the compiler from `RegexAst::GraphemeCluster`; VM dispatch uses `unicode-segmentation`'s `graphemes(true)` to advance by one cluster per `\X`. Verified end-to-end on ASCII, accented (`é`), single-codepoint emoji (`🦀`), ZWJ family emoji (`👨‍👩‍👧‍👦`, 25 bytes one cluster), and combining marks (`e\u{301}`, 3 bytes one cluster).

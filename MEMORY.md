@@ -4445,3 +4445,44 @@ What remains truly open after this:
 - Misc per-category clippy follow-ups inventoried in BACKLOG C6
 - A8 publish (parked pending PGEN compile-time work per `project_release_strategy` memory)
 - A9 language bindings (deferred pending demand signal)
+
+## 2026-05-13 session — A9 Phase 0: language bindings design doc landed
+
+User PNT'd into A9. A8 publishing is parked per `project_release_strategy` memory (PGEN compile-time work, PGEN-RGX-0073, gates the eventual crates.io release vehicle), but the C ABI artefact for A9 can ship independently — users can clone + build today regardless of crate publication.
+
+Same pattern as TDFA Phase 0 / C1 Step 0: **design doc first**, implementation gated on user sign-off. Doc landed at `docs/A9_LANGUAGE_BINDINGS_DESIGN.md` (~700 lines).
+
+**Key design decisions** locked in by the doc:
+
+1. **C ABI as the universal entry point**. One `cbindgen`-generated `rgx.h` unlocks ~10 host languages via standard FFI machinery. Per-language idiomatic wrappers are SEPARATE projects.
+
+2. **Surface area informed by `book/src/why-rgx.md` differentiator analysis**: 5 of 7 rgx differentiators translate cleanly across FFI (embedded scripting, `tail_file`, sandbox modes, structured events, `code_result`). The 2 that don't (host-language predicate callbacks, host-language match steering) get minimal-but-present surface so users know what they're paying for.
+
+3. **Error model**: every fallible function returns `int32_t` (0 = OK, negative = error). Successful results via out-params. Append-only error code enumeration. Thread-local `rgx_last_error()` for human-readable diagnostics. `panic::catch_unwind` wraps every entry point — no Rust panic crosses FFI.
+
+4. **Memory model**: opaque pointers with explicit retain/release. `RgxMatch*` borrows the original text buffer. All byte-buffer APIs take explicit `(const uint8_t*, size_t)`.
+
+5. **Threading**: `RgxRegex*` thread-safe for reading (matches `Send + Sync`). `RgxMatch*` single-owner. Per-thread `rgx_last_error`.
+
+6. **ABI stability**: function signatures + error codes + `#[repr(C)]` struct layouts stable; opaque pointer internals evolve freely. Semantic version on `.so`/`.dylib`.
+
+7. **New crate `rgx-capi/`** alongside `rgx-core` and `rgx-cli`. Produces `cdylib` + `staticlib` + `rlib`.
+
+**7-phase staging plan**:
+- Phase 1: scaffolding (compile/free/is_match/find_first, C smoke test, CI)
+- Phase 2: captures + iterators + replace
+- Phase 3: configuration + safety limits + execution modes + introspection
+- Phase 4: embedded scripting hosts (native + WASM + variables + ExecContext)
+- Phase 5: observers / structured events
+- Phase 6: `tail_file`
+- Phase 7: per-language wrappers (Go → Python → Julia → Zig → Ruby/PHP, prioritised by demand)
+
+**BACKLOG A9 updated** from "DEFERRED 2026-04-09" to "Phase 0 (design doc) landed 2026-05-13" with full inventory.
+
+**`book/src/why-rgx.md`** "From other languages" section gets a cross-link to the design doc.
+
+**Validation**: mdbook build clean. No code touched. Conformance untouched.
+
+**A8 dependency clarified**: A9's C ABI artefact (`librgx.{so,dylib,a}` + `rgx.h`) ships independently. Crate publication via crates.io waits for A8 (parked pending PGEN). This decoupling matters — users who want to embed rgx via C ABI in their own build don't need to wait for the PGEN compile-time work.
+
+**Next step**: user sign-off on the design doc, then Phase 1 implementation (~3-5 days of focused work — new crate scaffolding, cbindgen, basic match functions, C-side smoke test, cross-platform CI). Per the design doc §10 acceptance criteria, Phase 1 doesn't land until the user confirms the staging plan, error model, memory model, and "C ABI ships independently of A8" position.
