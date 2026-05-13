@@ -4308,3 +4308,34 @@ User asked me to PNT into A5 ("ANSI color highlighting on the CLI"). Audit showe
 **Pattern observed across A1/A2/A5/B-list audits**: the actual feature work shipped incrementally over 2026-04 to 2026-05; BACKLOG entries weren't audited as a batch. The PNT-through-BACKLOG pattern surfaces items that are functionally done but need either test coverage or status reconciliation — both forms of completion debt. Doing the audit + reconciliation IS the work for these items, not pretending to re-implement from scratch.
 
 **Open remaining**: 3 conformance residuals, C1 JIT, C2 perf levers (TDFA broadening, DFA minimization, SIMD char-class), A6 inline-language steering (extending to embedded hosts), C6 clippy noise cleanup.
+
+## 2026-05-13 session — A6: WASM steering imports (closes A6 across all five embedded hosts)
+
+User asked me to PNT into A6 ("inline-language steering — `rgx.steer_skip(n)` from Lua / JS / Rhai / WASM"). Audit showed Lua / JS / Rhai already shipping the steer surface; the WASM host was the gap.
+
+**WASM steer imports added** to `execution.rs::wasm::build_linker`:
+- `rgx.steer_continue()` → `SteerResult::Continue`
+- `rgx.steer_fail()` → `SteerResult::Fail`
+- `rgx.steer_accept()` → `SteerResult::Accept`
+- `rgx.steer_skip(i32)` → `SteerResult::Skip(n)` (negative i32 traps as error)
+- `rgx.steer_abort()` → `SteerResult::Abort`
+
+**Plumbing**: `WasmStoreData` extended with `emitted_steer: Option<SteerResult>` + accessors. `execute_predicate` checks the emitted steer BEFORE the i32-return-value path — steer takes priority over both the predicate boolean and any `emit_numeric`/`emit_replacement` value. Matches the `finish_exec_result_with_steer` precedence used by the other hosts.
+
+**4 new tests** at `lib.rs:3901+`:
+- `safe_mode_wasm_code_block_can_emit_steer_accept` — i32=0 + steer_accept → Accept match
+- `_can_emit_steer_fail` — i32=1 + steer_fail → Failure (steer wins)
+- `_can_emit_steer_skip` — advance cursor and continue
+- `_steer_takes_priority_over_value` — emit_numeric + steer_fail simultaneously → Fail wins
+
+All four pass.
+
+**Book chapter `match-steering.md`** extended with "WASM steering" section between Rhai and the Decision Guide. Covers the five imports, the wat-syntax module-import declaration, and the steer-takes-priority semantic.
+
+**BACKLOG A6 entry** collapsed to ✅ Shipped with locations for all five hosts (native @ ExecResult variant, Lua @ execution.rs:750+, Rhai @ 1004+, JS @ 1300+, WASM @ build_linker / 5 new import functions). Cross-link to the why-rgx chapter for the embedded-set rationale.
+
+**Validation**: cargo fmt --all clean, lib --features wasm 1216/1216 (1212 baseline + 4 new), lib without wasm 1190/1190, clippy --features wasm correctness clean, mdbook builds, **conformance holds at 12,806/4** (pattern-syntax surface unchanged; WASM imports only active under `(?{wasm:...})` blocks).
+
+**Result**: every embedded host now has the full steer surface. A6 is closed. Pattern authors writing `(?{wasm:...})` blocks get the same engine-steering power as Lua/JS/Rhai users.
+
+**Open list after A6 closure**: 3 conformance residuals, C1 JIT, C2 perf levers (TDFA broadening, DFA minimization, SIMD char-class), C6 clippy noise cleanup.

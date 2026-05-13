@@ -1388,6 +1388,7 @@ pub mod wasm {
     struct WasmStoreData {
         context: ExecContext,
         emitted_result: Option<CodeBlockValue>,
+        emitted_steer: Option<SteerResult>,
     }
 
     impl WasmStoreData {
@@ -1395,6 +1396,7 @@ pub mod wasm {
             Self {
                 context,
                 emitted_result: None,
+                emitted_steer: None,
             }
         }
 
@@ -1404,6 +1406,14 @@ pub mod wasm {
 
         fn take_emitted_result(&mut self) -> Option<CodeBlockValue> {
             self.emitted_result.take()
+        }
+
+        fn set_emitted_steer(&mut self, steer: SteerResult) {
+            self.emitted_steer = Some(steer);
+        }
+
+        fn take_emitted_steer(&mut self) -> Option<SteerResult> {
+            self.emitted_steer.take()
         }
     }
 
@@ -1697,6 +1707,43 @@ pub mod wasm {
                     RgxError::Engine(format!(
                         "Failed to define WASM import rgx.emit_replacement: {e}"
                     ))
+                })?;
+            // Steering imports — matches the API surface offered by
+            // the Lua / JS / Rhai embedded hosts. The WASM module
+            // calls these to request that the engine steer to a
+            // specific outcome instead of (or in addition to)
+            // returning a predicate boolean. Steer is highest
+            // priority: if a steer is emitted, the eventual
+            // ExecResult is `Steer(_)` regardless of the function's
+            // return value.
+            linker
+                .func_wrap("rgx", "steer_continue", Self::steer_continue_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.steer_continue: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "steer_fail", Self::steer_fail_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.steer_fail: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "steer_accept", Self::steer_accept_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!(
+                        "Failed to define WASM import rgx.steer_accept: {e}"
+                    ))
+                })?;
+            linker
+                .func_wrap("rgx", "steer_skip", Self::steer_skip_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.steer_skip: {e}"))
+                })?;
+            linker
+                .func_wrap("rgx", "steer_abort", Self::steer_abort_import)
+                .map_err(|e| {
+                    RgxError::Engine(format!("Failed to define WASM import rgx.steer_abort: {e}"))
                 })?;
             trace_exit!("execution", "WasmEngine::build_linker", "ok=true");
             Ok(linker)
@@ -2066,6 +2113,35 @@ pub mod wasm {
             Ok(())
         }
 
+        fn steer_continue_import(mut caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<()> {
+            caller.data_mut().set_emitted_steer(SteerResult::Continue);
+            Ok(())
+        }
+
+        fn steer_fail_import(mut caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<()> {
+            caller.data_mut().set_emitted_steer(SteerResult::Fail);
+            Ok(())
+        }
+
+        fn steer_accept_import(mut caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<()> {
+            caller.data_mut().set_emitted_steer(SteerResult::Accept);
+            Ok(())
+        }
+
+        fn steer_skip_import(
+            mut caller: Caller<'_, WasmStoreData>,
+            count: i32,
+        ) -> wasmtime::Result<()> {
+            let skip = Self::nonnegative_i32_to_usize(count, "steer_skip count")?;
+            caller.data_mut().set_emitted_steer(SteerResult::Skip(skip));
+            Ok(())
+        }
+
+        fn steer_abort_import(mut caller: Caller<'_, WasmStoreData>) -> wasmtime::Result<()> {
+            caller.data_mut().set_emitted_steer(SteerResult::Abort);
+            Ok(())
+        }
+
         /// Register a named wasm module from binary bytes.
         pub fn register_module(&self, name: String, module_bytes: Vec<u8>) -> Result<()> {
             trace_enter!(
@@ -2193,7 +2269,15 @@ pub mod wasm {
             };
             let result = match function.call(&mut store, ()) {
                 Ok(value) => {
-                    if value != 0 {
+                    // Steer takes highest priority: if the WASM
+                    // module emitted a steer via one of the
+                    // rgx.steer_* imports, return Steer(_)
+                    // regardless of the function's i32 result.
+                    // Matches the Lua / JS / Rhai precedence in
+                    // `finish_exec_result_with_steer`.
+                    if let Some(steer) = store.data_mut().take_emitted_steer() {
+                        ExecResult::Steer(steer)
+                    } else if value != 0 {
                         match store.data_mut().take_emitted_result() {
                             Some(CodeBlockValue::Numeric(value)) => ExecResult::Numeric(value),
                             Some(CodeBlockValue::Replacement(value)) => {

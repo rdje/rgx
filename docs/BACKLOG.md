@@ -34,13 +34,16 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 ### A5. CLI `--color` output ✅ Shipped
 - **Status**: `rgx --color {auto,always,never}` flag in `rgx-cli/src/main.rs:117` with `auto` default (resolves via `std::io::IsTerminal::is_terminal`). Four distinct ANSI colors following the grep convention: bold red for matches (`\x1b[1;31m`), bold green for line numbers, bold magenta for filenames, cyan for separators. `highlight_line` (main.rs:402) wraps each match span in colour codes with relative-to-line-offset arithmetic. Helpers `color_match` / `color_file` / `color_line_num` / `color_sep`. Used at 7 dispatch sites covering find_first, find_all, --follow, --only-matching, file/directory modes. User documentation in `book/src/appendices/cli-guide.md` (the `--color` section). 11 unit tests at `rgx-cli/src/main.rs::tests` cover: `always`/`never`/`auto` resolution, no-match line passthrough, single/multiple match wrapping with ANSI codes, `line_offset` arithmetic for sliced inputs, and each of the four colour helpers individually.
 
-### A6. Inline-language steering
-- **What**: `rgx.steer_skip(n)` / `rgx.steerSkip(n)` from Lua / JS / Rhai / WASM code blocks. (Native Rust callbacks already have steering — they return `ExecResult::Steer` directly.)
-- **Effort**: `small`
-- **Rationale**: Currently steering is native-callback-only. The four *embedded* scripting hosts should have the same power.
-- **How**: Add `rgx.steer_*` helper functions to each embedded host's execution context, returning special `ExecResult::Steer` values.
-- **Why this set and not C / Python / Julia**: A6 is about *embedded* hosts — languages rgx runs *inside* the regex pattern. The embedded set (Lua, JS, Rhai, WASM, native) was chosen for sandboxability + low embed cost. C lacks a sandboxable runtime; CPython is ~10MB + GIL + not safely sandboxable; libjulia is ~100MB + JIT-heavy. WASM is the back door for anyone wanting C/Go/AssemblyScript inline: compile to WASM, use `(?{wasm:...})`. Calling rgx *from* C/Python/Julia is the FFI direction (A9), a different axis.
-- **Dependencies**: Layer 3 (shipped).
+### A6. Inline-language steering ✅ Shipped
+- **Status**: all five embedded hosts emit `SteerResult` from inside code blocks.
+  - **Native Rust callbacks** — return `ExecResult::Steer(SteerResult::...)` directly.
+  - **Lua** — `steer_continue()` / `steer_fail()` / `steer_accept()` / `steer_skip(n)` / `steer_abort()` globals (`execution.rs:750+`).
+  - **Rhai** — same five functions as global Rhai fns (`execution.rs:1004+`).
+  - **JavaScript** — `rgx.steerContinue` / `rgx.steerFail` / `rgx.steerAccept` / `rgx.steerSkip(n)` / `rgx.steerAbort` on the `rgx` object (`execution.rs:1300+`).
+  - **WASM** — `rgx.steer_continue` / `rgx.steer_fail` / `rgx.steer_accept` / `rgx.steer_skip(i32)` / `rgx.steer_abort` host imports (`execution.rs::wasm::build_linker`). Shipped 2026-05-13 — the WASM host was the last missing piece. Steer takes priority over the function's i32 return value; matches the precedence used by the other embedded hosts.
+- **Tests**: 4 new WASM-specific tests at `lib.rs::tests::safe_mode_wasm_code_block_can_emit_steer_*` (accept / fail / skip / priority-over-value). The Lua/JS/Rhai equivalents are exercised by their respective integration tests.
+- **Documentation**: `book/src/host-integration/match-steering.md` now has a "WASM steering" section between Rhai and the Decision Guide.
+- **Why this set and not C / Python / Julia**: A6 is about *embedded* hosts — languages rgx runs *inside* the regex pattern. The embedded set was chosen on three axes: embed cost, sandboxability, and design-space niche. C lacks a sandboxable runtime; CPython is ~10MB + GIL + not safely sandboxable; libjulia is ~100MB + JIT-heavy. WASM is the back door for anyone wanting C/Go/AssemblyScript inline: compile to WASM, use `(?{wasm:...})`. Calling rgx *from* C/Python/Julia is the FFI direction (A9), a different axis. See `book/src/why-rgx.md#the-embedded-language-set-why-these-five-not-others` for the full rationale.
 
 ### ~~A7. Full Unicode case folding for `(?i)`~~ ✅ Shipped
 - **What**: `(?i:café)` matches `CAFÉ`. Full simple-fold equivalences (ſ↔s, K↔K(Kelvin), Σ↔σ↔ς) now match under `/i`.

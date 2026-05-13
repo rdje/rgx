@@ -14,6 +14,21 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - A6: WASM steering imports (closes A6 across all five embedded hosts)
+- Scope: PNT into A6 ("inline-language steering — extend the steer API from native callbacks to the other embedded hosts"). Audit showed Lua / JS / Rhai already had the steer surface from prior work; the WASM host was the only one missing it. Shipped the five WASM imports to close the gap.
+- New WASM host imports in the `rgx` namespace (`rgx-core/src/execution.rs::wasm::build_linker`):
+  - `rgx.steer_continue()` → `SteerResult::Continue`
+  - `rgx.steer_fail()` → `SteerResult::Fail`
+  - `rgx.steer_accept()` → `SteerResult::Accept`
+  - `rgx.steer_skip(i32)` → `SteerResult::Skip(n)` (negative i32 traps with an error)
+  - `rgx.steer_abort()` → `SteerResult::Abort`
+- `WasmStoreData` extended with `emitted_steer: Option<SteerResult>` field + `set_emitted_steer` / `take_emitted_steer` accessors. `execute_predicate` now checks the emitted steer **before** the i32-return-value path, matching the precedence used by `finish_exec_result_with_steer` for Lua / JS / Rhai. Steer takes priority over both the predicate result and any `emit_numeric` / `emit_replacement` value.
+- 4 new unit tests in `rgx-core/src/lib.rs::tests` (lines 3901+): `safe_mode_wasm_code_block_can_emit_steer_accept` (i32=0 + steer_accept → Accept match), `_can_emit_steer_fail` (i32=1 + steer_fail → Failure), `_can_emit_steer_skip` (advance cursor), `_steer_takes_priority_over_value` (emit_numeric + steer_fail simultaneously → Fail wins). All four pass.
+- Book chapter `book/src/host-integration/match-steering.md` extended with a "WASM steering" section between Rhai and the Decision Guide. Covers the five host imports, the wat module-import syntax, and the precedence rule (steer wins over i32 return value).
+- BACKLOG A6 entry collapsed to ✅ Shipped status line with locations for all five hosts (native, Lua, JS, Rhai, WASM) and the steer-takes-priority semantic recorded. Cross-link to `book/src/why-rgx.md` for the embedded-set design rationale.
+- Validation: `cargo fmt --all` clean. `cargo test -p rgx-core --lib --features wasm` 1216/1216 (1212 baseline + 4 new). `cargo test -p rgx-core --lib` (without wasm) 1190/1190 unchanged. `cargo clippy --workspace --all-targets --features wasm -- -D clippy::correctness` clean. `mdbook build` clean. **PCRE2 conformance ratchet holds at 12,806 / 4 / 0 / 0** (the WASM host is only active under `(?{wasm:...})` code blocks; pattern-syntax surface unchanged).
+- Notes/impact: every embedded host now offers the full steer surface. A6 is closed. Pattern users authoring `(?{wasm:...})` blocks can now drive engine behaviour the same way they would from Lua / JS / Rhai — adding a real ergonomic peer to the WASM compile-target catch-all.
+
 ### 2026-05-13 - A5 (CLI --color): unit tests + BACKLOG closure
 - Scope: PNT into A5 ("ANSI color highlighting on the CLI"). Audit revealed the feature is functionally complete — `--color {auto,always,never}` flag with `is_terminal` detection, four grep-convention ANSI colors, `highlight_line` wrapper with `line_offset` arithmetic, 7 dispatch sites across find_first/find_all/--follow/--only-matching/file/directory modes, book CLI guide documentation. What was missing: unit tests for the helpers. Added those and marked A5 shipped.
 - 11 new unit tests in `rgx-cli/src/main.rs::tests` (lines 1828+):

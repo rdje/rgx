@@ -116,6 +116,32 @@ Available Rhai steering functions:
 - `steer_skip(n)` where n is an integer
 - `steer_abort()`
 
+## WASM steering
+
+WebAssembly modules call steering through the `rgx` import namespace. Five imports are wired into every module instantiation:
+
+```wat
+(module
+    (import "rgx" "steer_continue" (func $steer_continue))
+    (import "rgx" "steer_fail"     (func $steer_fail))
+    (import "rgx" "steer_accept"   (func $steer_accept))
+    (import "rgx" "steer_skip"     (func $steer_skip (param i32)))
+    (import "rgx" "steer_abort"    (func $steer_abort))
+
+    (func (export "evaluate") (result i32)
+        ;; Force-accept regardless of the i32 return value.
+        call $steer_accept
+        i32.const 0
+    )
+)
+```
+
+The WASM module's exported function still returns `i32` (its predicate result), but **the steer takes priority** — if any `rgx.steer_*` import is called, the eventual `ExecResult` is `Steer(...)` with the corresponding variant, ignoring the return value entirely. This matches the precedence used by the Lua / JS / Rhai hosts.
+
+`rgx.steer_skip` takes an `i32` byte count. Negative values are an error (the import returns a wasm trap, surfacing as `ExecResult::Error`).
+
+A WASM-side helper can be exposed via a small wrapper if you want function-style ergonomics in your guest language (Rust, AssemblyScript, etc.); the imports themselves are the underlying primitive.
+
 ## Decision guide
 
 When should you use each variant?
