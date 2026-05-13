@@ -1,0 +1,42 @@
+[package]
+name = "rgx-capi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "C ABI bindings for the rgx-core regex engine — universal entry point for FFI hosts (Go, Python, Julia, Zig, Ruby, PHP, Swift, …)"
+documentation = "https://docs.rs/rgx-capi"
+readme = "README.md"
+# Build-side custom logic: invoke cbindgen to (re)generate the C
+# header at `target/include/rgx.h` so consumers don't need cbindgen
+# installed locally.
+build = "build.rs"
+
+[lib]
+# `cdylib` produces librgx.{so,dylib,dll} for runtime linking from
+# any C-FFI host. `staticlib` produces librgx.{a,lib} for embedded
+# / static-link use cases. `rlib` keeps the crate consumable from
+# other Rust crates (rare but useful for the eventual Rust-direct
+# bindings).
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+# The engine we're wrapping. We re-export a strict subset of its
+# public API through `extern "C"` entry points.
+rgx-core = { workspace = true, default-features = false, features = ["std"] }
+
+[build-dependencies]
+# Header generation. cbindgen reads our lib.rs (with `extern "C"`
+# functions + `#[repr(C)]` types) and produces a portable C header.
+cbindgen = "0.27"
+
+[dev-dependencies]
+# C-side smoke test: a tiny C program that exercises the Phase 1
+# API surface. The harness in `tests/c_smoke_test.rs` compiles it
+# with `cc` and runs it.
+cc = "1.0"

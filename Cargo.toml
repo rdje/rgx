@@ -2,9 +2,10 @@
 resolver = "2"
 members = [
     "rgx-core",
-    "rgx-cli", 
+    "rgx-cli",
     "rgx-bench",
     "rgx-wasm",
+    "rgx-capi",
 ]
 exclude = ["subs/pgen/rust"]
 

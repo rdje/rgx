@@ -4486,3 +4486,34 @@ Same pattern as TDFA Phase 0 / C1 Step 0: **design doc first**, implementation g
 **A8 dependency clarified**: A9's C ABI artefact (`librgx.{so,dylib,a}` + `rgx.h`) ships independently. Crate publication via crates.io waits for A8 (parked pending PGEN). This decoupling matters — users who want to embed rgx via C ABI in their own build don't need to wait for the PGEN compile-time work.
 
 **Next step**: user sign-off on the design doc, then Phase 1 implementation (~3-5 days of focused work — new crate scaffolding, cbindgen, basic match functions, C-side smoke test, cross-platform CI). Per the design doc §10 acceptance criteria, Phase 1 doesn't land until the user confirms the staging plan, error model, memory model, and "C ABI ships independently of A8" position.
+
+## 2026-05-13 session — A9 Phase 1 shipped (rgx-capi crate + cbindgen + C smoke test)
+
+**Decision and trigger**: User approved Phase 1 with "Not being an expert, I approve Phase 1 implementation, will see later if there are issues." That's a deliberate "ship and iterate" sign-off — they're explicitly granting permission to land the foundation now and surface real-world friction later, rather than blocking on a full pre-implementation review by someone with deep FFI experience.
+
+**What landed**:
+- New `rgx-capi` workspace crate (`crate-type = ["cdylib", "staticlib", "rlib"]`). Depends on `rgx-core` with `std`. Builds clean.
+- 470-line `src/lib.rs` covering the Phase 1 surface: `rgx_compile`, `rgx_regex_free`, `rgx_regex_retain`, `rgx_is_match`, `rgx_find_first`, `rgx_last_error`, `rgx_runtime_version_{major,minor,patch}`. Every entry point wraps its body in `panic::catch_unwind`. Thread-local `LAST_ERROR: RefCell<Option<CString>>` for diagnostics. `RgxRegex` wraps `Arc<Regex>` so `rgx_regex_retain` is a cheap `Arc::clone`.
+- 7 stable error codes: `RGX_OK = 0`, `RGX_ERR_NULL_POINTER = -1`, `RGX_ERR_INVALID_PATTERN = -2`, `RGX_ERR_INVALID_UTF8 = -3`, `RGX_ERR_LIMIT_EXCEEDED = -5`, `RGX_ERR_INVALID_HANDLE = -7`, `RGX_ERR_INTERNAL = -99`. The `-4` and `-6` gaps are deliberate space for future categories (e.g. text-buffer issues, no-match-on-required-pattern).
+- `cbindgen.toml` + `build.rs` generate `include/rgx.h` (7 KB) on every `cargo build`. Header is also committed to the source tree so callers can inspect the API without building. `sort_by = "Name"` keeps the diff stable across regenerations.
+- 17 Rust-side unit tests + a Rust integration harness (`tests/c_smoke_test.rs`) that compiles `tests/c/smoke_test.c` against `librgx_capi.a` via the system `cc` driver and runs the resulting binary as a subprocess. The C smoke test has 8 functions exercising every Phase 1 entry point end-to-end.
+- `rgx-capi/README.md` clarifies: this is the FFI foundation, NOT idiomatic per-language wrappers. Rust users should use `rgx-core` directly.
+
+**Validation**:
+- `cargo test -p rgx-capi`: 17/0 unit tests + 1/0 C smoke test (which itself runs 8 C-side test functions).
+- `cargo clippy -p rgx-capi --all-targets`: clean.
+- `cargo test -p rgx-core --lib`: 1197/0/1 — no engine regression.
+- `cargo test -p rgx-cli`: 41/0.
+- PCRE2 conformance ratchet: **12,806 / 4 / 0 / 0** holds (363s wall on Apple Silicon release build).
+- `nm -gU librgx_capi.dylib | grep _rgx_` shows all 9 Phase 1 functions exported (plus the 6 `rgx_runtime_*` JIT trampolines that rgx-core's c1 module already exposes for dlsym).
+
+**Gotchas surfaced and resolved**:
+1. **macOS linking fails without CoreServices framework**. The rgx-core staticlib pulls in the `notify` crate transitively (via `tail_file`), and notify's FSEvents path needs `_FSEventStreamCreate` etc. — those live in `CoreServices`, not `CoreFoundation`. The harness now links both. Worth noting: this is a property of the Phase 1 staticlib, not the public C ABI. If a downstream binding wants to avoid CoreServices, the path forward is feature-gating `tail_file` to a future Phase 4 — punted to that phase.
+2. **`#[no_mangle]` on `pub extern "C"` triggers `unsafe_attr_outside_unsafe`** on current Rust. The crate already uses `#[unsafe(no_mangle)]` form throughout.
+3. **clippy `&PathBuf` warnings** in the test harness — fixed to `&Path` per clippy's `ptr_arg` lint.
+
+**What's reserved but unused**: `RGX_ERR_LIMIT_EXCEEDED` (Phase 3 brings safety limits) and `RGX_ERR_INVALID_UTF8` (Phase 2 surfaces this on capture extraction; an eventual `bytes::Regex` distinction surfaces it more broadly). Declaring them now keeps the error-code enumeration append-only.
+
+**What this unlocks today**: a real Go consumer (cgo), Python consumer (ctypes / cffi), Julia consumer (`ccall`), Zig consumer (`@cImport`), Ruby (`fiddle`), PHP FFI, Swift, Kotlin/Native, etc. can each load `librgx.dylib` or `librgx.so` and call the Phase 1 surface. Patterns compile, matches return spans, error strings are retrievable, panics never cross FFI. Per-language idiomatic wrappers are SEPARATE projects per the design doc §5 Phase 7.
+
+**Remaining A9 work**: Phase 2 (captures + iterators + replace), Phase 3 (configuration + safety limits + uses_c2/uses_tdfa/uses_jit introspection), Phase 4 (`tail_file`), Phase 5 (observers + structured events), Phase 6 (embedded scripting pass-through), Phase 7 (per-language wrappers — order: Go → Python → Julia → Zig → Ruby/PHP).

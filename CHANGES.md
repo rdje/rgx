@@ -14,6 +14,32 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - A9 Phase 1: rgx-capi scaffolding + basic matching surface
+- Scope: Phase 1 of the A9 language-bindings roadmap. User approved the Phase 0 design with the framing "Not being an expert, I approve Phase 1 implementation, will see later if there are issues." This commit lands the C ABI foundation — a new workspace crate plus a cbindgen-generated C header — and the smallest meaningful surface (compile / free / retain / is_match / find_first / last_error / version) so we have something to validate end-to-end before piling on captures, iterators, and configuration in Phase 2.
+- New `rgx-capi` workspace crate:
+  - `Cargo.toml`: depends on `rgx-core` (with `std`); declares `crate-type = ["cdylib", "staticlib", "rlib"]` so callers can link statically, dynamically, or as a Rust dependency.
+  - `src/lib.rs` (~470 lines): full Phase 1 surface in one file. Every public entry point wraps its body in `panic::catch_unwind` and converts a caught panic to `RGX_ERR_INTERNAL` so no Rust panic crosses the FFI boundary. Errors return `int32_t` (negative = error; `RGX_OK == 0`); human-readable diagnostics live in a thread-local `LAST_ERROR: RefCell<Option<CString>>` accessible via `rgx_last_error()`. `RgxRegex` is `pub struct RgxRegex { inner: Arc<Regex> }` so `rgx_regex_retain` is a cheap `Arc::clone` returning a fresh handle. Every text/pattern API takes explicit `(const uint8_t*, size_t)` — no null-terminated strings, no UTF-8 assumptions on inputs. 17 Rust-side unit tests cover the happy path, null arguments, invalid patterns, invalid UTF-8 in pattern, version metadata, error-string lifecycle, retain independence.
+  - `cbindgen.toml`: drives header generation. C language, `#pragma once` + `RGX_H` include guard, doxygen doc-comment passthrough, `sort_by = Name` for stable diffs across regenerations, explicit `[export.include]` for the 7 error-code constants.
+  - `build.rs`: invokes cbindgen at compile time. Writes `include/rgx.h` (committed alongside source so callers can inspect the header without running a build) and also copies it to `OUT_DIR`. Failure is non-fatal (Rust callers don't need the header) but surfaces a `cargo:warning=`. `cargo:rerun-if-changed` on `cbindgen.toml` / `src/lib.rs` / `build.rs`.
+  - `tests/c/smoke_test.c`: 8 C-side test functions exercising every Phase 1 entry point: version constants callable, compile/free round-trip, invalid-pattern compile populates `rgx_last_error`, is_match present/absent, find_first span (`"abc 123 def"` → `(4, 7)`), retain returns an independent handle that's separately freeable, `rgx_regex_free(NULL)` is a no-op, null arguments are rejected with `RGX_ERR_NULL_POINTER`. `int main` runs all 8 and exits 0 on success.
+  - `tests/c_smoke_test.rs`: Rust integration-test harness that compiles `smoke_test.c` against the staticlib via the system `cc` driver and runs the resulting binary as a subprocess, asserting exit code 0. Cfg-gated to Linux + macOS for Phase 1; links `CoreFoundation`, `CoreServices`, `Security`, `SystemConfiguration` on macOS (CoreServices is what supplies the `FSEventStream*` symbols pulled in by `notify` via rgx-core's `tail_file`); links `pthread`, `dl`, `m` on Linux. Honours `$CC`.
+  - `README.md`: explains what `rgx-capi` is (FFI foundation) and what it isn't (idiomatic per-language wrappers; the way Rust users should consume rgx). Documents the Phase 1 surface, build invocation, a 20-line C usage example, the ABI stability contract.
+  - `include/rgx.h` (7 KB, committed): cbindgen output. Auto-regenerated on `cargo build -p rgx-capi`.
+- Workspace `Cargo.toml`: `rgx-capi` added to `[workspace.members]`.
+- Validation:
+  - `cargo build -p rgx-capi`: clean. Produces `librgx_capi.{a,dylib,rlib}` in `target/debug/`. Header is regenerated to `rgx-capi/include/rgx.h`.
+  - `cargo test -p rgx-capi`: 17/0 unit tests; 1/0 C smoke test (8 C-side tests via subprocess).
+  - `cargo clippy -p rgx-capi --all-targets`: clean (no warnings or errors in rgx-capi).
+  - `cargo test -p rgx-core --lib`: 1197/0/1 — no engine regression.
+  - `cargo test -p rgx-cli`: 41/0 — CLI unaffected.
+  - PCRE2 conformance ratchet: **12,806 / 4 / 0 / 0** holds.
+  - `nm -gU librgx_capi.dylib | grep _rgx_` confirms all 9 Phase 1 functions are exported.
+- Notes/impact:
+  - The C ABI is now usable end-to-end from real C code. A Go consumer using cgo, a Python consumer using ctypes/cffi, a Julia consumer using `ccall`, etc. can each load `librgx.dylib` / `librgx.so` and call the Phase 1 surface today. Per-language wrappers remain SEPARATE projects (design doc §5 Phase 7) and ship on demand.
+  - `RGX_ERR_LIMIT_EXCEEDED` and `RGX_ERR_INVALID_UTF8` are reserved error codes; Phase 1 doesn't yet exercise them (Phase 3 brings safety limits; an eventual `bytes::Regex` distinction would surface UTF-8 enforcement). They're declared now to make the error-code enumeration append-only — adding error codes is always backward-compatible; reordering is not.
+  - The header is committed (not just generated at build time) so users browsing the repo can see the API surface without running cargo. The CI ABI-diff gate is a follow-up — for now, a `git diff include/rgx.h` after `cargo build` would catch accidental drift.
+  - Remaining A9 phases per `docs/A9_LANGUAGE_BINDINGS_DESIGN.md`: Phase 2 (captures + iterators + replace), Phase 3 (configuration + safety limits + execution-mode introspection), Phase 4 (`tail_file`), Phase 5 (observers / structured events), Phase 6 (embedded scripting pass-through), Phase 7 (per-language wrappers).
+
 ### 2026-05-13 - A9 Phase 0: language bindings design doc landed
 - Scope: PNT into A9 (language bindings). Same pattern as TDFA Phase 0 / C1 Step 0 — design doc first, implementation gated on user sign-off. The doc covers the full surface: C ABI as the universal entry point, error/memory/threading models, ABI stability, 7-phase staging plan, correctness gates, risk table.
 - New file `docs/A9_LANGUAGE_BINDINGS_DESIGN.md` (~700 lines) covering:

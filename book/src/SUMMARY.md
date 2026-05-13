@@ -40,6 +40,7 @@
 - [Structured Events](./host-integration/structured-events.md)
 - [Async I/O](./host-integration/async-io.md)
 - [File Matching & tail_file](./host-integration/file-matching.md)
+- [Using rgx from Other Languages (C ABI)](./host-integration/c-abi.md)
 
 # Part V: Real World
 
