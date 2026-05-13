@@ -14,6 +14,24 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - Docs: PUBLISH_READINESS.md — single page enumerating publication gates
+- Scope: user articulated the publication readiness bar — "I won't publish on crates.io unless I have all the deliverables necessary to publish (API contract stabilization, book 100% in sync with the codebase, regex engine has no showstopper bugs, ...). I want to do it right." This commit captures that as an explicit, living checklist so the gating items are visible rather than implicit.
+- New `docs/PUBLISH_READINESS.md`:
+  - Preamble preserves the user's decision rule as a direct quote and restates three properties: the user is the gatekeeper (no mechanical metric flips the switch), the list is open-ended (the "..." reserves room for more criteria), and closing individual items does NOT mean "publication is closer" — each closure is work toward the bar, not movement of the bar.
+  - 8 criteria, each structured as "What 'done' looks like" / "Current state" / "Next concrete step":
+    1. **API contract stabilization** — Not started; highest priority is `rgx-capi/STABILITY.md` (external non-Rust consumers will load `.so`/`.dylib` they can't recompile when signatures change). Per-surface table covers rgx-capi (yes, top priority), rgx-core (probably yes before publication), rgx-cli (lighter touch), PGEN grammar (out of scope).
+    2. **Book 100% in sync with codebase** — In progress per-commit (CLAUDE.md enforces it); needs a cumulative audit pass for drift before publication.
+    3. **No showstopper bugs** — Ratchet 12,806/4/0/0. 4 residuals classified: BACKLOG #59 (3 cases, engine-side fix possible) + BACKLOG #60 (1 case, blocked on PGEN-RGX-0084).
+    4. **PGEN-RGX-0073 compile-time perf** — Blocked, lives in PGEN; RGX cannot resolve directly. No actionable next step on the RGX side.
+    5. **Cross-platform CI validation** — Partial; macOS-heavy. Needs Linux + Windows matrix on GitHub Actions; the rgx-capi C smoke test is currently cfg-gated to Linux + macOS per the A9 design doc.
+    6. **Documentation completeness beyond the book** — README + LICENSE + CHANGES exist; CONTRIBUTING + issue/PR templates + a publication-shaped changelog format have not been audited.
+    7. **Performance baseline established and documented** — Bench infra exists; C4 regression gate shipped; publication-shaped comparison story (PCRE2 + RE2 + Rust `regex`) has not been written.
+    8. **Security / safety review** — Sandboxing chapter exists, panic-safety in place at the FFI boundary, safety limits implemented and exposed. `SECURITY.md` and C ABI fuzzing have not been audited.
+  - "How to update" section at the bottom: adding a criterion (numbered section, same structure), updating status (edit *Current state* paragraph, don't delete history — git log is the record), closing a criterion (state → **Complete** with how/when, keep the section in the document), and the explicit "this is not a backlog" distinction (per-feature work belongs in `docs/BACKLOG.md`).
+- README.md: pointer to the new doc added to the `docs/` markdown files index, with the distinction from BACKLOG made explicit ("cross-cutting gates" vs "per-feature work").
+- Validation: doc-only commit; no code touched. Conformance untouched.
+- Notes/impact: this is the single page that answers "what's gating publication?" — useful both for the user's own visibility and for future sessions that need to understand which items belong on the readiness bar vs. which are normal feature work. The 8 criteria above are the user's stated working definition; per the preamble, the user adds new criteria as they surface. First version is intentionally rough — per the user's instruction "we amend it when needed."
+
 ### 2026-05-13 - A9 Phase 1: rgx-capi scaffolding + basic matching surface
 - Scope: Phase 1 of the A9 language-bindings roadmap. User approved the Phase 0 design with the framing "Not being an expert, I approve Phase 1 implementation, will see later if there are issues." This commit lands the C ABI foundation — a new workspace crate plus a cbindgen-generated C header — and the smallest meaningful surface (compile / free / retain / is_match / find_first / last_error / version) so we have something to validate end-to-end before piling on captures, iterators, and configuration in Phase 2.
 - New `rgx-capi` workspace crate:

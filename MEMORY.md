@@ -4517,3 +4517,26 @@ Same pattern as TDFA Phase 0 / C1 Step 0: **design doc first**, implementation g
 **What this unlocks today**: a real Go consumer (cgo), Python consumer (ctypes / cffi), Julia consumer (`ccall`), Zig consumer (`@cImport`), Ruby (`fiddle`), PHP FFI, Swift, Kotlin/Native, etc. can each load `librgx.dylib` or `librgx.so` and call the Phase 1 surface. Patterns compile, matches return spans, error strings are retrievable, panics never cross FFI. Per-language idiomatic wrappers are SEPARATE projects per the design doc §5 Phase 7.
 
 **Remaining A9 work**: Phase 2 (captures + iterators + replace), Phase 3 (configuration + safety limits + uses_c2/uses_tdfa/uses_jit introspection), Phase 4 (`tail_file`), Phase 5 (observers + structured events), Phase 6 (embedded scripting pass-through), Phase 7 (per-language wrappers — order: Go → Python → Julia → Zig → Ruby/PHP).
+
+## 2026-05-13 session — `docs/PUBLISH_READINESS.md` first version landed
+
+**Trigger**: user articulated the readiness bar — "I won't publish on crates.io unless I have all the deliverables necessary to publish (API contract stabilization, book 100% in sync with the codebase, regex engine has no showstopper bugs, ...). I want to do it right." That's a values statement, not a feature request. Saved as a feedback memory (`feedback_publish_readiness_bar`); also captured operationally as a single checklist doc so the gates are visible rather than implicit.
+
+**What landed**: `docs/PUBLISH_READINESS.md`. Preamble preserves the user's decision rule verbatim and restates three properties: user is the gatekeeper, list is open-ended, closing items ≠ "publication is closer." Then 8 criteria, each with *What "done" looks like* / *Current state* / *Next concrete step*:
+
+1. **API contract stabilization** — Not started; `rgx-capi/STABILITY.md` is the highest priority because external non-Rust consumers will load `.so`/`.dylib` files they can't recompile when signatures change. Per-surface table covers rgx-capi (top priority), rgx-core (defer until crates.io is on the horizon or a third-party Rust consumer materializes), rgx-cli (script-stability concern, lighter touch), PGEN grammar (out of scope — lives in PGEN's own readiness bar).
+2. **Book 100% in sync with codebase** — In progress per-commit (CLAUDE.md enforces it); needs a cumulative audit before publication for drift.
+3. **No showstopper bugs** — Ratchet 12,806/4/0/0; 4 residuals classified (BACKLOG #59 = 3 cases, engine-side fix possible; BACKLOG #60 = 1 case, blocked on PGEN-RGX-0084).
+4. **PGEN-RGX-0073 compile-time perf** — Blocked on PGEN; RGX cannot resolve directly. No RGX-side next step.
+5. **Cross-platform CI validation** — Partial; macOS-heavy. Needs Linux + Windows matrix. rgx-capi C smoke test currently cfg-gated to Linux + macOS per A9 design doc §5.
+6. **Documentation completeness beyond the book** — README + LICENSE + CHANGES exist; CONTRIBUTING + issue/PR templates + publication-shaped CHANGELOG not yet audited.
+7. **Performance baseline established and documented** — Bench infra exists; C4 regression gate shipped; publication-shaped comparison story (PCRE2 + RE2 + Rust `regex`) has not been written.
+8. **Security / safety review** — Sandboxing chapter exists, panic-safety at FFI boundary, safety limits implemented. SECURITY.md + C ABI fuzzing not audited.
+
+"How to update" section at the bottom prescribes: adding a criterion (numbered section, same structure), updating status (edit *Current state*, don't delete history — git log is the record), closing a criterion (set to **Complete** with how/when, keep the section), and the explicit "this is not a backlog" distinction.
+
+**README.md** updated with a pointer to the new doc in the `docs/` index, with explicit "cross-cutting gates" vs "per-feature work" distinction from BACKLOG.
+
+**Strategic note for future sessions**: when closing major items (TDFA phases, C1 JIT, A9 phases, conformance ratchet moves), do NOT frame them as "release-blockers cleared" or "publication is closer." Per `feedback_publish_readiness_bar`, those framings are wrong — closures are work toward the bar, the bar doesn't move until every checklist item is green AND the user calls it done. The user's quality-bar framing ("do it right") is consistent with `feedback_sota_first_time` and `feedback_accuracy_first_then_speed`.
+
+**User instruction**: "You can commit the first version. We amend it when needed." First version is intentionally rough; expect criteria to be added, refined, or removed as the publication picture clarifies.
