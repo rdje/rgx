@@ -164,7 +164,7 @@ struct DfaState {
     /// the simulator just reads this and treats it as "the position
     /// after the transition into this state is a valid match end".
     /// For patterns *with* `\b` / `\B` the accept may also be
-    /// reachable via a satisfied WordBoundary epsilon — see the
+    /// reachable via a satisfied `WordBoundary` epsilon — see the
     /// precomputed [`Self::accept_when_fire_wb`] /
     /// [`Self::accept_when_not_fire_wb`] flags below.
     is_accept: bool,
@@ -340,10 +340,8 @@ impl LazyDfa {
     fn start_state_for(&self, input: &[u8], start: usize) -> DfaStateId {
         if start == 0 {
             0
-        } else if Self::word_ness_at(input, start - 1) {
-            1
         } else {
-            0
+            u32::from(Self::word_ness_at(input, start - 1))
         }
     }
 
@@ -364,10 +362,8 @@ impl LazyDfa {
     fn start_state_for_reverse(&self, input: &[u8], end: usize) -> DfaStateId {
         if end >= input.len() {
             0
-        } else if Self::word_ness_at(input, end) {
-            1
         } else {
-            0
+            u32::from(Self::word_ness_at(input, end))
         }
     }
 
@@ -423,8 +419,7 @@ impl LazyDfa {
                 let prev_state_count = self.states.len();
                 match self.transition(state, cls as u8) {
                     TransitionResult::Next(target) => {
-                        if self.states.len() > prev_state_count
-                            && (self.states.len() as usize) <= state_limit
+                        if self.states.len() > prev_state_count && self.states.len() <= state_limit
                         {
                             queue.push_back(target);
                         }
@@ -552,8 +547,7 @@ impl LazyDfa {
         // Solution: always preserve two start-state slots verbatim,
         // and let the encounter-order loop fill in the rest.
         let final_count = {
-            let distinct_partitions =
-                (partition.iter().max().copied().unwrap_or(0) as usize) + 1;
+            let distinct_partitions = (partition.iter().max().copied().unwrap_or(0) as usize) + 1;
             // We always allocate at least `min(n, 2)` start-state
             // slots. The remaining partitions add their own slots
             // only if they're not already pinned to slot 0 or 1.
@@ -599,9 +593,9 @@ impl LazyDfa {
         // Remaining partitions get IDs in encounter order.
         for s in 0..n {
             let p = partition[s];
-            if !partition_to_new_id.contains_key(&p) {
+            if let std::collections::hash_map::Entry::Vacant(e) = partition_to_new_id.entry(p) {
                 let new_id = new_states.len() as DfaStateId;
-                partition_to_new_id.insert(p, new_id);
+                e.insert(new_id);
                 new_states.push(self.states[s].clone());
             }
         }
@@ -974,6 +968,7 @@ impl LazyDfa {
     /// where every reachable transition is guaranteed to be cached;
     /// the `Exhausted` return is then a defensive guard rather than
     /// the expected outcome.
+    #[must_use]
     pub fn find_match_at_immut(&self, input: &[u8], start: usize) -> DfaSearchOutcome {
         let mut state = self.start_state_for(input, start);
         let start_pw = self.states[state as usize].prev_byte_was_word;
@@ -1031,12 +1026,10 @@ impl LazyDfa {
         // closure cost on `\b` patterns. For NFAs without word-
         // boundary edges this is a no-op (the closure ignores all
         // assertion edges and the bool collapses to `is_accept`).
-        let (accept_when_fire_wb, accept_when_not_fire_wb) = if !self
+        let (accept_when_fire_wb, accept_when_not_fire_wb) = if self
             .nfa
             .has_word_boundary_assertions()
         {
-            (is_accept, is_accept)
-        } else {
             let mut accept_fire = is_accept;
             let mut accept_not_fire = is_accept;
             if !is_accept {
@@ -1062,6 +1055,8 @@ impl LazyDfa {
                 }
             }
             (accept_fire, accept_not_fire)
+        } else {
+            (is_accept, is_accept)
         };
         self.states.push(DfaState {
             is_accept,
@@ -1224,8 +1219,10 @@ impl LazyDfa {
         for edge in &state_obj.epsilons {
             match edge.assertion {
                 None => self.epsilon_close(set, visited, edge.target),
-                Some(crate::c2::nfa::ZeroWidthAssertion::WordBoundary)
-                | Some(crate::c2::nfa::ZeroWidthAssertion::NotWordBoundary) => {
+                Some(
+                    crate::c2::nfa::ZeroWidthAssertion::WordBoundary
+                    | crate::c2::nfa::ZeroWidthAssertion::NotWordBoundary,
+                ) => {
                     // Deferred — evaluated at transition / accept-check time.
                 }
                 Some(_) => {
@@ -1239,8 +1236,8 @@ impl LazyDfa {
     }
 
     /// Word-boundary-aware variant of [`Self::epsilon_close`]. Adds
-    /// every reachable NFA state to `set`, traversing WordBoundary
-    /// edges iff `fire_wb` is `true` and NotWordBoundary edges iff
+    /// every reachable NFA state to `set`, traversing `WordBoundary`
+    /// edges iff `fire_wb` is `true` and `NotWordBoundary` edges iff
     /// `fire_wb` is `false`. Non-assertion epsilon edges are always
     /// traversed.
     ///
@@ -1274,8 +1271,8 @@ impl LazyDfa {
 
     /// Context-aware accept check. Returns `true` if either the
     /// stored `is_accept` flag fires (accept reachable without any
-    /// WordBoundary epsilon) or the accept is reachable through a
-    /// satisfied WordBoundary edge given the current position
+    /// `WordBoundary` epsilon) or the accept is reachable through a
+    /// satisfied `WordBoundary` edge given the current position
     /// context.
     ///
     /// `prev_byte_was_word` is the state's stored flag (set to the
@@ -1322,8 +1319,7 @@ impl LazyDfa {
         input
             .get(pos)
             .copied()
-            .map(crate::c2::byte_class::is_ascii_word_byte)
-            .unwrap_or(false)
+            .is_some_and(crate::c2::byte_class::is_ascii_word_byte)
     }
 }
 

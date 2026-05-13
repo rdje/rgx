@@ -55,6 +55,7 @@ use aho_corasick::{AhoCorasick, MatchKind};
 ///
 /// Each branch must be either a single `Regex::Char(c)` or a
 /// `Regex::Sequence` of `Regex::Char` items, all single-byte ASCII.
+#[must_use]
 pub fn extract_literal_alternation(ast: &Regex) -> Option<Vec<Vec<u8>>> {
     let alternation_branches = top_level_alternation_branches(ast)?;
     // Reject single-branch alternations — those have no real choice
@@ -123,6 +124,7 @@ fn pure_ascii_literal(ast: &Regex) -> Option<Vec<u8>> {
 /// rules). Returns `None` only if AC construction fails (which on
 /// `aho-corasick = "1.x"` is essentially impossible for a non-empty
 /// non-overlapping literal set, but the API is fallible).
+#[must_use]
 pub fn build_aho_corasick(literals: &[Vec<u8>]) -> Option<AhoCorasick> {
     AhoCorasick::builder()
         .match_kind(MatchKind::LeftmostFirst)

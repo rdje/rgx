@@ -611,15 +611,9 @@ fn build_yaml_report(
         PgenCategory::ParseFailure | PgenCategory::UnterminatedCharClass => {
             "PGEN should accept the pattern. PCRE2 10.47 parses it as a valid regex; the corresponding case in `subs/pcre2/testdata/testinput1` (line {line}) expects a successful match.".replace("{line}", &report.source_line.to_string())
         }
-        PgenCategory::ContractMismatch => format!(
-            "PGEN should emit an AST whose node shapes match the documented `class_item` (or analogous) contract that the RGX adapter walks. The current output triggers RGX's contract guard at compile time."
-        ),
-        PgenCategory::AcceptsPcre2Rejects => format!(
-            "PGEN should reject the pattern at parse time, matching PCRE2 10.47's compile-time rejection. Currently PGEN accepts it and emits an AST; any downstream engine that trusts PGEN's output inherits PCRE2-incompatible permissiveness."
-        ),
-        PgenCategory::WrongAstSemantics => format!(
-            "PGEN should emit an AST whose semantics align with PCRE2 10.47's documented matching behaviour for this construct. See `actual_behavior` for the concrete divergence and `pgen_ast_dump.json` for the node shape PGEN emits."
-        ),
+        PgenCategory::ContractMismatch => "PGEN should emit an AST whose node shapes match the documented `class_item` (or analogous) contract that the RGX adapter walks. The current output triggers RGX's contract guard at compile time.".to_string(),
+        PgenCategory::AcceptsPcre2Rejects => "PGEN should reject the pattern at parse time, matching PCRE2 10.47's compile-time rejection. Currently PGEN accepts it and emits an AST; any downstream engine that trusts PGEN's output inherits PCRE2-incompatible permissiveness.".to_string(),
+        PgenCategory::WrongAstSemantics => "PGEN should emit an AST whose semantics align with PCRE2 10.47's documented matching behaviour for this construct. See `actual_behavior` for the concrete divergence and `pgen_ast_dump.json` for the node shape PGEN emits.".to_string(),
     };
     let actual = format!(
         "RGX `Regex::compile({pat:?})` returns:\n      {err}",

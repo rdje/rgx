@@ -17,9 +17,9 @@
 //! - **NEON** on aarch64 — Apple Silicon, modern ARM. 16-byte blocks
 //!   via `vld1q_u8` + range / equality comparisons + `vmaxvq_u8`
 //!   reduction.
-//! - **AVX2** on x86_64 (when detected) — 32-byte blocks via
+//! - **AVX2** on `x86_64` (when detected) — 32-byte blocks via
 //!   `_mm256_loadu_si256` + `_mm256_cmpgt_epi8` + `_mm256_movemask_epi8`.
-//! - **SSE2** on x86_64 (always available on x86_64 Rust targets) —
+//! - **SSE2** on `x86_64` (always available on `x86_64` Rust targets) —
 //!   16-byte blocks via `_mm_loadu_si128` + `_mm_cmpgt_epi8` +
 //!   `_mm_movemask_epi8`.
 //! - **Scalar** fallback — portable byte loop, used on architectures

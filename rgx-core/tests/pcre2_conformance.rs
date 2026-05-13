@@ -311,7 +311,7 @@ fn classify_block<'a>(block: &'a [&[u8]]) -> BlockKind<'a> {
 /// lines) are dropped. Lines containing ONLY whitespace (spaces or
 /// tabs) are treated as block separators — pcre2test uses those
 /// interchangeably with truly-empty lines.
-fn split_into_blocks(bytes: &[u8]) -> Vec<Block> {
+fn split_into_blocks(bytes: &[u8]) -> Vec<Block<'_>> {
     let lines = split_lines(bytes);
     let mut blocks = Vec::new();
     let mut current: Vec<&[u8]> = Vec::new();
@@ -1676,7 +1676,7 @@ fn decode_hex_pattern(bytes: &[u8]) -> Option<String> {
                     i += 1;
                 }
                 let group = &bytes[start..i];
-                if group.len() % 2 != 0 {
+                if !group.len().is_multiple_of(2) {
                     return None;
                 }
                 for pair in group.chunks(2) {
@@ -3161,8 +3161,8 @@ fn run_full_conformance() {
     eprintln!("==== PCRE2 10.47 full-testdata conformance ====");
     eprintln!();
     eprintln!(
-        "  {:<16} {:>7} {:>7} {:>7} {:>7} {:>7}   {}",
-        "file", "parsed", "pass", "fail", "panic", "skip", "ran%"
+        "  {:<16} {:>7} {:>7} {:>7} {:>7} {:>7}   ran%",
+        "file", "parsed", "pass", "fail", "panic", "skip"
     );
     eprintln!(
         "  {:-<16} {:->7} {:->7} {:->7} {:->7} {:->7}   {:->6}",

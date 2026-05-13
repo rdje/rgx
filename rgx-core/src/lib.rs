@@ -327,26 +327,25 @@ impl<'t> Captures<'t> {
     }
 
     /// Iterator over all capture groups.
+    #[must_use]
     pub fn iter(&self) -> SubCaptureMatches<'_, 't> {
         SubCaptureMatches { caps: self, idx: 0 }
     }
 }
 
-impl<'t> std::ops::Index<usize> for Captures<'t> {
+impl std::ops::Index<usize> for Captures<'_> {
     type Output = str;
     fn index(&self, i: usize) -> &str {
         self.get(i)
-            .map(|m| m.as_str())
-            .unwrap_or_else(|| panic!("no group at index {i}"))
+            .map_or_else(|| panic!("no group at index {i}"), |m| m.as_str())
     }
 }
 
-impl<'t> std::ops::Index<&str> for Captures<'t> {
+impl std::ops::Index<&str> for Captures<'_> {
     type Output = str;
     fn index(&self, name: &str) -> &str {
         self.name(name)
-            .map(|m| m.as_str())
-            .unwrap_or_else(|| panic!("no group named '{name}'"))
+            .map_or_else(|| panic!("no group named '{name}'"), |m| m.as_str())
     }
 }
 
@@ -356,7 +355,7 @@ pub struct SubCaptureMatches<'c, 't> {
     idx: usize,
 }
 
-impl<'c, 't> Iterator for SubCaptureMatches<'c, 't> {
+impl<'t> Iterator for SubCaptureMatches<'_, 't> {
     type Item = Option<Match<'t>>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.caps.len() {
@@ -373,7 +372,7 @@ impl<'c, 't> Iterator for SubCaptureMatches<'c, 't> {
     }
 }
 
-impl<'c, 't> ExactSizeIterator for SubCaptureMatches<'c, 't> {}
+impl ExactSizeIterator for SubCaptureMatches<'_, '_> {}
 
 // ────────────────────────────────────────────────────────────
 // B20: CaptureLocations — reusable capture storage
@@ -513,7 +512,7 @@ where
 /// ```
 pub struct NoExpand<'s>(pub &'s str);
 
-impl<'s> Replacer for NoExpand<'s> {
+impl Replacer for NoExpand<'_> {
     fn replace_append(&mut self, _caps: &Captures<'_>, dst: &mut String) {
         dst.push_str(self.0);
     }
@@ -534,7 +533,7 @@ pub struct FindIter<'r, 't> {
     done: bool,
 }
 
-impl<'r, 't> Iterator for FindIter<'r, 't> {
+impl<'t> Iterator for FindIter<'_, 't> {
     type Item = Match<'t>;
 
     fn next(&mut self) -> Option<Match<'t>> {
@@ -575,7 +574,7 @@ impl<'r, 't> Iterator for FindIter<'r, 't> {
     }
 }
 
-impl<'r, 't> std::iter::FusedIterator for FindIter<'r, 't> {}
+impl std::iter::FusedIterator for FindIter<'_, '_> {}
 
 /// Lazy iterator over successive non-overlapping matches with capture groups.
 ///
@@ -586,7 +585,7 @@ pub struct CaptureIter<'r, 't> {
     named_all: std::sync::Arc<std::collections::HashMap<String, Vec<u32>>>,
 }
 
-impl<'r, 't> Iterator for CaptureIter<'r, 't> {
+impl<'t> Iterator for CaptureIter<'_, 't> {
     type Item = Captures<'t>;
 
     fn next(&mut self) -> Option<Captures<'t>> {
@@ -633,7 +632,7 @@ impl<'r, 't> Iterator for CaptureIter<'r, 't> {
     }
 }
 
-impl<'r, 't> std::iter::FusedIterator for CaptureIter<'r, 't> {}
+impl std::iter::FusedIterator for CaptureIter<'_, '_> {}
 
 /// Lazy iterator over substrings delimited by regex matches.
 ///
@@ -644,28 +643,25 @@ pub struct SplitIter<'r, 't> {
     done: bool,
 }
 
-impl<'r, 't> Iterator for SplitIter<'r, 't> {
+impl<'t> Iterator for SplitIter<'_, 't> {
     type Item = &'t str;
 
     fn next(&mut self) -> Option<&'t str> {
         if self.done {
             return None;
         }
-        match self.finder.next() {
-            Some(m) => {
-                let piece = &self.finder.text[self.last_end..m.start()];
-                self.last_end = m.end();
-                Some(piece)
-            }
-            None => {
-                self.done = true;
-                Some(&self.finder.text[self.last_end..])
-            }
+        if let Some(m) = self.finder.next() {
+            let piece = &self.finder.text[self.last_end..m.start()];
+            self.last_end = m.end();
+            Some(piece)
+        } else {
+            self.done = true;
+            Some(&self.finder.text[self.last_end..])
         }
     }
 }
 
-impl<'r, 't> std::iter::FusedIterator for SplitIter<'r, 't> {}
+impl std::iter::FusedIterator for SplitIter<'_, '_> {}
 
 /// Lazy iterator over substrings delimited by regex matches, with a limit.
 ///
@@ -678,7 +674,7 @@ pub struct SplitNIter<'r, 't> {
     done: bool,
 }
 
-impl<'r, 't> Iterator for SplitNIter<'r, 't> {
+impl<'t> Iterator for SplitNIter<'_, 't> {
     type Item = &'t str;
 
     fn next(&mut self) -> Option<&'t str> {
@@ -691,21 +687,18 @@ impl<'r, 't> Iterator for SplitNIter<'r, 't> {
             self.done = true;
             return Some(&self.finder.text[self.last_end..]);
         }
-        match self.finder.next() {
-            Some(m) => {
-                let piece = &self.finder.text[self.last_end..m.start()];
-                self.last_end = m.end();
-                Some(piece)
-            }
-            None => {
-                self.done = true;
-                Some(&self.finder.text[self.last_end..])
-            }
+        if let Some(m) = self.finder.next() {
+            let piece = &self.finder.text[self.last_end..m.start()];
+            self.last_end = m.end();
+            Some(piece)
+        } else {
+            self.done = true;
+            Some(&self.finder.text[self.last_end..])
         }
     }
 }
 
-impl<'r, 't> std::iter::FusedIterator for SplitNIter<'r, 't> {}
+impl std::iter::FusedIterator for SplitNIter<'_, '_> {}
 
 /// Iterator over capture group names.
 ///
@@ -743,7 +736,7 @@ impl<'r> Iterator for CaptureNames<'r> {
     }
 }
 
-impl<'r> ExactSizeIterator for CaptureNames<'r> {}
+impl ExactSizeIterator for CaptureNames<'_> {}
 
 // ────────────────────────────────────────────────────────────
 // B11: RegexBuilder — fluent compilation with flag overrides
@@ -1815,7 +1808,7 @@ impl Regex {
         } else {
             limit.min(matches.len())
         };
-        let literal = rep.no_expansion().map(|c| c.into_owned());
+        let literal = rep.no_expansion().map(std::borrow::Cow::into_owned);
         let named = std::sync::Arc::new(self.engine.named_groups().clone());
         let named_all = std::sync::Arc::new(self.engine.named_groups_all().clone());
         let mut result = String::with_capacity(text.len());
@@ -2421,7 +2414,7 @@ impl Regex {
         // precedence over `region` for a single character, then clears.
         let mut case_next = CaseChange::None;
         let mut case_region = CaseChange::None;
-        let mut push_with_case =
+        let push_with_case =
             |out: &mut String, s: &str, next: &mut CaseChange, region: CaseChange| {
                 for ch in s.chars() {
                     let applied = match *next {
@@ -2682,7 +2675,7 @@ impl Regex {
                         // preserving PCRE2's "a backslash before any
                         // non-metacharacter is the character itself"
                         // convention.
-                        push_with_case(out, &replacement[i..i + 1], &mut case_next, case_region);
+                        push_with_case(out, &replacement[i..=i], &mut case_next, case_region);
                         i += 1;
                     }
                 }
@@ -6830,10 +6823,7 @@ mod tests {
         // equivalent to `\P{Lu}`. Whitespace around the `^` is
         // tolerated.
         let re = Regex::compile(r"^\p{^Lu}+").unwrap();
-        assert!(re
-            .find_first("abcD")
-            .map(|m| m.end - m.start == 3)
-            .unwrap_or(false));
+        assert!(re.find_first("abcD").is_some_and(|m| m.end - m.start == 3));
         // `\p{  ^ Lu }` should also compile (whitespace variant).
         assert!(Regex::compile(r"^\p{  ^ Lu }+").is_ok());
     }
@@ -7723,10 +7713,10 @@ mod tests {
                     MatchOutcome::Completed(Some(m)) => {
                         assert_eq!((m.start, m.end), (0, 3));
                     }
-                    other => panic!("expected completed match after resume, got {:?}", other),
+                    other => panic!("expected completed match after resume, got {other:?}"),
                 }
             }
-            other => panic!("expected suspension, got {:?}", other),
+            other => panic!("expected suspension, got {other:?}"),
         }
     }
 
@@ -7741,10 +7731,10 @@ mod tests {
                     MatchOutcome::Completed(Some(m)) => {
                         assert_eq!((m.start, m.end), (3, 6));
                     }
-                    other => panic!("expected dog match after check failure, got {:?}", other),
+                    other => panic!("expected dog match after check failure, got {other:?}"),
                 }
             }
-            other => panic!("expected suspension, got {:?}", other),
+            other => panic!("expected suspension, got {other:?}"),
         }
     }
 
@@ -7778,10 +7768,10 @@ mod tests {
                             Some(CodeBlockValue::Replacement("kitten".to_string()))
                         );
                     }
-                    other => panic!("expected completed match, got {:?}", other),
+                    other => panic!("expected completed match, got {other:?}"),
                 }
             }
-            other => panic!("expected suspension, got {:?}", other),
+            other => panic!("expected suspension, got {other:?}"),
         }
     }
 
@@ -7795,10 +7785,10 @@ mod tests {
                     MatchOutcome::Completed(Some(m)) => {
                         assert_eq!(m.code_result, Some(CodeBlockValue::Numeric(42.0)));
                     }
-                    other => panic!("expected completed match, got {:?}", other),
+                    other => panic!("expected completed match, got {other:?}"),
                 }
             }
-            other => panic!("expected suspension, got {:?}", other),
+            other => panic!("expected suspension, got {other:?}"),
         }
     }
 
@@ -7811,7 +7801,7 @@ mod tests {
                 // Position should be at the end of "cat" (position 9)
                 assert_eq!(cont.pending_context.position, 9);
             }
-            other => panic!("expected suspension, got {:?}", other),
+            other => panic!("expected suspension, got {other:?}"),
         }
     }
 
@@ -7829,7 +7819,7 @@ mod tests {
             MatchOutcome::Completed(Some(m)) => {
                 assert_eq!((m.start, m.end), (4, 9));
             }
-            other => panic!("expected completed match, got {:?}", other),
+            other => panic!("expected completed match, got {other:?}"),
         }
     }
 
@@ -7849,7 +7839,7 @@ mod tests {
                 assert_eq!(cont.pending_callback_name, "first");
                 outcome = re.resume(*cont, ExecResult::Success);
             }
-            other => panic!("expected first suspension, got {:?}", other),
+            other => panic!("expected first suspension, got {other:?}"),
         }
 
         // Second suspension
@@ -7858,7 +7848,7 @@ mod tests {
                 assert_eq!(cont.pending_callback_name, "second");
                 outcome = re.resume(*cont, ExecResult::Success);
             }
-            other => panic!("expected second suspension, got {:?}", other),
+            other => panic!("expected second suspension, got {other:?}"),
         }
 
         // Final completion
@@ -7866,7 +7856,7 @@ mod tests {
             MatchOutcome::Completed(Some(m)) => {
                 assert_eq!((m.start, m.end), (0, 3));
             }
-            other => panic!("expected completed match, got {:?}", other),
+            other => panic!("expected completed match, got {other:?}"),
         }
     }
 
@@ -7889,7 +7879,7 @@ mod tests {
             MatchOutcome::Completed(Some(m)) => {
                 assert_eq!((m.start, m.end), (0, 3));
             }
-            other => panic!("expected completed, got {:?}", other),
+            other => panic!("expected completed, got {other:?}"),
         }
     }
 

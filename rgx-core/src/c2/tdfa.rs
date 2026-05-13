@@ -18,7 +18,7 @@
 //!   per-(NFA-state, tag) register assignment, and accept-state
 //!   register map.
 //! - [`TaggedDfa`] — the construction-time container. Carries the
-//!   per-state metadata, the flat transition table, the RegOp pool,
+//!   per-state metadata, the flat transition table, the `RegOp` pool,
 //!   and the cache.
 //! - [`TaggedDfa::try_build`] — builds the start state. Byte
 //!   transitions land in Phase 2b.
@@ -78,7 +78,7 @@ const REGISTER_NONE: u16 = u16::MAX;
 /// "position after edge" convention and the Pike-VM's existing
 /// capture-tag firing point.
 ///
-/// Dependency rule: when a transition's RegOps include both copies
+/// Dependency rule: when a transition's `RegOps` include both copies
 /// and saves, the construction emits copies in topological order
 /// before saves that read from the destination register. Cycles in
 /// the copy graph (mutual exchange) need a scratch register; this
@@ -113,9 +113,9 @@ pub struct TaggedTransition {
     /// sentinels formalise in Phase 2b when transitions land.
     pub target: TaggedDfaStateId,
     /// Index into [`TaggedDfa::reg_op_pool`] for the start of this
-    /// transition's RegOp slice.
+    /// transition's `RegOp` slice.
     pub reg_op_idx: u32,
-    /// Number of RegOps starting at `reg_op_idx`. Zero is the common
+    /// Number of `RegOps` starting at `reg_op_idx`. Zero is the common
     /// case (no captures cross this transition).
     pub reg_op_len: u16,
 }
@@ -136,7 +136,7 @@ const UNCACHED: TaggedDfaStateId = u32::MAX;
 /// Compared to a lazy DFA state (`c2/dfa.rs::DfaState`), the TDFA
 /// state additionally carries a **per-(NFA-state, tag) register
 /// assignment** in [`Self::register_map`] and an accept-state-only
-/// **accept_register_map** that the simulator reads when this state
+/// **`accept_register_map`** that the simulator reads when this state
 /// is the accept terminus.
 ///
 /// `register_map` is indexed as a flat `Vec<u16>` of length
@@ -162,7 +162,7 @@ pub struct TaggedDfaState {
     /// `nfa_states` and the same `canonical_register_map` are
     /// equivalent up to register renaming — a transition reaching
     /// such a configuration can be redirected to this state via a
-    /// short list of `Copy` RegOps (Phase 2c).
+    /// short list of `Copy` `RegOps` (Phase 2c).
     ///
     /// Stored alongside `register_map` so the cache lookup and the
     /// register-correspondence computation on cache hits don't
@@ -268,12 +268,12 @@ pub struct TaggedDfa {
     /// transitions yet); Phase 2b populates it.
     transitions: Vec<TaggedTransition>,
 
-    /// RegOp pool. [`TaggedTransition::reg_op_idx`] indexes into
+    /// `RegOp` pool. [`TaggedTransition::reg_op_idx`] indexes into
     /// this. Phase 2a uses this only for start-state initialisation
     /// operations (see [`Self::start_reg_ops`]).
     reg_op_pool: Vec<RegOp>,
 
-    /// Cache: (NFA state set, register config) → TaggedDfaStateId.
+    /// Cache: (NFA state set, register config) → `TaggedDfaStateId`.
     /// Phase 2a uses verbatim register-map comparison; Phase 2c
     /// upgrades to canonicalised comparison.
     cache: HashMap<TaggedDfaStateKey, TaggedDfaStateId>,
@@ -288,7 +288,7 @@ pub struct TaggedDfa {
     /// attempt.
     num_registers: u32,
 
-    /// RegOps that run **before the first byte** to initialise
+    /// `RegOps` that run **before the first byte** to initialise
     /// registers for tags fired during the start-state ε-closure.
     /// In Laurikari's formulation these are part of the "ε-prefix"
     /// firing; in our register layout we materialise them as a
@@ -334,7 +334,7 @@ impl TaggedDfa {
     /// Phase 2a builds only the start state. Phase 2b adds byte
     /// transitions; until then the TDFA has exactly one state and
     /// no transitions, but the start-state register map and
-    /// initialisation RegOps are fully constructed.
+    /// initialisation `RegOps` are fully constructed.
     ///
     /// # Errors
     ///
@@ -400,7 +400,7 @@ impl TaggedDfa {
         self.num_registers
     }
 
-    /// RegOps that run before the first byte to initialise
+    /// `RegOps` that run before the first byte to initialise
     /// registers for the start-state's tag firings.
     #[must_use]
     pub fn start_reg_ops(&self) -> &[RegOp] {
@@ -432,7 +432,7 @@ impl TaggedDfa {
         self.num_classes
     }
 
-    /// Borrow the RegOp pool. Indexed by
+    /// Borrow the `RegOp` pool. Indexed by
     /// [`TaggedTransition::reg_op_idx`] / `reg_op_len`. Phase 2b
     /// transitions append here; the simulator (Phase 2d) reads
     /// from here in the hot loop.
@@ -441,8 +441,8 @@ impl TaggedDfa {
         &self.reg_op_pool
     }
 
-    /// Borrow the RegOps for a given transition. Returns an empty
-    /// slice if the transition is dead, uncached, or has no RegOps.
+    /// Borrow the `RegOps` for a given transition. Returns an empty
+    /// slice if the transition is dead, uncached, or has no `RegOps`.
     /// This is the convenience wrapper the simulator (Phase 2d)
     /// uses on the hot path.
     #[must_use]
@@ -558,7 +558,7 @@ impl TaggedDfa {
     /// `transition_ops_sink`:
     /// - `Some(&mut Vec<RegOp>)` — Save ops produced by tag firings
     ///   are appended here. Used when computing a byte transition's
-    ///   RegOp list (Phase 2b).
+    ///   `RegOp` list (Phase 2b).
     /// - `None` — Save ops are appended to `self.start_reg_ops`
     ///   instead, the firing context for the start state.
     ///
@@ -576,7 +576,7 @@ impl TaggedDfa {
     /// state are ignored.
     ///
     /// This is the primitive Phase 2a built. Phase 2b extends it
-    /// to accept an explicit RegOp sink so byte-transition firings
+    /// to accept an explicit `RegOp` sink so byte-transition firings
     /// can be routed correctly.
     fn tagged_epsilon_closure_into(
         &mut self,
@@ -589,9 +589,8 @@ impl TaggedDfa {
         // Iterative DFS preserves slot order (lowest-slot edge
         // pushed last so it pops first).
         let mut stack: Vec<(NfaStateId, Vec<u16>)> = Vec::new();
-        let seed_map = inherited
-            .map(<[u16]>::to_vec)
-            .unwrap_or_else(|| vec![REGISTER_NONE; self.num_tags]);
+        let seed_map =
+            inherited.map_or_else(|| vec![REGISTER_NONE; self.num_tags], <[u16]>::to_vec);
         stack.push((seed, seed_map));
 
         while let Some((state, regs)) = stack.pop() {
@@ -747,7 +746,7 @@ impl TaggedDfa {
     ///    seeded with `n`'s register map.
     /// 2. Run a tagged ε-closure from each scheduled `m`, threading
     ///    register-map inheritance and emitting Save ops into a
-    ///    local RegOp accumulator. The closure's first-to-reach-wins
+    ///    local `RegOp` accumulator. The closure's first-to-reach-wins
     ///    guard handles priority within the closure.
     /// 3. Cross-target priority (which source `n` wins when multiple
     ///    `n`s lead to the same `m`) is handled by iteration order:
@@ -887,18 +886,18 @@ impl TaggedDfa {
         }
     }
 
-    /// Build the list of `Copy` RegOps that redirect the just-
+    /// Build the list of `Copy` `RegOps` that redirect the just-
     /// computed transition into an existing TDFA state's physical
     /// register layout.
     ///
-    /// For every (nfa_state, tag) cell where the new map uses
+    /// For every (`nfa_state`, tag) cell where the new map uses
     /// physical register `new_phys` and the existing state uses
     /// `existing_phys`, the value currently in `new_phys` must end
     /// up in `existing_phys` before the transition completes.
-    /// Multiple cells often share the same (new_phys, existing_phys)
+    /// Multiple cells often share the same (`new_phys`, `existing_phys`)
     /// pair (the same physical register holds the same tag value
     /// across multiple NFA states in the set); the Copy is emitted
-    /// exactly once per distinct pair via a `seen` HashSet.
+    /// exactly once per distinct pair via a `seen` `HashSet`.
     ///
     /// `REGISTER_NONE` cells are skipped — they represent unfired
     /// tags and have no live value to move.
@@ -1099,7 +1098,7 @@ impl TaggedDfa {
 /// `captures` is indexed by tag index (the same numbering the
 /// Pike-VM's capture buffer uses): slot 0/1 are the whole-match
 /// span, slots 2g/2g+1 are group g's start/end. The simulator
-/// fills slots 0/1 from the scan span; slots 2..num_tags() come
+/// fills slots 0/1 from the scan span; slots `2..num_tags()` come
 /// from registers via the accept state's `accept_register_map`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TdfaMatch {
@@ -1120,7 +1119,7 @@ pub struct TdfaMatch {
 /// [`TaggedDfa::num_registers`] for the live register array and a
 /// second of the same length for the "last accept snapshot."
 /// `start_reg_ops` fire at position `start`. Each byte transition's
-/// RegOps fire at the position *after* the consumed byte (matching
+/// `RegOps` fire at the position *after* the consumed byte (matching
 /// the Pike-VM's `apply_capture_tag` convention).
 ///
 /// **Leftmost-longest by construction.** The DFA model is leftmost-
@@ -1233,7 +1232,7 @@ pub fn find_match_at(tdfa: &mut TaggedDfa, input: &[u8], start: usize) -> Option
     })
 }
 
-/// Apply a single RegOp to the live registers at the simulator's
+/// Apply a single `RegOp` to the live registers at the simulator's
 /// current position.
 ///
 /// `Save { dst }` writes `Some(pos)` to register `dst`. `Copy
@@ -1718,12 +1717,12 @@ mod tests {
     fn canonicalise_distinguishes_non_equivalent_maps() {
         // Same registers but in different positions → different
         // canonical signatures.
-        let a = vec![5, 7]; // canonical = [0, 1]
-        let b = vec![7, 5]; // canonical = [0, 1] too actually... wait
-                            // Let me redo: a = [5, 7] → first sees 5 → canon 0, then 7 → canon 1 → [0, 1].
-                            // b = [7, 5] → first sees 7 → canon 0, then 5 → canon 1 → [0, 1].
-                            // So they ARE equivalent (both have two distinct registers in two positions).
-                            // Use a truly non-equivalent example instead:
+        let _a = [5, 7]; // canonical = [0, 1]
+        let _b = [7, 5]; // canonical = [0, 1] too actually... wait
+                         // Let me redo: a = [5, 7] → first sees 5 → canon 0, then 7 → canon 1 → [0, 1].
+                         // b = [7, 5] → first sees 7 → canon 0, then 5 → canon 1 → [0, 1].
+                         // So they ARE equivalent (both have two distinct registers in two positions).
+                         // Use a truly non-equivalent example instead:
         let a = vec![5, 5, 7]; // canon [0, 0, 1]
         let b = vec![5, 7, 7]; // canon [0, 1, 1]
         let (canon_a, _) = canonicalise_register_map(&a);
@@ -1808,9 +1807,7 @@ mod tests {
             .count();
         assert!(
             copy_count >= 1,
-            "cache-hit iteration of (a)+ must emit ≥ 1 Copy; got {} copies in {:?}",
-            copy_count,
-            ops_3
+            "cache-hit iteration of (a)+ must emit ≥ 1 Copy; got {copy_count} copies in {ops_3:?}"
         );
     }
 
@@ -1834,8 +1831,7 @@ mod tests {
         match (&sorted[0], &sorted[1]) {
             (RegOp::Copy { src: 11, dst: 12 }, RegOp::Copy { src: 10, dst: 11 }) => {}
             _ => panic!(
-                "topo sort produced wrong order: {:?}. Expected [Copy(11,12), Copy(10,11)]",
-                sorted
+                "topo sort produced wrong order: {sorted:?}. Expected [Copy(11,12), Copy(10,11)]"
             ),
         }
     }
@@ -1894,8 +1890,7 @@ mod tests {
         assert_eq!(
             sorted.len(),
             3,
-            "two-cycle must produce 3 Copies; got {:?}",
-            sorted
+            "two-cycle must produce 3 Copies; got {sorted:?}"
         );
 
         // A fresh scratch register must have been allocated.

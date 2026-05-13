@@ -168,7 +168,7 @@ impl TailHandle {
     /// Check if the tail thread is still running.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().map_or(false, |h| !h.is_finished())
+        self.thread.as_ref().is_some_and(|h| !h.is_finished())
     }
 }
 
@@ -218,9 +218,7 @@ impl Regex {
 
             let mut pos = if options.from_end { metadata.len() } else { 0 };
             let mut line_number = if options.from_end {
-                fs::read_to_string(&file_path)
-                    .map(|s| s.lines().count())
-                    .unwrap_or(0)
+                fs::read_to_string(&file_path).map_or(0, |s| s.lines().count())
             } else {
                 0
             };

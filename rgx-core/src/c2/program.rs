@@ -272,9 +272,9 @@ impl CompiledC2Program {
             reverse_unanchored,
             num_capture_groups,
             c2_prefix_byte,
+            c2_has_nested_quantifier,
             c2_prefix_literal,
             c2_prefix_finder,
-            c2_has_nested_quantifier,
             c2_required_inner_byte,
             c2_required_inner_literal,
             c2_required_inner_finder,
@@ -367,7 +367,7 @@ impl CompiledC2Program {
 ///
 /// Single literal non-ASCII characters (`Regex::Char(c)` where `c >
 /// 0x7F`) are still dispatchable because they produce a single
-/// Utf8Sequence with no inter-sequence overlap, so the coarse oracle
+/// `Utf8Sequence` with no inter-sequence overlap, so the coarse oracle
 /// is precise enough.
 ///
 /// The classifier's own check (`Classification::NoBacktracking`) is a
@@ -378,6 +378,7 @@ impl CompiledC2Program {
 /// test behaviour by routing affected patterns through the existing
 /// backtracking VM. As Pike-VM gains support for each excluded
 /// feature, the corresponding check can be removed.
+#[must_use]
 pub fn is_c2_dispatch_eligible(ast: &Regex) -> bool {
     !has_top_level_alternation(ast)
         && !contains_flag_group(ast)
@@ -433,7 +434,7 @@ fn contains_flag_group(ast: &Regex) -> bool {
 /// See [`is_c2_dispatch_eligible`] for the rationale.
 ///
 /// Single literal non-ASCII characters (`Regex::Char(c)` where `c` is
-/// non-ASCII) are NOT excluded — they produce one Utf8Sequence with
+/// non-ASCII) are NOT excluded — they produce one `Utf8Sequence` with
 /// non-overlapping byte ranges, which the coarse oracle handles
 /// correctly.
 fn contains_multi_byte_char_class(ast: &Regex) -> bool {
@@ -485,6 +486,7 @@ fn contains_multi_byte_char_class(ast: &Regex) -> bool {
 /// (which handles all assertions and lazy quantifiers correctly).
 /// As the DFA gains support for each excluded feature, the
 /// corresponding check can be removed.
+#[must_use]
 pub fn is_c2_dfa_eligible(ast: &Regex) -> bool {
     is_c2_dispatch_eligible(ast)
         && !contains_non_word_boundary_zero_width_assertion(ast)
@@ -511,6 +513,7 @@ pub fn is_c2_dfa_eligible(ast: &Regex) -> bool {
 ///
 /// See `docs/C2_TDFA_DESIGN.md` §4 for the full eligibility
 /// rationale and the items that may be lifted in future phases.
+#[must_use]
 pub fn is_c2_tdfa_eligible(ast: &Regex) -> bool {
     is_c2_dfa_eligible(ast) && contains_capture_group(ast) && !contains_word_boundary(ast)
 }

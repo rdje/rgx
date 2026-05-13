@@ -14,6 +14,18 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - C6: clippy auto-fix pass (29 RGX files; mechanical wins banked, remaining categories inventoried)
+- Scope: PNT into C6 ("479 missing_docs warnings"). Audit found the original framing was wrong — actual count is 2667 workspace warnings, dominated by PGEN-generated code at `subs/pgen/rust/.../generated/return_annotation_parser.rs` (450 of the "variable does not need to be mutable" warnings live there alone; per project policy that submodule is read-only from RGX). The truly RGX-owned warnings are a heterogeneous mix dominated by 116 unnecessary-unsafe blocks (defensive SIMD code), ~100 casting warnings (intentional truncations), 36 identical match arms, and various style preferences.
+- Banked the mechanical wins via `cargo clippy --fix --lib --tests -p rgx-core` and `cargo clippy --fix -p rgx-cli`. 29 RGX files touched, net -16 LOC. Changes are uniformly mechanical:
+  - Unused `mut` keywords removed.
+  - Unused match-arm fields prefixed with `_` (e.g. `non_atomic` → `non_atomic: _`).
+  - Modern-API substitutions (e.g. `n % 2 == 0` → `n.is_multiple_of(2)`).
+  - Format-string variable inlining (e.g. `format!("{}", x)` → `format!("{x}")`).
+  - Redundant closure removals.
+- Remaining ~400 RGX-owned warnings are either deliberate (casting), need manual review (unsafe blocks), or are style preferences that would touch many files without functional benefit. Inventory recorded in BACKLOG C6.
+- Validation: `cargo fmt --all` clean. `cargo test -p rgx-core --lib` 1190/1190 (semantic preservation verified). `cargo test -p rgx-cli` 41/41. `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo test -p rgx-core --test c2_tdfa_dispatch` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. `regression_check` all 14 entries stable within ±7%, no regressions. **PCRE2 conformance ratchet holds at 12,806 / 4 / 0 / 0**.
+- BACKLOG C6 marked ✅ Auto-fixable pass shipped, with the remaining category inventory recorded so a future cleanup pass has a clear starting point.
+
 ### 2026-05-13 - C2 perf levers: DFA minimization (shipped), TDFA \b broadening / SIMD / reverse-\b dispatch (deferred with rationale)
 - Scope: PNT through four C2 perf items. **Shipped**: DFA minimization (Hopcroft via Moore's partition refinement). **Deferred with documented rationale**: TDFA `\b`-in-capture broadening (#79), SIMD char-class lookup (#81), Reverse-DFA `\b` dispatch policy (#82). The deferrals all surface real architectural complications beyond the BACKLOG's "Small-Medium" framing; the rationale is recorded inline in `docs/BACKLOG.md` so a future implementer doesn't redo the analysis.
 - **#80 DFA minimization (shipped)**: new `LazyDfa::minimize` at `c2/dfa.rs:444+`. Moore's partition-refinement algorithm: initial partition by accept-flag triple (`is_accept`, `accept_when_fire_wb`, `accept_when_not_fire_wb`), iteratively refines via per-state signature `(current_partition, target_partitions_per_class)`, converges in at most `n` iterations. Runs unconditionally after `try_materialize` succeeds in `engine.rs::DfaCell::from_lazy`. **Critical invariant preserved**: states 0 (pw=false start) and 1 (pw=true start) always remain as distinct state slots even when behaviourally equivalent (the simulator's `start_state_for(input, start)` returns either ID unconditionally). Cache cleared post-minimisation. No regressions on the 14-entry bench corpus; all benches stable within ±5%.

@@ -86,7 +86,10 @@ impl RegexCache {
 
         // Fast path: read lock
         {
-            let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+            let inner = self
+                .inner
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(cached) = inner.map.get(&key) {
                 return Ok(cached.clone());
             }
@@ -100,7 +103,10 @@ impl RegexCache {
         };
         let arc = Arc::new(regex);
 
-        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Double-check: another thread may have inserted while we compiled.
         if let Some(cached) = inner.map.get(&key) {
@@ -121,7 +127,10 @@ impl RegexCache {
     /// Number of cached entries.
     #[must_use]
     pub fn len(&self) -> usize {
-        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let inner = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.map.len()
     }
 
@@ -133,7 +142,10 @@ impl RegexCache {
 
     /// Remove all cached entries.
     pub fn clear(&self) {
-        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.map.clear();
         inner.order.clear();
     }

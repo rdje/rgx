@@ -301,7 +301,7 @@ fn steer_alternating_fail_continue() {
     let re = Regex::with_mode(r"\w(?{native:alternate})", ExecutionMode::Full).unwrap();
     re.register_native("alternate", move |_| {
         let n = c.fetch_add(1, Ordering::Relaxed);
-        if n % 2 == 0 {
+        if n.is_multiple_of(2) {
             ExecResult::Steer(SteerResult::Fail)
         } else {
             ExecResult::Steer(SteerResult::Continue)
@@ -850,7 +850,7 @@ fn concurrent_set_variable_and_matching() {
     let re1 = re.clone();
     handles.push(thread::spawn(move || {
         for i in 0..1000 {
-            re1.set_variable("counter", &i.to_string()).unwrap();
+            re1.set_variable("counter", i.to_string()).unwrap();
         }
     }));
 

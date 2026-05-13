@@ -175,18 +175,17 @@ impl ByteClassMap {
                 .map(|oracle| oracle.iter().any(|&(s, e)| lo >= s && lo <= e))
                 .collect();
 
-            let class_id = match signature_to_class.get(&signature).copied() {
-                Some(id) => id,
-                None => {
-                    debug_assert!(
-                        num_classes < 256,
-                        "byte class count overflowed u8 table value range"
-                    );
-                    let id = num_classes as u8;
-                    signature_to_class.insert(signature, id);
-                    num_classes += 1;
-                    id
-                }
+            let class_id = if let Some(id) = signature_to_class.get(&signature).copied() {
+                id
+            } else {
+                debug_assert!(
+                    num_classes < 256,
+                    "byte class count overflowed u8 table value range"
+                );
+                let id = num_classes as u8;
+                signature_to_class.insert(signature, id);
+                num_classes += 1;
+                id
             };
 
             for b in lo..=hi {

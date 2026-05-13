@@ -444,7 +444,7 @@ impl ExecContext {
     /// Panics if the internal variables `RwLock` is poisoned.
     #[must_use]
     pub fn variable(&self, name: &str) -> Option<String> {
-        let variable_slots = self.variables.read().unwrap().len();
+        let _variable_slots = self.variables.read().unwrap().len();
         trace_enter!(
             "execution",
             "ExecContext::variable",
@@ -474,7 +474,7 @@ impl ExecContext {
     /// Panics if the internal variables `RwLock` is poisoned.
     #[must_use]
     pub fn variables_snapshot(&self) -> HashMap<String, String> {
-        let variable_slots = self.variables.read().unwrap().len();
+        let _variable_slots = self.variables.read().unwrap().len();
         trace_enter!(
             "execution",
             "ExecContext::variables_snapshot",
@@ -501,7 +501,7 @@ impl ExecContext {
     /// Panics if the internal typed-variables `RwLock` is poisoned.
     #[must_use]
     pub fn typed_variable(&self, name: &str) -> Option<Value> {
-        let typed_slots = self.typed_variables.read().unwrap().len();
+        let _typed_slots = self.typed_variables.read().unwrap().len();
         trace_enter!(
             "execution",
             "ExecContext::typed_variable",
@@ -2392,7 +2392,7 @@ impl NativeCallbackRegistry {
             name
         );
         let mut callbacks = self.callbacks.write().unwrap();
-        let replaced_existing = callbacks
+        let _replaced_existing = callbacks
             .insert(name.to_string(), Arc::new(callback))
             .is_some();
         trace_decision!(
@@ -2556,7 +2556,7 @@ impl ExecutionVariableRegistry {
             .unwrap()
             .insert(name.to_string(), Value::String(value.clone()));
         let mut variables = self.variables.write().unwrap();
-        let replaced_existing = variables.insert(name.to_string(), value).is_some();
+        let _replaced_existing = variables.insert(name.to_string(), value).is_some();
         trace_decision!(
             "execution",
             "variables.insert(name,...).is_some()",
@@ -2690,7 +2690,7 @@ impl ExecutionManager {
             native_callbacks: NativeCallbackRegistry::new(),
             variables: ExecutionVariableRegistry::new(),
         };
-        let lua_available = {
+        let _lua_available = {
             #[cfg(feature = "lua")]
             {
                 manager.lua_engine.is_some()
@@ -2700,7 +2700,7 @@ impl ExecutionManager {
                 false
             }
         };
-        let wasm_available = {
+        let _wasm_available = {
             #[cfg(feature = "wasm")]
             {
                 manager.wasm_engine.is_some()
@@ -2710,7 +2710,7 @@ impl ExecutionManager {
                 false
             }
         };
-        let js_available = {
+        let _js_available = {
             #[cfg(feature = "javascript")]
             {
                 manager.js_engine.is_some()
@@ -2720,7 +2720,7 @@ impl ExecutionManager {
                 false
             }
         };
-        let rhai_available = {
+        let _rhai_available = {
             #[cfg(feature = "rhai")]
             {
                 manager.rhai_engine.is_some()
@@ -2885,7 +2885,7 @@ impl ExecutionManager {
             "name={}",
             name
         );
-        let replaced_existing = self.native_callbacks.has(name);
+        let _replaced_existing = self.native_callbacks.has(name);
         self.native_callbacks.register(name, callback);
         trace_decision!(
             "execution",

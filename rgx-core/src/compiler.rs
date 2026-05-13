@@ -108,8 +108,7 @@ fn newline_mode_from_pattern(pattern: &str) -> VmNewlineMode {
     .iter()
     .filter_map(|(tag, mode)| pattern.rfind(tag).map(|idx| (idx, *mode)))
     .max_by_key(|(idx, _)| *idx)
-    .map(|(_, mode)| mode)
-    .unwrap_or(VmNewlineMode::Lf)
+    .map_or(VmNewlineMode::Lf, |(_, mode)| mode)
 }
 use crate::{debug_log, low_log, trace_decision, trace_enter, trace_exit, trace_log};
 
@@ -654,7 +653,7 @@ impl Compiler {
                 "error={}",
                 msg
             );
-            return Err(RgxError::compile(msg.to_string()));
+            return Err(RgxError::compile(msg.clone()));
         }
         trace_decision!(
             "compiler",

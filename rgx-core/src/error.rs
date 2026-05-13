@@ -55,6 +55,7 @@ impl CompileError {
     ///   (abc[def
     ///       ^
     /// ```
+    #[must_use]
     pub fn format(&self) -> String {
         let mut out = format!("regex compile error: {}", self.message);
         if let (Some(pattern), Some(offset)) = (&self.pattern, self.offset) {

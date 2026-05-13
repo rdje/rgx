@@ -179,7 +179,7 @@ pub fn reverse_ast(ast: &Regex) -> Regex {
         Regex::Lookahead {
             expr,
             positive,
-            non_atomic,
+            non_atomic: _,
         } => Regex::Lookahead {
             expr: Box::new(reverse_ast(expr)),
             positive: *positive,
@@ -188,7 +188,7 @@ pub fn reverse_ast(ast: &Regex) -> Regex {
         Regex::Lookbehind {
             expr,
             positive,
-            non_atomic,
+            non_atomic: _,
         } => Regex::Lookbehind {
             expr: Box::new(reverse_ast(expr)),
             positive: *positive,
@@ -346,7 +346,7 @@ impl Tag {
     /// [`Self::is_end`].
     #[must_use]
     pub const fn is_start(self) -> bool {
-        self.0 % 2 == 0
+        self.0.is_multiple_of(2)
     }
 
     /// True iff this is a group-end tag. The complement of
@@ -617,8 +617,9 @@ impl Nfa {
     pub fn has_non_word_boundary_assertions(&self) -> bool {
         self.states.iter().any(|s| {
             s.epsilons.iter().any(|e| match e.assertion {
-                Some(ZeroWidthAssertion::WordBoundary)
-                | Some(ZeroWidthAssertion::NotWordBoundary) => false,
+                Some(ZeroWidthAssertion::WordBoundary | ZeroWidthAssertion::NotWordBoundary) => {
+                    false
+                }
                 Some(_) => true,
                 None => false,
             })
@@ -634,8 +635,7 @@ impl Nfa {
             s.epsilons.iter().any(|e| {
                 matches!(
                     e.assertion,
-                    Some(ZeroWidthAssertion::WordBoundary)
-                        | Some(ZeroWidthAssertion::NotWordBoundary)
+                    Some(ZeroWidthAssertion::WordBoundary | ZeroWidthAssertion::NotWordBoundary)
                 )
             })
         })
@@ -1275,15 +1275,12 @@ impl<'a> NfaBuilder<'a> {
                 let optional_count = max_val.saturating_sub(min);
                 for _ in 0..optional_count {
                     let optional = self.build_zero_or_one(expr, lazy);
-                    match current_accept {
-                        Some(prev_accept) => {
-                            self.connect(prev_accept, optional.start, 0);
-                            current_accept = Some(optional.accept);
-                        }
-                        None => {
-                            current_start = Some(optional.start);
-                            current_accept = Some(optional.accept);
-                        }
+                    if let Some(prev_accept) = current_accept {
+                        self.connect(prev_accept, optional.start, 0);
+                        current_accept = Some(optional.accept);
+                    } else {
+                        current_start = Some(optional.start);
+                        current_accept = Some(optional.accept);
                     }
                 }
                 match (current_start, current_accept) {
@@ -2070,7 +2067,7 @@ mod tests {
             for codepoint in (r.start as u32)..=(r.end as u32) {
                 let c = char::from_u32(codepoint).unwrap();
                 assert!(
-                    !('a'..='z').contains(&c),
+                    !c.is_ascii_lowercase(),
                     "inverted ranges should not contain {c:?}"
                 );
             }

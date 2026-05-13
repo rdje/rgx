@@ -21,7 +21,6 @@
 
 use crate::engine::{Engine, ExecutionMode};
 use crate::error::Result;
-use crate::pattern::CompiledPattern;
 use crate::Compiler;
 
 /// A compiled regex that matches against `&[u8]` input without UTF-8 validation.

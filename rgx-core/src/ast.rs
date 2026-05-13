@@ -468,7 +468,7 @@ impl ParseContext {
             self.named_groups.len()
         );
         let number = self.next_group_number();
-        let replaced_existing = self.named_groups.insert(name.clone(), number).is_some();
+        let _replaced_existing = self.named_groups.insert(name.clone(), number).is_some();
         trace_decision!(
             "ast",
             "replaced_existing",

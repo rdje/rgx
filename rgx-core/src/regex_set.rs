@@ -131,6 +131,7 @@ impl SetMatches {
     }
 
     /// Iterator over the indices of matched patterns.
+    #[must_use]
     pub fn iter(&self) -> SetMatchesIter<'_> {
         SetMatchesIter {
             matched: &self.matched,
@@ -157,7 +158,7 @@ pub struct SetMatchesIter<'a> {
     idx: usize,
 }
 
-impl<'a> Iterator for SetMatchesIter<'a> {
+impl Iterator for SetMatchesIter<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
         while self.idx < self.matched.len() {
@@ -197,7 +198,7 @@ mod tests {
 
     #[test]
     fn regex_set_basic() {
-        let set = RegexSet::new(&[r"\d+", r"[a-z]+", r"[A-Z]+"]).unwrap();
+        let set = RegexSet::new([r"\d+", r"[a-z]+", r"[A-Z]+"]).unwrap();
         let m = set.matches("abc 123 XYZ");
         assert!(m.matched(0));
         assert!(m.matched(1));
@@ -208,7 +209,7 @@ mod tests {
 
     #[test]
     fn regex_set_partial_match() {
-        let set = RegexSet::new(&[r"\d+", r"[A-Z]+"]).unwrap();
+        let set = RegexSet::new([r"\d+", r"[A-Z]+"]).unwrap();
         let m = set.matches("abc 123");
         assert!(m.matched(0)); // digits found
         assert!(!m.matched(1)); // no uppercase
@@ -218,14 +219,14 @@ mod tests {
 
     #[test]
     fn regex_set_no_match() {
-        let set = RegexSet::new(&[r"\d+", r"[A-Z]+"]).unwrap();
+        let set = RegexSet::new([r"\d+", r"[A-Z]+"]).unwrap();
         let m = set.matches("abc def");
         assert!(!m.matched_any());
     }
 
     #[test]
     fn regex_set_is_match() {
-        let set = RegexSet::new(&[r"foo", r"bar"]).unwrap();
+        let set = RegexSet::new([r"foo", r"bar"]).unwrap();
         assert!(set.is_match("foo"));
         assert!(set.is_match("bar"));
         assert!(!set.is_match("baz"));
@@ -241,19 +242,19 @@ mod tests {
 
     #[test]
     fn regex_set_invalid_pattern_fails() {
-        let result = RegexSet::new(&[r"\d+", r"(unclosed"]);
+        let result = RegexSet::new([r"\d+", r"(unclosed"]);
         assert!(result.is_err());
     }
 
     #[test]
     fn regex_set_patterns_accessor() {
-        let set = RegexSet::new(&[r"\d+", r"\w+"]).unwrap();
+        let set = RegexSet::new([r"\d+", r"\w+"]).unwrap();
         assert_eq!(set.patterns(), &[r"\d+".to_string(), r"\w+".to_string()]);
     }
 
     #[test]
     fn regex_set_iter_matched_indices() {
-        let set = RegexSet::new(&[r"a", r"b", r"c", r"d"]).unwrap();
+        let set = RegexSet::new([r"a", r"b", r"c", r"d"]).unwrap();
         let m = set.matches("ac");
         let indices: Vec<usize> = m.iter().collect();
         assert_eq!(indices, vec![0, 2]); // "a" and "c" matched
@@ -261,7 +262,7 @@ mod tests {
 
     #[test]
     fn regex_set_into_iter() {
-        let set = RegexSet::new(&[r"x", r"y", r"z"]).unwrap();
+        let set = RegexSet::new([r"x", r"y", r"z"]).unwrap();
         let m = set.matches("xyz");
         let indices: Vec<usize> = m.into_iter().collect();
         assert_eq!(indices, vec![0, 1, 2]);
@@ -270,7 +271,7 @@ mod tests {
     #[test]
     fn regex_set_routing_use_case() {
         let routes =
-            RegexSet::new(&[r"^/api/users", r"^/api/posts", r"^/static/", r"^/health$"]).unwrap();
+            RegexSet::new([r"^/api/users", r"^/api/posts", r"^/static/", r"^/health$"]).unwrap();
 
         let m = routes.matches("/api/users/123");
         assert!(m.matched(0));

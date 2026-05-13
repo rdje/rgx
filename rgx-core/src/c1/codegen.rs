@@ -91,7 +91,7 @@ use cranelift_module::{FuncId, Linkage};
 const C1_BACKTRACK_STACK_FRAMES: i64 = 256;
 
 /// Per-frame fixed prelude size in bytes:
-/// 8 bytes saved_pc (op index) + 8 bytes saved_pos (input position).
+/// 8 bytes `saved_pc` (op index) + 8 bytes `saved_pos` (input position).
 /// Frames also carry a per-program capture snapshot whose size is
 /// `2 * (num_groups + 1) * 8` bytes — see `capture_snapshot_bytes_for`
 /// and `frame_bytes_for`.
@@ -111,7 +111,7 @@ const C1_FRAME_PRELUDE_BYTES: i64 = 16;
 /// Cap: at most `C1_MAX_USER_GROUPS` user-numbered groups. Patterns
 /// with more capture groups than this fall through to the interpreter
 /// via the engine's dispatch chain. The cap exists so the per-frame
-/// snapshot size stays bounded — at the cap the bt_stack consumes
+/// snapshot size stays bounded — at the cap the `bt_stack` consumes
 /// `C1_BACKTRACK_STACK_FRAMES * frame_bytes_for(C1_MAX_USER_GROUPS)`
 /// = 256 * (16 + 16 * (16 + 1)) = 73 728 bytes ≈ 72 KiB of function
 /// stack. Realistic patterns have far fewer groups.
@@ -135,7 +135,7 @@ const fn capture_snapshot_bytes_for(num_groups: u32) -> i64 {
     2 * (num_groups as i64 + 1) * C1_CAPTURE_SLOT_BYTES
 }
 
-/// Compute the total bt_stack byte size for a program with
+/// Compute the total `bt_stack` byte size for a program with
 /// `num_groups` capture groups. `C1_BACKTRACK_STACK_FRAMES * frame_bytes_for(num_groups)`.
 #[allow(clippy::cast_possible_truncation)] // bounded by C1_MAX_USER_GROUPS = 16 → max 73 728 bytes, fits in u32
 #[allow(clippy::cast_sign_loss)] // both factors are positive
@@ -549,7 +549,7 @@ fn eligible_opcode_operand_size(op: OpCode, rest: &[u8]) -> Option<usize> {
 ///   this when emitting calls.
 /// - `max_steps`: per-call step limit. `0` = unlimited. The JIT
 ///   maintains a step counter that increments at the start of
-///   every JitOp's emit and bails out via the limit-abort sentinel
+///   every `JitOp`'s emit and bails out via the limit-abort sentinel
 ///   `-2` when the counter reaches `max_steps`. Step 7 added this
 ///   parameter so the JIT can enforce the user-configured
 ///   `set_max_steps` limit inline.
@@ -1143,7 +1143,7 @@ pub fn compile_program(program: &Program, host: &mut JitHost) -> Result<FuncId, 
 ///    `JitHost` is dropped and the error is propagated.
 /// 3. Calls [`JitHost::finalize_definitions`] to make the function
 ///    pointer executable.
-/// 4. Wraps the host + func_id into a [`JitProgram`].
+/// 4. Wraps the host + `func_id` into a [`JitProgram`].
 ///
 /// Used by `Engine::new` (in `engine.rs`) to optionally JIT-compile
 /// every newly-built engine. Patterns the JIT can't handle return
@@ -1610,7 +1610,7 @@ fn emit_backtrack_push(
 /// ctx.step_count += 1;
 /// ```
 /// The JIT enforces the same per-call limit by emitting this
-/// helper at the START of every JitOp's emit. The semantics are
+/// helper at the START of every `JitOp`'s emit. The semantics are
 /// **per-call**, not **cumulative across calls** — the JIT's step
 /// counter resets to 0 on every JIT'd-function entry. The engine
 /// scan loop interprets the limit-abort sentinel as "stop
@@ -1658,7 +1658,7 @@ fn emit_step_limit_check(
 }
 
 /// Emit unrolled IR that copies the captures buffer into the
-/// per-frame snapshot region (frame_addr + C1_FRAME_PRELUDE_BYTES).
+/// per-frame snapshot region (`frame_addr` + `C1_FRAME_PRELUDE_BYTES`).
 /// Each capture group has 2 slots (start, end), and group 0 is
 /// included alongside the user groups, so the total slot count is
 /// `2 * (num_groups + 1)`. Each slot is `i64`.
@@ -1673,7 +1673,7 @@ fn emit_capture_snapshot_save(
     captures_ptr: cranelift_codegen::ir::Value,
     num_groups: u32,
 ) {
-    let total_slots = 2 * (num_groups as i64 + 1);
+    let total_slots = 2 * (i64::from(num_groups) + 1);
     for slot_idx in 0..total_slots {
         let slot_byte_offset = slot_idx * C1_CAPTURE_SLOT_BYTES;
         let src_addr = builder.ins().iadd_imm(captures_ptr, slot_byte_offset);
@@ -1699,7 +1699,7 @@ fn emit_capture_snapshot_restore(
     captures_ptr: cranelift_codegen::ir::Value,
     num_groups: u32,
 ) {
-    let total_slots = 2 * (num_groups as i64 + 1);
+    let total_slots = 2 * (i64::from(num_groups) + 1);
     for slot_idx in 0..total_slots {
         let slot_byte_offset = slot_idx * C1_CAPTURE_SLOT_BYTES;
         let snapshot_offset = C1_FRAME_PRELUDE_BYTES + slot_byte_offset;
@@ -3081,7 +3081,7 @@ mod tests {
         // when `jit_compile_inner` returns.
         let wrapped = move |text_ptr: *const u8, text_len: usize, pos: usize| -> isize {
             let mut captures = vec![-1i64; captures_size];
-            let cc_ptr = char_classes.as_ptr() as *const u8;
+            let cc_ptr = char_classes.as_ptr().cast::<u8>();
             let cc_len = char_classes.len();
             // SAFETY: caller upholds the text/text_len/pos
             // contract; captures is sized correctly for the
@@ -3125,7 +3125,7 @@ mod tests {
         let wrapped =
             move |text_ptr: *const u8, text_len: usize, pos: usize| -> (isize, Vec<i64>) {
                 let mut captures = vec![-1i64; captures_size];
-                let cc_ptr = char_classes.as_ptr() as *const u8;
+                let cc_ptr = char_classes.as_ptr().cast::<u8>();
                 let cc_len = char_classes.len();
                 // SAFETY: see jit_compile.
                 let result = unsafe {
@@ -3163,7 +3163,7 @@ mod tests {
                             max_bt_frames: u64|
               -> isize {
             let mut captures = vec![-1i64; captures_size];
-            let cc_ptr = char_classes.as_ptr() as *const u8;
+            let cc_ptr = char_classes.as_ptr().cast::<u8>();
             let cc_len = char_classes.len();
             // SAFETY: see jit_compile.
             unsafe {
@@ -3185,7 +3185,7 @@ mod tests {
     /// Shared inner helper: compile + finalise + transmute, then
     /// return the raw `(host, func, num_groups, char_classes)`
     /// quadruple. Both `jit_compile` and `jit_compile_with_captures`
-    /// build on this. The char_classes Vec is cloned out of the
+    /// build on this. The `char_classes` Vec is cloned out of the
     /// program so the caller can move it into the wrapper closure
     /// (the program itself is dropped when this function returns).
     fn jit_compile_inner(
@@ -3346,9 +3346,9 @@ mod tests {
         let f_xyz: JittedFn = unsafe { std::mem::transmute(host.get_finalized_fn(id_xyz)) };
         let text = b"abcxyz";
         let mut captures: [i64; 2] = [-1, -1];
-        let cc_abc_ptr = prog_abc.char_classes.as_ptr() as *const u8;
+        let cc_abc_ptr = prog_abc.char_classes.as_ptr().cast::<u8>();
         let cc_abc_len = prog_abc.char_classes.len();
-        let cc_xyz_ptr = prog_xyz.char_classes.as_ptr() as *const u8;
+        let cc_xyz_ptr = prog_xyz.char_classes.as_ptr().cast::<u8>();
         let cc_xyz_len = prog_xyz.char_classes.len();
         unsafe {
             assert_eq!(
@@ -4858,8 +4858,8 @@ mod tests {
     ///
     /// **Step 4b**: extended to allocate / reset the capture buffer
     /// between calls and return the buffer alongside the span.
-    /// **Step 6**: takes the program's char_classes slice and threads
-    /// it through to the JIT call as the new char_classes_ptr / len
+    /// **Step 6**: takes the program's `char_classes` slice and threads
+    /// it through to the JIT call as the new `char_classes_ptr` / len
     /// args.
     fn jit_find_first_via_scan(
         func: JittedFn,
@@ -4868,7 +4868,7 @@ mod tests {
         char_classes: &[crate::vm::CompiledCharClass],
     ) -> Option<(usize, usize, Vec<i64>)> {
         let captures_size = 2 * (num_groups as usize + 1);
-        let cc_ptr = char_classes.as_ptr() as *const u8;
+        let cc_ptr = char_classes.as_ptr().cast::<u8>();
         let cc_len = char_classes.len();
         for start in 0..=text.len() {
             let mut captures = vec![-1i64; captures_size];
@@ -5268,7 +5268,7 @@ mod tests {
             Ok(_) => {}
             Err(JitHostError::CodegenUnsupported(_)) => return false,
             Err(other) => panic!("compile_program for `{pattern}` failed: {other}"),
-        };
+        }
         // We don't actually need the JIT'd function pointer here —
         // the engine's `Regex::compile` builds its own JitProgram
         // via `build_jit_program_if_eligible` and dispatches

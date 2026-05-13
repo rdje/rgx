@@ -497,7 +497,7 @@ mod tests {
         class_id: u32,
         negated: bool,
     ) -> u32 {
-        let cc_ptr = program.char_classes.as_ptr() as *const u8;
+        let cc_ptr = program.char_classes.as_ptr().cast::<u8>();
         let cc_len = program.char_classes.len();
         // SAFETY: text outlives the call; cc_ptr is valid for cc_len
         // CompiledCharClass values via program.

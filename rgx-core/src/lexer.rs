@@ -182,14 +182,14 @@ impl<'a> Lexer<'a> {
 
         let result = token_result.map(|token| TokenWithPos::new(token, start_pos));
         match &result {
-            Ok(token) => trace_exit!(
+            Ok(_token) => trace_exit!(
                 "lexer",
                 "Lexer::next_token",
                 "ok=true,token_kind={},offset={}",
                 Self::token_kind(&token.token),
                 token.position.offset
             ),
-            Err(err) => trace_exit!("lexer", "Lexer::next_token", "ok=false,error={}", err),
+            Err(_err) => trace_exit!("lexer", "Lexer::next_token", "ok=false,error={}", err),
         }
         result
     }
@@ -214,13 +214,13 @@ impl<'a> Lexer<'a> {
             Some(c) => self.parse_escape_char(c, start_pos),
         };
         match &result {
-            Ok(token) => trace_exit!(
+            Ok(_token) => trace_exit!(
                 "lexer",
                 "Lexer::parse_escape",
                 "ok=true,token_kind={}",
                 Self::token_kind(token)
             ),
-            Err(err) => trace_exit!("lexer", "Lexer::parse_escape", "ok=false,error={}", err),
+            Err(_err) => trace_exit!("lexer", "Lexer::parse_escape", "ok=false,error={}", err),
         }
         result
     }
@@ -1107,13 +1107,13 @@ impl<'a> Lexer<'a> {
             }),
         };
         match &result {
-            Ok(token) => trace_exit!(
+            Ok(_token) => trace_exit!(
                 "lexer",
                 "Lexer::parse_group",
                 "ok=true,token_kind={}",
                 Self::token_kind(token)
             ),
-            Err(err) => trace_exit!("lexer", "Lexer::parse_group", "ok=false,error={}", err),
+            Err(_err) => trace_exit!("lexer", "Lexer::parse_group", "ok=false,error={}", err),
         }
         result
     }
@@ -1569,7 +1569,7 @@ impl<'a> Lexer<'a> {
                 "ok=true,expr_len={}",
                 expr_text.len()
             ),
-            Err(err) => trace_exit!(
+            Err(_err) => trace_exit!(
                 "lexer",
                 "Lexer::parse_conditional_subexpression_ast",
                 "ok=false,error={}",

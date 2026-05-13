@@ -495,7 +495,6 @@ mod tests {
 
     #[test]
     fn set_vars_option_c() {
-        use crate::value;
         let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full).unwrap();
         re.set_vars(value!({
             "env" => "staging",

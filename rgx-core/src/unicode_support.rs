@@ -96,7 +96,7 @@ pub(crate) fn resolve_unicode_property_class(
 /// PCRE2 case-distinguished Unicode property closure under `/i`.
 ///
 /// Per pcre2pattern(3) lines 980-985: *"If they are used with the
-/// PCRE2_CASELESS option, pattern letters from the property classes
+/// `PCRE2_CASELESS` option, pattern letters from the property classes
 /// Lu, Ll, and Lt are all matched against any letter (Lu, Ll, or
 /// Lt)."* The same rule applies to the boolean case-distinction
 /// properties Upper / Lower / Title (which collapse to `Cased`)

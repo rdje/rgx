@@ -17,13 +17,13 @@ use std::sync::{Arc, OnceLock};
 /// pre-filled at engine-build time, after which the dispatch hot
 /// path can read from the DFA via `&Arc<LazyDfa>` and skip the
 /// Mutex entirely (saving ~3 ns per call on top of today's
-/// parking_lot win). Patterns above the bound fall back to the
+/// `parking_lot` win). Patterns above the bound fall back to the
 /// lazy + Mutex path. 64 covers `\d{3}-\d{2}-\d{4}`, `\b\w+\b`,
 /// most simple literal alternations, and patterns of similar
 /// shape; larger patterns (`url_simple`, multi-class with `\w+`,
 /// counted-quantifier unrolls) typically exceed the limit but
 /// don't lose performance — the Mutex was already cheap with
-/// parking_lot.
+/// `parking_lot`.
 const DFA_MATERIALIZE_STATE_LIMIT: usize = 64;
 
 /// Lock-free or lock-protected access wrapper for a `LazyDfa`.
@@ -86,20 +86,15 @@ pub enum ExecutionMode {
 }
 
 /// Controls how alternation matches are selected.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum MatchSemantics {
     /// Leftmost-first: the first alternative that matches wins (PCRE2/Perl default).
     /// `a|ab` on "ab" → matches "a".
+    #[default]
     LeftmostFirst,
     /// Leftmost-longest: at each position, the longest match wins (POSIX semantics).
     /// `a|ab` on "ab" → matches "ab".
     LeftmostLongest,
-}
-
-impl Default for MatchSemantics {
-    fn default() -> Self {
-        Self::LeftmostFirst
-    }
 }
 
 /// Result of a partial-match query.
@@ -181,7 +176,7 @@ pub struct Engine {
     /// reverse DFA walks backward from that end to find the START,
     /// and finally Pike-VM recovers captures over the known span.
     /// Replaces the per-position anchored-DFA scan (which was O(n ·
-    /// candidate_positions)) on the fast path. Lazy — built on first
+    /// `candidate_positions`)) on the fast path. Lazy — built on first
     /// access from the reverse-DFA pipeline driver.
     c2_forward_unanchored_dfa: OnceLock<Option<Mutex<LazyDfa>>>,
     /// C2 lazy DFA built over the **reverse-anchored** NFA. The
@@ -281,7 +276,7 @@ fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
 
 /// Allocate a fresh capture-slot buffer sized for `num_groups`
 /// user-numbered capture groups. Layout matches the JIT'd function's
-/// captures_ptr contract: `[i64; 2 * (num_groups + 1)]`, with each
+/// `captures_ptr` contract: `[i64; 2 * (num_groups + 1)]`, with each
 /// pair representing `(start, end)` for one group, and `-1` meaning
 /// "unset". Group 0 is included alongside the user groups, so the
 /// buffer always has at least 2 slots.
@@ -310,7 +305,7 @@ fn reset_capture_buffer(captures: &mut [i64]) {
 ///
 /// The JIT'd function returns the new match end position via its
 /// return value AND populates the caller-provided captures buffer
-/// with `(start, end)` pairs for every capture group 0..=num_groups.
+/// with `(start, end)` pairs for every capture group `0..=num_groups`.
 /// This helper:
 ///
 /// 1. Reads each `(start, end)` slot pair from the buffer.
@@ -391,7 +386,7 @@ impl<'a> PrefixScanner<'a> {
     /// Build a scanner from a VM and the C2 program's prefix hints.
     /// Resolution priority (most selective wins):
     ///
-    /// 1. `c2_prefix_finder` (pre-built memmem::Finder, multi-byte)
+    /// 1. `c2_prefix_finder` (pre-built `memmem::Finder`, multi-byte)
     /// 2. `c2_prefix_byte` (single byte) → `memchr`
     /// 3. `vm.prefix_filter()` (byte class / char class) → scalar loop
     ///
@@ -426,7 +421,7 @@ impl<'a> PrefixScanner<'a> {
         // the leading literal is more than one byte. SIMD-accelerated
         // by `memchr::memmem` (Two-Way / Boyer-Moore-Horspool under
         // the hood).
-        if let Some(ref finder) = self.literal_finder {
+        if let Some(finder) = self.literal_finder {
             if start >= input.len() {
                 return None;
             }
@@ -784,7 +779,7 @@ impl Engine {
     /// `Mutex<PikeScratch>` only for the duration of one
     /// `pike_captures_at_with_scratch` / `pike_captures_all_with_scratch`
     /// call so the buffers stay attached to the engine while the
-    /// inner ThreadSet contents reset between calls.
+    /// inner `ThreadSet` contents reset between calls.
     ///
     /// Returns `None` for engines without a `c2_program` (the scratch
     /// has nothing to size against). Callers fall through to the
@@ -1322,11 +1317,11 @@ impl Engine {
     /// True when the reverse-DFA pipeline is preferred over the
     /// per-position anchored scan for `find_first`.
     ///
-    /// The per-position scan is O(candidate_positions * match_length)
+    /// The per-position scan is `O(candidate_positions` * `match_length`)
     /// and uses [`PrefixScanner`] + `memchr` / byte-class predicates to
     /// jump between candidate positions. When the pattern exposes any
     /// prefix hint (literal byte, `\d`/`\w`/`\s`, or a custom char
-    /// class) the per-position scan is close to O(match_length) per
+    /// class) the per-position scan is close to `O(match_length)` per
     /// candidate and typically faster than the pipeline's three full
     /// DFA sweeps.
     ///
@@ -1569,7 +1564,7 @@ impl Engine {
     /// 3. Forward-anchored `find_match_at(input, start)` — greedy end.
     /// 4. Pike-VM `pike_captures_at(c2, input, start)` — captures.
     ///
-    /// The find_all advance rules (non-empty → end, empty adjacent
+    /// The `find_all` advance rules (non-empty → end, empty adjacent
     /// to a previous non-empty → skip by 1, empty otherwise →
     /// `start + 1`) are applied on each iteration. An exhaustion or
     /// reconciliation failure at any pass aborts with `None`.
@@ -1860,7 +1855,7 @@ impl Engine {
         }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
-        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_ptr = self.vm.program.char_classes.as_ptr().cast::<u8>();
         let cc_len = self.vm.program.char_classes.len();
         // Step 7: thread the user-configured runtime safety
         // limits through to the JIT'd function as 7th and 8th
@@ -1950,7 +1945,7 @@ impl Engine {
         }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
-        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_ptr = self.vm.program.char_classes.as_ptr().cast::<u8>();
         let cc_len = self.vm.program.char_classes.len();
         // Step 7: thread the user-configured runtime safety
         // limits through to the JIT'd function as 7th and 8th
@@ -2046,7 +2041,7 @@ impl Engine {
         }
         let func = self.jit_function_ptr(jit_mutex);
         let num_groups = self.vm.program.num_groups;
-        let cc_ptr = self.vm.program.char_classes.as_ptr() as *const u8;
+        let cc_ptr = self.vm.program.char_classes.as_ptr().cast::<u8>();
         let cc_len = self.vm.program.char_classes.len();
         // Step 7: thread the user-configured runtime safety
         // limits through to the JIT'd function as 7th and 8th
@@ -2251,7 +2246,7 @@ impl Engine {
                 );
                 s
             }
-            Err(err) => {
+            Err(_err) => {
                 trace_decision!(
                     "engine",
                     "std::str::from_utf8(text).is_ok()",
@@ -2382,7 +2377,7 @@ impl Engine {
                 );
                 s
             }
-            Err(err) => {
+            Err(_err) => {
                 trace_decision!(
                     "engine",
                     "std::str::from_utf8(text).is_ok()",

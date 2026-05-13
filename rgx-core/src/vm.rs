@@ -210,8 +210,8 @@ pub enum OpCode {
     /// Call subroutine (for recursion/subroutine calls)
     Call = 0x45,
     /// Call subroutine with a "returned-capture" group list (PCRE2
-    /// `(?N(grouplist))` syntax). Operand format: target_id (u8) +
-    /// count (u8) + count × group_id (u8). After the subroutine
+    /// `(?N(grouplist))` syntax). Operand format: `target_id` (u8) +
+    /// count (u8) + count × `group_id` (u8). After the subroutine
     /// matches, the listed groups' captures (as set inside the
     /// subroutine) leak back into the outer capture state; all
     /// other captures made inside the subroutine are isolated and
@@ -290,7 +290,7 @@ pub enum OpCode {
     /// (read 2 bytes, advance ip by 2, ip += offset).
     StarLazyContinue = 0x87,
     /// Wrapper for the alt-aware lazy `*?` loop. Operand: 1-byte
-    /// block_len — length of the inline body block
+    /// `block_len` — length of the inline body block
     /// `[SaveLazyPos][body][StarLazyContinue][2-byte back-offset]`.
     /// Dispatch: push an iter-frame at the start of the block (=
     /// `SaveLazyPos`) carrying the current text pos, then advance ip
@@ -323,11 +323,11 @@ pub enum OpCode {
     /// Cluster 1C — non-atomic positive lookahead body prologue.
     /// 4-byte LE operand: byte-offset from the end of the operand to
     /// the matching `NaplaRestorePos`. Pushes a `NaplaScope` onto
-    /// `ctx.napla_scope_stack` recording (start_ip = body_start,
-    /// end_ip = NaplaRestorePos_pos, saved_pos = current ctx.pos).
+    /// `ctx.napla_scope_stack` recording (`start_ip` = `body_start`,
+    /// `end_ip` = `NaplaRestorePos_pos`, `saved_pos` = current ctx.pos).
     /// `OpCode::Accept` checks the top scope: if the current ip is
     /// within `[start_ip, end_ip)`, ACCEPT is scoped to the
-    /// assertion — control jumps to the NaplaRestorePos byte instead
+    /// assertion — control jumps to the `NaplaRestorePos` byte instead
     /// of bubbling up as a force-match. PCRE2 spec: "(*ACCEPT) inside
     /// a positive assertion makes the assertion succeed".
     NaplaScopeBegin = 0x8B,
@@ -545,6 +545,7 @@ impl VmNewlineMode {
     /// newline under this convention. Used by `OpCode::StartLine` to
     /// decide whether `^` is legal at `pos`.
     #[inline]
+    #[must_use]
     pub fn is_line_start_before(self, text: &[u8], pos: usize) -> bool {
         if pos == 0 {
             return true;
@@ -606,6 +607,7 @@ impl VmNewlineMode {
     /// newline under this convention. Used by `OpCode::EndLine` to
     /// decide whether `$` is legal at `pos`.
     #[inline]
+    #[must_use]
     pub fn is_line_end_at(self, text: &[u8], pos: usize) -> bool {
         if pos >= text.len() {
             return true;
@@ -702,8 +704,8 @@ pub struct Program {
     /// the previous / current byte is one of the newlines in this
     /// set rather than hard-coding `\n`.
     pub newline_mode: VmNewlineMode,
-    /// PCRE2_UCP flag: controls whether `\b` / `\B` use Unicode
-    /// General_Category L|N plus `_` as word characters (true) or the
+    /// `PCRE2_UCP` flag: controls whether `\b` / `\B` use Unicode
+    /// `General_Category` L|N plus `_` as word characters (true) or the
     /// ASCII subset `[A-Za-z0-9_]` (false, default). Set at compile
     /// time from the pattern's `(*UCP)` start-verb.
     pub ucp_enabled: bool,
@@ -839,7 +841,7 @@ pub struct ExecContext<'a> {
     /// the topmost alt-fallback frame to this slot before clearing.
     /// `verb_apply_then` reads the slot: if Some, push the frame back
     /// onto the stack so the alt-redirect path can take it. Reset to
-    /// None at execute_at start.
+    /// None at `execute_at` start.
     pub pending_alt_revival: Option<BacktrackFrame>,
     /// Cluster 1E/2B/2H — lazy-loop pre-body-pos save stack. Each
     /// `OpCode::SaveLazyPos` (emitted at body entry of a `*?` lazy
@@ -925,15 +927,15 @@ pub struct ExecContext<'a> {
     pub alt_scope_marks: Vec<usize>,
     /// Cluster 1C — active non-atomic positive lookahead body
     /// scopes. Pushed by `NaplaScopeBegin`, peeked by
-    /// `NaplaRestorePos` (saved_pos) and `OpCode::Accept`
-    /// (start_ip/end_ip range). Truncated on backtrack via
+    /// `NaplaRestorePos` (`saved_pos`) and `OpCode::Accept`
+    /// (`start_ip/end_ip` range). Truncated on backtrack via
     /// `BacktrackFrame.napla_scope_len`. The scope stack lingers
     /// across body alt re-entries (peek-don't-pop) so ACCEPT can
     /// be redirected each time, and is rolled back by the backtrack
     /// machinery when execution backtracks past the corresponding
     /// `NaplaScopeBegin`.
     pub napla_scope_stack: Vec<NaplaScope>,
-    /// PCRE2 NOTEMPTY_ATSTART: when set, the engine rejects matches
+    /// PCRE2 `NOTEMPTY_ATSTART`: when set, the engine rejects matches
     /// that span zero bytes at the search-start position. Used by
     /// `find_all_scanning_from` after an empty match to retry at the
     /// same position forcing a non-empty match — the PCRE2 substitute
@@ -1103,6 +1105,7 @@ impl PrefixFilter {
     /// Test whether a byte could match this filter.
     #[doc(hidden)]
     #[inline]
+    #[must_use]
     pub fn matches(self, b: u8, char_classes: &[CompiledCharClass]) -> bool {
         match self {
             Self::None => true,
@@ -1149,8 +1152,8 @@ pub struct RegexVM {
     /// Optional event observer for structured match events.
     event_observer: RwLock<Option<EventObserver>>,
     /// Cached presence flag for `event_observer`. The hot VM path emits
-    /// many `emit_event` calls per match attempt (MatchAttemptStarted /
-    /// MatchAttemptCompleted / BacktrackOccurred etc.), and each one
+    /// many `emit_event` calls per match attempt (`MatchAttemptStarted` /
+    /// `MatchAttemptCompleted` / `BacktrackOccurred` etc.), and each one
     /// previously took an `RwLock::read()` round-trip just to discover
     /// that no observer was registered (the common case). An atomic
     /// boolean lets `emit_event` short-circuit on a single relaxed load
@@ -2808,7 +2811,7 @@ impl RegexVM {
     /// the eager clear, snapshot the topmost alt-fallback frame to
     /// `pending_alt_revival`. A following `(*THEN)` revives it, restoring
     /// the alt-redirect path without breaking SKIP-alone semantics.
-    /// `pending_alt_revival` resets to None at execute_at start
+    /// `pending_alt_revival` resets to None at `execute_at` start
     /// (per attempt) and is consumed (taken) by `verb_apply_then`.
     #[inline]
     fn verb_apply_skip(
@@ -2835,7 +2838,7 @@ impl RegexVM {
     /// exists, behaviour depends on the name:
     ///
     /// - **Empty name `(*SKIP:)`**: PCRE2 treats this as plain
-    ///   `(*SKIP)` (set skip_position to the current position).
+    ///   `(*SKIP)` (set `skip_position` to the current position).
     ///   testinput1:5213 (`A(*MARK:A)A+(*SKIP:)(B|Z)|AC/x` on
     ///   "AAAC") expects no-match precisely because `(*SKIP:)`
     ///   advances the scanner past the failing alt1's end-of-A+
@@ -2929,7 +2932,7 @@ impl RegexVM {
     /// equivalent to (*PRUNE)."*
     ///
     /// Three-outcome dispatch — see `ThenOutcome` for the full
-    /// trichotomy (Redirected / ScopeExhausted / FullyDegraded). The
+    /// trichotomy (Redirected / `ScopeExhausted` / `FullyDegraded`). The
     /// subexpr dispatch site reads the outcome to decide whether to
     /// also clear the outer `ctx.backtrack_stack` (only on
     /// `FullyDegraded`, which is PCRE2's PRUNE-equivalence).
@@ -2954,7 +2957,7 @@ impl RegexVM {
         }
         if let Some(&alt_idx) = alt_boundaries.last() {
             backtrack_stack.truncate(alt_idx + 1);
-            while alt_boundaries.last().map_or(false, |&b| b > alt_idx) {
+            while alt_boundaries.last().is_some_and(|&b| b > alt_idx) {
                 alt_boundaries.pop();
             }
             // Last-verb-wins: THEN supersedes preceding SKIP/COMMIT.
@@ -3000,7 +3003,7 @@ impl RegexVM {
         marks_atomic_depths.push(atomic_depth);
     }
 
-    /// Build the COMMIT sentinel frame from the current ExecContext
+    /// Build the COMMIT sentinel frame from the current `ExecContext`
     /// state. Used by `verb_apply_commit` when COMMIT fires inside
     /// an atomic group.
     #[inline]
@@ -3024,7 +3027,7 @@ impl RegexVM {
     /// the IP advanced past the operand. Returns None if the operand
     /// would run off the end of the code buffer.
     #[inline]
-    fn decode_verb_name<'a>(code: &'a [u8], ip: usize) -> Option<(&'a str, usize)> {
+    fn decode_verb_name(code: &[u8], ip: usize) -> Option<(&str, usize)> {
         if ip >= code.len() {
             return None;
         }
@@ -3243,7 +3246,7 @@ impl RegexVM {
             // no longer on the stack, so any alt_boundaries entry
             // pointing at it or beyond must be dropped too.
             let new_len = ctx.backtrack_stack.len();
-            while ctx.alt_boundaries.last().map_or(false, |&b| b >= new_len) {
+            while ctx.alt_boundaries.last().is_some_and(|&b| b >= new_len) {
                 ctx.alt_boundaries.pop();
             }
             self.emit_event(&MatchEvent::BacktrackOccurred {
@@ -4099,7 +4102,7 @@ impl RegexVM {
                         }
                         return false;
                     }
-                    let first_match_end = ctx.pos;
+                    let _first_match_end = ctx.pos;
                     trace_log!(
                         "vm",
                         "  ✓ First match succeeded, pos {} -> {}",
@@ -4667,13 +4670,9 @@ impl RegexVM {
                     // when the immediately-following opcode is a
                     // backref. Narrow gate so non-palindrome patterns
                     // pay no retry cost.
-                    let next_is_backref = code
-                        .get(ip)
-                        .copied()
-                        .map(|b| {
-                            b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
-                        })
-                        .unwrap_or(false);
+                    let next_is_backref = code.get(ip).copied().is_some_and(|b| {
+                        b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
+                    });
 
                     if self.invoke_subroutine(ctx, target) {
                         if ctx.pos > saved_pos && next_is_backref {
@@ -5126,7 +5125,7 @@ impl RegexVM {
         match execution_manager.execute(language, code, &exec_ctx) {
             ExecResult::Success => CodeBlockOutcome::Pass,
             ExecResult::Failure => CodeBlockOutcome::Fail,
-            ExecResult::Error(error) => {
+            ExecResult::Error(_error) => {
                 debug_log!("vm", "CodeBlock {} execution error: {}", language, error);
                 CodeBlockOutcome::Fail
             }
@@ -6226,7 +6225,7 @@ impl RegexVM {
                 return MatchOutcome::Completed(Some(crate::engine::MatchResult {
                     start: effective_start,
                     end: ctx.pos,
-                    groups: self.extract_captures_with_match(&ctx, effective_start, ctx.pos),
+                    groups: self.extract_captures_with_match(ctx, effective_start, ctx.pos),
                     matched_branch_number: ctx.current_alternative.map(|id| id + 1),
                     code_result: ctx.code_result.clone(),
                     last_mark: ctx.marks.last().map(|(name, _)| name.clone()),
@@ -7173,14 +7172,9 @@ impl RegexVM {
                         let saved_code_result = ctx.code_result.clone();
                         let saved_match_start_override = ctx.match_start_override;
                         // Retry-different gate (palindrome family).
-                        let next_is_backref = code
-                            .get(ip)
-                            .copied()
-                            .map(|b| {
-                                b == OpCode::Backref as u8
-                                    || b == OpCode::BackrefCaseInsensitive as u8
-                            })
-                            .unwrap_or(false);
+                        let next_is_backref = code.get(ip).copied().is_some_and(|b| {
+                            b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
+                        });
                         if self.invoke_subroutine(ctx, target) {
                             if ctx.pos > saved_pos && next_is_backref {
                                 ctx.backtrack_stack.push(BacktrackFrame {
@@ -8111,13 +8105,9 @@ impl RegexVM {
                     // return position — while skipping every plain
                     // (non-recursive) `(?N)` so the suite doesn't
                     // pay any retry cost.
-                    let next_is_backref = code
-                        .get(ip)
-                        .copied()
-                        .map(|b| {
-                            b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
-                        })
-                        .unwrap_or(false);
+                    let next_is_backref = code.get(ip).copied().is_some_and(|b| {
+                        b == OpCode::Backref as u8 || b == OpCode::BackrefCaseInsensitive as u8
+                    });
                     let is_recursive_self = ctx.recursion_stack.iter().any(|&(t, _)| t == target);
 
                     if self.invoke_subroutine(ctx, target) {
@@ -9606,7 +9596,7 @@ pub struct OptimizingCompiler {
     /// is the *last-registered* id. Used by backrefs, substitute
     /// template interpolation, and the single-id conditional path.
     named_groups: HashMap<String, u32>,
-    /// Parallel map that preserves *all* group_ids for a given name,
+    /// Parallel map that preserves *all* `group_ids` for a given name,
     /// in registration order. Duplicate names (e.g. `(?J)(?<A>a)|(?<A>b)`
     /// or the harness's implicit dupnames via alternation in PCRE2
     /// testdata) end up with a `Vec` longer than one here; everywhere
@@ -9644,9 +9634,9 @@ pub struct OptimizingCompiler {
     /// `(*CR)` / `(*LF)` / `(*CRLF)` / `(*ANYCRLF)` / `(*ANY)` /
     /// `(*NUL)` pragma (default `Lf`).
     newline_mode: VmNewlineMode,
-    /// PCRE2_UCP: when set, `\b` / `\B` classify word characters
-    /// using Unicode General_Category L|N plus `_` (matching PCRE2's
-    /// PCRE2_EXTRA_MATCH_WORD + PCRE2_UCP behaviour). Default false →
+    /// `PCRE2_UCP`: when set, `\b` / `\B` classify word characters
+    /// using Unicode `General_Category` L|N plus `_` (matching PCRE2's
+    /// `PCRE2_EXTRA_MATCH_WORD` + `PCRE2_UCP` behaviour). Default false →
     /// ASCII-only `[A-Za-z0-9_]`. Detected from `(*UCP)` start-verb.
     ucp_enabled: bool,
 }
@@ -9932,8 +9922,8 @@ impl OptimizingCompiler {
         self.newline_mode = mode;
     }
 
-    /// Configure PCRE2_UCP for this compilation. Controls whether `\b`
-    /// / `\B` classify word characters using Unicode General_Category
+    /// Configure `PCRE2_UCP` for this compilation. Controls whether `\b`
+    /// / `\B` classify word characters using Unicode `General_Category`
     /// L|N plus `_` (UCP=true) or the ASCII subset `[A-Za-z0-9_]`
     /// (UCP=false, default). Set by the outer compiler after scanning
     /// the pattern text for the `(*UCP)` start-verb.
@@ -10426,7 +10416,7 @@ impl OptimizingCompiler {
                 // dispatch reads the same width.)
                 let sub_code = self.compile_lookaround_body(expr);
                 assert!(
-                    sub_code.len() <= u16::MAX as usize,
+                    u16::try_from(sub_code.len()).is_ok(),
                     "lookahead body bytecode exceeds 65535 bytes ({} bytes); \
                      widen the length prefix or split the body",
                     sub_code.len()
@@ -10439,7 +10429,7 @@ impl OptimizingCompiler {
             Regex::Lookbehind {
                 expr,
                 positive,
-                non_atomic,
+                non_atomic: _,
             } => {
                 // Mirror of Lookahead's body-trivially-succeeds
                 // elision (Cluster 1D residual). Positive lookbehind
@@ -10464,7 +10454,7 @@ impl OptimizingCompiler {
                 // the rationale.
                 let sub_code = self.compile_lookaround_body(expr);
                 assert!(
-                    sub_code.len() <= u16::MAX as usize,
+                    u16::try_from(sub_code.len()).is_ok(),
                     "lookbehind body bytecode exceeds 65535 bytes ({} bytes); \
                      widen the length prefix or split the body",
                     sub_code.len()
@@ -10957,7 +10947,7 @@ impl OptimizingCompiler {
                                 // StarGreedyContinue+offset operand.
                                 let exit_target = self.code.len();
                                 let split_offset = exit_target - (split_offset_pos + 2);
-                                if let Ok(_) = u16::try_from(split_offset) {
+                                if u16::try_from(split_offset).is_ok() {
                                     let offset_bytes = (split_offset as u16).to_le_bytes();
                                     self.code[split_offset_pos] = offset_bytes[0];
                                     self.code[split_offset_pos + 1] = offset_bytes[1];
@@ -12594,7 +12584,7 @@ mod tests {
         assert!(vm.is_match("xab"));
         // "axb" — the 'a' at position 0 matches, (*COMMIT) fires, then 'x' != 'b'
         // fails. Because committed, no retry at position 1. No match.
-        assert!(!vm.find_first("axb").is_some_and(|m| m.start == 0));
+        assert!(vm.find_first("axb").is_none_or(|m| m.start != 0));
     }
 
     #[test]

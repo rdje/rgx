@@ -138,7 +138,7 @@ fn smoke_position_aware() {
 
 #[test]
 fn smoke_regex_set() {
-    let set = RegexSet::new(&[r"\d+", r"[a-z]+", r"[A-Z]+"]).unwrap();
+    let set = RegexSet::new([r"\d+", r"[a-z]+", r"[A-Z]+"]).unwrap();
     let m = set.matches("abc 123 XYZ");
     assert!(m.matched_all());
     assert!(m.matched(0));

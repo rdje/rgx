@@ -419,7 +419,7 @@ fn collapse_to_json(content: &PgenAstContent) -> serde_json::Value {
 #[cfg(feature = "pgen-parser")]
 struct PgenAstAdapter<'a> {
     pattern: &'a str,
-    /// Unicode Character Properties mode (PCRE2_UCP). When set, `\d`,
+    /// Unicode Character Properties mode (`PCRE2_UCP`). When set, `\d`,
     /// `\w`, `\s` compile to Unicode-property-backed character classes
     /// rather than the ASCII shorthands. Detected by scanning the
     /// pattern for a leading `(*UCP)` start-verb.
@@ -520,8 +520,7 @@ impl<'a> PgenAstAdapter<'a> {
         .iter()
         .filter_map(|(pragma, mode)| pattern.rfind(pragma).map(|idx| (idx, *mode)))
         .max_by_key(|(idx, _)| *idx)
-        .map(|(_, mode)| mode)
-        .unwrap_or(NewlineMode::Lf);
+        .map_or(NewlineMode::Lf, |(_, mode)| mode);
         Self {
             pattern,
             ucp_enabled,
@@ -958,7 +957,7 @@ impl<'a> PgenAstAdapter<'a> {
                     .to_string();
                 let negated = map
                     .get("negated")
-                    .and_then(|v| v.as_bool())
+                    .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 Ok(Regex::CharClass(CharClass::UnicodeClass { name, negated }))
             }
@@ -1198,9 +1197,12 @@ impl<'a> PgenAstAdapter<'a> {
             .ok_or_else(|| self.contract_error("typed backreference missing 'kind'"))?;
         match kind {
             "numeric" => {
-                let index = map.get("index").and_then(|v| v.as_u64()).ok_or_else(|| {
-                    self.contract_error("typed numeric backreference missing 'index'")
-                })?;
+                let index = map
+                    .get("index")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| {
+                        self.contract_error("typed numeric backreference missing 'index'")
+                    })?;
                 // PCRE2 rejects backreferences whose decoded index exceeds
                 // its capture-group ceiling. RGX's compiler validates the
                 // index against the actual capture count, but at the walker
@@ -1208,7 +1210,7 @@ impl<'a> PgenAstAdapter<'a> {
                 // a `u32` — silently truncating 6_666_666_666 down to a
                 // wrapped value would alias to some legitimate small group
                 // and produce wrong matches. testinput9:287 covers this.
-                if index > u32::MAX as u64 {
+                if index > u64::from(u32::MAX) {
                     return Err(RgxError::compile(format!(
                         "numeric backreference \\{index} exceeds the supported range"
                     )));
@@ -1255,7 +1257,7 @@ impl<'a> PgenAstAdapter<'a> {
                 })?;
                 let value = raw_ref
                     .get("value")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .ok_or_else(|| self.contract_error("subroutine_numeric ref missing 'value'"))?
                     as i64;
                 let sign = raw_ref.get("sign").and_then(|v| v.as_str());
@@ -1273,31 +1275,28 @@ impl<'a> PgenAstAdapter<'a> {
                 })?;
                 let value = raw_ref
                     .get("value")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .ok_or_else(|| {
                         self.contract_error("numeric_backreference ref missing 'value'")
                     })?;
                 let sign = raw_ref.get("sign").and_then(|v| v.as_str());
-                match sign {
-                    Some("+") | Some("-") => {
-                        // Relative back-reference (rare; PCRE2 supports
-                        // `\g+N` / `\g-N` for relative refs).
-                        let signed = if sign == Some("-") {
-                            -(value as i32)
-                        } else {
-                            value as i32
-                        };
-                        Ok(Regex::RelativeBackreference(signed))
+                if let Some("+" | "-") = sign {
+                    // Relative back-reference (rare; PCRE2 supports
+                    // `\g+N` / `\g-N` for relative refs).
+                    let signed = if sign == Some("-") {
+                        -(value as i32)
+                    } else {
+                        value as i32
+                    };
+                    Ok(Regex::RelativeBackreference(signed))
+                } else {
+                    if value > u64::from(u32::MAX) {
+                        return Err(RgxError::compile(format!(
+                            "numeric backreference \\g{{{value}}} exceeds the supported range"
+                        )));
                     }
-                    _ => {
-                        if value > u32::MAX as u64 {
-                            return Err(RgxError::compile(format!(
-                                "numeric backreference \\g{{{value}}} exceeds the supported range"
-                            )));
-                        }
-                        #[allow(clippy::cast_possible_truncation)]
-                        Ok(Regex::Backreference(value as u32))
-                    }
+                    #[allow(clippy::cast_possible_truncation)]
+                    Ok(Regex::Backreference(value as u32))
                 }
             }
             // Legacy un-typed shape (kept for `\g`-prefixed forms when
@@ -1319,7 +1318,7 @@ impl<'a> PgenAstAdapter<'a> {
     /// PCRE2's bracket-form-determines-semantic rule:
     ///   - `\g<N>` / `\g<name>` / `\g'…'` → subroutine call (Recursion)
     ///   - `\g{N}` / `\g{name}` → back-reference
-    ///   - `\gN` (bare signed_digits) → back-reference
+    ///   - `\gN` (bare `signed_digits`) → back-reference
     fn classify_g_subroutine_ref(&self, value: &serde_json::Value) -> Result<Regex> {
         let arr = value.as_array().ok_or_else(|| {
             self.contract_error(&format!(
@@ -1329,7 +1328,7 @@ impl<'a> PgenAstAdapter<'a> {
         })?;
         let head = arr.first().and_then(|v| v.as_str());
         match head {
-            Some("<") | Some("'") => {
+            Some("<" | "'") => {
                 // Angle/apostrophe form → subroutine call.
                 let inner = arr
                     .get(1)
@@ -1465,8 +1464,8 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    /// Array-shaped atom — backreference, escape, char_class, group, lookaround,
-    /// quoted_literal, conditional, etc. Dispatch on the first element's prefix
+    /// Array-shaped atom — backreference, escape, `char_class`, group, lookaround,
+    /// `quoted_literal`, conditional, etc. Dispatch on the first element's prefix
     /// per the "Identification table" in `rules-atom.md`.
     fn convert_typed_atom_array(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         if arr.is_empty() {
@@ -1743,7 +1742,7 @@ impl<'a> PgenAstAdapter<'a> {
         let payload_value: Option<String> = payload.and_then(|p| {
             p.get("value")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
         });
         let upper = name.to_ascii_uppercase();
         match upper.as_str() {
@@ -1847,9 +1846,12 @@ impl<'a> PgenAstAdapter<'a> {
             .ok_or_else(|| self.contract_error("typed subroutine_call target missing 'kind'"))?;
         match kind {
             "numeric" => {
-                let value = inner.get("value").and_then(|v| v.as_u64()).ok_or_else(|| {
-                    self.contract_error("typed subroutine_call numeric target missing 'value'")
-                })?;
+                let value = inner
+                    .get("value")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| {
+                        self.contract_error("typed subroutine_call numeric target missing 'value'")
+                    })?;
                 let sign = inner.get("sign").and_then(|v| v.as_str());
                 Ok(match sign {
                     Some("+") => RecursionTarget::RelativeGroup(value as i32),
@@ -1913,9 +1915,12 @@ impl<'a> PgenAstAdapter<'a> {
             return Ok(RecursionTarget::NamedGroup(s.to_string()));
         }
         if let Some(obj) = arg.as_object() {
-            let value = obj.get("value").and_then(|v| v.as_u64()).ok_or_else(|| {
-                self.contract_error("typed returned-capture arg object missing 'value'")
-            })?;
+            let value = obj
+                .get("value")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| {
+                    self.contract_error("typed returned-capture arg object missing 'value'")
+                })?;
             let sign = obj.get("sign").and_then(|v| v.as_str());
             return Ok(match sign {
                 Some("+") => RecursionTarget::RelativeGroup(value as i32),
@@ -2008,8 +2013,14 @@ impl<'a> PgenAstAdapter<'a> {
                     .get("number")
                     .and_then(|v| v.as_object())
                     .ok_or_else(|| self.contract_error("VERSION condition missing 'number'"))?;
-                let major = number.get("major").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let minor = number.get("minor").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let major = number
+                    .get("major")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u32;
+                let minor = number
+                    .get("minor")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u32;
                 let op = match op_str {
                     "=" | "==" => VersionConditionalOp::Eq,
                     "!=" => VersionConditionalOp::Ne,
@@ -2048,7 +2059,7 @@ impl<'a> PgenAstAdapter<'a> {
                     as u32;
                 Ok(ConditionalTest::GroupExists(idx))
             }
-            serde_json::Value::String(s) => Ok(ConditionalTest::NamedGroupExists(s.to_string())),
+            serde_json::Value::String(s) => Ok(ConditionalTest::NamedGroupExists(s.clone())),
             serde_json::Value::Object(map) => {
                 if let Some(kind) = map.get("kind").and_then(|v| v.as_str()) {
                     match kind {
@@ -2061,7 +2072,7 @@ impl<'a> PgenAstAdapter<'a> {
                                 ConditionalTest::RecursionGroup(n.as_u64().unwrap_or(0) as u32),
                             ),
                             Some(serde_json::Value::String(s)) => {
-                                Ok(ConditionalTest::RecursionNamed(s.to_string()))
+                                Ok(ConditionalTest::RecursionNamed(s.clone()))
                             }
                             Some(other) => Err(self.contract_error(&format!(
                                 "unrecognised recursion condition group: {}",
@@ -2085,7 +2096,7 @@ impl<'a> PgenAstAdapter<'a> {
                             })?;
                             let positive = map
                                 .get("positive")
-                                .and_then(|v| v.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(true);
                             let inner = self.convert_typed_pattern(body)?;
                             if kind == "lookahead" {
@@ -2168,7 +2179,8 @@ impl<'a> PgenAstAdapter<'a> {
                                 .contract_error(&format!("unrecognised condition kind: {other:?}")))
                         }
                     }
-                } else if let Some(value_int) = map.get("value").and_then(|v| v.as_u64()) {
+                } else if let Some(value_int) = map.get("value").and_then(serde_json::Value::as_u64)
+                {
                     let sign = map.get("sign").and_then(|v| v.as_str());
                     match sign {
                         Some("+") => Ok(ConditionalTest::RelativeGroupExists(value_int as i32)),
@@ -2400,7 +2412,7 @@ impl<'a> PgenAstAdapter<'a> {
                         "property" => {
                             let negated = map
                                 .get("negated")
-                                .and_then(|v| v.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(false);
                             out.push('\\');
                             out.push(if negated { 'P' } else { 'p' });
@@ -2489,7 +2501,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
         let min = map
             .get("min")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .ok_or_else(|| self.contract_error("typed quantifier missing 'min'"))?;
         let max = match map.get("max") {
             Some(serde_json::Value::Null) | None => None,
@@ -2682,7 +2694,7 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Convert a `\` escape atom: `["\\", <unit>]`. The unit is either
-    /// a single-char string (simple escape, single_byte_escape) or an
+    /// a single-char string (simple escape, `single_byte_escape`) or an
     /// array (hex/unicode/octal/control/property/backreference).
     fn convert_typed_backslash_atom(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         if arr.len() < 2 {
@@ -2881,7 +2893,7 @@ impl<'a> PgenAstAdapter<'a> {
             d if d.is_ascii_digit() && d != '0' =>
             {
                 #[allow(clippy::cast_possible_truncation)]
-                Ok(Regex::Backreference((d as u8 - b'0') as u32))
+                Ok(Regex::Backreference(u32::from(d as u8 - b'0')))
             }
             // Catch-all: literal character.
             other => Ok(Regex::Char(other)),
@@ -3043,7 +3055,7 @@ impl<'a> PgenAstAdapter<'a> {
             .ok_or_else(|| self.contract_error("\\g subroutine ref is empty"))?;
         let first_str = first.as_str();
         match first_str {
-            Some("<") | Some("'") => {
+            Some("<" | "'") => {
                 // Angle/apostrophe form → subroutine call.
                 let inner = parr
                     .get(1)
@@ -3180,7 +3192,7 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::NamedBackreference(name))
     }
 
-    /// Convert a `\Q...\E` quoted_literal atom: `["\\Q", <chars-Quantified>, "\\E"]`.
+    /// Convert a `\Q...\E` `quoted_literal` atom: `["\\Q", <chars-Quantified>, "\\E"]`.
     fn convert_typed_quoted_literal(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         let mut text = String::new();
         if let Some(chars) = arr.get(1) {
@@ -3190,7 +3202,7 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::Sequence(chars))
     }
 
-    /// Convert a char_class atom: `["[", <neg?>, <init_close?>, <body>, "]"]`.
+    /// Convert a `char_class` atom: `["[", <neg?>, <init_close?>, <body>, "]"]`.
     fn convert_typed_char_class(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         if arr.len() < 5 {
             return Err(self.contract_error(&format!(
@@ -3292,7 +3304,7 @@ impl<'a> PgenAstAdapter<'a> {
         }))
     }
 
-    /// Is `item` a `\Q…\E` quoted run inside a char_class body?
+    /// Is `item` a `\Q…\E` quoted run inside a `char_class` body?
     /// Recognises both the legacy un-typed array shape
     /// `["\\Q", <chars>, "\\E"]` and the typed-object form
     /// `{type:"class_quoted_literal", body:[<chars>]}`.
@@ -3306,7 +3318,7 @@ impl<'a> PgenAstAdapter<'a> {
         false
     }
 
-    /// Extract the literal characters from a quoted-run class_item.
+    /// Extract the literal characters from a quoted-run `class_item`.
     /// Handles both the legacy array shape and the typed-object form.
     fn extract_quoted_class_chars(item: &serde_json::Value) -> String {
         let mut text = String::new();
@@ -3329,7 +3341,7 @@ impl<'a> PgenAstAdapter<'a> {
         text
     }
 
-    /// Convert a single class_item, appending its expanded ranges to `ranges`.
+    /// Convert a single `class_item`, appending its expanded ranges to `ranges`.
     /// Per PGEN-RGX-0076 fix (post-1.1.36): `posix_class` is now a typed
     /// `{type:"posix_class", name, negated}` object instead of a bare `"[:"`.
     fn convert_typed_class_item(
@@ -3359,7 +3371,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
     }
 
-    /// Convert a typed-object class_item — currently `posix_class`,
+    /// Convert a typed-object `class_item` — currently `posix_class`,
     /// extensible to future typed class-item shapes.
     fn convert_typed_class_item_object(
         &self,
@@ -3576,7 +3588,7 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(())
     }
 
-    /// Resolve a class_atom (used as range endpoint) to a single character.
+    /// Resolve a `class_atom` (used as range endpoint) to a single character.
     fn typed_class_atom_to_char(&self, value: &serde_json::Value) -> Result<char> {
         match value {
             serde_json::Value::String(s) if s.chars().count() == 1 => Ok(s.chars().next().unwrap()),
@@ -3655,8 +3667,7 @@ impl<'a> PgenAstAdapter<'a> {
                 if pair_arr
                     .first()
                     .and_then(|v| v.as_str())
-                    .map(|s| s == "|")
-                    .unwrap_or(false) =>
+                    .is_some_and(|s| s == "|") =>
             {
                 let no_pieces = pair_arr.get(1).and_then(|v| v.as_array()).ok_or_else(|| {
                     self.contract_error("conditional no-branch missing piece array")
@@ -3689,14 +3700,14 @@ impl<'a> PgenAstAdapter<'a> {
     /// Convert a typed condition. Possible shapes per `rules-misc.md`:
     /// - `"DEFINE"` (string)
     /// - `["VERSION", <op>, <ver>]` (array)
-    /// - `[<sign?>, <int>]` for signed_digits
+    /// - `[<sign?>, <int>]` for `signed_digits`
     /// - `<int>` for plain digits
     /// - `["?C", ...]` callout-condition
-    /// - `["?=", ...]` etc. condition_assertion
+    /// - `["?=", ...]` etc. `condition_assertion`
     /// - `["*", <name>, ":", <pattern>]` alpha condition assertion
-    /// - `[<first_char>, <Quantified rest>]` for name (looks like signed_digits but with strings)
-    /// - `["R", <int?>]` or `["R&", <name>]` recursion_condition
-    /// - name_ref `["<", <name>, ">"]` etc.
+    /// - `[<first_char>, <Quantified rest>]` for name (looks like `signed_digits` but with strings)
+    /// - `["R", <int?>]` or `["R&", <name>]` `recursion_condition`
+    /// - `name_ref` `["<", <name>, ">"]` etc.
     fn convert_typed_condition(&self, value: &serde_json::Value) -> Result<ConditionalTest> {
         if let Some(s) = value.as_str() {
             if s == "DEFINE" {
@@ -3761,7 +3772,7 @@ impl<'a> PgenAstAdapter<'a> {
                         if slot_arr.is_empty() {
                             return Ok(ConditionalTest::RecursionAny);
                         }
-                        if let Some(n) = slot_arr.first().and_then(|v| v.as_u64()) {
+                        if let Some(n) = slot_arr.first().and_then(serde_json::Value::as_u64) {
                             return Ok(ConditionalTest::RecursionGroup(n as u32));
                         }
                     }
@@ -3880,7 +3891,7 @@ impl<'a> PgenAstAdapter<'a> {
         if !name.is_empty() {
             return Ok(ConditionalTest::NamedGroupExists(name));
         }
-        Err(self.contract_error(&format!("unsupported condition shape: {}", value)))
+        Err(self.contract_error(&format!("unsupported condition shape: {value}")))
     }
 
     fn pieces_to_sequence(&self, pieces: &[serde_json::Value]) -> Result<Regex> {
@@ -3895,7 +3906,7 @@ impl<'a> PgenAstAdapter<'a> {
     /// `<arg?>` is one of:
     ///   - `[]` (no argument — defaults to callout 0)
     ///   - integer (numeric callout)
-    ///   - delimited callout_string array (string callout — treated as 0
+    ///   - delimited `callout_string` array (string callout — treated as 0
     ///     since RGX's match semantics for unregistered string callouts
     ///     are identical to numeric 0)
     fn convert_typed_callout(&self, arr: &[serde_json::Value]) -> Result<Regex> {
@@ -3915,7 +3926,7 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::Callout(number))
     }
 
-    /// Convert a code_block atom.
+    /// Convert a `code_block` atom.
     /// Plain shape: `["(?{", <content>, "})"]` (3 elements)
     /// Lang shape: `["(?{", <lang>, ":", <ws?>, <content>, "})"]` (6 elements)
     fn convert_typed_code_block(&self, arr: &[serde_json::Value]) -> Result<Regex> {
@@ -3950,12 +3961,12 @@ impl<'a> PgenAstAdapter<'a> {
         )))
     }
 
-    /// Convert a comment_group atom: `["(?#", <text?>, ")"]` — no runtime effect.
+    /// Convert a `comment_group` atom: `["(?#", <text?>, ")"]` — no runtime effect.
     fn convert_typed_comment_group(&self, _arr: &[serde_json::Value]) -> Result<Regex> {
         Ok(Regex::Empty)
     }
 
-    /// Convert an extended_class atom: `["(?[", <content>, "])"]`.
+    /// Convert an `extended_class` atom: `["(?[", <content>, "])"]`.
     fn convert_typed_extended_class(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         // For now, surface this through the existing ExtendedCharClass node
         // by reconstructing the source text and letting the compiler
@@ -3967,12 +3978,12 @@ impl<'a> PgenAstAdapter<'a> {
         Ok(Regex::ExtendedCharClass { content })
     }
 
-    /// Convert an `(*...)`-prefixed atom — alpha_lookaround, scan_substring,
-    /// script_run, atomic_group (alpha form), or directive_verb.
+    /// Convert an `(*...)`-prefixed atom — `alpha_lookaround`, `scan_substring`,
+    /// `script_run`, `atomic_group` (alpha form), or `directive_verb`.
     /// Possible shapes:
-    ///   directive_verb: `["(*", <body>, ")"]` — body is the directive_named or mark_shorthand
-    ///   alpha_lookaround: `["(*", <name-string>, ":", <pattern?>, ")"]`
-    ///   atomic_group (alpha): `["(*atomic:", <pattern?>, ")"]` (5-letter prefix; typically dispatched separately)
+    ///   `directive_verb`: `["(*", <body>, ")"]` — body is the `directive_named` or `mark_shorthand`
+    ///   `alpha_lookaround`: `["(*", <name-string>, ":", <pattern?>, ")"]`
+    ///   `atomic_group` (alpha): `["(*atomic:", <pattern?>, ")"]` (5-letter prefix; typically dispatched separately)
     fn convert_typed_alpha_prefixed(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         if arr.is_empty() {
             return Err(self.contract_error("empty (*...) atom"));
@@ -4076,11 +4087,11 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Convert a `(?...)`-prefixed atom that didn't match a more specific
-    /// prefix — inline_modifiers, scoped_inline_modifiers, or subroutine_call.
+    /// prefix — `inline_modifiers`, `scoped_inline_modifiers`, or `subroutine_call`.
     /// Shapes:
-    ///   inline_modifiers: `["(?", <modifier_spec?>, ")"]` (3 elements)
-    ///   scoped_inline_modifiers: `["(?", <modifier_spec>, ":", <pattern?>, ")"]` (5 elements)
-    ///   subroutine_call: `["(?", <subroutine_target>, ")"]` (3 elements)
+    ///   `inline_modifiers`: `["(?", <modifier_spec?>, ")"]` (3 elements)
+    ///   `scoped_inline_modifiers`: `["(?", <modifier_spec>, ":", <pattern?>, ")"]` (5 elements)
+    ///   `subroutine_call`: `["(?", <subroutine_target>, ")"]` (3 elements)
     fn convert_typed_question_prefixed(&self, arr: &[serde_json::Value]) -> Result<Regex> {
         if arr.len() == 5 && matches!(arr.get(2), Some(serde_json::Value::String(s)) if s == ":") {
             // Scoped inline modifiers.
@@ -4154,7 +4165,7 @@ impl<'a> PgenAstAdapter<'a> {
         )))
     }
 
-    /// Walk a modifier_spec value and assemble its flag string.
+    /// Walk a `modifier_spec` value and assemble its flag string.
     fn collect_typed_modifier_flags(&self, value: &serde_json::Value) -> String {
         let mut out = String::new();
         self.walk_typed_modifier_spec(value, &mut out);
@@ -4195,13 +4206,16 @@ impl<'a> PgenAstAdapter<'a> {
         if matches!(arr.first(), Some(serde_json::Value::String(s)) if s == ",") {
             let max = arr
                 .get(2)
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .ok_or_else(|| self.contract_error("typed {,m} body missing max digits"))?;
             return Ok((0, Some(max as u32)));
         }
-        let min = arr.first().and_then(|v| v.as_u64()).ok_or_else(|| {
-            self.contract_error("typed counted_quantifier_body missing min digits")
-        })? as u32;
+        let min = arr
+            .first()
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                self.contract_error("typed counted_quantifier_body missing min digits")
+            })? as u32;
         let sub = match arr.get(2) {
             Some(s) => s,
             None => return Ok((min, Some(min))),
@@ -4226,7 +4240,7 @@ impl<'a> PgenAstAdapter<'a> {
         }
         let max = inner_arr
             .first()
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .ok_or_else(|| self.contract_error("typed {n,m} max digits missing"))?
             as u32;
         Ok((min, Some(max)))
@@ -4986,7 +5000,7 @@ impl<'a> PgenAstAdapter<'a> {
     ///
     /// Generalizes the previous hardcoded `\P{Lu/Ll/Lt}` handler
     /// (engine fix #13 / audit §9.B B1): the family is now
-    /// {Lu, Ll, Lt, L&, Lc, Cased_Letter, Upper, Lower, Title, Cased}
+    /// {Lu, Ll, Lt, L&, Lc, `Cased_Letter`, Upper, Lower, Title, Cased}
     /// for both polarities, looked up via
     /// `unicode_support::case_fold_property_closure`.
     fn case_fold_property_class_item_ranges(&self, item: &PgenAstNode) -> Option<Vec<CharRange>> {
@@ -5013,7 +5027,7 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     /// Typed-shape variant of `case_fold_property_class_item_ranges`
-    /// — recognises a typed class_item that carries a `\p{X}` /
+    /// — recognises a typed `class_item` that carries a `\p{X}` /
     /// `\P{X}` escape and returns the case-fold-closed ranges if X is
     /// case-distinguished. The typed shapes recognised:
     /// - `["\\", ["p{", <prop_name>, "}"]]` — braced positive
@@ -6917,7 +6931,7 @@ where
                 1..=7 => char::from_u32(n).ok_or_else(|| {
                     make_error(&format!("octal escape value {n} is not a valid codepoint"))
                 })?,
-                8..=9 => char::from_u32(b'0' as u32 + n).expect("digit char is always valid"),
+                8..=9 => char::from_u32(u32::from(b'0') + n).expect("digit char is always valid"),
                 other => {
                     return Err(make_error(&format!(
                         "class_escape Backreference({other}) has no PCRE2 interpretation inside a char class"
@@ -6985,7 +6999,7 @@ fn regex_from_alpha_lookaround_name(name: &str, expr: Regex) -> Option<Regex> {
 /// class-internal use only — the adapter always emits these as
 /// disjoint ranges that merge into the surrounding char class.
 #[cfg(feature = "pgen-parser")]
-/// PCRE2 POSIX class ranges under PCRE2_UCP. Returns `None` for names
+/// PCRE2 POSIX class ranges under `PCRE2_UCP`. Returns `None` for names
 /// where PCRE2 keeps the ASCII-only semantic (e.g. `:xdigit:` and
 /// `:ascii:` stay as the ASCII set even in UCP mode); callers fall
 /// back to the ASCII table in that case.
@@ -7399,7 +7413,7 @@ enum VersionConditionalOp {
 fn parse_version_string(s: &str) -> Option<(u32, u32)> {
     let mut parts = s.split('.');
     let major: u32 = parts.next()?.parse().ok()?;
-    let minor: u32 = parts.next().map(|p| p.parse().ok()).unwrap_or(Some(0))?;
+    let minor: u32 = parts.next().map_or(Some(0), |p| p.parse().ok())?;
     Some((major, minor))
 }
 
