@@ -31,12 +31,8 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Rationale**: The most common CLI use case for log monitoring.
 - **Dependencies**: A3 (`tail_file`) — shipped.
 
-### A5. CLI `--color` output
-- **What**: ANSI color highlighting for matches, line numbers, filenames.
-- **Effort**: `small`
-- **Rationale**: All grep-like tools have color. Users expect it.
-- **How**: Detect terminal via `is_terminal` crate or `std::io::IsTerminal`. Wrap match spans in `\x1b[31;1m...\x1b[0m`.
-- **Dependencies**: None.
+### A5. CLI `--color` output ✅ Shipped
+- **Status**: `rgx --color {auto,always,never}` flag in `rgx-cli/src/main.rs:117` with `auto` default (resolves via `std::io::IsTerminal::is_terminal`). Four distinct ANSI colors following the grep convention: bold red for matches (`\x1b[1;31m`), bold green for line numbers, bold magenta for filenames, cyan for separators. `highlight_line` (main.rs:402) wraps each match span in colour codes with relative-to-line-offset arithmetic. Helpers `color_match` / `color_file` / `color_line_num` / `color_sep`. Used at 7 dispatch sites covering find_first, find_all, --follow, --only-matching, file/directory modes. User documentation in `book/src/appendices/cli-guide.md` (the `--color` section). 11 unit tests at `rgx-cli/src/main.rs::tests` cover: `always`/`never`/`auto` resolution, no-match line passthrough, single/multiple match wrapping with ANSI codes, `line_offset` arithmetic for sliced inputs, and each of the four colour helpers individually.
 
 ### A6. Inline-language steering
 - **What**: `rgx.steer_skip(n)` / `rgx.steerSkip(n)` from Lua / JS / Rhai / WASM code blocks. (Native Rust callbacks already have steering — they return `ExecResult::Steer` directly.)

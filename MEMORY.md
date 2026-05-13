@@ -4285,3 +4285,26 @@ User pushed back on my prior decision to defer the third A2 limit (`max_trail_en
 **Production-readiness summary**: A1 (steps) + A2 (3 memory limits) = adequate DoS defense across every resource axis the backtracking VM can blow up on. Defaults remain `None` so existing users see no behaviour change. Server deployments accepting user-supplied regex patterns MUST set limits explicitly.
 
 **Lesson learned**: when something fits in the original spec, is trivial to add, and tests cleanly — ship it instead of deferring. "Defense-in-depth" framing was a rationalisation for the smaller scope, not a real reason to defer.
+
+## 2026-05-13 session — A5 CLI --color: unit tests + BACKLOG closure
+
+User asked me to PNT into A5 ("ANSI color highlighting on the CLI"). Audit showed the feature was already functionally complete:
+- `--color {auto,always,never}` flag at `rgx-cli/src/main.rs:117` with `auto` default
+- `should_color()` uses `std::io::IsTerminal::is_terminal(&std::io::stdout())` for auto-resolution
+- Four grep-convention ANSI colors: bold red matches, bold green line numbers, bold magenta filenames, cyan separators
+- `highlight_line(line, matches, line_offset)` wraps match spans with `line_offset` arithmetic for sliced inputs
+- 7 dispatch sites covering find_first, find_all, --follow, --only-matching, file mode, directory mode
+- Book CLI guide documentation at `book/src/appendices/cli-guide.md`
+
+**What was missing**: unit tests for the helpers. Added 11 tests at `main.rs:1828+` covering:
+- `should_color`: always/never/auto resolution paths
+- `highlight_line`: empty matches (passthrough), single match wrapping, multiple matches each wrapped independently, line_offset arithmetic
+- `color_match` / `color_file` / `color_line_num` / `color_sep`: each helper produces the right ANSI escape pair
+
+**BACKLOG cleanup**: A5 entry collapsed to ✅ Shipped with concrete location pointers (flag, colour codes, helper functions, 7 dispatch sites, book chapter, 11 unit tests).
+
+**Validation**: cargo fmt --all clean, cargo test -p rgx-cli 41/41 (30 baseline + 11 new), cargo test -p rgx-core --lib 1190/1190 untouched (no engine code touched), cargo clippy --workspace --all-targets clean. CLI behaviour unchanged.
+
+**Pattern observed across A1/A2/A5/B-list audits**: the actual feature work shipped incrementally over 2026-04 to 2026-05; BACKLOG entries weren't audited as a batch. The PNT-through-BACKLOG pattern surfaces items that are functionally done but need either test coverage or status reconciliation — both forms of completion debt. Doing the audit + reconciliation IS the work for these items, not pretending to re-implement from scratch.
+
+**Open remaining**: 3 conformance residuals, C1 JIT, C2 perf levers (TDFA broadening, DFA minimization, SIMD char-class), A6 inline-language steering (extending to embedded hosts), C6 clippy noise cleanup.

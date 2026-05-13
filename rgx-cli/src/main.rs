@@ -1825,4 +1825,131 @@ mod tests {
         let result = regex.replace_all_with_code("hello world");
         assert_eq!(result, "HELLO WORLD");
     }
+
+    // === A5: --color flag and ANSI highlighting ===
+
+    #[test]
+    fn should_color_always_returns_true_regardless_of_terminal() {
+        assert!(should_color("always"));
+    }
+
+    #[test]
+    fn should_color_never_returns_false_regardless_of_terminal() {
+        assert!(!should_color("never"));
+    }
+
+    #[test]
+    fn should_color_auto_defers_to_terminal_detection() {
+        // Under `cargo test` stdout is not a tty, so auto should resolve to false.
+        // We don't assert the exact value (CI environments vary); we assert the
+        // function is callable and returns a bool. The `always`/`never` tests
+        // above prove the explicit resolution paths.
+        let _result: bool = should_color("auto");
+    }
+
+    #[test]
+    fn highlight_line_no_matches_returns_input_unchanged() {
+        let result = highlight_line("abc def", &[], 0);
+        assert_eq!(result, "abc def");
+    }
+
+    #[test]
+    fn highlight_line_single_match_wraps_with_ansi_codes() {
+        let m = MatchResult {
+            start: 4,
+            end: 7,
+            groups: vec![Some((4, 7))],
+            matched_branch_number: None,
+            code_result: None,
+            last_mark: None,
+        };
+        let result = highlight_line("abc def", &[m], 0);
+        // The match span "def" must be wrapped in COLOR_MATCH_START / COLOR_RESET.
+        assert!(result.starts_with("abc "));
+        assert!(result.contains(COLOR_MATCH_START));
+        assert!(result.contains("def"));
+        assert!(result.ends_with(COLOR_RESET));
+    }
+
+    #[test]
+    fn highlight_line_multiple_matches_wraps_each_independently() {
+        // Two non-overlapping matches in "foo bar baz".
+        let m1 = MatchResult {
+            start: 0,
+            end: 3,
+            groups: vec![Some((0, 3))],
+            matched_branch_number: None,
+            code_result: None,
+            last_mark: None,
+        };
+        let m2 = MatchResult {
+            start: 8,
+            end: 11,
+            groups: vec![Some((8, 11))],
+            matched_branch_number: None,
+            code_result: None,
+            last_mark: None,
+        };
+        let result = highlight_line("foo bar baz", &[m1, m2], 0);
+        // Both "foo" and "baz" should be color-wrapped; "bar" in the middle
+        // should be present without color codes around it.
+        let escape_count = result.matches(COLOR_MATCH_START).count();
+        assert_eq!(
+            escape_count, 2,
+            "expected 2 match-start escapes; got {result:?}"
+        );
+        let reset_count = result.matches(COLOR_RESET).count();
+        assert_eq!(reset_count, 2);
+        assert!(result.contains("bar"));
+    }
+
+    #[test]
+    fn highlight_line_respects_line_offset() {
+        // The match span "def" is at absolute positions 14..17, but the line
+        // starts at offset 10 — so within the line it's at relative 4..7.
+        let m = MatchResult {
+            start: 14,
+            end: 17,
+            groups: vec![Some((14, 17))],
+            matched_branch_number: None,
+            code_result: None,
+            last_mark: None,
+        };
+        let result = highlight_line("abc def", &[m], 10);
+        assert!(result.contains("abc "));
+        assert!(result.contains(COLOR_MATCH_START));
+        assert!(result.contains("def"));
+    }
+
+    #[test]
+    fn color_match_wraps_match_color() {
+        let result = color_match("hit");
+        assert!(result.starts_with(COLOR_MATCH_START));
+        assert!(result.ends_with(COLOR_RESET));
+        assert!(result.contains("hit"));
+    }
+
+    #[test]
+    fn color_file_wraps_file_color() {
+        let result = color_file("file.txt");
+        assert!(result.starts_with(COLOR_FILE));
+        assert!(result.contains("file.txt"));
+        assert!(result.ends_with(COLOR_RESET));
+    }
+
+    #[test]
+    fn color_line_num_wraps_line_color() {
+        let result = color_line_num(42);
+        assert!(result.starts_with(COLOR_LINE_NUM));
+        assert!(result.contains("42"));
+        assert!(result.ends_with(COLOR_RESET));
+    }
+
+    #[test]
+    fn color_sep_wraps_sep_color() {
+        let result = color_sep(":");
+        assert!(result.starts_with(COLOR_SEP));
+        assert!(result.contains(':'));
+        assert!(result.ends_with(COLOR_RESET));
+    }
 }

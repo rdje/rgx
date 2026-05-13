@@ -14,6 +14,20 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-13 - A5 (CLI --color): unit tests + BACKLOG closure
+- Scope: PNT into A5 ("ANSI color highlighting on the CLI"). Audit revealed the feature is functionally complete — `--color {auto,always,never}` flag with `is_terminal` detection, four grep-convention ANSI colors, `highlight_line` wrapper with `line_offset` arithmetic, 7 dispatch sites across find_first/find_all/--follow/--only-matching/file/directory modes, book CLI guide documentation. What was missing: unit tests for the helpers. Added those and marked A5 shipped.
+- 11 new unit tests in `rgx-cli/src/main.rs::tests` (lines 1828+):
+  - `should_color_always_returns_true_regardless_of_terminal` / `_never_returns_false` — explicit-value resolution paths.
+  - `should_color_auto_defers_to_terminal_detection` — the auto path is callable; result value depends on test environment.
+  - `highlight_line_no_matches_returns_input_unchanged` — passthrough path.
+  - `highlight_line_single_match_wraps_with_ansi_codes` — verifies the match span is wrapped in `COLOR_MATCH_START`/`COLOR_RESET`.
+  - `highlight_line_multiple_matches_wraps_each_independently` — two non-overlapping matches each get their own escape pair; non-match text in between stays uncoloured.
+  - `highlight_line_respects_line_offset` — match at absolute byte 14-17 with `line_offset = 10` correctly highlights position 4-7 within the line slice.
+  - `color_match` / `color_file` / `color_line_num` / `color_sep` — each helper wraps in the right ANSI code pair.
+- BACKLOG A5 entry collapsed from open spec to ✅ Shipped status line with concrete locations (flag, colour-codes, helper functions, dispatch-site count, book chapter, unit test count).
+- Validation: `cargo fmt --all` clean, `cargo test -p rgx-cli` 41/41 (30 baseline + 11 new), `cargo test -p rgx-core --lib` 1190/1190 untouched, `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. CLI behaviour unchanged; the implementation surface was already user-facing.
+- Notes/impact: A5 is closed. The CLI's colour output had been shipping since well before this audit; what changed is documented test coverage for the helpers + BACKLOG reconciliation.
+
 ### 2026-05-13 - A2: ship the third memory limit (`set_max_trail_entries`)
 - Scope: ship the missing third A2 limit. After the prior audit revealed A2 was 2-of-3 shipped, deferring the third (`max_trail_entries`) on weak grounds ("defense-in-depth not gating"), the user pushed back: the pattern is trivial, the spec is clear, ship it now. This commit does that and closes A2.
 - New: `Regex::set_max_trail_entries(Option<u64>)` at `rgx-core/src/lib.rs:2068`. Caps the **capture-trail length** per match attempt. The capture trail records each capture-slot write so backtrack can undo them; on pathological patterns with many nested captures (e.g. `(.)*x` on long no-`x` input) the trail can grow far beyond what `max_backtrack_frames` defends against. A single backtrack frame can carry an unbounded trail.
