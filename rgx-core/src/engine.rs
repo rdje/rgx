@@ -46,10 +46,13 @@ pub(crate) enum DfaCell {
 impl DfaCell {
     /// Wrap a freshly-built `LazyDfa` in the appropriate variant.
     /// Attempts eager materialisation up to
-    /// [`DFA_MATERIALIZE_STATE_LIMIT`]; if successful, returns the
-    /// lock-free `Materialized` variant. Otherwise wraps in a Mutex.
+    /// [`DFA_MATERIALIZE_STATE_LIMIT`]; on success, runs Hopcroft-
+    /// style minimisation via [`LazyDfa::minimize`] to collapse
+    /// equivalent states, then returns the lock-free `Materialized`
+    /// variant. Otherwise wraps in a Mutex.
     fn from_lazy(mut lazy: LazyDfa) -> Self {
         if lazy.try_materialize(DFA_MATERIALIZE_STATE_LIMIT) {
+            lazy.minimize();
             Self::Materialized(Arc::new(lazy))
         } else {
             Self::Lazy(Mutex::new(lazy))

@@ -440,6 +440,210 @@ impl LazyDfa {
         true
     }
 
+    /// Minimize a fully-materialised DFA via Moore's partition
+    /// refinement algorithm.
+    ///
+    /// Two DFA states are equivalent iff they have the same accept-
+    /// flag triple (`is_accept`, `accept_when_fire_wb`,
+    /// `accept_when_not_fire_wb`) AND for every byte class their
+    /// transition targets are equivalent. Moore's algorithm
+    /// iteratively refines a partition starting from the accept-
+    /// flag-tuple grouping; each round computes a per-state
+    /// signature `(current_partition, targets_for_class_0..N)`,
+    /// and states with identical signatures collapse into the same
+    /// new partition. Converges in at most `n` iterations.
+    ///
+    /// Should only be called on a fully-materialised DFA (every
+    /// reachable transition cached as `Next` or `Dead`, no
+    /// `UNCACHED` entries). Defensive: a stray `UNCACHED` slot is
+    /// preserved verbatim and excluded from minimisation. After
+    /// successful minimisation:
+    ///
+    /// - `self.states` shrinks to one entry per equivalence class.
+    /// - `self.transitions` is rebuilt with mapped targets.
+    /// - The start state (originally ID `0`) remains ID `0`.
+    /// - `self.cache` is cleared (stale post-merge); the
+    ///   materialised flat table is now the source of truth.
+    ///
+    /// Use cases where minimisation pays back its construction cost:
+    /// - Patterns whose materialisation is just below the state
+    ///   limit cap — minimisation may bring them under by enough
+    ///   margin that they fit comfortably in L1 / L2.
+    /// - Patterns with redundant alternation branches that the
+    ///   forward subset construction can't pre-collapse.
+    ///
+    /// For patterns whose materialised DFA is already small (under
+    /// ~30 states), minimisation typically removes 1-5 states and
+    /// the runtime impact is below measurement noise. Called
+    /// unconditionally because the construction cost is one-time
+    /// and small.
+    pub fn minimize(&mut self) {
+        let n = self.states.len();
+        if n <= 1 {
+            return;
+        }
+        let num_classes = self.num_classes;
+
+        // Sentinel partition ID for the virtual "dead state".
+        // Distinct from any real partition; chosen as u32::MAX so it
+        // sorts predictably in signature comparisons.
+        const DEAD_PARTITION: u32 = u32::MAX;
+
+        // Initial partition by accept-flag triple. States with
+        // different combos can never be equivalent — they observe
+        // different accept behaviour under different word-boundary
+        // contexts.
+        let mut partition: Vec<u32> = vec![0; n];
+        {
+            let mut sig_to_id: HashMap<(bool, bool, bool), u32> = HashMap::new();
+            for s in 0..n {
+                let state = &self.states[s];
+                let key = (
+                    state.is_accept,
+                    state.accept_when_fire_wb,
+                    state.accept_when_not_fire_wb,
+                );
+                let next_id = sig_to_id.len() as u32;
+                let id = *sig_to_id.entry(key).or_insert(next_id);
+                partition[s] = id;
+            }
+        }
+
+        // Moore iteration: refine the partition until stable. Each
+        // iteration computes, for each state, a signature
+        // (current_partition, transition_targets_in_partitions). States
+        // with the same signature stay together; differing signatures
+        // split their parent partition.
+        loop {
+            let mut new_partition: Vec<u32> = vec![0; n];
+            let mut sig_to_new_id: HashMap<Vec<u32>, u32> = HashMap::new();
+            for s in 0..n {
+                let mut sig: Vec<u32> = Vec::with_capacity(num_classes + 1);
+                sig.push(partition[s]);
+                for cls in 0..num_classes {
+                    let trans_idx = s * num_classes + cls;
+                    let target = self.transitions[trans_idx];
+                    let target_partition = if target == DEAD_STATE || target == UNCACHED {
+                        DEAD_PARTITION
+                    } else {
+                        partition[target as usize]
+                    };
+                    sig.push(target_partition);
+                }
+                let next_id = sig_to_new_id.len() as u32;
+                let id = *sig_to_new_id.entry(sig).or_insert(next_id);
+                new_partition[s] = id;
+            }
+            if new_partition == partition {
+                break;
+            }
+            partition = new_partition;
+        }
+
+        // Critical invariant: states 0 and 1 are both start states
+        // (state 0 for pw=false context, state 1 for pw=true context).
+        // The simulator's `start_state_for(input, start)` returns
+        // either 0 or 1 unconditionally, so both slots MUST exist in
+        // the minimised DFA even when behaviourally equivalent
+        // (which is the case for every non-WB pattern — both states
+        // have the same accept flags, same transitions, and end up
+        // in the same Moore partition).
+        //
+        // Solution: always preserve two start-state slots verbatim,
+        // and let the encounter-order loop fill in the rest.
+        let final_count = {
+            let distinct_partitions =
+                (partition.iter().max().copied().unwrap_or(0) as usize) + 1;
+            // We always allocate at least `min(n, 2)` start-state
+            // slots. The remaining partitions add their own slots
+            // only if they're not already pinned to slot 0 or 1.
+            let pinned = n.min(2);
+            let mut counted_partitions: std::collections::HashSet<u32> =
+                std::collections::HashSet::new();
+            counted_partitions.insert(partition[0]);
+            if n >= 2 {
+                counted_partitions.insert(partition[1]);
+            }
+            let extra_partitions = distinct_partitions.saturating_sub(counted_partitions.len());
+            pinned + extra_partitions
+        };
+        if final_count >= n {
+            return;
+        }
+
+        // Build the partition → new-state-ID mapping. Slots 0 and 1
+        // are pinned to the original start states (regardless of
+        // their partition). Other partitions populate in encounter
+        // order from slot 2 upward.
+        let mut partition_to_new_id: HashMap<u32, DfaStateId> = HashMap::new();
+        let mut new_states: Vec<DfaState> = Vec::with_capacity(final_count);
+
+        // Slot 0: state 0 (pw=false start).
+        let start_partition = partition[0];
+        partition_to_new_id.insert(start_partition, 0);
+        new_states.push(self.states[0].clone());
+
+        // Slot 1: state 1 (pw=true start), if it exists. Note we
+        // ONLY add a partition_to_new_id entry for state 1's
+        // partition if it differs from state 0's — otherwise the
+        // partition is already mapped to slot 0 and we just need
+        // the state slot to exist for start_state_for's contract.
+        if n >= 2 {
+            let state1_partition = partition[1];
+            new_states.push(self.states[1].clone());
+            if state1_partition != start_partition {
+                partition_to_new_id.insert(state1_partition, 1);
+            }
+        }
+
+        // Remaining partitions get IDs in encounter order.
+        for s in 0..n {
+            let p = partition[s];
+            if !partition_to_new_id.contains_key(&p) {
+                let new_id = new_states.len() as DfaStateId;
+                partition_to_new_id.insert(p, new_id);
+                new_states.push(self.states[s].clone());
+            }
+        }
+
+        // Rebuild transitions. For old state 0 → new slot 0. For
+        // old state 1 → new slot 1 (always, even if partition[1] ==
+        // partition[0] — preserving the start-state contract). All
+        // other old states map via partition_to_new_id.
+        let actual_final_count = new_states.len();
+        let mut new_transitions: Vec<DfaStateId> =
+            vec![DEAD_STATE; actual_final_count * num_classes];
+        for old_s in 0..n {
+            let new_s: DfaStateId = if old_s == 0 {
+                0
+            } else if old_s == 1 {
+                1
+            } else {
+                partition_to_new_id[&partition[old_s]]
+            };
+            for cls in 0..num_classes {
+                let old_idx = old_s * num_classes + cls;
+                let old_target = self.transitions[old_idx];
+                let new_target = if old_target == DEAD_STATE {
+                    DEAD_STATE
+                } else if old_target == UNCACHED {
+                    UNCACHED
+                } else {
+                    partition_to_new_id[&partition[old_target as usize]]
+                };
+                let new_idx = (new_s as usize) * num_classes + cls;
+                new_transitions[new_idx] = new_target;
+            }
+        }
+
+        self.states = new_states;
+        self.transitions = new_transitions;
+        // Cache holds state IDs from the pre-minimisation DFA;
+        // discard. Post-materialisation, the cache is unused — the
+        // flat transition table is the source of truth.
+        self.cache.clear();
+    }
+
     /// Immutable companion to [`Self::transition`]. Reads only the
     /// pre-filled cache; returns `Exhausted` if it hits an UNCACHED
     /// slot (which means the caller needs the mutable variant to

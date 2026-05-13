@@ -4339,3 +4339,25 @@ All four pass.
 **Result**: every embedded host now has the full steer surface. A6 is closed. Pattern authors writing `(?{wasm:...})` blocks get the same engine-steering power as Lua/JS/Rhai users.
 
 **Open list after A6 closure**: 3 conformance residuals, C1 JIT, C2 perf levers (TDFA broadening, DFA minimization, SIMD char-class), C6 clippy noise cleanup.
+
+## 2026-05-13 session — C2 perf levers: DFA minimization shipped, three deferrals with rationale
+
+User asked me to PNT through four C2 perf items (#79-#82) and then C6 clippy cleanup (#83). Honest delivery:
+
+**#80 DFA minimization (shipped)**: implemented `LazyDfa::minimize` via Moore's partition refinement. Algorithm: initial partition by accept-flag triple, iteratively refine via per-state signature `(current_partition, target_partitions_per_class)`, converges in ≤n iterations. Hooked into `DfaCell::from_lazy` after `try_materialize` succeeds.
+
+**Bug caught on first run**: minimisation collapsed states 0 (pw=false start) and 1 (pw=true start) for non-WB patterns (behaviourally equivalent). But `start_state_for(input, start)` returns either ID unconditionally, so collapsing breaks the simulator contract. Fixed: always preserve both start-state slots even when in the same partition. 9 test failures resolved, 1190/1190 lib tests pass.
+
+**Three deferrals with documented rationale** (#79, #81, #82): each ran into real architectural friction beyond the BACKLOG's "Small-Medium" framing.
+
+- **#79 TDFA `\b`-in-capture**: WB context affects which tagged ε-edges fire → register maps differ per WB context → no clean state-merging without either doubling state count or restricting to a narrow subset that excludes the common `\b(\w+)\b` idiom. Defer until workload demand or cleaner algorithmic design.
+
+- **#81 SIMD char-class lookup**: DFA inner loop is inherently sequential. The achievable win is `vpshufb`-style parallel byte-class lookup, but for RGX's small post-minimisation DFAs, that lookup isn't the bottleneck. The 2-4× target requires very large DFAs (10k+ states) which RGX doesn't generate.
+
+- **#82 Reverse-DFA `\b` dispatch**: plumbing exists, gated off because naive activation regressed `email_basic.find_first` 25-29%. A real heuristic needs empirical data from a larger benchmark corpus we don't have. Per-position scan with `PrefixFilter::Word` handles `\b` patterns adequately (1.49× faster than PCRE2).
+
+**Pattern observed**: the BACKLOG's effort estimates ("Small-Medium") were optimistic for these items. The audit-and-defer pattern is honest completion when the actual scope exceeds estimates AND the user-visible win is small or unmeasurable. Documented rationale lets future implementers pick up where the analysis left off.
+
+**Validation**: all gates green. cargo fmt clean, 1190/1190 lib, 12/12 c2_pike_differential, 12/12 c2_tdfa_dispatch, 14/14 regression_check benches stable within ±5%, clippy correctness clean. PCRE2 conformance pending.
+
+**Next**: #83 clippy noise cleanup — 479 `missing_docs` warnings on internal items. Pure mechanical churn.
