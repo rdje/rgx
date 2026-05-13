@@ -101,152 +101,70 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ## B. Features to port from Rust's `regex` crate
 
-### B1. Step/time limits (like `regex`'s guaranteed linear time)
-- **What**: rgx can't guarantee linear time (it's a backtracking engine), but it CAN abort after N steps.
-- **Effort**: `small`
-- **Rationale**: The `regex` crate's #1 advantage is "can't hang." rgx should have the next-best thing: configurable limits.
-- **How**: Same as A1 above.
-- **Port difficulty**: Easy — it's a counter, not an algorithm change.
+> **Section status (2026-05-13)**: every B-item has shipped. Code locations are listed per entry below. The shipping cadence was incremental over the C2 / TDFA period, but the section was never audited as a batch — this audit closes it. New `regex`-crate-style API gaps belong in a new section, not as additions to B.
 
-### B2. `RegexSet` — match multiple patterns at once
-- **What**: Compile N patterns, test an input against all of them in one pass, get which ones matched.
-- **Effort**: `large`
-- **Rationale**: The `regex` crate's `RegexSet` is widely used for routing, filtering, and classification. Very powerful.
-- **How**: Compile each pattern to its own bytecode. Run an Aho-Corasick or NFA-union pre-filter, then confirm with individual VM executions for candidates.
-- **Port difficulty**: Hard — the `regex` crate uses NFA composition, which is architecturally different from a backtracking VM. A simpler approach: run each pattern separately but share the input scan.
+### B1. Step/time limits ✅ Shipped
+- **Status**: `Regex::set_max_steps(Some(limit))` at `rgx-core/src/lib.rs:2040`. Engine accumulates a step counter per opcode; exceeding the limit returns no match (`None`) instead of looping. Tests at `lib.rs:8164+`. Same machinery satisfies A1 (production safety) and B1 (port from `regex`).
 
-### B3. Compilation caching
-- **What**: Cache compiled `Program` objects so recompiling the same pattern is instant.
-- **Effort**: `small`
-- **Rationale**: The `regex` crate caches internally. Useful for applications that compile patterns dynamically.
-- **How**: `HashMap<String, Arc<Program>>` with LRU eviction. Thread-safe via `RwLock`.
-- **Port difficulty**: Easy.
+### B2. `RegexSet` — match multiple patterns at once ✅ Shipped
+- **Status**: `pub struct RegexSet` in `rgx-core/src/regex_set.rs`. `RegexSet::new(&[...])` / `set.matches(text)` API with `SetMatches` result. Book chapter `book/src/core-api/regex-set.md`.
 
-### B4. Configurable match semantics
-- **What**: The `regex` crate supports leftmost-first and leftmost-longest semantics.
-- **Effort**: `medium`
-- **Rationale**: Different applications need different semantics. POSIX requires leftmost-longest.
-- **How**: Add a `MatchSemantics` enum to compilation options. Modify the VM's alternation handling.
-- **Port difficulty**: Medium — requires alternation changes in the VM.
+### B3. Compilation caching ✅ Shipped
+- **Status**: `pub struct RegexCache` in `rgx-core/src/cache.rs`. Thread-safe LRU via `RwLock<HashMap<String, Arc<Regex>>>`. Book chapter `book/src/core-api/regex-cache.md`.
 
-### B5. `bytes::Regex` — match on `&[u8]` directly
-- **What**: The `regex` crate has `Regex` (for `&str`) and `bytes::Regex` (for `&[u8]`). The bytes version doesn't require valid UTF-8.
-- **Effort**: `medium`
-- **Rationale**: Binary protocol parsing, log files with mixed encoding.
-- **How**: rgx already operates on `&[u8]` internally. Expose a `BytesRegex` that accepts `&[u8]` input and doesn't validate UTF-8.
-- **Port difficulty**: Easy — the internal machinery already works on bytes.
+### B4. Configurable match semantics ✅ Shipped
+- **Status**: `MatchSemantics::{LeftmostFirst, LeftmostLongest}` enum in `engine.rs`. `Regex::set_match_semantics(MatchSemantics::LeftmostLongest)` at `lib.rs:2091`. Tests at `lib.rs:8780+`. Book chapter `book/src/advanced/match-semantics.md`.
 
-### B6. Replacer API with capture interpolation
-- **What**: `regex` has `re.replace_all(text, "$1-$2")` with capture group interpolation in the replacement string.
-- **Effort**: `small`
-- **Rationale**: Very common operation. Currently rgx requires code blocks for replacement logic.
-- **How**: Parse `$1`, `$2`, `$name` in the replacement string. Substitute with captured text.
-- **Port difficulty**: Easy.
+### B5. `bytes::Regex` — match on `&[u8]` directly ✅ Shipped
+- **Status**: `pub struct BytesRegex` in `rgx-core/src/bytes.rs`. Accepts `&[u8]` without UTF-8 validation. Book chapter `book/src/core-api/bytes-regex.md`.
 
-### B7. `CaptureMatches` / `Captures` API
-- **What**: `regex` returns `Captures` objects with named group access: `caps["year"]`, `caps.name("year")`.
-- **Effort**: `small`
-- **Rationale**: Ergonomic capture access. rgx currently returns `groups: Vec<Option<(usize, usize)>>` which requires index arithmetic.
-- **How**: Add a `Captures` struct wrapping the match result + input text, with `get(index)`, `name("group")`, `Index` impl.
-- **Port difficulty**: Easy — it's a wrapper.
+### B6. Replacer API with capture interpolation ✅ Shipped
+- **Status**: `Regex::interpolate_replacement_ext` at `lib.rs:2359` parses `$1`, `${name}`, `$&` in replacement strings. Reused by both `replace` and `replace_all` paths.
 
-### B8. `split` and `splitn`
-- **What**: Split a string by a regex pattern, like `str::split` but with regex.
-- **Effort**: `trivial`
-- **Rationale**: Very common operation. Standard in every regex library.
-- **How**: Use `find_all` to get match positions, return the text between matches.
-- **Port difficulty**: Trivial.
+### B7. `CaptureMatches` / `Captures` API ✅ Shipped (folded into B13 implementation)
+- **Status**: `pub struct Captures<'t>` at `lib.rs:253` with `name()`, `Index<usize>`, `Index<&str>`. Iterator form via `captures_iter` (B12).
 
-### B9. Syntax error diagnostics with spans
-- **What**: The `regex` crate provides beautiful error messages with span highlighting when a pattern is invalid.
-- **Effort**: `medium`
-- **Rationale**: Developer experience. Helps users fix their patterns.
-- **How**: Propagate PGEN's diagnostic location through to the error message. Format with caret highlighting.
-- **Port difficulty**: Medium — PGEN already provides `byte_offset`/`line`/`column`, need to format nicely.
+### B8. `split` and `splitn` ✅ Shipped
+- **Status**: `Regex::split(text)` at `lib.rs:1697`, `Regex::splitn(text, limit)` at `lib.rs:1724`. Lazy variants `split_iter` / `splitn_iter` at `lib.rs:1999/2011`.
 
-### B10. `is_match_at` / `find_at` — match from a specific position
-- **What**: Start matching from byte position N instead of 0.
-- **Effort**: `trivial`
-- **Rationale**: Useful for parsing, tokenization, and custom scanning loops.
-- **How**: Set `ExecContext.pos = start_position` before calling `execute_at`.
-- **Port difficulty**: Trivial.
+### B9. Syntax error diagnostics with spans ✅ Shipped
+- **Status**: `CompileError` struct at `rgx-core/src/error.rs:40` with caret-position formatting. Book chapter `book/src/core-api/error-diagnostics.md`.
 
-### B11. `RegexBuilder` — builder-pattern compilation with flag overrides
-- **What**: `RegexBuilder::new(pattern).case_insensitive(true).multi_line(true).build()`.
-- **Effort**: `small`
-- **Rationale**: The `regex` crate's primary compilation API. Lets users set flags without embedding them in the pattern.
-- **How**: Add a `RegexBuilder` struct with fields for each flag. Apply them as default inline flags before compilation.
-- **Port difficulty**: Easy — rgx already supports `(?imsx)` inline; builder just sets defaults.
+### B10. `is_match_at` / `find_at` ✅ Shipped
+- **Status**: `Regex::is_match_at(text, start)` at `lib.rs:1680`, `Regex::find_first_at(text, start)` at `lib.rs:1658`. Names differ from `regex`'s `find_at`/`is_match_at` to match rgx's `find_first` convention; semantics are identical. Tests at `lib.rs:7916+`. Book chapter `book/src/core-api/position-aware.md`.
 
-### B12. Iterator-based APIs — `find_iter`, `captures_iter`, lazy `split`
-- **What**: All `regex` find/capture/split operations return lazy iterators instead of collecting into `Vec`.
-- **Effort**: `small`
-- **Rationale**: Zero-allocation iteration is idiomatic Rust. Collecting into `Vec` forces full materialization even when only the first few matches are needed.
-- **How**: Add `FindIter`, `CaptureIter`, `SplitIter` structs that hold `&Regex` + `&str` + scan state.
-- **Port difficulty**: Easy — the scanning logic already exists; wrap it in Iterator impl.
+### B11. `RegexBuilder` ✅ Shipped
+- **Status**: `pub struct RegexBuilder` at `lib.rs:763`. Chainable `case_insensitive()`, `multi_line()`, `dot_matches_new_line()`, etc. Book chapter `book/src/getting-started/regex-builder.md`.
 
-### B13. `Captures` wrapper — ergonomic capture access
-- **What**: `caps.get(1)`, `caps.name("year")`, `caps["year"]`, `caps.extract::<N>()`, `caps.expand(template, &mut dst)`.
-- **Effort**: `small`
-- **Rationale**: The `regex` crate's `Captures` is the primary way to access groups. rgx currently exposes raw `Vec<Option<(usize, usize)>>`.
-- **How**: Wrap `MatchResult` + `&str` + named-group map. Implement `Index<usize>`, `Index<&str>`, and helper methods.
-- **Port difficulty**: Easy — it's a wrapper. Replaces B7 (partially shipped).
+### B12. Iterator-based APIs ✅ Shipped
+- **Status**: `FindIter` / `CaptureIter` / `SplitIter` / `SplitNIter` at `lib.rs:1975`/`1988`/`1999`/`2011`. All implement `Iterator`. Book chapter `book/src/core-api/iterators.md`.
 
-### B14. `Match` type — ergonomic match access
-- **What**: `m.as_str()`, `m.range()`, `m.len()`, `m.is_empty()` instead of manual `&text[m.start..m.end]`.
-- **Effort**: `trivial`
-- **Rationale**: Every `regex` user relies on `m.as_str()`. RGX's `MatchResult` requires manual slicing.
-- **How**: Either add these methods to `MatchResult`, or return a `Match<'a>` that borrows the input text.
-- **Port difficulty**: Trivial.
+### B13. `Captures` wrapper ✅ Shipped
+- **Status**: `Captures<'t>` at `lib.rs:253`. Methods: `get(idx)`, `name(name)`, `expand(template, dst)`, `Index<usize>`, `Index<&str>`. Tests at `lib.rs:6221+`.
 
-### B15. `replacen` — replace up to N matches
-- **What**: `re.replacen(text, 2, replacement)` — like `replace_all` but stops after N.
-- **Effort**: `trivial`
-- **Rationale**: Common operation. `regex` has it; rgx has `replace` (first) and `replace_all` but nothing in between.
-- **How**: Add a `limit` parameter to the replace loop.
-- **Port difficulty**: Trivial.
+### B14. `Match` type ✅ Shipped
+- **Status**: `pub struct Match<'t>` at `lib.rs:200` with `as_str()`, `range()`, `start()`, `end()`, `len()`, `is_empty()`. Book chapter `book/src/core-api/match-type.md`.
 
-### B16. `Replacer` trait — custom replacement functions
-- **What**: `re.replace_all(text, |caps: &Captures| { format!("{}!", caps[1]) })` — closure-based replacement.
-- **Effort**: `small`
-- **Rationale**: Much more powerful than string interpolation. Lets users compute replacements programmatically.
-- **How**: Define a `Replacer` trait with `replace_append(&mut self, caps: &Captures, dst: &mut String)`. Implement for `&str`, `String`, `Fn`.
-- **Port difficulty**: Easy.
+### B15. `replacen` ✅ Shipped
+- **Status**: `Regex::replacen(text, limit, replacer)` at `lib.rs:1803` returns `Cow<str>`.
 
-### B17. `shortest_match` / `shortest_match_at`
-- **What**: Return only the end position of the first match, not the full span. Faster because the engine can stop earlier.
-- **Effort**: `small`
-- **Rationale**: Performance optimization for "does it match and where does it end?" queries (tokenizers, validators).
-- **How**: Early-exit VM mode that stops at the first `Match` opcode hit and returns `ctx.pos`.
-- **Port difficulty**: Easy.
+### B16. `Replacer` trait ✅ Shipped
+- **Status**: `pub trait Replacer` at `lib.rs:438`. Blanket impls for `&str`, `String`, `Fn(&Captures) -> String`. Book chapter `book/src/advanced/replacer-trait.md`.
 
-### B18. `escape()` — escape regex metacharacters
-- **What**: `regex::escape("a.b") == "a\\.b"` — make a literal string safe for regex concatenation.
-- **Effort**: `trivial`
-- **Rationale**: Every regex library has this. Critical for building patterns from user input safely.
-- **How**: Iterate chars, prefix metacharacters with `\`.
-- **Port difficulty**: Trivial.
+### B17. `shortest_match` / `shortest_match_at` ✅ Shipped
+- **Status**: `Regex::shortest_match(text)` at `lib.rs:1875`, `Regex::shortest_match_at(text, start)` at `lib.rs:1884`. Returns `Option<usize>` of the match-end byte position.
 
-### B19. `captures_len` / `static_captures_len` / `capture_names` / `as_str` metadata
-- **What**: Introspection: how many groups? what are their names? what was the original pattern?
-- **Effort**: `trivial`
-- **Rationale**: Needed for generic regex-processing code that works with any pattern.
-- **How**: Expose `program.num_groups`, `program.named_groups`, and store the original pattern string.
-- **Port difficulty**: Trivial.
+### B18. `escape()` ✅ Shipped
+- **Status**: `pub fn escape(text: &str) -> String` at `lib.rs:177`. Escapes the standard PCRE2 metacharacter set.
 
-### B20. `CaptureLocations` — reusable capture storage
-- **What**: Pre-allocate a capture buffer and reuse it across matches to avoid per-match allocation.
-- **Effort**: `small`
-- **Rationale**: Performance-critical loops that match millions of times. Avoids `Vec` allocation per match.
-- **How**: Add a `CaptureLocations` struct wrapping `Vec<Option<(usize, usize)>>`. Add `captures_read(text, &mut locs)` that fills it in-place.
-- **Port difficulty**: Easy.
+### B19. Introspection metadata ✅ Shipped
+- **Status**: `Regex::captures_len()` (lib.rs:1898), `Regex::capture_names()` (lib.rs:1963), `Regex::as_str()` (lib.rs:1892). `CaptureNames` iterator at lib.rs:713. `Regex::named_groups()` accessor at lib.rs:2717.
 
-### B21. `Cow<str>` return for `replace` — avoid allocation when no match
-- **What**: `regex`'s `replace` returns `Cow<str>`, borrowing the original text when there's no match instead of cloning.
-- **Effort**: `trivial`
-- **Rationale**: Avoids unnecessary allocation. RGX's `replace` currently returns `String` always.
-- **How**: Return `Cow::Borrowed(text)` when no match, `Cow::Owned(result)` otherwise.
-- **Port difficulty**: Trivial.
+### B20. `CaptureLocations` ✅ Shipped
+- **Status**: `pub struct CaptureLocations` at `lib.rs:397`. Reusable across matches. Book chapter `book/src/advanced/capture-locations.md`.
+
+### B21. `Cow<str>` return for `replace` ✅ Shipped
+- **Status**: `Regex::replace` / `replace_all` / `replacen` all return `Cow<'t, str>` (lib.rs:1767/1794/1803). No allocation when no match occurs.
 
 ---
 

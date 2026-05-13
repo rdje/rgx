@@ -4191,3 +4191,48 @@ The user emphasized that rationales should be in user-visible documentation, not
 **Validation.** `mdbook build` clean. No engine code touched, no tests affected.
 
 **Open follow-up.** If a new embedded host is ever added, the three-axis test (embed cost ≤ ~5MB, real sandbox, unique design-space niche) is the gate. Candidates that *could* clear it in principle but lack demand: Chibi-Scheme, Wren, Mun. Current five cover the space adequately.
+
+## 2026-05-13 session — BACKLOG audit: B-list (all 21 items) marked shipped
+
+User asked me to PNT through the B-list ("Features to port from Rust's regex crate") until full completion. Audit showed every B-item (B1 through B21) is already shipped in code; the BACKLOG section had drifted out of sync with reality.
+
+**Verification method**: grepped `rgx-core/src/lib.rs` and submodules for the symbols and types each B-item describes. Confirmed each is present, documented, and (for the bigger items) has its own book chapter under `book/src/core-api/` or `book/src/advanced/`.
+
+**Status of each B-item**:
+- B1 step limits → `set_max_steps` at lib.rs:2040
+- B2 RegexSet → rgx-core/src/regex_set.rs
+- B3 cache → rgx-core/src/cache.rs
+- B4 match semantics → `MatchSemantics` + `set_match_semantics` at lib.rs:2091
+- B5 BytesRegex → rgx-core/src/bytes.rs
+- B6 replace interpolation → `interpolate_replacement_ext` at lib.rs:2359
+- B7 Captures/CaptureMatches → folded into B13 implementation
+- B8 split/splitn → lib.rs:1697/1724
+- B9 syntax error spans → CompileError at error.rs:40 with caret-position
+- B10 is_match_at/find_at → is_match_at (lib.rs:1680), find_first_at (1658). Renamed from `regex`'s `find_at` to match rgx's `find_first` naming convention; semantic identical.
+- B11 RegexBuilder → lib.rs:763
+- B12 iterator APIs → FindIter/CaptureIter/SplitIter/SplitNIter at lib.rs:1975-2011
+- B13 Captures wrapper → lib.rs:253 with Index<usize> and Index<&str>
+- B14 Match type → lib.rs:200 with as_str/range/len/is_empty
+- B15 replacen → lib.rs:1803
+- B16 Replacer trait → lib.rs:438
+- B17 shortest_match → lib.rs:1875/1884
+- B18 escape → lib.rs:177
+- B19 introspection → captures_len (1898), capture_names (1963), as_str (1892)
+- B20 CaptureLocations → lib.rs:397
+- B21 Cow<str> for replace → lib.rs:1767/1794/1803
+
+**BACKLOG cleanup pattern**: each B-item's full What/Effort/Rationale/How/Port-difficulty subsections collapsed into a single ✅ Shipped + Status line with code location + book chapter cross-link where applicable. Section header gets a note: "every B-item has shipped; new `regex`-crate-style API gaps belong in a new section, not as additions to B."
+
+**Why this is meaningful work**: BACKLOG is the project's task inventory. Staleness in it costs future maintainers/contributors time. The shipping itself happened incrementally over 2026-04 to 2026-05 across many small commits; this audit makes the BACKLOG match reality so the B-section can be ignored as "done" going forward.
+
+**No code touched.** `cargo test --no-run` clean.
+
+**Next: open items remaining after this audit**:
+- 3 conformance residuals (testinput2:6592/6595/6601) — cross-subexpr alt-frame promotion
+- C1 JIT compilation (major)
+- C2 perf levers: TDFA eligibility broadening, DFA minimization, SIMD char-class lookup, reverse-DFA \b dispatch policy
+- A1 step limits (already shipped — overlapping with B1)
+- A2 memory limits
+- A5 CLI --color
+- A6 inline-language steering (documented as Lua/JS/Rhai/WASM)
+- C6 clippy noise cleanup
