@@ -2583,6 +2583,11 @@ impl Engine {
         self.vm.set_max_recursion_depth(limit);
     }
 
+    /// Set the maximum capture-trail length per match attempt.
+    pub fn set_max_trail_entries(&self, limit: Option<u64>) {
+        self.vm.set_max_trail_entries(limit);
+    }
+
     /// Register a native callback on the engine's execution manager.
     ///
     /// # Errors

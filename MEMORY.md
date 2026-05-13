@@ -4256,3 +4256,32 @@ User asked me to PNT into A1 ("configurable max-step counter, production blocker
 **Production-readiness summary**: A1 + 2/3 A2 limits = adequate DoS defense for servers accepting user-supplied regex patterns. Defaults remain unbounded (existing user behavior unchanged); production deployments must set limits explicitly. Pattern matches `regex` crate's `RegexBuilder::size_limit` / `dfa_size_limit` convention but covers a broader set of resource axes (steps + backtrack frames + recursion depth, with trail entries as future defense-in-depth).
 
 **No code touched**. Conformance ratchet untouched at 12,806 / 4 / 0 / 0.
+
+## 2026-05-13 session — A2: ship the third memory limit (set_max_trail_entries)
+
+User pushed back on my prior decision to defer the third A2 limit (`max_trail_entries`) on weak grounds. Reasoning was: pattern is trivial, spec is in BACKLOG, "defense-in-depth not gating" isn't a reason to NOT ship a small thing. Shipped it now.
+
+**New API**: `Regex::set_max_trail_entries(Option<u64>)` at lib.rs:2068. Caps the capture-trail length per match attempt. Defaults to `None` (unbounded). Pathological patterns like `(.)*x` on long no-`x` input grow the trail to one entry per input byte; the limit short-circuits.
+
+**Plumbing** (mirrors the existing three limits exactly):
+- `RegexVM::max_trail_entries: AtomicU64` field
+- `RegexVM::set_max_trail_entries(Option<u64>)` setter
+- `ExecContext::max_trail_entries: u64` field
+- Propagated from RegexVM to ExecContext at 8 construction sites (7 VM-owned + 1 clone-from-ctx)
+- Enforcement in the opcode dispatch loop: `if ctx.max_trail_entries > 0 && ctx.capture_trail.len() > ctx.max_trail_entries { return false; }`
+- `Engine::set_max_trail_entries` forwarder
+- `has_runtime_match_limits()` extended to include the new limit (so C2 dispatch correctly routes to backtracking VM when set)
+
+**Why the capture trail matters as a separate axis**: `max_backtrack_frames` bounds the NUMBER of pending states. `max_trail_entries` bounds the PER-STATE undo cost. A pattern can be safe under one but not the other. `(a|b)*c` adversarial input grows the frame count; `(.)*x` adversarial input grows the trail within a small frame count. Together they bound total trail memory across all live states.
+
+**4 new unit tests** at lib.rs:8245+: pathological-input-aborts, valid-match-not-blocked, `None`-is-unlimited, low-limit-blocks-every-attempt. All pass.
+
+**Book chapter** `book/src/core-api/safety-limits.md`: added new "## `set_max_trail_entries`" section between recursion-depth and atomic-mutability sections. Explains the three axes of memory-bounded matching (frame count × per-state cost). "Combining all three" example retitled "Combining all four" with the new limit included in the worked example.
+
+**Live docs**: BACKLOG A2 entry updated from "partially shipped — 2 of 3" to ✅ Shipped. CHANGES.md entry covers the slice. MEMORY.md (this entry).
+
+**Validation**: 1190/1190 lib tests, 12/12 c2_pike_differential, 12/12 c2_tdfa_dispatch, clippy correctness clean, mdbook builds. PCRE2 conformance pending (release run started).
+
+**Production-readiness summary**: A1 (steps) + A2 (3 memory limits) = adequate DoS defense across every resource axis the backtracking VM can blow up on. Defaults remain `None` so existing users see no behaviour change. Server deployments accepting user-supplied regex patterns MUST set limits explicitly.
+
+**Lesson learned**: when something fits in the original spec, is trivial to add, and tests cleanly — ship it instead of deferring. "Defense-in-depth" framing was a rationalisation for the smaller scope, not a real reason to defer.

@@ -15,10 +15,12 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 - **Status**: `Regex::set_max_steps(Some(limit))` at `rgx-core/src/lib.rs:2040`. VM accumulates a step counter per opcode in `ExecContext`; exceeding the limit causes the match attempt to fail (returns `None`), while the scanning loop is free to try other start positions. Doc-comment example uses the canonical `(a+)+b` pathological pattern. Tests at `lib.rs:8160-8192` cover four cases: pathological-input-aborts, valid-match-not-blocked, `None`-is-unlimited, and per-attempt application (a low limit blocks every start position). User-facing documentation in `book/src/core-api/safety-limits.md`.
 - **Production gate**: A1 is the production blocker for any server accepting user-supplied regex patterns. Shipping `set_max_steps` closes the DoS surface. Defaults to `None` (unbounded) so existing users see no behaviour change; servers MUST set a limit explicitly.
 
-### A2. Memory limits — partially shipped
-- **Status**: 2 of 3 limits shipped. `Regex::set_max_backtrack_frames(Some(n))` and `Regex::set_max_recursion_depth(Some(n))` live at `rgx-core/src/lib.rs:2048` and `2056`. Both have unit tests (`backtrack_frame_limit_prevents_stack_explosion`, `recursion_depth_limit_custom` at `lib.rs:8197+`). The recursion limit also has a default hard ceiling of 1024 even when `None` is passed.
-- **Remaining**: `max_trail_entries` (capture trail size cap). Not yet implemented. Trivial to add — same pattern as the other two — once a production deployment surfaces a trail-size DoS shape worth defending against. Defer until needed.
-- **Production gate impact**: with `set_max_steps` (A1) + the two shipped A2 limits, server deployments accepting user-supplied patterns have adequate defenses. The remaining trail-size limit is defense-in-depth, not a gating concern.
+### A2. Memory limits ✅ Shipped
+- **Status**: all three limits shipped.
+  - `Regex::set_max_backtrack_frames(Some(n))` at `lib.rs:2048`. Tests at `lib.rs:8197+`.
+  - `Regex::set_max_recursion_depth(Some(n))` at `lib.rs:2056`. Tests at `lib.rs:8215+`. Default hard ceiling of 1024 even when `None`.
+  - `Regex::set_max_trail_entries(Some(n))` at `lib.rs:2068`. Tests at `lib.rs:8245+`. Caps the capture-trail length so a single backtrack frame can't grow an unbounded undo log on pathological patterns (e.g. `(.)*` on long input).
+- **Production gate**: A1 (`set_max_steps`) + A2's three limits cover every resource axis the backtracking VM can blow up on — CPU time (steps), state count (frames), recursion depth, and per-state memory (trail). Defaults are `None` (unbounded) so existing users see no behaviour change; server deployments accepting user-supplied patterns MUST set limits explicitly. User-facing documentation in `book/src/core-api/safety-limits.md`.
 
 ### A3. `tail_file` — file watching/streaming ✅ DONE
 - **Status**: shipped. `Regex::tail_file(path, options, on_match)` lives in `rgx-core/src/file.rs` with `TailHandle` / `TailOptions` types and integration tests (`tail_file_detects_appended_content`, `tail_file_from_beginning`).

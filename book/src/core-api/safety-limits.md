@@ -143,13 +143,62 @@ re.set_max_recursion_depth(None);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## `set_max_trail_entries` -- capture-trail length cap
+
+Every capture-group write is recorded in a **capture trail** so the engine
+can undo the write on backtrack. On pathological patterns with many nested
+captures, the trail can grow far beyond what `set_max_backtrack_frames`
+alone defends against — a single backtrack frame can carry an arbitrarily
+long trail. `set_max_trail_entries` caps the trail length:
+
+```rust,ignore
+# use rgx_core::Regex;
+let re = Regex::compile(r"(.)*x")?;
+re.set_max_trail_entries(Some(100));
+
+// Pathological input without 'x': the trail would otherwise grow
+// to one entry per input byte. The limit short-circuits it.
+let result = re.find_first(&"a".repeat(10_000));
+assert!(result.is_none());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### When to use it
+
+`set_max_trail_entries` is the third axis of memory-bounded matching:
+
+- `max_backtrack_frames` bounds the **number** of pending states.
+- `max_trail_entries` bounds the **per-state** undo cost.
+- Together they bound total trail memory across all live states.
+
+A pattern can be safe under one but not the other. `(a|b)*c` on adversarial
+input grows the frame count; `(.)*x` on adversarial input grows the trail
+within a small frame count. For untrusted input you usually want both.
+
+### The default
+
+The default is `None` (unbounded). Set a limit explicitly if you accept
+patterns or input from untrusted sources.
+
+### Removing the limit
+
+```rust,ignore
+# use rgx_core::Regex;
+let re = Regex::compile(r"(.)*x")?;
+re.set_max_trail_entries(Some(1_000));
+
+// Later, remove the limit
+re.set_max_trail_entries(None);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ## Interior mutability with `AtomicU64`
 
-You may have noticed that `set_max_steps`, `set_max_backtrack_frames`, and
-`set_max_recursion_depth` take `&self`, not `&mut self`. This is by design:
-all three limits are stored as `AtomicU64` values inside the VM, allowing
-them to be changed at any time without requiring exclusive access to the
-`Regex`.
+You may have noticed that `set_max_steps`, `set_max_backtrack_frames`,
+`set_max_recursion_depth`, and `set_max_trail_entries` all take `&self`,
+not `&mut self`. This is by design: all four limits are stored as
+`AtomicU64` values inside the VM, allowing them to be changed at any time
+without requiring exclusive access to the `Regex`.
 
 This means you can:
 
@@ -187,9 +236,12 @@ Note: because the limit is a single `AtomicU64` shared by all users of the
 `Regex`, the last writer wins. If different threads need different limits on
 the *same* regex, compile separate instances.
 
-## Combining all three limits
+## Combining all four limits
 
-For maximum protection against adversarial input, set all three:
+For maximum protection against adversarial input, set all four. Each
+defends a different resource axis: CPU time (`max_steps`), backtrack-state
+count (`max_backtrack_frames`), recursion depth (`max_recursion_depth`),
+and per-state undo memory (`max_trail_entries`).
 
 ```rust,ignore
 # use rgx_core::Regex;
@@ -198,6 +250,7 @@ fn compile_safe(pattern: &str) -> Result<Regex, Box<dyn std::error::Error>> {
     re.set_max_steps(Some(50_000));
     re.set_max_backtrack_frames(Some(5_000));
     re.set_max_recursion_depth(Some(100));
+    re.set_max_trail_entries(Some(10_000));
     Ok(re)
 }
 

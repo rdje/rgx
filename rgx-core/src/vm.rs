@@ -896,6 +896,14 @@ pub struct ExecContext<'a> {
     pub max_backtrack_frames: u64,
     /// Maximum recursion depth. 0 = unlimited.
     pub max_recursion_depth: u64,
+    /// Maximum capture-trail length per match attempt. 0 = unlimited.
+    /// The capture trail records each capture-slot write so backtrack
+    /// can undo them; on pathological patterns with many nested
+    /// captures the trail can grow exponentially. Bounding it
+    /// complements `max_backtrack_frames` (which bounds the stack of
+    /// pending states): a state can carry an arbitrarily long trail
+    /// even when the frame count is small.
+    pub max_trail_entries: u64,
     /// Set to `true` when a match attempt fails because it reached end-of-input
     /// while the pattern could have continued matching with more data.
     /// Used by partial-match APIs to distinguish "no match" from "need more input".
@@ -1160,6 +1168,11 @@ pub struct RegexVM {
     max_backtrack_frames: std::sync::atomic::AtomicU64,
     /// Maximum recursion depth per match attempt. 0 = unlimited (default).
     max_recursion_depth: std::sync::atomic::AtomicU64,
+    /// Maximum capture-trail length per match attempt. 0 = unlimited
+    /// (default). Defense-in-depth complement to `max_backtrack_frames`:
+    /// even a single backtrack frame can carry an unbounded trail on
+    /// pathological capture-heavy patterns.
+    max_trail_entries: std::sync::atomic::AtomicU64,
 }
 
 /// Runtime SIMD capability detection
@@ -1220,6 +1233,7 @@ impl RegexVM {
             max_steps: std::sync::atomic::AtomicU64::new(0),
             max_backtrack_frames: std::sync::atomic::AtomicU64::new(0),
             max_recursion_depth: std::sync::atomic::AtomicU64::new(0),
+            max_trail_entries: std::sync::atomic::AtomicU64::new(0),
         };
         vm.prefix_filter = vm.extract_prefix_filter();
         vm.literal_finder = vm.extract_literal_finder();
@@ -1274,6 +1288,23 @@ impl RegexVM {
     /// Set the maximum recursion depth per match attempt.
     pub fn set_max_recursion_depth(&self, limit: Option<u64>) {
         self.max_recursion_depth
+            .store(limit.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set the maximum capture-trail length per match attempt.
+    ///
+    /// The capture trail records each capture-slot write so that
+    /// backtrack can undo them. On pathological patterns with many
+    /// nested captures the trail can grow large; capping it provides
+    /// a defense-in-depth complement to
+    /// [`Self::set_max_backtrack_frames`] (which caps the number of
+    /// pending states but not the trail each state carries).
+    ///
+    /// Pass `None` to remove the limit (default — unbounded). Pass
+    /// `Some(n)` to abort the match attempt when the trail reaches
+    /// `n` entries.
+    pub fn set_max_trail_entries(&self, limit: Option<u64>) {
+        self.max_trail_entries
             .store(limit.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -1396,11 +1427,12 @@ impl RegexVM {
     }
 
     /// Returns `true` if any of the runtime safety limits
-    /// (`max_steps`, `max_backtrack_frames`, `max_recursion_depth`)
-    /// have been set to a non-zero value. Used by the C2 dispatch
-    /// decision — the Pike-VM is bounded by O(nm) and doesn't enforce
-    /// these limits, so patterns whose tests assert limit-triggered
-    /// errors must continue to run on the existing backtracking VM.
+    /// (`max_steps`, `max_backtrack_frames`, `max_recursion_depth`,
+    /// `max_trail_entries`) have been set to a non-zero value. Used
+    /// by the C2 dispatch decision — the Pike-VM is bounded by O(nm)
+    /// and doesn't enforce these limits, so patterns whose tests
+    /// assert limit-triggered errors must continue to run on the
+    /// existing backtracking VM.
     #[doc(hidden)]
     pub fn has_runtime_match_limits(&self) -> bool {
         self.max_steps.load(std::sync::atomic::Ordering::Relaxed) > 0
@@ -1410,6 +1442,10 @@ impl RegexVM {
                 > 0
             || self
                 .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+            || self
+                .max_trail_entries
                 .load(std::sync::atomic::Ordering::Relaxed)
                 > 0
     }
@@ -1520,6 +1556,9 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             max_recursion_depth: self
                 .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
@@ -1676,6 +1715,9 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
+                .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
@@ -1768,6 +1810,9 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
+                .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
@@ -1842,6 +1887,9 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             max_recursion_depth: self
                 .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
@@ -3238,6 +3286,7 @@ impl RegexVM {
             max_steps: ctx.max_steps,
             max_backtrack_frames: ctx.max_backtrack_frames,
             max_recursion_depth: ctx.max_recursion_depth,
+            max_trail_entries: ctx.max_trail_entries,
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
@@ -3366,6 +3415,14 @@ impl RegexVM {
             if ctx.max_backtrack_frames > 0
                 && ctx.backtrack_stack.len() as u64 > ctx.max_backtrack_frames
             {
+                return false;
+            }
+            // Capture-trail size check. Defense-in-depth complement
+            // to `max_backtrack_frames`: a single frame can carry an
+            // unbounded trail on pathological capture-heavy patterns
+            // (e.g. `(.)*` on long input), even when the frame count
+            // is small.
+            if ctx.max_trail_entries > 0 && ctx.capture_trail.len() as u64 > ctx.max_trail_entries {
                 return false;
             }
             ctx.step_count += 1;
@@ -5722,6 +5779,9 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
+                .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
@@ -6073,6 +6133,9 @@ impl RegexVM {
             max_recursion_depth: self
                 .max_recursion_depth
                 .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
+                .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),
             alt_scope_marks: Vec::new(),
@@ -6242,6 +6305,9 @@ impl RegexVM {
                 .load(std::sync::atomic::Ordering::Relaxed),
             max_recursion_depth: self
                 .max_recursion_depth
+                .load(std::sync::atomic::Ordering::Relaxed),
+            max_trail_entries: self
+                .max_trail_entries
                 .load(std::sync::atomic::Ordering::Relaxed),
             hit_end: false,
             alt_boundaries: Vec::new(),

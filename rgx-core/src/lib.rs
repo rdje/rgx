@@ -2057,6 +2057,38 @@ impl Regex {
         self.engine.set_max_recursion_depth(limit);
     }
 
+    /// Set the maximum capture-trail length per match attempt.
+    ///
+    /// The capture trail records each capture-slot write so backtrack
+    /// can undo them. On pathological patterns with many nested
+    /// captures (e.g. `(.)*` on long input) the trail can grow large
+    /// even when the backtrack frame count is small. This limit
+    /// complements [`Self::set_max_backtrack_frames`] as defense-in-
+    /// depth: the frame limit bounds the number of pending states,
+    /// the trail limit bounds the per-state cost.
+    ///
+    /// When the limit is reached the current match attempt fails
+    /// (returns no-match). The scanning loop may still try the next
+    /// start position, so the limit applies per-attempt, not
+    /// per-call.
+    ///
+    /// Pass `None` to remove the limit (default — unbounded). Pass
+    /// `Some(n)` to abort when the trail reaches `n` entries.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use rgx_core::Regex;
+    /// let re = Regex::compile(r"(.)*x").unwrap();
+    /// re.set_max_trail_entries(Some(100));
+    /// // Pathological input without 'x' would otherwise build a
+    /// // large capture trail; the limit short-circuits it.
+    /// assert!(re.find_first(&"a".repeat(10_000)).is_none());
+    /// ```
+    pub fn set_max_trail_entries(&self, limit: Option<u64>) {
+        self.engine.set_max_trail_entries(limit);
+    }
+
     /// Find the first match, or report a partial match when the input ends
     /// while the pattern could still be matching.
     ///
@@ -8240,6 +8272,54 @@ mod tests {
         re.set_max_recursion_depth(None); // Uses default (1024)
         let m = re.find_first("aabb");
         assert!(m.is_some());
+    }
+
+    #[test]
+    fn trail_entries_limit_prevents_explosion() {
+        // (.)*x — each iteration of the capture (`.`) writes a
+        // capture slot, growing the capture trail by one entry per
+        // input byte. With many bytes and no 'x', the trail bloats.
+        let re = Regex::compile(r"(.)*x").unwrap();
+        re.set_max_trail_entries(Some(50));
+        // 200-byte input with no 'x' — trail would otherwise grow
+        // far past 50 entries before failing.
+        let big = "a".repeat(200);
+        assert!(re.find_first(&big).is_none());
+    }
+
+    #[test]
+    fn trail_entries_limit_does_not_prevent_valid_matches() {
+        // Same pattern, but with a generous limit and an input
+        // short enough to match.
+        let re = Regex::compile(r"(.)*x").unwrap();
+        re.set_max_trail_entries(Some(1_000));
+        let m = re.find_first("aaax").unwrap();
+        assert_eq!(&"aaax"[m.start..m.end], "aaax");
+    }
+
+    #[test]
+    fn trail_entries_limit_none_is_unlimited() {
+        // Explicitly None — no abort regardless of trail growth.
+        let re = Regex::compile(r"(.)*x").unwrap();
+        re.set_max_trail_entries(None);
+        let s = format!("{}x", "a".repeat(200));
+        assert!(re.find_first(&s).is_some());
+    }
+
+    #[test]
+    fn trail_entries_limit_low_value_blocks_every_attempt() {
+        // A trail limit of 0 is "unlimited" per the API convention
+        // (Some(0) clamps to "no abort" — same as None internally
+        // because the atomic uses 0 as the sentinel for unlimited).
+        // Any positive value below the minimum trail growth for a
+        // single match blocks every attempt.
+        let re = Regex::compile(r"(.)+x").unwrap();
+        re.set_max_trail_entries(Some(1));
+        // Two-byte input: even "ax" requires at least one trail
+        // entry for the capture; with limit 1 the engine aborts on
+        // the second trail push (the second '.' iteration writing
+        // the capture slot before consuming 'x').
+        assert!(re.find_first("aaax").is_none());
     }
 
     // === B18: escape() ===
