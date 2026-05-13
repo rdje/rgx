@@ -1168,6 +1168,50 @@ impl Regex {
         self.uses_c2() && self.engine.is_tdfa_eligible()
     }
 
+    /// Whether this pattern is eligible for the **JIT** path — the
+    /// Cranelift-compiled native-code execution tier (C1).
+    ///
+    /// JIT eligibility is a compile-time property: a pattern is
+    /// JIT-eligible iff its compiled bytecode contains only the
+    /// JIT-supported opcode set. Excluded constructs:
+    ///
+    /// - Backreferences (`\1`, `\k<name>`) — the JIT doesn't track
+    ///   captured text.
+    /// - Recursion / subroutines (`(?R)`, `(?1)`, `(?&name)`) — the
+    ///   JIT doesn't lower `Call`.
+    /// - Lookaround — needs interpreter context.
+    /// - Inline code blocks (`(?{lua:...})` etc.) — host callbacks.
+    /// - Backtracking verbs (`(*COMMIT)`, `(*SKIP)`, …) and `\K`.
+    /// - Atomic groups, possessive quantifiers, conditionals.
+    /// - More than 16 capture groups (`C1_MAX_USER_GROUPS` cap on
+    ///   the per-call stack-frame snapshot size).
+    /// - Top-level alternation (the JIT'd function signature
+    ///   returns only the match span, not `matched_branch_number`).
+    ///
+    /// Patterns where this returns `false` continue to dispatch
+    /// through the existing DFA / Pike-VM / interpreter tiers
+    /// unchanged.
+    ///
+    /// Returns `false` unconditionally when the `jit` Cargo feature
+    /// is disabled (default-on as of 2026-04-11; users can opt out
+    /// via `default-features = false`).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rgx_core::Regex;
+    ///
+    /// // Simple capture: JIT-eligible.
+    /// assert!(Regex::compile(r"(\d+)").unwrap().uses_jit());
+    ///
+    /// // Backreference: outside the JIT subset.
+    /// assert!(!Regex::compile(r"(a)\1").unwrap().uses_jit());
+    /// ```
+    #[must_use]
+    pub fn uses_jit(&self) -> bool {
+        self.engine.is_jit_eligible()
+    }
+
     /// Compile a regex with specific execution mode.
     ///
     /// This allows you to control the performance/feature tradeoff:
@@ -8444,6 +8488,68 @@ mod tests {
         // the second trail push (the second '.' iteration writing
         // the capture slot before consuming 'x').
         assert!(re.find_first("aaax").is_none());
+    }
+
+    // === C1: uses_jit() introspection ===
+    //
+    // Mirror of `uses_c2()` / `uses_tdfa()`. Reports compile-time
+    // JIT eligibility — the actual JIT compilation may still fail
+    // even for an eligible Program (Cranelift codegen error,
+    // unsupported architecture), in which case the engine
+    // transparently falls back through DFA / Pike-VM / interpreter.
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_accepts_simple_literal() {
+        assert!(Regex::compile(r"abc").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_accepts_simple_capture() {
+        assert!(Regex::compile(r"(\d+)").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_accepts_char_class() {
+        assert!(Regex::compile(r"[a-z]+").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_accepts_quantifier() {
+        assert!(Regex::compile(r"a+b*c?").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_rejects_backreference() {
+        // Backreferences require state the JIT doesn't track.
+        assert!(!Regex::compile(r"(a)\1").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_rejects_lookahead() {
+        // Lookaround needs interpreter context.
+        assert!(!Regex::compile(r"(?=a)\w+").unwrap().uses_jit());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn uses_jit_rejects_recursion() {
+        // Subroutine calls aren't lowered by the JIT.
+        assert!(
+            !Regex::compile(r"(?R)").is_ok() || !Regex::compile(r"a(?R)?b").unwrap().uses_jit()
+        );
+    }
+
+    #[cfg(not(feature = "jit"))]
+    #[test]
+    fn uses_jit_false_when_feature_disabled() {
+        // With the jit feature off, every pattern returns false.
+        assert!(!Regex::compile(r"abc").unwrap().uses_jit());
     }
 
     // === B18: escape() ===

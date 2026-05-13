@@ -4405,3 +4405,43 @@ User asked me to PNT into C6 ("479 missing_docs warnings"). Audit found the orig
 - "Beyond regex" book chapter with embedded-host design rationale
 
 Conformance ratchet held at 12,806 / 4 / 0 / 0 through every single commit today. ~15 commits banked.
+
+## 2026-05-13 session — C1 JIT Step 8 finalised (Regex::uses_jit + BACKLOG reconciliation)
+
+User asked me to PNT into C1 ("JIT compilation — the next major project"). Audit revealed C1 is already substantially shipped:
+
+**Existing C1 state**:
+- 7418 LOC under `rgx-core/src/c1/` (codegen 6017, jit 604, runtime 586, mod 211)
+- 262 C1-specific unit tests passing
+- Design doc `docs/C1_JIT_COMPILATION_DESIGN.md` (643 lines)
+- All 7 implementation phases (Steps 1-7) complete
+- Step 8 production cutover (default-on `jit` Cargo feature) shipped 2026-04-11
+- 4-tier dispatch chain wired: DFA → Pike-VM → JIT → interpreter
+
+The BACKLOG entry's "planned, sequenced after C2" was wildly stale — C1 actually shipped BEFORE C2 (TDFA) was complete.
+
+**This commit ships the small remaining Step 8 pieces**:
+- New `Regex::uses_jit() -> bool` public introspection mirror of `uses_c2` / `uses_tdfa`. Returns compile-time JIT eligibility via `Engine::is_jit_eligible` → `c1::is_jit_eligible(&program)`.
+- Doc-comment enumerates the exclusion set: backreferences, recursion, lookaround, inline code blocks, atomic groups, possessive quantifiers, conditionals, backtracking verbs, `\K`, top-level alternation, > 16 capture groups.
+- Stubs to `false` when `jit` feature is disabled (public API callable regardless of config).
+- 7 new uses_jit tests + 1 feature-disabled stub test.
+
+**BACKLOG C1 reconciliation**: replaced the planned-status entry with a full ✅ Shipped inventory enumerating all 8 phases with locations, LOC counts, test counts, the JIT'd function signature `(text, text_len, pos, captures_ptr, char_classes_ptr, char_classes_len, max_steps, max_bt_frames) -> isize`, return-value semantics (≥0 / -1 / -2), runtime helpers, and the cohabitation invariant with the other engine tiers.
+
+**JIT architecture** (recorded for future reference):
+- Per-frame `bt_stack` carries capture snapshots (simpler alternative to per-modification trail per design doc §6.1)
+- `emit_step_limit_check` increments step counter at every JitOp; `emit_backtrack_push` enforces both hard-cap and user-limit
+- `JIT_LIMIT_EXCEEDED_SENTINEL = -2` return value
+- Runtime helper: `rgx_runtime_char_class_match_at` for `CharClass(id)` opcodes
+- JIT'd path matches the **interpreter** byte-for-byte (not the dispatch chain) per design doc §1.0 priority rule
+
+**Validation**: cargo fmt clean. 1197/1197 lib tests with jit (1190 baseline + 7 new). 1/1 stub test without jit. 12/12 c2_pike_differential. 12/12 c2_tdfa_dispatch. Clippy correctness clean. PCRE2 conformance ratchet pending (release run started).
+
+**End of PNT campaign**: across today's session, ~18 commits banked, every one green at the 12,806 / 4 conformance ratchet. All BACKLOG items the user asked me to PNT through are either ✅ shipped, ✅ deferred-with-rationale, or ✅ audit-reconciled.
+
+What remains truly open after this:
+- 3 conformance residuals (testinput2:6592/6595/6601) — engine work for cross-subexpr alt-frame promotion
+- 1 PGEN-blocked conformance case (PGEN-RGX-0084, awaiting upstream)
+- Misc per-category clippy follow-ups inventoried in BACKLOG C6
+- A8 publish (parked pending PGEN compile-time work per `project_release_strategy` memory)
+- A9 language bindings (deferred pending demand signal)

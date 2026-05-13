@@ -2150,6 +2150,33 @@ impl Engine {
         crate::c2::program::is_c2_tdfa_eligible(&self.ast)
     }
 
+    /// Whether the engine's pattern is eligible for **JIT** dispatch
+    /// (the Cranelift-compiled native-code path in `c1/`). See
+    /// [`crate::c1::is_jit_eligible`] for the full eligibility rules.
+    ///
+    /// This is the compile-time eligibility check, not a runtime
+    /// dispatch query — the actual JIT compilation may still fail
+    /// (e.g. Cranelift codegen error) even for an eligible Program,
+    /// in which case the engine silently falls back to the
+    /// interpreter / DFA / Pike-VM dispatch chain.
+    ///
+    /// Returns `false` unconditionally when the `jit` Cargo feature
+    /// is disabled.
+    #[cfg(feature = "jit")]
+    #[doc(hidden)]
+    pub fn is_jit_eligible(&self) -> bool {
+        crate::c1::is_jit_eligible(&self.vm.program)
+    }
+
+    /// Stub for `is_jit_eligible` when the `jit` feature is disabled.
+    /// Always returns `false`. Lets `Regex::uses_jit()` compile and
+    /// run regardless of the feature flag.
+    #[cfg(not(feature = "jit"))]
+    #[doc(hidden)]
+    pub fn is_jit_eligible(&self) -> bool {
+        false
+    }
+
     /// `true` when the underlying VM has a `memmem::Finder` for the
     /// pattern's literal — i.e. the pattern is a pure literal string
     /// like `"hello"`. Lets the public `Regex` API skip the

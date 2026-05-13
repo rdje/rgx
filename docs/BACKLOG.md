@@ -166,14 +166,23 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
 
 ## C. Engineering improvements
 
-### C1. JIT compilation — ACTIVE FOCUS 2026-04-09 (second after C2)
-- **What**: Compile regex bytecode to native machine code for ~5-10x speedup.
-- **Effort**: `major`
-- **Status**: `planned, sequenced after C2`. C1 multiplies whatever engine is running by a constant factor; C2 changes the algorithmic class. Doing C2 first means C1's constant-factor win compounds on top of the NFA/DFA wins for the common case + the JIT'd backtracking path for everything else.
-- **Rationale**: Closes the speed gap with PCRE2's JIT. Makes rgx competitive with C engines.
-- **How**: Use `cranelift` (already in dependency tree via wasmtime) to translate bytecode to native code. Or `dynasm-rs` for lower-level control.
-- **Dependencies**: Stable bytecode format. C2 should land first so C1 has both engines to JIT.
-- **Open design questions**: binary-size impact, debug story, cross-platform validation matrix, fallback path when JIT compilation itself fails.
+### C1. JIT compilation ✅ Shipped (cutover landed 2026-04-11, Step 8 finalised 2026-05-13)
+- **What**: Compile regex bytecode to native machine code via Cranelift.
+- **Status**: all 8 phases of the design doc (`docs/C1_JIT_COMPILATION_DESIGN.md`) shipped. ~7418 LOC under `rgx-core/src/c1/` (codegen 6017, jit 604, runtime 586, mod 211). 262 C1-specific unit tests passing. The `jit` Cargo feature is default-on since 2026-04-11 (Step 8 cutover); users can opt out via `default-features = false`.
+- **Shipped phases**:
+  - Step 0: design proposal landed (`docs/C1_JIT_COMPILATION_DESIGN.md`, 643 lines).
+  - Step 1: standalone JIT host plumbing (`jit::JitHost`, Cranelift dependency tree, smoke test).
+  - Step 2: JIT eligibility check (`codegen::is_jit_eligible(&Program)`, ~45-pattern truth table).
+  - Step 3 (a-e): codegen for `Char`, `DigitAscii`, `WordAscii`, `SpaceAscii`, `Split`, `Jump`, `Match`, `SaveStart`/`SaveEnd`, `Backtrack`, `StartText`/`EndText`, `WordBoundary`/`NonWordBoundary`.
+  - Step 4a: corpus-based differential test harness.
+  - Step 4b: capture trail (per-frame snapshot variant). User-group cap `C1_MAX_USER_GROUPS = 16`. 14 step-4b tests.
+  - Step 5: engine dispatch wiring. `JitProgram` type, `Engine::should_use_jit` runtime gate, `try_jit_is_match` / `try_jit_find_first` / `try_jit_find_all` methods, 4-tier dispatch chain (DFA → Pike-VM → JIT → interpreter).
+  - Step 6: `CharClass(id)` + multi-byte literal support via runtime helpers. 19 step-6 tests.
+  - Step 7: runtime safety limits (`max_steps`, `max_bt_frames`) as Cranelift branches. `JIT_LIMIT_EXCEEDED_SENTINEL = -2` return value. 13 step-7 tests.
+  - Step 8: production cutover (default-on feature flag), benchmarks (existing `regression_check` already measures JIT-eligible patterns through the public API), public `Regex::uses_jit()` introspection (2026-05-13), Book chapter (`book/src/internals/jit-compiler.md`, 311 lines).
+- **Architecture summary**: JIT'd function signature `(text, text_len, pos, captures_ptr, char_classes_ptr, char_classes_len, max_steps, max_bt_frames) -> isize`. Returns: ≥0 = match end, `-1` = no match, `-2` = limit exceeded. Per-frame `bt_stack` carries capture snapshots; `emit_step_limit_check` increments + checks at every JitOp; `emit_backtrack_push` enforces both hard-cap and user-limit checks. Runtime helpers: `rgx_runtime_char_class_match_at` for `CharClass(id)` opcodes.
+- **Cohabitation**: patterns outside the JIT-eligible subset continue to run on the interpreter / DFA / Pike-VM unchanged. Eligibility excludes backreferences, recursion, lookaround, inline code blocks, atomic groups, possessive quantifiers, conditionals, backtracking verbs, `\K`, top-level alternation (matched_branch_number tracking), > 16 capture groups. JIT'd path matches the **interpreter** byte-for-byte (not the dispatch chain) — design doc §1.0 priority rule.
+- **Public introspection**: `Regex::uses_jit() -> bool` mirrors `uses_c2()` / `uses_tdfa()`. Returns compile-time eligibility; runtime JIT-build failures fall through transparently. Stubbed to `false` when the `jit` Cargo feature is disabled.
 
 ### C2. NFA/DFA hybrid for simple patterns — ✅ SHIPPED 2026-04-11, Step 8 finalised 2026-05-11
 - **What**: Detect patterns that don't use backtracking-only features and run them through a Thompson NFA + lazy DFA cache instead of the backtracking VM.
