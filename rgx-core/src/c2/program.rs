@@ -491,6 +491,95 @@ pub fn is_c2_dfa_eligible(ast: &Regex) -> bool {
         && !contains_lazy_quantifier(ast)
 }
 
+/// Returns `true` iff the pattern is eligible for **TDFA** dispatch
+/// (the tagged DFA at `c2/tdfa.rs`).
+///
+/// TDFA eligibility is a **strict subset** of DFA eligibility: TDFA
+/// requires everything the DFA requires, plus
+///
+/// - **At least one capture group.** The TDFA's perf win comes from
+///   inlining capture recovery; for zero-capture patterns the
+///   existing fast path in `engine.rs::recover_match_for_dfa_span`
+///   already skips the Pike-VM second pass and is strictly faster
+///   than the TDFA could be.
+/// - **No `\b` / `\B` assertion anywhere.** Phase 2 first-pass
+///   conservatism — the TDFA construction (`TaggedDfa::try_build`)
+///   rejects all assertions, including word boundaries. The lazy
+///   DFA handles `\b` via `prev_byte_was_word` state extension;
+///   adapting the same trick to the TDFA is future work. Patterns
+///   with `\b` fall back to the existing DFA → Pike pipeline.
+///
+/// See `docs/C2_TDFA_DESIGN.md` §4 for the full eligibility
+/// rationale and the items that may be lifted in future phases.
+pub fn is_c2_tdfa_eligible(ast: &Regex) -> bool {
+    is_c2_dfa_eligible(ast) && contains_capture_group(ast) && !contains_word_boundary(ast)
+}
+
+/// Returns `true` if the AST contains any `Regex::Group` with
+/// `GroupKind::Capturing`. Helper for [`is_c2_tdfa_eligible`].
+///
+/// Excludes lookaround bodies because the C2 classifier already
+/// rejects lookaround at the dispatch-eligibility level; the
+/// recursive walk here is defensive — if a future classifier
+/// pass lifts the lookaround restriction, this predicate stays
+/// conservative.
+fn contains_capture_group(ast: &Regex) -> bool {
+    match ast {
+        Regex::Group { kind, expr, .. } => {
+            matches!(kind, crate::ast::GroupKind::Capturing) || contains_capture_group(expr)
+        }
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_capture_group)
+        }
+        Regex::Quantified { expr, .. } => contains_capture_group(expr),
+        Regex::FlagGroup { expr, .. } => contains_capture_group(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_capture_group(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_capture_group(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_capture_group(fb))
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if the AST contains `\b` or `\B` anywhere.
+/// Helper for [`is_c2_tdfa_eligible`] — Phase 2 TDFA conservatively
+/// excludes word-boundary patterns until the construction can
+/// handle the `prev_byte_was_word` state extension.
+fn contains_word_boundary(ast: &Regex) -> bool {
+    match ast {
+        Regex::WordBoundary { .. } => true,
+        Regex::Sequence(items) | Regex::Alternation(items) => {
+            items.iter().any(contains_word_boundary)
+        }
+        Regex::Quantified { expr, .. } => contains_word_boundary(expr),
+        Regex::Group { expr, .. } => contains_word_boundary(expr),
+        Regex::FlagGroup { expr, .. } => contains_word_boundary(expr),
+        Regex::Lookahead { expr, .. } | Regex::Lookbehind { expr, .. } => {
+            contains_word_boundary(expr)
+        }
+        Regex::Conditional {
+            true_branch,
+            false_branch,
+            ..
+        } => {
+            contains_word_boundary(true_branch)
+                || false_branch
+                    .as_ref()
+                    .is_some_and(|fb| contains_word_boundary(fb))
+        }
+        _ => false,
+    }
+}
+
 /// Recursively walks the AST and returns `true` if any node is a
 /// **positional or `\G`** zero-width assertion — i.e., everything
 /// EXCEPT word boundaries (`\b` / `\B`), which the DFA now handles

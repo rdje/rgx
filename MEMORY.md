@@ -4080,3 +4080,33 @@ Fix: resize the registers Vec after each transition to match the current `num_re
 **Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1186/1186 (1172 baseline + 14 new). `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0** — engine path unchanged.
 
 **Next step.** Phase 3 — engine dispatch wiring. Add `tdfa_eligible: bool` field on `CompiledC2Program`, a TDFA classifier visitor (capture groups present, no lazy-in-capture, no `\b`-in-capture-closure, LeftmostFirst only), `c2_tdfa: OnceLock<Option<TdfaCell>>` on `Regex`, `should_dispatch_to_tdfa()` runtime gate, and dispatch sites in `engine.rs` (`try_dfa_find_first`, etc.) that try the TDFA before the existing DFA → Pike pipeline. The TDFA returns `(start, end, captures)` directly; the existing two-pass capture recovery is skipped on the TDFA path. Differential gate at the public `Regex::find_first` level then verifies engine-level parity.
+
+## 2026-05-13 session — TDFA Phase 3: engine dispatch + Pike-VM bypass
+
+Seventh commit on the TDFA track. Phase 3 deploys the TDFA: capture-bearing C2 patterns now route through a single-pass TDFA scan via `Regex::find_first`, skipping the Pike-VM second pass entirely. This is the first commit where end users actually benefit from the work in Phases 0-2.
+
+**Public surface.** `Regex::uses_tdfa() -> bool` mirrors `uses_c2()`. Returns true iff the pattern is TDFA-eligible at compile time. Engine: `is_tdfa_eligible()` doc-hidden accessor used by the public method.
+
+**Eligibility (`c2/program.rs::is_c2_tdfa_eligible`).** Strict subset of DFA eligibility:
+- `is_c2_dfa_eligible(ast)` — i.e., C2 dispatch + no positional anchors + no flag groups + no multi-byte char classes + no top-level alternation + no lazy quantifier.
+- `contains_capture_group(ast)` — must have at least one capture (the zero-capture fast path strictly wins otherwise).
+- `!contains_word_boundary(ast)` — Phase 2 first-pass conservatism. `TaggedDfa::try_build` rejects all assertions, including `\b`. Future phase lifts via the same `prev_byte_was_word` state extension the DFA uses.
+
+**Engine wiring (`engine.rs`).**
+- `TdfaCell::Lazy(Mutex<TaggedDfa>)` enum (materialised variant is future).
+- `c2_tdfa: OnceLock<Option<TdfaCell>>` field on `Engine`. Lazy-built on first access.
+- `build_tdfa_if_eligible` constructor — eligibility check + `TaggedDfa::try_build`.
+- `should_dispatch_to_tdfa()` — same runtime gating as `should_dispatch_to_dfa` (no event observer, no match limits, no literal finder).
+- `try_tdfa_find_first` — per-position scan via `PrefixScanner`, calls `c2::tdfa::find_match_at`, returns `MatchResult` directly on success.
+- `tdfa_match_to_match_result` — adapter from `TdfaMatch.captures` (Pike-slot Vec) to `MatchResult.groups` (Vec of `Option<(usize, usize)>`).
+- `try_dfa_find_first` extended: TDFA fast path FIRST, then existing reverse-DFA pipeline, then per-position DFA → Pike. The TDFA path returning `Some` short-circuits; returning `None` (ineligible / refused) falls through transparently.
+
+**Differential gate (`rgx-core/tests/c2_tdfa_dispatch.rs`).** Public-API tests for: simple capture `(a)`, sequential `(a)(b)`, inner-alternation-in-sequence `x(?:(a)|(b))` (top-level alt is excluded by C2 dispatch entirely), greedy repeat `(a)+` (last-iteration captures), nested `((a)b)`, character class `(\d+)`, two-group date pattern `(\d+)-(\d+)`. Eligibility-predicate tests for accepted and rejected pattern shapes. All 9 tests pass.
+
+**Caught by test.** `(?:(a)|(b))` (non-capturing wrapper around alternation) is NOT TDFA-eligible because `has_top_level_alternation` unwraps both capturing and non-capturing groups looking for the Alternation node. To exercise the inner-alternation TDFA path the test uses `x(?:(a)|(b))` — the outer Sequence node defeats the top-level-alt unwrap. This is strictly correct behaviour: top-level alternation needs `matched_branch_number` tracking which the C2 dispatch doesn't do.
+
+**What is NOT in this commit.** `find_all`, `is_match`, and the reverse-DFA pipeline are still on the existing DFA → Pike path. Wiring TDFA into those sites is a follow-on commit. Phase 4 (perf gate) measures the actual `email_basic` / `url_simple` / `capture_groups` deltas against the design doc's targets.
+
+**Validation.** All gates green. `cargo fmt -p rgx-core` clean. `cargo test -p rgx-core --lib` 1186/1186. `cargo test -p rgx-core --test c2_pike_differential` 12/12. `cargo test -p rgx-core --test c2_tdfa_dispatch` 9/9. `cargo test -p rgx-cli` 30/30. `cargo clippy --workspace --all-targets -- -D clippy::correctness` clean. PCRE2 conformance ratchet **holds at 12,806 / 4 / 0 / 0**. The TDFA path is now active for every capture-bearing C2-eligible pattern that reaches `Regex::find_first`.
+
+**Next step.** Phase 4 — the perf gate. Run `rgx-bench` with TDFA dispatch on the find_first benches that have captures (`email_basic`, `url_simple`, `capture_groups`). Compare to the prior baseline. If a TDFA-eligible bench regresses, profile and fix before the commit lands. If the gains land, snapshot a new baseline at the materialised-+-TDFA HEAD and update `book/src/internals/nfa-dfa-engine.md` perf table.

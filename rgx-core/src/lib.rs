@@ -1143,6 +1143,38 @@ impl Regex {
         matches!(self.classification(), c2::Classification::NoBacktracking)
     }
 
+    /// Whether this pattern is eligible for the **tagged DFA** path —
+    /// the single-pass DFA that recovers capture positions inline,
+    /// replacing the DFA-finds-span + Pike-VM-recovers-captures
+    /// two-pass approach on capture-bearing patterns.
+    ///
+    /// TDFA eligibility is a strict subset of C2 eligibility:
+    /// - [`Self::uses_c2`] must be `true`.
+    /// - The pattern must contain at least one capture group.
+    /// - The pattern must not contain `\b` or `\B` (first-pass
+    ///   conservatism — see `docs/C2_TDFA_DESIGN.md` §4).
+    /// - The pattern must not contain a lazy quantifier (DFA
+    ///   semantics can't express lazy capture priority).
+    ///
+    /// Patterns where this returns `false` continue to dispatch
+    /// through the existing DFA → Pike pipeline (or the
+    /// backtracking VM, depending on `uses_c2`).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rgx_core::Regex;
+    ///
+    /// assert!(Regex::compile(r"(\d+)-(\d+)").unwrap().uses_tdfa());
+    /// // No captures → not TDFA-eligible (zero-capture fast path
+    /// // already wins).
+    /// assert!(!Regex::compile(r"\d+").unwrap().uses_tdfa());
+    /// ```
+    #[must_use]
+    pub fn uses_tdfa(&self) -> bool {
+        self.uses_c2() && self.engine.is_tdfa_eligible()
+    }
+
     /// Compile a regex with specific execution mode.
     ///
     /// This allows you to control the performance/feature tradeoff:

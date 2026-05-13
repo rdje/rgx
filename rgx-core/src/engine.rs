@@ -1,4 +1,5 @@
 use crate::c2::dfa::{DfaSearchOutcome, LazyDfa};
+use crate::c2::tdfa::TaggedDfa;
 use crate::c2::Classification;
 use crate::error::Result;
 use crate::events::MatchEvent;
@@ -54,6 +55,20 @@ impl DfaCell {
             Self::Lazy(Mutex::new(lazy))
         }
     }
+}
+
+/// Lock-protected access wrapper for a [`TaggedDfa`].
+///
+/// Built once at engine init; subsequent dispatch acquires the
+/// `Mutex` for the duration of one TDFA scan. The same lazy /
+/// locked discipline the lazy DFA uses. A materialised
+/// (lock-free) variant for small TDFAs is a future-Phase
+/// optimisation; first-pass we always lock.
+#[derive(Debug)]
+pub(crate) enum TdfaCell {
+    /// Lazy + locked: `Mutex<TaggedDfa>` accessed via `&Mutex`
+    /// from `&self` dispatch.
+    Lazy(Mutex<TaggedDfa>),
 }
 
 /// Execution mode that controls performance vs feature tradeoffs
@@ -146,6 +161,16 @@ pub struct Engine {
     /// `Mutex` because the DFA's `transition` method mutates its
     /// state cache and public `Regex` API methods are `&self`.
     c2_dfa: OnceLock<Option<DfaCell>>,
+    /// C2 **tagged** DFA (`c2/tdfa.rs`) for capture-bearing patterns.
+    /// When eligible (`is_c2_tdfa_eligible`), the TDFA replaces the
+    /// two-pass DFA-finds-span → Pike-VM-recovers-captures pipeline
+    /// with a single forward scan that produces match end + captures
+    /// directly from per-state tag registers.
+    ///
+    /// Built lazily on first access; `None` means ineligible
+    /// (pattern outside the TDFA subset, or zero captures, or
+    /// contains `\b`). Same runtime gating as `c2_dfa`.
+    c2_tdfa: OnceLock<Option<TdfaCell>>,
     /// C2 lazy DFA built over the **forward-unanchored** NFA.
     /// Companion to [`Self::c2_reverse_dfa`] in the **reverse-DFA
     /// pipeline**: a single O(n) forward sweep (via this DFA) finds
@@ -207,6 +232,39 @@ pub(crate) fn vm_match_to_result(m: crate::vm::Match) -> MatchResult {
 /// `matched_branch_number` and `code_result` are always `None` for
 /// C2-dispatched patterns by construction (the dispatch eligibility
 /// checks exclude top-level alternation and inline code blocks).
+/// Convert a [`crate::c2::tdfa::TdfaMatch`] into the public
+/// [`MatchResult`] shape. The TDFA's `captures` field is indexed by
+/// tag slot (slots 0/1 = whole-match span, slots 2g/2g+1 = group g
+/// start/end); we reshape it into the `Vec<Option<(usize, usize)>>`
+/// form `MatchResult.groups` uses.
+///
+/// `matched_branch_number` and `code_result` are always `None` for
+/// TDFA-dispatched patterns by construction (the TDFA eligibility
+/// check excludes top-level alternation with branch tracking and
+/// inline code blocks via the underlying C2 dispatch eligibility).
+fn tdfa_match_to_match_result(m: crate::c2::tdfa::TdfaMatch) -> MatchResult {
+    let captures = m.captures;
+    let num_groups = captures.len() / 2;
+    let mut groups: Vec<Option<(usize, usize)>> = Vec::with_capacity(num_groups);
+    for g in 0..num_groups {
+        let start_slot = captures.get(2 * g).copied().flatten();
+        let end_slot = captures.get(2 * g + 1).copied().flatten();
+        let group = match (start_slot, end_slot) {
+            (Some(s), Some(e)) => Some((s, e)),
+            _ => None,
+        };
+        groups.push(group);
+    }
+    MatchResult {
+        start: m.start,
+        end: m.end,
+        groups,
+        matched_branch_number: None,
+        code_result: None,
+        last_mark: None,
+    }
+}
+
 fn pike_match_to_match_result(m: crate::c2::PikeMatch) -> MatchResult {
     MatchResult {
         start: m.start,
@@ -450,6 +508,29 @@ fn build_dfa_if_eligible(
         .map(DfaCell::from_lazy)
 }
 
+/// Build a [`TaggedDfa`] (`c2/tdfa.rs`) from the C2 program if the
+/// pattern is TDFA-eligible (`is_c2_tdfa_eligible`).
+///
+/// TDFA eligibility is a strict subset of DFA eligibility (see
+/// [`crate::c2::program::is_c2_tdfa_eligible`]): C2-eligible + at
+/// least one capture group + no `\b` / `\B`. Patterns outside the
+/// subset return `None` here and the engine falls back to the
+/// existing DFA → Pike pipeline.
+fn build_tdfa_if_eligible(
+    ast: &crate::ast::Regex,
+    c2_program: &Option<crate::c2::CompiledC2Program>,
+) -> Option<TdfaCell> {
+    let c2 = c2_program.as_ref()?;
+    if !crate::c2::program::is_c2_tdfa_eligible(ast) {
+        return None;
+    }
+    let nfa = Arc::new(c2.forward_anchored.clone());
+    let bcm = Arc::new(c2.byte_class_map.clone());
+    TaggedDfa::try_build(nfa, bcm, TaggedDfa::DEFAULT_STATE_LIMIT)
+        .ok()
+        .map(|tdfa| TdfaCell::Lazy(Mutex::new(tdfa)))
+}
+
 /// Build a `Mutex<LazyDfa>` over the **forward-unanchored** NFA for
 /// the given AST + C2 program if the pattern is DFA-eligible. The
 /// forward half of the reverse-DFA pipeline: a single call to
@@ -592,6 +673,7 @@ impl Engine {
             mode: pattern.mode,
             ast: pattern.ast.clone(),
             c2_dfa: OnceLock::new(),
+            c2_tdfa: OnceLock::new(),
             c2_forward_unanchored_dfa: OnceLock::new(),
             c2_reverse_dfa: OnceLock::new(),
             #[cfg(feature = "jit")]
@@ -631,6 +713,32 @@ impl Engine {
             return None;
         }
         Some(dfa)
+    }
+
+    /// Returns the engine's tagged DFA (`c2/tdfa.rs`) if the pattern
+    /// is TDFA-eligible AND the runtime state allows TDFA dispatch.
+    ///
+    /// The TDFA inlines capture recovery: a single forward scan
+    /// produces both the match end and the captures, skipping the
+    /// Pike-VM second pass that the existing DFA → Pike pipeline
+    /// runs. Same runtime gating as
+    /// [`Self::should_dispatch_to_dfa`].
+    #[doc(hidden)]
+    pub(crate) fn should_dispatch_to_tdfa(&self) -> Option<&TdfaCell> {
+        let tdfa = self
+            .c2_tdfa
+            .get_or_init(|| build_tdfa_if_eligible(&self.ast, &self.vm.program.c2_program))
+            .as_ref()?;
+        if self.vm.has_event_observer() {
+            return None;
+        }
+        if self.vm.has_runtime_match_limits() {
+            return None;
+        }
+        if self.vm.has_literal_finder() {
+            return None;
+        }
+        Some(tdfa)
     }
 
     /// Returns the forward-unanchored lazy DFA for this engine if
@@ -711,6 +819,52 @@ impl Engine {
         // Fallback: scratch unavailable (no c2_program) or mutex poisoned.
         // Use the per-call alloc path so we never lose correctness.
         crate::c2::pike::pike_captures_at(c2, input, start)
+    }
+
+    /// Attempt to match using the **tagged DFA** at each candidate
+    /// position produced by the [`PrefixScanner`].
+    ///
+    /// Returns:
+    /// - `Some(Some(MatchResult))` — the TDFA matched at a candidate
+    ///   position; captures came from the TDFA's register snapshot
+    ///   directly, no Pike-VM second pass.
+    /// - `Some(None)` — the scanner exhausted candidates without
+    ///   finding any match; the TDFA proved no match exists.
+    /// - `None` — TDFA unavailable (pattern ineligible / runtime
+    ///   gate refused), or the TDFA's state cache exhausted
+    ///   mid-scan; caller falls through to the existing DFA → Pike
+    ///   pipeline.
+    ///
+    /// The "TDFA exhausted" case is treated like "TDFA unavailable"
+    /// from the caller's perspective: a defensive fall-through to
+    /// the slower-but-always-correct two-pass path. Phase 4 will
+    /// measure whether this happens often enough to warrant a more
+    /// sophisticated recovery (e.g. partial-cache reuse).
+    #[doc(hidden)]
+    fn try_tdfa_find_first(
+        &self,
+        input: &[u8],
+        c2: &crate::c2::CompiledC2Program,
+    ) -> Option<Option<MatchResult>> {
+        let tdfa_cell = self.should_dispatch_to_tdfa()?;
+        let scanner = PrefixScanner::new(&self.vm, c2.c2_prefix_byte, c2.c2_prefix_finder.as_ref());
+        let mut start = 0usize;
+        match tdfa_cell {
+            TdfaCell::Lazy(mutex) => {
+                let mut tdfa = mutex.lock();
+                while start <= input.len() {
+                    let Some(candidate) = scanner.next_candidate(input, start) else {
+                        return Some(None);
+                    };
+                    start = candidate;
+                    if let Some(tm) = crate::c2::tdfa::find_match_at(&mut tdfa, input, start) {
+                        return Some(Some(tdfa_match_to_match_result(tm)));
+                    }
+                    start += 1;
+                }
+                Some(None)
+            }
+        }
     }
 
     /// Build a [`MatchResult`] for a span the DFA already located.
@@ -984,6 +1138,17 @@ impl Engine {
                     return Some(None);
                 }
             }
+        }
+        // Tagged DFA fast path: for capture-bearing patterns, the
+        // TDFA replaces DFA-finds-span + Pike-recovers-captures with
+        // a single forward scan that produces both end and captures.
+        // If the TDFA is eligible AND succeeds for this input, the
+        // result is returned directly. If the TDFA refuses (e.g.,
+        // state-cache exhaustion mid-scan, encoded as a dead
+        // sentinel) we fall through to the existing DFA → Pike
+        // pipeline.
+        if let Some(outcome) = self.try_tdfa_find_first(input, c2) {
+            return Some(outcome);
         }
         // Reverse-DFA pipeline fast path. Only prefer it when the
         // per-position scan has no prefix hint — otherwise the scan's
@@ -1889,6 +2054,21 @@ impl Engine {
     #[doc(hidden)]
     pub fn classification(&self) -> &Classification {
         &self.vm.program.classification
+    }
+
+    /// Whether the engine's pattern is eligible for **TDFA** dispatch
+    /// (the tagged DFA in `c2/tdfa.rs`). See
+    /// [`crate::c2::program::is_c2_tdfa_eligible`] for the
+    /// eligibility rules.
+    ///
+    /// This is the compile-time eligibility check, not a runtime
+    /// dispatch query — the actual TDFA may fail to build (e.g.
+    /// state-cache exhaustion during construction) even for an
+    /// eligible AST, in which case the engine silently falls back
+    /// to the existing DFA → Pike pipeline.
+    #[doc(hidden)]
+    pub fn is_tdfa_eligible(&self) -> bool {
+        crate::c2::program::is_c2_tdfa_eligible(&self.ast)
     }
 
     /// `true` when the underlying VM has a `memmem::Finder` for the
