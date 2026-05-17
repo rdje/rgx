@@ -403,3 +403,83 @@ fn single_char_input_stress() {
         assert_eq!(m.end, 1);
     }
 }
+
+// =========================================================================
+// DEEP-NESTING STACK SAFETY -- a deeply nested pattern must never abort the
+// host process. PGEN's generated recursive-descent parser recurses once per
+// `(` level with no internal guard; RGX bounds the nesting deterministically
+// (clean error past the limit) and runs the within-limit parse + compile on
+// a guaranteed-deep stack. These tests run on the default libtest thread
+// stack -- the exact environment that previously SIGABRT'd. The limit is
+// `crate::recursion::MAX_NESTING_DEPTH` (1000); tests use concrete depths
+// around it and must NOT hard-code an exported constant (kept crate-private).
+// =========================================================================
+
+/// Build `(((…(a)*…)*)*` nested `depth` levels deep.
+fn nested_star_pattern(depth: usize) -> String {
+    let mut pattern = String::from("a");
+    for _ in 0..depth {
+        pattern = format!("({pattern})*");
+    }
+    pattern
+}
+
+#[test]
+fn deeply_nested_within_limit_does_not_abort() {
+    // Well under the 1000 limit but far past the ~16 depth that used to
+    // overflow a default libtest thread stack. Must return (Ok or Err)
+    // without crashing the process.
+    let pattern = nested_star_pattern(200);
+    let _ = Regex::compile(&pattern);
+}
+
+#[test]
+fn pattern_nested_past_limit_returns_clean_error() {
+    // Comfortably past MAX_NESTING_DEPTH (1000). Must be rejected with a
+    // clean compile error -- never a panic or process abort.
+    let pattern = nested_star_pattern(1500);
+    match Regex::compile(&pattern) {
+        Ok(_) => panic!("a pattern nested 1500 levels deep must be rejected, not compiled"),
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("nesting too deep"),
+                "expected the deterministic nesting-limit error, got: {msg}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pattern_nested_just_under_limit_is_not_limit_rejected() {
+    // 900 < 1000: the deterministic nesting guard must NOT fire here.
+    // It may still compile successfully or fail for an unrelated reason,
+    // but it must not be rejected as "nesting too deep" and must not abort.
+    let pattern = nested_star_pattern(900);
+    if let Err(e) = Regex::compile(&pattern) {
+        assert!(
+            !e.to_string().contains("nesting too deep"),
+            "depth 900 (< limit) must not trip the nesting guard"
+        );
+    }
+}
+
+#[test]
+fn from_ast_deeply_nested_does_not_abort() {
+    // The parser-bypass path: `Regex::from_ast` skips the pre-PGEN scan,
+    // so its stack safety rests entirely on the deep-stack compile
+    // wrapper. A trusted-but-deep hand-built AST must not abort.
+    use rgx_core::ast::{GroupKind, Regex as RegexAst};
+    let mut ast = RegexAst::Char('a');
+    for _ in 0..800 {
+        ast = RegexAst::Group {
+            expr: Box::new(ast),
+            kind: GroupKind::NonCapturing,
+            index: None,
+            name: None,
+        };
+    }
+    // Returns Ok or Err depending on downstream limits; the contract under
+    // test is "no stack overflow / no process abort".
+    let _ = Regex::from_ast(ast);
+}

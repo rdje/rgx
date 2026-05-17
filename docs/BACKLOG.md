@@ -317,6 +317,23 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 - **Rationale**: Clean CI output and reduce the noise floor when reviewing diffs. Original BACKLOG entry claimed ~25 warnings; the lint cliff has grown since the C2 sprint (multi-thousand-line files mean more pedantic hits per file) and the count now reads ~479. Most are repetitive (missing `# Errors` doc on internal helpers, `must_use` on builder methods); a single pass cleans the bulk.
 - **Dependencies**: None.
 
+### C9. Compile-time recursion DoS guard ✅ Shipped 2026-05-18 (RGX side); PGEN side tracked PGEN-RGX-0085
+- **What**: deeply nested patterns (hundreds of `(...)` levels) overflowed the thread stack and aborted the *host process* (SIGABRT) instead of failing cleanly. Broke the COMMIT.md mandatory gate `cargo test -p rgx-core` (`stress_tests::compile_patterns_of_increasing_complexity`) and was a DoS hole for the advertised untrusted-pattern use case (publish-readiness #3).
+- **Root cause**: PGEN's parse + AST-dump path has no recursion ceiling; the half-applied 2026-04-07 `serde_stacker` family fix protected only JSON deserialize. Non-monotonic crash depth (serde_stacker heuristic signature).
+- **Status (RGX)**: ✅ Shipped. New `rgx-core/src/recursion.rs` — `MAX_NESTING_DEPTH = 1000` (4× PCRE2's 250 / `regex`'s `nest_limit`), O(n) pre-PGEN nesting scan returning a clean `CompileError`, `stacker`-grown parse/compile (parity with the existing `serde_stacker` JSON treatment), defense-in-depth wrappers on `convert_typed_pattern` / legacy `convert_pattern` / `compile_ast_with_label`. 4 new regression tests; existing stress test not weakened. Conformance ratchet held 12,806/4/0/0.
+- **Status (PGEN)**: open — `pgen-issues/PGEN-RGX-0085.yaml` filed per protocol with full repro/artifact bundle + pre-release verification gate. PGEN owns the real fix (its own parser recursion guard); RGX's pre-PGEN ceiling becomes belt-and-suspenders once PGEN ships it.
+- **Related**: the `testinput15` exclusion follow-up above ("audit every RGX hot path to ensure it checks `max_steps`") is the *runtime* analog of this *compile-time* DoS axis — same "adversarial input must fail cleanly, never hang/crash" theme.
+- **Follow-ups (tracked separately)**: CI toolchain 1.88.0 vs MSRV 1.95 (hosted CI cannot build — masked this); validation-flow hardening so a red mandatory gate cannot be self-reported green; stale PGEN generated-artifacts vs submodule pin (contract reports 1.1.29 vs README's 1.1.75).
+- **Dependencies**: PGEN-RGX-0085 for the upstream half.
+
+### C10. Open upstream PGEN-RGX issues (blocking conformance / robustness)
+Tracked here so open PGEN-side dependencies are visible from the backlog, not buried in the C7 narrative. RGX cannot fix these directly (PGEN is the sole parser and read-only); no RGX-side workarounds per `feedback_no_pgen_workarounds`.
+
+- **PGEN-RGX-0084 — `\NN` forward-reference parsed as backref instead of octal/literal.** Open since 2026-05-08; PGEN has **not** addressed it. PGEN counts *whole-pattern* capturing groups instead of groups-seen-so-far, so `\10` in `()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+` is emitted as `numeric backreference index 10` when PCRE2's "up to that point" rule makes it the octal escape `\010` (U+0008). Sole cause of conformance failure `testinput1:3910` (the "PGEN-blocked (1)" residual in C7 / publish-readiness #3). Family scope: any two-digit `\NN` whose N exceeds groups-defined-so-far. Artifact bundle `pgen-issues/PGEN-RGX-0084.yaml` (+ `artifacts/PGEN-RGX-0084/`). Ratchet ticks 12,806→12,807 / 4→3 when PGEN ships the fix and `subs/pgen` is bumped. No RGX-side fix.
+- **PGEN-RGX-0085 — parser/AST-dump stack-overflow on deep nesting.** Open, filed 2026-05-18 (see C9). PGEN's `parse_regex_default_ast_dump` has no recursion ceiling; RGX-side mitigation shipped, PGEN owns the real fix.
+- **PGEN-RGX-0073 / 0078 — compile-time / parse-time perf.** Open per README ("0073 PGEN regex-grammar parse-time perf; 0078 compile-time perf gap, Acknowledged/Deferred non-blocking"). Precondition for the ROADMAP `<5x of PCRE2 compile` target. No RGX-side fix.
+- **Verification on close**: after any `subs/pgen` bump that claims to address one of these, re-run `make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap`, the PCRE2 conformance ratchet, and the relevant report's `resolution.verification_notes` steps; flip the YAML `status`/`resolution` and bump the ratchet baselines in the same commit.
+
 ---
 
 ## Priority tiers

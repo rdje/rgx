@@ -7,9 +7,12 @@ nested quantifiers before concluding there is no match. In a web server or
 data pipeline, this becomes a denial-of-service vector -- a crafted input
 can hang a thread indefinitely.
 
-RGX provides three configurable safety limits that cap the work the engine
+RGX provides configurable safety limits that cap the work the engine
 will do per match attempt. When a limit is exceeded, the attempt fails
-gracefully (returns no-match) rather than running forever.
+gracefully (returns no-match) rather than running forever. Separately, a
+fixed [compile-time nesting limit](#compile-time-nesting-limit----parse-time-dos-protection)
+protects the *compilation* of adversarially nested patterns -- see the
+end of this chapter.
 
 ## `set_max_steps` -- opcode step budget
 
@@ -305,13 +308,62 @@ let results = safe_search(&cache, r"(a+)+b", "aaaaaaaaaaaac");
 assert!(results.is_empty());
 ```
 
+## Compile-time nesting limit -- parse-time DoS protection
+
+The limits above all bound work done *per match attempt*. They do nothing
+for a pattern that is dangerous to **compile** in the first place. A
+deeply nested pattern such as
+
+```text
+(((((( ... (a)* ... )*)*)*)*)*)*     // N levels deep
+```
+
+drives the parser and compiler to recurse once per nesting level. Without
+a ceiling, a sufficiently nested pattern would exhaust the thread stack
+and **abort the whole process** -- the worst possible failure mode for a
+library, and a trivial denial-of-service vector for any service that
+compiles user-supplied regexes.
+
+RGX therefore enforces a fixed **compile-time nesting limit**. A pattern
+nested deeper than the limit fails to compile with a clean, deterministic
+error instead of crashing:
+
+```rust,ignore
+# use rgx_core::Regex;
+// Pathologically nested input is rejected, not crashed:
+let mut pattern = String::from("a");
+for _ in 0..5_000 { pattern = format!("({pattern})*"); }
+let err = Regex::compile(&pattern).unwrap_err();
+assert!(err.to_string().contains("nesting too deep"));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The limit is **1000 levels** -- four times PCRE2's default
+parenthesis-nesting limit of 250 (`PCRE2_CONFIG_PARENSLIMIT`) and the
+Rust `regex` crate's default `nest_limit` of 250. No realistic pattern,
+and no pattern in PCRE2's own conformance corpus, comes anywhere near it;
+the bound exists purely so adversarial input cannot exhaust the stack. It
+is the **compile-time analog** of the runtime limits above: `set_max_*`
+protect *matching*, the nesting limit protects *compilation*.
+
+Within the limit, RGX additionally runs the recursive parse/compile on a
+growable stack (the same mechanism used for the JSON deserialization of
+the parser's output), so a legitimately deep pattern compiles correctly
+regardless of the calling thread's stack size rather than aborting.
+
+This protection is always on and requires no configuration -- it is not a
+`set_max_*` knob because, unlike match-time budgets, there is no
+legitimate use case for compiling a pattern nested past the limit.
+
 ## Default values summary
 
-| Limit | Default | Method |
-|-------|---------|--------|
-| Max steps | Unlimited (`None` / 0) | `set_max_steps` |
-| Max backtrack frames | Unlimited (`None` / 0) | `set_max_backtrack_frames` |
-| Max recursion depth | 1024 | `set_max_recursion_depth` |
+| Limit | Default | Method | Phase |
+|-------|---------|--------|-------|
+| Max steps | Unlimited (`None` / 0) | `set_max_steps` | match |
+| Max backtrack frames | Unlimited (`None` / 0) | `set_max_backtrack_frames` | match |
+| Max recursion depth | 1024 | `set_max_recursion_depth` | match |
+| Max trail entries | Unlimited (`None` / 0) | `set_max_trail_entries` | match |
+| Nesting depth | 1000 (fixed) | automatic | compile |
 
 The step and backtrack limits default to unlimited because most patterns are
 not pathological, and imposing a limit on well-behaved patterns adds

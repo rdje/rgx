@@ -113,6 +113,10 @@ pub mod file;
 /// Shared error types and result aliases.
 pub mod error;
 
+// Stack-safe recursion guards for the compile pipeline (deep-nesting
+// DoS protection — the compile-time analog of the runtime limits).
+pub(crate) mod recursion;
+
 // Logging system
 pub mod log;
 

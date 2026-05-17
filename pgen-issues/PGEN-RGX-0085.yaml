@@ -1,0 +1,249 @@
+id: PGEN-RGX-0085
+summary: |
+  PGEN's regex parse + AST-dump production
+  (`pgen::embedding_api::parse_regex_default_ast_dump`, the exact
+  entry RGX's adapter uses) has NO internal nesting / recursion
+  ceiling anywhere in the deep-recursion family. On a deeply nested
+  pattern it exhausts the thread stack and HARD-ABORTS the *host
+  process* (EXC_BAD_ACCESS on the stack guard page → SIGABRT)
+  instead of returning a recoverable parse error / `ParseDiagnostic`.
+  The overflow surfaces in either of two sub-paths of the same
+  call, both unbounded:
+    A. recursive serialization of the deeply-nested AST `Value`
+       tree into the dump JSON (`serde_json::value::ser::…` /
+       `to_value` / `SerializeMap` / `SerializeVec`, recursing per
+       AST level);
+    B. the recursive-descent parse itself
+       (`RegexParser::parse_group → parse_capturing_group →
+       parse_pattern → parse_alternation → parse_alternative →
+       parse_concatenation → parse_piece → parse_atom →
+       parse_group → …`, one frame-chain per `(` level).
+  A library that accepts untrusted patterns cannot defend against
+  this without refusing to call the sole parser.
+status: open
+opened_at: 2026-05-18T00:00:00Z
+first_seen_at: 2026-05-18T00:00:00Z
+last_updated_at: 2026-05-18T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.29
+rgx_commit: c924c2e784eb5ea65366147bcd35605771c06e61
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed; feature `pgen-parser`)
+  parser_entrypoint: rgx-core/src/parsing.rs::parse_pattern
+  pgen_commit: 08593d05c2f298e6f4be524147258e187d92d92e
+  api_version: "1.2.0"
+  regex_parser_release_version: "1.1.29"
+  regex_integration_contract_version: "1.1.31"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api (parse_grammar_profile_named)
+  generated_artifact: subs/pgen/generated/regex_parser.rs
+  host_os_arch: Darwin arm64
+  rust_toolchain: rustc 1.95.0 (59807616e 2026-04-14)
+  pattern: '(((…(a)*…)*)*  — N nested levels; see artifacts/repro_input*.txt'
+  version_discrepancy_note: |
+    `parser_embedding_api_contract()` on the committed `subs/pgen`
+    pin (`08593d05`) reports regex_parser_release_version=1.1.29,
+    regex_integration_contract_version=1.1.31, api_version=1.2.0.
+    RGX's README/MEMORY currently claim PGEN 1.1.75 / contract
+    1.1.77 for the same pin, and the local
+    `subs/pgen/generated/regex_parser.rs` is dated 2026-05-05. The
+    authoritative live contract values are recorded here per the
+    reporting protocol; the RGX-side version-bookkeeping
+    discrepancy is tracked separately and does not affect this
+    bug's reproduction (the unbounded recursion is structural and
+    independent of the release-version label).
+  notes: |
+    Discovered while ground-truthing the workspace: the COMMIT.md
+    mandatory gate `cargo test -p rgx-core` aborts because
+    `tests/stress_tests.rs::compile_patterns_of_increasing_complexity`
+    (depths 1..=30, contract "just verify no panic") SIGABRTs. lldb
+    showed the overflow is entirely inside
+    `pgen::generated_parsers::regex::RegexParser::*`. The depth at
+    which it aborts is stack-size dependent (≈16 on a default
+    libtest worker thread; survives on an 8 MiB main thread), which
+    is the signature of unbounded recursion with no internal guard.
+expected_behavior: |
+  PGEN's parser should impose a configurable internal
+  nesting / recursion-depth ceiling and, when a pattern exceeds it,
+  return a clean parse failure — ideally a `ParseDiagnostic` whose
+  `location` (`byte_offset` / `line` / `column`) points at the `(`
+  that crossed the limit — instead of recursing until the stack
+  guard page faults and the host process is aborted.
+
+  Reference behaviour from the ecosystem:
+    - PCRE2: default parenthesis-nesting limit is 250
+      (`PCRE2_CONFIG_PARENSLIMIT`, build-time
+      `--with-parens-nest-limit`); `pcre2_compile` returns the
+      clean error "parentheses are too deeply nested".
+    - Rust `regex` crate: default `nest_limit = 250`; the parser
+      returns a structured error past it.
+
+  The control artifact `pgen_parse_outcome_control.json` (a
+  depth-10 pattern) shows the parser is *correct* on within-budget
+  input — the only defect is the absent recursion ceiling.
+actual_behavior: |
+  Class: **panics/crashes** (also pathological resource usage —
+  unbounded stack growth).
+
+  `parse_regex_default_ast_dump` recurses with no ceiling and the
+  process aborts inside the call (no `ParseOutcome` /
+  `ParseDiagnostic` is ever produced):
+
+      thread '…' has overflowed its stack
+      fatal runtime error: stack overflow, aborting
+      (signal: 6, SIGABRT — EXC_BAD_ACCESS on the stack guard page)
+
+  Two captured manifestations of the same family (full backtraces:
+  `pgen-issues/artifacts/PGEN-RGX-0085/pgen_crash_backtrace.txt`):
+
+    A. **Recursive AST-dump serialization.** Overflow in
+       `serde_json::value::ser::<impl Serialize for Value>::serialize`
+       → `to_value` → `SerializeMap::serialize_value` /
+       `SerializeVec::serialize_element`, recursing once per AST
+       nesting level while PGEN serializes the deeply nested AST
+       `Value` tree into the dump JSON. Reproduced 4/4 at nest
+       depth 500 on a 2 MiB thread (debug).
+
+    B. **Recursive-descent parse.** Overflow in
+       `pgen::generated_parsers::regex::RegexParser::parse_group →
+       parse_capturing_group → parse_pattern → parse_alternation →
+       parse_alternative → parse_concatenation → parse_piece →
+       parse_atom → parse_group → …`, one frame-chain per `(`
+       level, in `generated/regex_parser.rs`. Captured from the
+       failing `cargo test` (libtest worker thread).
+
+  **Non-monotonic in depth** (the insidious part): depth 500
+  aborts but 2000 / 8000 / 30000 / 120000 *survive* on the same
+  2 MiB thread. This is the `serde_stacker` heuristic-growth
+  signature — `serde_stacker` only protects the JSON *deserialize*
+  step; when its grow heuristic happens not to fire for a given
+  depth, the *unprotected* recursion (serialize in A, parse in B)
+  overflows. So the crash depth is not a clean threshold and
+  cannot be defended by "reject deeper than the deepest observed
+  crash"; only a true ceiling fixes it.
+
+  Because the abort is a process-level SIGABRT (not an unwinding
+  panic) it cannot be caught with `catch_unwind`; the only
+  host-side defense is to refuse to call the parser on over-nested
+  input.
+reproduction: |
+  Faithful failing shape — nested `(X)*` (a group AND a quantifier
+  per level), exactly as RGX builds it in
+  `tests/stress_tests.rs::compile_patterns_of_increasing_complexity`:
+
+      let mut p = String::from("a");
+      for _ in 0..DEPTH { p = format!("({p})*"); }
+
+  (Note: a plain `((((a))))` shape does NOT reproduce — PGEN
+  rejects it shallowly. The quantifier per level is load-bearing.)
+
+  Artifacts in `pgen-issues/artifacts/PGEN-RGX-0085/`:
+    - repro_input.txt        — 200,000 levels of `(X)*`
+                               (600,001 bytes).
+    - repro_input_small.txt  — 5,000 levels of `(X)*` (15,001 B).
+    - pgen_contract.json     — `parser_embedding_api_contract()`.
+    - pgen_parse_outcome_control.json — depth-10 control, parses OK.
+    - pgen_crash_backtrace.txt — both captured backtraces
+                               (A: serialize, B: parse).
+    - host_call_site.md      — call chain + verification harness.
+
+  **Deterministic minimal reproduction (verified, 4/4 aborts).**
+  Build profile and thread-stack size matter — the overflow needs
+  large (debug) frames on a constrained stack, and the crash depth
+  is non-monotonic (see actual_behavior). This recipe reproduces
+  reliably; it uses the exact embedding-API entry RGX's adapter
+  calls (`parse_regex_default_ast_dump`), no RGX code in the path:
+
+      // debug build; run on a libtest-sized (2 MiB) thread.
+      use pgen::embedding_api::{parse_regex_default_ast_dump, AstDumpOptions};
+      std::thread::Builder::new()
+          .stack_size(2 * 1024 * 1024)
+          .spawn(|| {
+              let mut p = String::from("a");
+              for _ in 0..500 { p = format!("({p})*"); }   // depth 500
+              let _ = parse_regex_default_ast_dump(
+                  &p, &AstDumpOptions { pretty: false, max_ast_bytes: None });
+          }).unwrap().join().unwrap();
+      // -> Abort trap: 6 (EXC_BAD_ACCESS on the stack guard page)
+
+  Environment-independent reproduction (overflows even an 8 MiB
+  main-thread stack): use `repro_input.txt` (200,000 levels) as the
+  pattern. The original end-to-end reproduction is simply
+  `cargo test -p rgx-core --test stress_tests
+  compile_patterns_of_increasing_complexity` at RGX's pre-fix
+  commit (default debug build) — SIGABRT, backtrace B.
+
+  Pre-release verification gate (suggested for the PGEN ledger's
+  "validating regression/gate proof" — run on a 2 MiB thread so a
+  guardless build fails deterministically):
+
+      let mut deep = String::from("a");
+      for _ in 0..2000 { deep = format!("({deep})*"); }
+      let r = parse_regex_default_ast_dump(
+          &deep, &AstDumpOptions { pretty:false, max_ast_bytes:None });
+      assert!(r.status != ParseStatus::Success || r.ast_dump.is_some());
+      // MUST return a value (Success/Failure + optional diagnostic),
+      // MUST NOT abort the process, at ANY depth on a 2 MiB stack.
+      let mut ok = String::from("a");
+      for _ in 0..64 { ok = format!("({ok})*"); }
+      assert!(parse_regex_default_ast_dump(
+          &ok, &AstDumpOptions{pretty:false,max_ast_bytes:None})
+          .status == ParseStatus::Success);
+impact: |
+  Severity: high. A single deeply nested pattern aborts the entire
+  host process — the worst possible failure mode for a parsing
+  library, and a trivial denial-of-service vector for any service
+  that compiles user-supplied regexes. It is strictly worse than a
+  "wrong AST" bug: there is no value to validate and no error to
+  handle; the host simply dies.
+
+  RGX-specific impact:
+    - Breaks the COMMIT.md mandatory quality gate
+      `cargo test -p rgx-core` (integration suite SIGABRT).
+    - Publish-readiness criterion #3 ("no showstopper bugs").
+    - Undermines RGX's advertised DoS-safety guarantees
+      (`set_max_steps` / `set_max_backtrack_frames` /
+      `set_max_recursion_depth` are the *runtime* analogs; this is
+      the missing *compile-time* analog).
+
+  No-workaround stance per CLAUDE.md / `feedback_no_pgen_workarounds`:
+  RGX has NOT added adapter code that absorbs or rewrites PGEN's
+  AST. RGX's mitigation, pending PGEN's fix, is pure input
+  validation + stack provisioning:
+    - reject patterns nested past a deterministic ceiling
+      (MAX_NESTING_DEPTH = 1000, 4× the PCRE2 / `regex` default of
+      250) with a clean compile error *before* PGEN is invoked;
+    - run PGEN's correct, unmodified parse on a `stacker`-grown
+      stack — exact parity with the `serde_stacker` treatment RGX
+      already applies to PGEN's JSON deserialization.
+  PGEN's parser still owns the real fix (its own recursion guard);
+  this report is the upstream channel so the RGX-side ceiling
+  becomes belt-and-suspenders rather than the sole protection.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Add closing validation evidence here when PGEN's fix lands.
+    Verification path:
+      1. Bump `subs/pgen` to a release whose parser imposes an
+         internal nesting/recursion ceiling returning a clean
+         parse error.
+      2. Confirm `pgen::embedding_api::parse_grammar_profile_named(
+         "regex","regex_default", <200k-deep pattern>)` returns
+         `Err(ParseDiagnostic)` (not SIGABRT) on a 2 MiB-stack
+         thread, and a depth-64 pattern still parses OK.
+      3. Re-run `cargo test -p rgx-core --test stress_tests`
+         (default libtest stack) — all green incl.
+         `compile_patterns_of_increasing_complexity`.
+      4. Re-run the PCRE2 conformance ratchet (`-- --ignored`) and
+         confirm it is unchanged (the RGX-side ceiling of 1000 is
+         4× PCRE2's 250 default, so no corpus pattern is affected).
+      5. RGX may then keep its pre-PGEN ceiling as defense-in-depth
+         (recommended) since PGEN's guard is the authoritative one.

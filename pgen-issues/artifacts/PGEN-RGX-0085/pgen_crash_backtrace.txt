@@ -1,0 +1,100 @@
+PGEN-RGX-0085 — stack-overflow backtraces (debug build, constrained
+thread stack). PGEN's regex parse + AST-dump production
+(`pgen::embedding_api::parse_regex_default_ast_dump`, the exact entry
+RGX's adapter uses) has NO recursion/nesting ceiling. On deeply
+nested input it overflows the thread stack and ABORTS the host
+process (EXC_BAD_ACCESS on the stack guard page -> SIGABRT). The
+overflow surfaces in TWO sub-paths of the same PGEN call depending
+on where the guard page is hit; both are unbounded recursion with
+no ceiling:
+
+================================================================
+MANIFESTATION A — recursive AST-dump SERIALIZATION
+  Repro: faithful nested `(X)*` shape, depth 500, on a 2 MiB
+  (libtest-sized) thread, debug build, via
+  pgen::embedding_api::parse_regex_default_ast_dump.
+  Reproduced 4/4 (rc=134 / Abort trap: 6). Non-monotonic in depth
+  (500 aborts; 2000/8000/30000/120000 survive) — the classic
+  serde_stacker heuristic-growth signature: when stacker's grow
+  heuristic does not fire, the unprotected recursive serde_json
+  serialization of the deep Value tree overflows.
+================================================================
+* thread #2, stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03fc8)
+    frame #0: 0x0000000100403f60 _pgen_crash_repro`alloc::collections::btree::navigate::_$LT$impl$u20$alloc..collections..btree..node..Handle$LT$alloc..collections..btree..node..NodeRef$LT$BorrowType$C$K$C$V$C$alloc..collections..btree..node..marker..LeafOrInternal$GT$$C$alloc..collections..btree..node..marker..KV$GT$$GT$::next_leaf_edge::hfb3dab430c0e12b6(self=<unavailable>) at navigate.rs:715
+* thread #2, stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03fc8)
+  * frame #0: 0x0000000100403f60 _pgen_crash_repro`alloc::collections::btree::navigate::_$LT$impl$u20$alloc..collections..btree..node..Handle$LT$alloc..collections..btree..node..NodeRef$LT$BorrowType$C$K$C$V$C$alloc..collections..btree..node..marker..LeafOrInternal$GT$$C$alloc..collections..btree..node..marker..KV$GT$$GT$::next_leaf_edge::hfb3dab430c0e12b6(self=<unavailable>) at navigate.rs:715
+    frame #1: 0x000000010040a080 _pgen_crash_repro`alloc::collections::btree::navigate::_$LT$impl$u20$alloc..collections..btree..node..Handle$LT$alloc..collections..btree..node..NodeRef$LT$alloc..collections..btree..node..marker..Immut$C$K$C$V$C$alloc..collections..btree..node..marker..Leaf$GT$$C$alloc..collections..btree..node..marker..Edge$GT$$GT$::next_unchecked::_$u7b$$u7b$closure$u7d$$u7d$::h473d16e0406fca70((null)={closure_env#0}<alloc::string::String, serde_json::value::Value> @ 0x000000016fe0422f, leaf_edge=<unavailable>) at navigate.rs:535:17
+    frame #2: 0x0000000100411a04 _pgen_crash_repro`alloc::collections::btree::mem::replace::h0601d88d851e9705(v=0x000000016fe044f8, change={closure_env#0}<alloc::string::String, serde_json::value::Value> @ 0x000000016fe0430d) at mem.rs:27:28
+    frame #3: 0x000000010040f12c _pgen_crash_repro`alloc::collections::btree::navigate::_$LT$impl$u20$alloc..collections..btree..node..Handle$LT$alloc..collections..btree..node..NodeRef$LT$alloc..collections..btree..node..marker..Immut$C$K$C$V$C$alloc..collections..btree..node..marker..Leaf$GT$$C$alloc..collections..btree..node..marker..Edge$GT$$GT$::next_unchecked::hfe2e6332195c925e(self=0x000000016fe044f8) at navigate.rs:533:9 [inlined]
+    frame #4: 0x000000010040f128 _pgen_crash_repro`alloc::collections::btree::navigate::LazyLeafRange$LT$alloc..collections..btree..node..marker..Immut$C$K$C$V$GT$::next_unchecked::h4cc1c91b5f3fada0(self=0x000000016fe044f0) at navigate.rs:161:45 [inlined]
+    frame #5: 0x000000010040f120 _pgen_crash_repro`_$LT$alloc..collections..btree..map..Iter$LT$K$C$V$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h446542c25f4c2b92(self=0x000000016fe044f0) at map.rs:1738:38
+    frame #6: 0x00000001000b06b8 _pgen_crash_repro`_$LT$serde_json..map..Iter$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h0247dab5825e8170(self=0x000000016fe044f0) at map.rs:575:27
+    frame #7: 0x000000010009fb68 _pgen_crash_repro`serde_json::value::ser::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$serde_json..value..Value$GT$::serialize::h66a97d5e9d33b607(self=0x0000000c5490e800, serializer=Serializer @ 0x000000016fe04596) at ser.rs:27:31
+    frame #8: 0x000000010009f8b4 _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hd32d8cf86fd436fa(self=0x000000016fe04638, serializer=Serializer @ 0x000000016fe0461f) at impls.rs:472:26
+    frame #9: 0x00000001000a05ec _pgen_crash_repro`serde_json::value::to_value::hb928f9638a33f424(value=0x0000000c5490e800) at mod.rs:999:11
+    frame #10: 0x00000001000b1b0c _pgen_crash_repro`_$LT$serde_json..value..ser..SerializeMap$u20$as$u20$serde_core..ser..SerializeMap$GT$::serialize_value::h5e7450304dc7959a(self=0x000000016fe048a8, value=0x0000000c5490e800) at ser.rs:427:38
+    frame #11: 0x00000001000b0cac _pgen_crash_repro`serde_core::ser::SerializeMap::serialize_entry::h11b7d05baf0de55a(self=0x000000016fe048a8, key=0x0000000c5490e968, value=0x0000000c5490e800) at mod.rs:1861:14
+    frame #12: 0x000000010009fbb0 _pgen_crash_repro`serde_json::value::ser::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$serde_json..value..Value$GT$::serialize::h66a97d5e9d33b607(self=0x0000000c547d2ba0, serializer=Serializer @ 0x000000016fe04a26) at ser.rs:28:30
+    frame #13: 0x000000010009f8b4 _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hd32d8cf86fd436fa(self=0x000000016fe04bc0, serializer=Serializer @ 0x000000016fe04aaf) at impls.rs:472:26
+    frame #14: 0x000000010009f8dc _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hfce895c9a3520716(self=0x000000016fe04ae8, serializer=Serializer @ 0x000000016fe04acf) at impls.rs:472:26
+    frame #15: 0x00000001000a0488 _pgen_crash_repro`serde_json::value::to_value::h553d08fe478e3a3a(value=0x000000016fe04bc0) at mod.rs:999:11
+    frame #16: 0x00000001000b2334 _pgen_crash_repro`_$LT$serde_json..value..ser..SerializeVec$u20$as$u20$serde_core..ser..SerializeSeq$GT$::serialize_element::h9148417fffc0ce23(self=0x000000016fe04d20, value=0x000000016fe04bc0) at ser.rs:335:28
+    frame #17: 0x000000010000d8fc _pgen_crash_repro`serde_core::ser::Serializer::collect_seq::_$u7b$$u7b$closure$u7d$$u7d$::hfb43d5ee98467cc8(item=0x0000000c547d2ba0) at mod.rs:1303:50
+    frame #18: 0x0000000100089fc4 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_for_each::call::_$u7b$$u7b$closure$u7d$$u7d$::h71bbbbaa982ca396((null)=<unavailable>, x=0x0000000c547d2ba0) at iterator.rs:2528:26
+    frame #19: 0x0000000100006c34 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_fold::hb20759a76261527b(self=0x000000016fe04d10, init=<unavailable>, f={closure_env#0}<&serde_json::value::Value, core::result::Result<(), serde_json::error::Error>, serde_core::ser::Serializer::collect_seq::{closure_env#0}<serde_json::value::ser::Serializer, &alloc::vec::Vec<serde_json::value::Value, alloc::alloc::Global>>> @ 0x000000016fe04c58) at iterator.rs:2469:21
+    frame #20: 0x00000001000063e8 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_for_each::hbc03b29681fadd9e(self=0x000000016fe04d10, f={closure_env#0}<serde_json::value::ser::Serializer, &alloc::vec::Vec<serde_json::value::Value, alloc::alloc::Global>> @ 0x000000016fe04cc8) at iterator.rs:2531:14
+    frame #21: 0x00000001000b0b74 _pgen_crash_repro`serde_core::ser::Serializer::collect_seq::h93476c4dac7666a2(self=Serializer @ 0x000000016fe04d8f, iter=0x0000000c547d2b88) at mod.rs:1303:19
+    frame #22: 0x00000001000a832c _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$alloc..vec..Vec$LT$T$GT$$GT$::serialize::hc824a98de90a886c(self=0x0000000c547d2b88, serializer=Serializer @ 0x000000016fe04ddf) at impls.rs:203:28
+    frame #23: 0x000000010009f9f0 _pgen_crash_repro`serde_json::value::ser::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$serde_json..value..Value$GT$::serialize::h66a97d5e9d33b607(self=0x0000000c547d2b80, serializer=Serializer @ 0x000000016fe04fd6) at ser.rs:22:34
+    frame #24: 0x000000010009f8b4 _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hd32d8cf86fd436fa(self=0x000000016fe05170, serializer=Serializer @ 0x000000016fe0505f) at impls.rs:472:26
+    frame #25: 0x000000010009f8dc _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hfce895c9a3520716(self=0x000000016fe05098, serializer=Serializer @ 0x000000016fe0507f) at impls.rs:472:26
+    frame #26: 0x00000001000a0488 _pgen_crash_repro`serde_json::value::to_value::h553d08fe478e3a3a(value=0x000000016fe05170) at mod.rs:999:11
+    frame #27: 0x00000001000b2334 _pgen_crash_repro`_$LT$serde_json..value..ser..SerializeVec$u20$as$u20$serde_core..ser..SerializeSeq$GT$::serialize_element::h9148417fffc0ce23(self=0x000000016fe052d0, value=0x000000016fe05170) at ser.rs:335:28
+    frame #28: 0x000000010000d8fc _pgen_crash_repro`serde_core::ser::Serializer::collect_seq::_$u7b$$u7b$closure$u7d$$u7d$::hfb43d5ee98467cc8(item=0x0000000c547d2b80) at mod.rs:1303:50
+    frame #29: 0x0000000100089fc4 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_for_each::call::_$u7b$$u7b$closure$u7d$$u7d$::h71bbbbaa982ca396((null)=<unavailable>, x=0x0000000c547d2b80) at iterator.rs:2528:26
+    frame #30: 0x0000000100006c34 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_fold::hb20759a76261527b(self=0x000000016fe052c0, init=<unavailable>, f={closure_env#0}<&serde_json::value::Value, core::result::Result<(), serde_json::error::Error>, serde_core::ser::Serializer::collect_seq::{closure_env#0}<serde_json::value::ser::Serializer, &alloc::vec::Vec<serde_json::value::Value, alloc::alloc::Global>>> @ 0x000000016fe05208) at iterator.rs:2469:21
+    frame #31: 0x00000001000063e8 _pgen_crash_repro`core::iter::traits::iterator::Iterator::try_for_each::hbc03b29681fadd9e(self=0x000000016fe052c0, f={closure_env#0}<serde_json::value::ser::Serializer, &alloc::vec::Vec<serde_json::value::Value, alloc::alloc::Global>> @ 0x000000016fe05278) at iterator.rs:2531:14
+    frame #32: 0x00000001000b0b74 _pgen_crash_repro`serde_core::ser::Serializer::collect_seq::h93476c4dac7666a2(self=Serializer @ 0x000000016fe0533f, iter=0x0000000c5420b948) at mod.rs:1303:19
+    frame #33: 0x00000001000a832c _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$alloc..vec..Vec$LT$T$GT$$GT$::serialize::hc824a98de90a886c(self=0x0000000c5420b948, serializer=Serializer @ 0x000000016fe0538f) at impls.rs:203:28
+    frame #34: 0x000000010009f9f0 _pgen_crash_repro`serde_json::value::ser::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$serde_json..value..Value$GT$::serialize::h66a97d5e9d33b607(self=0x0000000c5420b940, serializer=Serializer @ 0x000000016fe05586) at ser.rs:22:34
+    frame #35: 0x000000010009f8b4 _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hd32d8cf86fd436fa(self=0x000000016fe05720, serializer=Serializer @ 0x000000016fe0560f) at impls.rs:472:26
+    frame #36: 0x000000010009f8dc _pgen_crash_repro`serde_core::ser::impls::_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$$RF$T$GT$::serialize::hfce895c9a3520716(self=0x000000016fe05648, serializer=Serializer @ 0x000000016fe0562f) at impls.rs:472:26
+    frame #37: 0x00000001000a0488 _pgen_crash_repro`serde_json::value::to_value::h553d08fe478e3a3a(value=0x000000016fe05720) at mod.rs:999:11
+    frame #38: 0x00000001000b2334 _pgen_crash_repro`_$LT$serde_json..value..ser..SerializeVec$u20$as$u20$serde_core..ser..SerializeSeq$GT$::serialize_element::h9148417fffc0ce23(self=0x000000016fe05880, value=0x000000016fe05720) at ser.rs:335:28
+
+================================================================
+MANIFESTATION B — recursive-descent PARSE (RegexParser::parse_*)
+  Repro: `cargo test -p rgx-core --test stress_tests \
+  compile_patterns_of_increasing_complexity` (pre-fix, default
+  debug build, libtest worker thread). Backtrace captured via
+  lldb on the stress_tests binary at the overflow. Recursive PEG
+  cycle, one frame-chain per `(` nesting level, all in
+  pgen::generated_parsers::regex::RegexParser (regex_parser.rs).
+================================================================
+* thread, name = 'compile_patterns_of_increasing_complexity', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03fe8)
+  frame #0:  RegexParser::bytes_match_at (self=0x0)                         regex_parser.rs:139600
+  frame #1:  RegexParser::match_string                                     regex_parser.rs:140723
+  frame #2:  RegexParser::parse_backreference::{{closure}}^3               regex_parser.rs:19254
+  frame #3:  RegexParser::try_parse                                        regex_parser.rs:140880
+  frame #6:  RegexParser::parse_backreference                              regex_parser.rs:17305
+  frame #7:  RegexParser::parse_atom::{{closure}}^3                        regex_parser.rs:7311
+  frame #10: RegexParser::memoized_call (rule_id=13)                       regex_parser.rs:140969
+  frame #12: RegexParser::parse_atom                                       regex_parser.rs:6448
+  frame #13: RegexParser::parse_piece::{{closure}}^3                       regex_parser.rs:2290
+  frame #16: RegexParser::memoized_call (rule_id=5)                        regex_parser.rs:140969
+  frame #18: RegexParser::parse_piece                                      regex_parser.rs:2023
+  frame #19: RegexParser::parse_concatenation::{{closure}}^2               regex_parser.rs:1742
+  frame #20: RegexParser::memoized_call (rule_id=4)                        regex_parser.rs:140969
+  frame #22: RegexParser::parse_concatenation                              regex_parser.rs:1728
+  frame #23: RegexParser::parse_alternative::{{closure}}^3                 regex_parser.rs:1577
+  frame #28: RegexParser::parse_alternative                                regex_parser.rs:1563
+  frame #29: RegexParser::parse_alternation::{{closure}}^2                 regex_parser.rs:1313
+  frame #32: RegexParser::parse_alternation                                regex_parser.rs:1298
+  frame #33: RegexParser::parse_pattern::{{closure}}^2                     regex_parser.rs:1147
+  frame #36: RegexParser::parse_pattern                                    regex_parser.rs:1136
+  frame #37: RegexParser::parse_capturing_group::{{closure}}^3             regex_parser.rs:64671
+  frame #42: RegexParser::parse_capturing_group                            regex_parser.rs:64639
+  frame #43: RegexParser::parse_group::{{closure}}^3                       regex_parser.rs:63690
+  frame #44: RegexParser::try_parse                                        regex_parser.rs:140880
+  ... (cycle repeats once per `(` nesting level until the stack
+      guard page faults; lldb truncated at frame #44)

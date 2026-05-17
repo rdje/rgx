@@ -31,6 +31,18 @@ aho-corasick = { workspace = true }
 # by rust-regex's `regex-automata::hybrid` internally.
 parking_lot = "0.12"
 
+# Stack-safe recursion. The compile pipeline (PGEN typed-AST walker
+# in `parsing.rs`, the recursive AST passes + codegen in
+# `compiler.rs`) descends once per nesting level of the pattern.
+# Deeply nested patterns would otherwise overflow the caller's
+# thread stack and ABORT the host process — unacceptable for a
+# DoS-safe library. `stacker::maybe_grow` grows the stack on demand,
+# the same mechanism `serde_stacker` already applies to the JSON
+# deserialize step. Non-optional: `compiler.rs` needs it on every
+# build (the parser-bypass `Regex::from_ast` path recurses too),
+# not just `pgen-parser`. See `rgx-core/src/recursion.rs`.
+stacker = "0.1"
+
 # Error handling
 thiserror = { workspace = true }
 anyhow = { workspace = true }

@@ -602,6 +602,26 @@ impl Compiler {
     }
 
     fn compile_ast_with_label(&self, ast: RegexAst, raw_label: &str) -> Result<CompiledPattern> {
+        // The AST→bytecode pipeline below is ~14 independent recursive
+        // AST passes plus recursive bytecode/NFA codegen; each
+        // descends once per pattern-nesting level. Run the whole thing
+        // on a guaranteed-deep stack so a deeply nested (but
+        // within-limit) pattern can never overflow the caller's thread
+        // stack and abort the process. The string-compile path
+        // additionally rejects patterns nested past
+        // `MAX_NESTING_DEPTH` in the parser before they ever reach
+        // here; `Regex::from_ast` callers supply a trusted AST. See
+        // `crate::recursion`.
+        crate::recursion::compile_on_deep_stack(move || {
+            self.compile_ast_with_label_inner(ast, raw_label)
+        })
+    }
+
+    fn compile_ast_with_label_inner(
+        &self,
+        ast: RegexAst,
+        raw_label: &str,
+    ) -> Result<CompiledPattern> {
         trace_enter!(
             "compiler",
             "Compiler::compile_ast_with_label",

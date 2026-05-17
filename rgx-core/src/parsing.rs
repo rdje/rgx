@@ -108,8 +108,40 @@ pub fn parse_pattern(pattern: &str) -> Result<Regex> {
         pattern.len()
     );
     low_log!("parsing", "Using PGEN backend");
-    let mut parser = PgenParser::new();
-    let result = parser.parse_pattern(pattern);
+
+    // Deterministic pre-PGEN input validation. PGEN's generated
+    // recursive-descent parser recurses once per `(` nesting level
+    // with no internal stack/recursion guard, so a deeply nested
+    // pattern overflows the thread stack and aborts the *host
+    // process* (SIGSEGV→SIGABRT) — confirmed via lldb backtrace
+    // inside `RegexParser::parse_group → … → parse_group`. PGEN is
+    // the sole parser and read-only from RGX, so the fix is to
+    // reject crash-inducing input here, before PGEN is invoked
+    // (filed upstream as a PGEN issue so PGEN gains its own guard).
+    // The compile-time analog of the runtime DoS limits
+    // (`set_max_steps` etc.). See `crate::recursion`.
+    let nesting = crate::recursion::pattern_nesting_depth(pattern);
+    if crate::recursion::exceeds_nesting_limit(nesting) {
+        let err = crate::recursion::too_deeply_nested();
+        trace_exit!(
+            "parsing",
+            "parsing::parse_pattern[pgen]",
+            "ok=false,reason=nesting-limit"
+        );
+        return Err(err);
+    }
+
+    // Within the limit: run PGEN's (correct) recursive parse and the
+    // typed-AST walk on a guaranteed-deep stack so a legitimately
+    // deep pattern can never overflow the caller's thread stack.
+    // This is exact parity with the `serde_stacker` treatment RGX
+    // already applies to PGEN's JSON deserialization — giving the
+    // sole parser enough stack to do its job, not absorbing
+    // malformed output.
+    let result = crate::recursion::compile_on_deep_stack(|| {
+        let mut parser = PgenParser::new();
+        parser.parse_pattern(pattern)
+    });
     trace_decision!(
         "parsing",
         "parse result is_ok()",
@@ -435,6 +467,30 @@ struct PgenAstAdapter<'a> {
     /// `(*NUL)` pattern-start pragmas. Default is `Lf` (matches RGX's
     /// pre-existing behaviour — `.` excludes `\n` only).
     newline_mode: NewlineMode,
+    /// Current pattern-nesting depth during the recursive typed-AST
+    /// walk. Bumped once per nesting level at the single
+    /// `convert_typed_pattern` choke point (every group / lookaround /
+    /// conditional body routes through it). Interior-mutable so the
+    /// `&self` walker methods can maintain it without threading a
+    /// parameter through ~60 mutually-recursive `convert_typed_*`
+    /// functions. Guards against unbounded recursion that would
+    /// otherwise overflow the caller's stack and abort the process —
+    /// see [`crate::recursion`].
+    depth: std::cell::Cell<usize>,
+}
+
+/// RAII guard that bumps [`PgenAstAdapter::depth`] for the lifetime
+/// of one nesting level and restores it on drop, including the early
+/// `?`-return paths inside the wrapped walker body.
+struct NestingGuard<'g> {
+    cell: &'g std::cell::Cell<usize>,
+}
+
+impl Drop for NestingGuard<'_> {
+    fn drop(&mut self) {
+        // Saturating for defensiveness; balanced enter/exit keeps it exact.
+        self.cell.set(self.cell.get().saturating_sub(1));
+    }
 }
 
 /// Character(s) that PCRE2 treats as a newline for the purposes of
@@ -526,7 +582,23 @@ impl<'a> PgenAstAdapter<'a> {
             ucp_enabled,
             bsr_anycrlf,
             newline_mode,
+            depth: std::cell::Cell::new(0),
         }
+    }
+
+    /// Enter one pattern-nesting level. Returns a [`NestingGuard`]
+    /// that restores the depth on drop, or a clean compile error when
+    /// the pattern is nested deeper than
+    /// [`crate::recursion::MAX_NESTING_DEPTH`] — rejected here, the
+    /// earliest point the structural nesting is visible, before the
+    /// recursion (and the stack it would grow) becomes unbounded.
+    fn enter_nesting(&self) -> Result<NestingGuard<'_>> {
+        let new_depth = self.depth.get() + 1;
+        if crate::recursion::exceeds_nesting_limit(new_depth) {
+            return Err(crate::recursion::too_deeply_nested());
+        }
+        self.depth.set(new_depth);
+        Ok(NestingGuard { cell: &self.depth })
     }
 
     /// Build the AST for `.` / `\N`. In the default `Lf` newline mode
@@ -675,6 +747,17 @@ impl<'a> PgenAstAdapter<'a> {
     /// concatenation array (or `[]` when the alternative is empty).
     /// `<rest>` is `[]` (no `|`) or `[["|", <alt>], ...]` (per `|`-separated branch).
     fn convert_typed_pattern(&self, value: &serde_json::Value) -> Result<Regex> {
+        // Single nesting choke point: every group / lookaround /
+        // conditional body routes back through here exactly once per
+        // level. Bound the depth (deterministic clean error past the
+        // limit) and grow the stack on demand so a within-limit but
+        // deeply nested pattern can never overflow the caller's stack
+        // and abort the process. See `crate::recursion`.
+        let _nesting = self.enter_nesting()?;
+        crate::recursion::grow_stack(|| self.convert_typed_pattern_inner(value))
+    }
+
+    fn convert_typed_pattern_inner(&self, value: &serde_json::Value) -> Result<Regex> {
         let arr = value.as_array().ok_or_else(|| {
             self.contract_error(&format!(
                 "expected typed pattern array, got {}",
@@ -4260,10 +4343,17 @@ impl<'a> PgenAstAdapter<'a> {
     }
 
     fn convert_pattern(&self, node: &PgenAstNode) -> Result<Regex> {
-        let alternation = self
-            .first_descendant(node, "alternation")
-            .ok_or_else(|| self.contract_error("pgen pattern node is missing alternation"))?;
-        self.convert_alternation(alternation)
+        // Legacy non-typed fallback path's nesting choke point — the
+        // analog of `convert_typed_pattern`. Same depth-bound +
+        // stack-growth contract so this rarely-taken path is equally
+        // safe against deeply nested adversarial input.
+        let _nesting = self.enter_nesting()?;
+        crate::recursion::grow_stack(|| {
+            let alternation = self
+                .first_descendant(node, "alternation")
+                .ok_or_else(|| self.contract_error("pgen pattern node is missing alternation"))?;
+            self.convert_alternation(alternation)
+        })
     }
 
     fn convert_alternation(&self, node: &PgenAstNode) -> Result<Regex> {

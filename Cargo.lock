@@ -1674,6 +1674,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_stacker",
+ "stacker",
  "target-lexicon",
  "thiserror",
  "tracing",
