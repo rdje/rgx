@@ -63,7 +63,16 @@ else
   fi
 fi
 
-absolute_path_pattern='(/Users/|/home/|[A-Za-z]:\\)'
+# Hardcoded developer-machine absolute paths must not enter source.
+# Unix dev paths (`/Users/…`, `/home/…`) are the common, important
+# case. The Windows-drive alternative requires TWO literal backslashes
+# (`[A-Za-z]:\\\\` → on-disk `X:\\`): a real Windows path embedded in
+# a Rust string is escaped (`"C:\\Users\\…"`), whereas the previous
+# one-backslash form (`[A-Za-z]:\\`) spuriously matched the ubiquitous
+# `<letter>:\n` / `:\x` / `:\t` in `println!`/format literals and doc
+# comments — which had silently kept this audit (and therefore the
+# whole `run-local-ci.sh` gate) red on benign pre-existing source.
+absolute_path_pattern='(/Users/|/home/|[A-Za-z]:\\\\)'
 
 rust_path_report="$(mktemp)"
 ci_path_report="$(mktemp)"

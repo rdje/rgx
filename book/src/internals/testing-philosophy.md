@@ -176,6 +176,19 @@ These are tracked explicitly because writing them down makes them actionable. Wh
 
 The whole suite runs via `./scripts/run-local-ci.sh` before every push. The same suite runs in GitHub Actions CI on every PR. A change that breaks any of it does not land.
 
+## Enforcing the gate: the receipt guard
+
+"A change that breaks the gate does not land" is only true if the gate is actually run, actually green, and *known* to be green for the exact content committed. In May 2026 all of those failed at once: a `cargo test -p rgx-core` stack-overflow regression rode along for six weeks because (1) the mandatory gate was being satisfied with *targeted* / `--lib` runs instead of the full suite; (2) a pipeline exit-masking trap — `cargo test … | tail` returns the *filter's* exit status (0), hiding the cargo failure / `SIGABRT` underneath; (3) hosted CI couldn't build at all (a toolchain-vs-MSRV pin mismatch); and (4) the canonical gate runner `run-local-ci.sh` had itself been red on entirely benign source (an absolute-path audit whose Windows-drive heuristic false-matched the ubiquitous `:\n` in Rust format strings), so contributors had quietly stopped running it.
+
+The structural fix is a **gate receipt**:
+
+- `run-local-ci.sh` runs every step under `set -euo pipefail` with no exit-masking. Only if *all* of them pass does it write a receipt — a deterministic hash of the gate-affecting worktree content (Rust / Cargo / CI / scripts; docs and the read-only `subs/pgen` submodule are excluded so post-gate documentation sync doesn't false-invalidate it) — into `.git/`.
+- A tracked `pre-commit` hook (`scripts/git-hooks/pre-commit`, activated once per clone via `./scripts/setup-hooks.sh`) recomputes that identity at commit time and **refuses the commit** unless a fresh receipt matches exactly. Documentation-only commits pass without a receipt — they cannot change a Rust gate result.
+
+The only way past a red gate is the explicit, loud `git commit --no-verify`, which the commit workflow requires to be justified in the commit message. "Self-reported green while actually red" is no longer something a tired session or a masked pipe can produce: the receipt only exists if the full gate genuinely passed, and the commit is physically blocked without it.
+
+The hardening proved itself the moment it shipped: the first full-gate run's *background notification said "exit code 0"* — the masking trap exactly — while the gate had in fact failed at the path audit and **no receipt was written**. Verifying by receipt rather than by pipeline exit caught the truth immediately. The lesson is general: **never conclude "pass" from filtered output; assert the real status.**
+
 ## What this buys us
 
 The payoff is confidence. When RGX claims "98% PCRE2 parity," that claim is backed by 250 parity fixtures. When it claims "correct under backtracking," that claim is backed by stress tests with thousands of iterations. When it claims "zero-overhead events," that claim is backed by benchmarks.

@@ -4623,3 +4623,17 @@ The feature roadmap is essentially done. What's left is breadth (A9 bindings exp
 - **Bootstrap mandate still pending**: RUST_CODEBASE_ANALYSIS.md full refresh (#2 — stale conformance 12,716→12,806, A9 Phase 0/1 rgx-capi, TDFA, LOC/test counts) and `rgx-capi/STABILITY.md` (#3, publish-readiness #1) are the next PNT items after this fix commits.
 
 **subs/pgen note**: read-only per `feedback_pgen_submodule_readonly`; parent shows ` m subs/pgen` (pre-existing: `?? generated/` + 16 stale `M` files inside, pointer unchanged at 08593d05). NOT staged in any commit this session.
+
+### 2026-05-18 follow-up — #11 + #12 closed; two more flow defects found & fixed in live fire
+
+Commits banked this session: `e918c3c` (deep-nesting showstopper + PGEN-RGX-0085), `1c4c670` (#11 CI toolchain 1.88.0→1.95.0 — hosted CI now buildable), and the #12 flow-hardening commit (gate-receipt guard).
+
+**#12 (user directive "make the flow rock solid") shipped**: `scripts/lib-gate-receipt.sh` (deterministic gate-affecting-content identity, docs/`subs/pgen`/brief excluded), `run-local-ci.sh` writes a `.git/` receipt only on a real green + loud banner + optional `RGX_RUN_CONFORMANCE=1`, tracked `scripts/git-hooks/pre-commit` + `scripts/setup-hooks.sh` (one-time `git config core.hooksPath`), COMMIT.md step 2 rewritten with an explicit exit-code-integrity rule. All 4 hook scenarios verified.
+
+**Two NEW flow defects surfaced while building #12 (both fixed in the same commit):**
+1. **Exit-masking trap, caught in live fire**: the first full `run-local-ci.sh` background run's notification said "exit code 0" while the gate had actually FAILED — verify-by-receipt (no receipt written) caught the lie. This is the exact mechanism that hid the original 6-week regression. Standing rule now in COMMIT.md + DEVELOPMENT_NOTES + book: never conclude "pass" from filtered/piped output.
+2. **`scripts/check-ci-paths.sh` was red on benign pre-existing source** (4th root cause): its Windows-drive regex `[A-Za-z]:\\` false-matched the ubiquitous `<letter>:\n` / `:\x` in Rust `println!`/format strings & doc comments (e.g. `"OUTCOME:\n"`, `lib.rs:7178`), so the canonical gate runner `run-local-ci.sh` could never reach green at step 1 — *why* sessions fell back to ad-hoc subset runs. Fixed: require escaped `[A-Za-z]:\\\\` (real Windows path in Rust source is `"C:\\…"`); still catches `/Users/` `/home/` escaped `C:\\`; no `:\n` false-positive. Pattern unchanged since `fc01c1a` — long-standing.
+
+**Activation note for future sessions**: the pre-commit guard requires a one-time `./scripts/setup-hooks.sh` per clone (sets local `core.hooksPath`). It was NOT auto-activated mid-session (would have blocked the very commit shipping it before its own receipt infra existed — resolved by activating after that commit lands). A future session should run `./scripts/setup-hooks.sh` once and thereafter rely on it.
+
+**Still pending (original bootstrap continuation, in task tree)**: #2 full RUST_CODEBASE_ANALYSIS.md refresh (stale conformance 12,716→12,806, A9 Phase 0/1 rgx-capi, TDFA, LOC/test counts — only the dangerous `cargo test -p rgx-core => pass` line was corrected so far), #3 `rgx-capi/STABILITY.md` (publish-readiness #1, highest), #14 stale-PGEN-artifacts-vs-pin investigation (contract 1.1.29 vs README 1.1.75).

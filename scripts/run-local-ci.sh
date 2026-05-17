@@ -5,6 +5,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Shared gate-receipt identity (also used by the pre-commit hook).
+# shellcheck source=scripts/lib-gate-receipt.sh
+. "$repo_root/scripts/lib-gate-receipt.sh"
+
 pgen_checkout="$repo_root/subs/pgen/rust/Cargo.toml"
 skip_pgen_checks="${RGX_SKIP_PGEN_CHECKS:-0}"
 have_pgen_checkout=0
@@ -61,10 +65,34 @@ run_step "cargo test -p rgx-cli --features all-languages" cargo test --manifest-
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets
 
+# Accuracy gate. The PCRE2 conformance ratchet is `#[ignore]`d so it
+# is not part of the default fast gate, but it is the merge condition
+# for any change touching parsing / the adapter / the VM / the
+# conformance harness (see COMMIT.md step 2). Fold it in with
+# RGX_RUN_CONFORMANCE=1; the harness's own `RATCHET OK` assertion
+# fails the step (and thus this script, via set -e) on regression.
+if [[ "${RGX_RUN_CONFORMANCE:-0}" == "1" ]]; then
+  run_step "cargo test -p rgx-core --test pcre2_conformance (ratchet)" \
+    cargo test --release --manifest-path Cargo.toml -p rgx-core \
+      --test pcre2_conformance -- --ignored
+else
+  echo "[run-local-ci.sh] Skipping PCRE2 conformance ratchet (RGX_RUN_CONFORMANCE!=1)."
+  echo "[run-local-ci.sh] COMMIT.md requires it for parsing/adapter/VM/conformance changes."
+fi
+
 if [[ "${RGX_SKIP_BENCH_TRENDS:-0}" == "1" ]]; then
   echo "[run-local-ci.sh] Skipping benchmark trend capture because RGX_SKIP_BENCH_TRENDS=1"
 else
   run_step "./scripts/capture-benchmark-trends.sh" ./scripts/capture-benchmark-trends.sh
 fi
 
-echo "[run-local-ci.sh] Local CI checks passed"
+# Reached only if every run_step above succeeded (set -euo pipefail).
+# Stamp a green receipt for exactly this gate-affecting content so
+# the pre-commit hook can certify the commit ran the real gate.
+rgx_gate_state_id > "$(rgx_receipt_path)"
+echo ""
+echo "=================================================================="
+echo "  ✓ run-local-ci.sh: ALL GATE STEPS PASSED"
+echo "    Green receipt written: $(rgx_receipt_path)"
+echo "    (covers Rust/Cargo/CI/script content of the current worktree)"
+echo "=================================================================="
