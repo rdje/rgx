@@ -91,7 +91,7 @@ No known data-corruption or panic bugs in the host integration surfaces.
 
 **What "done" looks like.** Every published artefact is CI-built and CI-tested on Linux, macOS, and (for the C ABI) Windows. Each platform runs the full sanity gate: `cargo test -p rgx-core`, `cargo test -p rgx-cli`, `cargo test -p rgx-capi` (including the C smoke harness), PCRE2 conformance.
 
-**Current state.** In progress / partial. Most testing happens on macOS (the user's primary). The Phase 1 C smoke test is cfg-gated to Linux + macOS — Windows is on the roadmap per the A9 design doc §5 but not implemented.
+**Current state.** In progress / partial. **Until 2026-05-18 hosted CI could not build at all** — `.github/workflows/ci.yml` pinned the toolchain to 1.88.0 while `Cargo.toml` MSRV is 1.95, and cargo hard-errors in that situation. This is *why* the deep-nesting `cargo test -p rgx-core` gate failure went uncaught by CI for ~6 weeks. Fixed 2026-05-18 (pin → 1.95.0, all three jobs; see CHANGES.md). Most testing still happens on macOS (the user's primary). The Phase 1 C smoke test is cfg-gated to Linux + macOS — Windows is on the roadmap per the A9 design doc §5 but not implemented.
 
 **Next concrete step.** Stand up a GitHub Actions matrix (Linux / macOS / Windows × stable / MSRV) for the workspace. Add the C smoke test to the Linux job once it's reachable on CI hardware.
 

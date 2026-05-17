@@ -31,7 +31,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          # Pin to the declared MSRV (Cargo.toml rust-version). Must
+          # stay >= rust-version or cargo hard-errors before any test
+          # runs — a 1.88.0 pin against MSRV 1.95 silently broke CI and
+          # let the deep-nesting gate failure through (see CHANGES.md
+          # 2026-05-18). Bump in lockstep with Cargo.toml rust-version.
+          toolchain: 1.95.0
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
@@ -62,7 +67,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          # Pin to the declared MSRV (Cargo.toml rust-version). Must
+          # stay >= rust-version or cargo hard-errors before any test
+          # runs — a 1.88.0 pin against MSRV 1.95 silently broke CI and
+          # let the deep-nesting gate failure through (see CHANGES.md
+          # 2026-05-18). Bump in lockstep with Cargo.toml rust-version.
+          toolchain: 1.95.0
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -105,7 +115,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          # Pin to the declared MSRV (Cargo.toml rust-version). Must
+          # stay >= rust-version or cargo hard-errors before any test
+          # runs — a 1.88.0 pin against MSRV 1.95 silently broke CI and
+          # let the deep-nesting gate failure through (see CHANGES.md
+          # 2026-05-18). Bump in lockstep with Cargo.toml rust-version.
+          toolchain: 1.95.0
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
