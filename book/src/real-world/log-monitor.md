@@ -12,7 +12,7 @@ We want to match standard log lines like:
 2026-04-08 14:23:03 WARN  [db]   Connection pool near limit (45/50)
 ```
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, file::TailOptions};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ let re = Regex::with_mode(
 
 The native callback classifies each log line and decides what action to take:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult, file::TailOptions};
 # use std::sync::{Arc, Mutex};
 # use std::collections::HashMap;
@@ -70,7 +70,7 @@ re.register_native("classify", move |ctx| {
 
 ## Wiring it up
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, file::TailOptions};
 # use std::sync::{Arc, Mutex};
 # use std::collections::HashMap;
@@ -110,7 +110,7 @@ handle.stop();
 
 Layer structured events on top for visibility into the engine's work:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, MatchEvent};
 # let re = Regex::with_mode(r"ERROR", ExecutionMode::Full)?;
 use std::sync::atomic::{AtomicUsize, Ordering};

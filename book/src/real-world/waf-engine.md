@@ -11,11 +11,13 @@ A WAF inspects incoming HTTP requests and blocks malicious payloads. The engine 
 3. Allow/block/log based on configurable policy
 4. Produce audit trails for security teams
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, RegexSet, ExecutionMode, ExecResult, SteerResult, MatchEvent, Value, vars};
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone)]
+// Note: no `#[derive(Debug, Clone)]` — a compiled `Regex` is neither
+// `Debug` nor `Clone` (it owns engine state). Store rule metadata
+// separately from the compiled patterns, as `WafEngine` does below.
 struct WafRule {
     name: &'static str,
     severity: u8,     // 1 = low, 5 = critical
@@ -41,7 +43,7 @@ struct WafResult {
 
 Each rule is a regex pattern with metadata:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, RegexSet, ExecutionMode, ExecResult, SteerResult};
 struct RuleDef {
     name: &'static str,
@@ -118,7 +120,7 @@ let rule_set = RegexSet::new(&patterns)?;
 
 `RegexSet::matches` tests all rules in a single pass:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let rules = RegexSet::new(&[
     r"(?i)union\s+(all\s+)?select",
@@ -142,7 +144,7 @@ if matches.matched_any() {
 
 For a WAF, once a critical rule fires, there's no need to keep scanning. Use match steering with `Abort`:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let critical_rule = Regex::with_mode(
     r"(?i)(union\s+select|<script|;\s*rm\s)(?{native:enforce})",
@@ -167,7 +169,7 @@ critical_rule.register_native("enforce", |ctx| {
 
 Wire up events to capture every matching decision for the audit trail:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, MatchEvent};
 # use std::sync::{Arc, Mutex};
 # let re = Regex::compile(r"(?i)union\s+select")?;
@@ -198,7 +200,7 @@ re.on_event(move |event| {
 
 Putting it all together:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, RegexSet};
 struct WafEngine {
     set: RegexSet,
@@ -293,7 +295,7 @@ assert_eq!(v.max_severity, 3);
 
 Use typed variables to load rules from configuration:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value, vars};
 let re = Regex::with_mode(
     r"(?P<payload>.+)(?{native:score})",

@@ -180,3 +180,25 @@ pub struct AdvReplacerTrait;
 /// Advanced → Unicode (case folding, \X, \p{...}, \R, \N).
 #[doc = include_str!("../../book/src/advanced/unicode.md")]
 pub struct AdvUnicode;
+
+// --- Campaign increment 5 (2026-05-18): remaining real-world/*
+// (http-router was the foundation exemplar). Mostly pure-API +
+// native-callback (core, not feature-gated) → `rust` (run); only
+// the two genuine IO/long-running blocks (`match_file_lines`,
+// `tail_file` + 60s sleep) are `no_run`. ---
+
+/// Real-world → Data Pipeline (replace_all + native callbacks + vars).
+#[doc = include_str!("../../book/src/real-world/data-pipeline.md")]
+pub struct RwDataPipeline;
+
+/// Real-world → Log Monitor (tail_file + classify callback + events).
+#[doc = include_str!("../../book/src/real-world/log-monitor.md")]
+pub struct RwLogMonitor;
+
+/// Real-world → Tokenizer / Lexer (branch identification).
+#[doc = include_str!("../../book/src/real-world/tokenizer.md")]
+pub struct RwTokenizer;
+
+/// Real-world → WAF Rule Engine (RegexSet + steering + events + vars).
+#[doc = include_str!("../../book/src/real-world/waf-engine.md")]
+pub struct RwWafEngine;

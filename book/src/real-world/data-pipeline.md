@@ -22,7 +22,7 @@ We want to:
 
 Exchange rates and configuration are passed as typed variables:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value, vars};
 let re = Regex::with_mode(
     r"(?P<date>\d{4}-\d{2}-\d{2})\|(?P<currency>[A-Z]{3})\|(?P<amount>\d+\.\d{2})\|(?P<type>\w+)(?{native:transform})",
@@ -47,7 +47,7 @@ vars!(re, {
 
 The native callback reads the captured fields and host variables, then produces a replacement string:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value, vars};
 # let re = Regex::with_mode(
 #     r"(?P<date>\d{4}-\d{2}-\d{2})\|(?P<currency>[A-Z]{3})\|(?P<amount>\d+\.\d{2})\|(?P<type>\w+)(?{native:transform})",
@@ -97,7 +97,7 @@ re.register_native("transform", |ctx| {
 
 ## Running the pipeline
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value, vars};
 # let re = Regex::with_mode(
 #     r"(?P<date>\d{4}-\d{2}-\d{2})\|(?P<currency>[A-Z]{3})\|(?P<amount>\d+\.\d{2})\|(?P<type>\w+)(?{native:transform})",
@@ -133,7 +133,7 @@ println!("{output}");
 
 Process a file line by line:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, vars};
 # let re = Regex::with_mode(
 #     r"(?P<date>\d{4}-\d{2}-\d{2})\|(?P<currency>[A-Z]{3})\|(?P<amount>\d+\.\d{2})\|(?P<type>\w+)",
@@ -155,7 +155,7 @@ for fm in &matches {
 
 Since variables are set on the compiled regex, you can update them between runs without recompiling:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value};
 # let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full)?;
 # re.register_native("check", |ctx| {
@@ -176,7 +176,7 @@ re.is_match("test");
 
 Chain multiple regexes for multi-stage transformations:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 // Stage 1: Normalize whitespace
 let ws = Regex::compile(r"\s+")?;

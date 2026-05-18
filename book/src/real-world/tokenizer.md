@@ -7,14 +7,17 @@ This example builds a fast tokenizer using rgx's branch identification feature. 
 A tokenizer (or lexer) breaks input text into a sequence of classified tokens. Traditional approaches use separate regexes or manual character-by-character scanning. With rgx, you write a single alternation pattern where each branch is a token type:
 
 ```text
-(?:NUMBER|IDENT|STRING|OPERATOR|WHITESPACE)
+NUMBER|IDENT|STRING|OPERATOR|WHITESPACE
 ```
 
-Branch numbers tell you which token type matched.
+Branch numbers tell you which token type matched. Note the alternation
+is written **bare** (not wrapped in `(?:...)`): `matched_branch_number`
+tracks the *top-level* alternation only, so a non-capturing-group
+wrapper around the whole alternation would suppress it.
 
 ## A simple expression tokenizer
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 #[derive(Debug, PartialEq)]
 enum TokenKind {
@@ -44,7 +47,7 @@ fn tokenize(input: &str) -> Vec<Token> {
     // Branch 6: whitespace
     // Branch 7: anything else (single char)
     let re = Regex::compile(
-        r#"(?:(\d+(?:\.\d+)?)|([a-zA-Z_]\w*)|("(?:[^"\\]|\\.)*")|([+\-*/=<>!&|]+)|([()\[\]{}])|(\s+)|(\S))"#,
+        r#"(\d+(?:\.\d+)?)|([a-zA-Z_]\w*)|("(?:[^"\\]|\\.)*")|([+\-*/=<>!&|]+)|([()\[\]{}])|(\s+)|(\S)"#,
     ).unwrap();
 
     let mut tokens = Vec::new();
@@ -91,7 +94,7 @@ assert_eq!(meaningful[8].kind, TokenKind::Paren);   // ")"
 
 ## How branch identification works
 
-When the pattern `(?:A|B|C)` matches, the `MatchResult` carries a `matched_branch_number` field:
+When the bare top-level pattern `A|B|C` matches, the `MatchResult` carries a `matched_branch_number` field:
 
 - Branch 1 if `A` matched
 - Branch 2 if `B` matched
@@ -103,10 +106,10 @@ Branch numbers are 1-based and correspond to left-to-right order of the top-leve
 
 To distinguish keywords from identifiers, add a native callback:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
-    r"(?:(\d+)|([a-zA-Z_]\w*)(?{native:classify_ident})|(\s+)|(\S))",
+    r"(\d+)|([a-zA-Z_]\w*)(?{native:classify_ident})|(\s+)|(\S)",
     ExecutionMode::Full,
 )?;
 
@@ -129,10 +132,10 @@ The `Replacement` value on the `MatchResult` tells the caller whether the matche
 
 Use `find_first_at` for cursor-based tokenization where you control the scan position:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(
-    r"(?:(\d+)|([a-zA-Z_]\w*)|(\s+)|(\S))"
+    r"(\d+)|([a-zA-Z_]\w*)|(\s+)|(\S)"
 )?;
 
 let input = "x = 42";
@@ -163,7 +166,7 @@ This approach gives you full control over the scan cursor and lets you handle er
 
 ## Complete tokenizer with error reporting
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 #[derive(Debug)]
 struct LexError {
@@ -173,7 +176,7 @@ struct LexError {
 
 fn lex(input: &str) -> Result<Vec<(usize, &str, &str)>, LexError> {
     let re = Regex::compile(
-        r#"(?:(\d+(?:\.\d+)?)|([a-zA-Z_]\w*)|("(?:[^"\\]|\\.)*")|([+\-*/=<>!]+)|([()\[\]{},:;])|(\s+)|(\S))"#
+        r#"(\d+(?:\.\d+)?)|([a-zA-Z_]\w*)|("(?:[^"\\]|\\.)*")|([+\-*/=<>!]+)|([()\[\]{},:;])|(\s+)|(\S)"#
     ).unwrap();
 
     let mut tokens = Vec::new();

@@ -7512,6 +7512,48 @@ mod tests {
     }
 
     #[test]
+    fn matched_branch_number_requires_bare_top_level_alternation() {
+        // Documented contract (book: host-integration/data-exchange,
+        // appendices/context-reference, real-world/tokenizer): the
+        // branch number tracks the *top-level* alternation arm. A
+        // bare alternation — even with per-arm capture groups, under
+        // find_all — reports 1-based branch numbers.
+        let re = Regex::compile(r"(\d+)|([a-z]+)").unwrap();
+        let got: Vec<_> = re
+            .find_all("a1 bc")
+            .iter()
+            .map(|m| m.matched_branch_number)
+            .collect();
+        assert_eq!(got, [Some(2), Some(1), Some(2)]);
+
+        // The tokenizer.md pattern — *bare*, no `(?:...)` wrapper —
+        // classifies tokens by branch number exactly as that chapter
+        // documents (1=number, 2=ident, 4=operator, 6=whitespace).
+        let tok = Regex::compile(
+            r#"(\d+(?:\.\d+)?)|([a-zA-Z_]\w*)|("(?:[^"\\]|\\.)*")|([+\-*/=<>!&|]+)|([()\[\]{}])|(\s+)|(\S)"#,
+        )
+        .unwrap();
+        let kinds: Vec<_> = tok
+            .find_all("x = 42")
+            .iter()
+            .map(|m| m.matched_branch_number)
+            .collect();
+        assert_eq!(kinds, [Some(2), Some(6), Some(4), Some(6), Some(1)]);
+
+        // Wrapping the alternation in a non-capturing group is NOT a
+        // top-level alternation, so branch tracking is intentionally
+        // unavailable. This is the engine's documented contract — it
+        // is exactly why tokenizer.md must use a bare alternation and
+        // never `(?:A|B|C)`.
+        let wrapped = Regex::compile(r"(?:(\d+)|([a-z]+))").unwrap();
+        assert!(wrapped
+            .find_first("abc")
+            .unwrap()
+            .matched_branch_number
+            .is_none());
+    }
+
+    #[test]
     fn fail_verb_causes_no_match() {
         let re = Regex::compile("a(*FAIL)").unwrap();
         assert!(!re.is_match("a"));
