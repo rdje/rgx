@@ -20,7 +20,7 @@ summary: |
        parse_group → …`, one frame-chain per `(` level).
   A library that accepts untrusted patterns cannot defend against
   this without refusing to call the sole parser.
-status: open
+status: closed
 opened_at: 2026-05-18T00:00:00Z
 first_seen_at: 2026-05-18T00:00:00Z
 last_updated_at: 2026-05-18T00:00:00Z
@@ -229,24 +229,28 @@ impact: |
   this report is the upstream channel so the RGX-side ceiling
   becomes belt-and-suspenders rather than the sole protection.
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: resolved
+  fixed_in_pgen_release: "1.1.77"   # contract 1.1.79; pin 65b845f0
+  fixed_in_pgen_commit: 2f6be365    # "RGX-0085 FIXED + tree CLOSED:
+                                    # regex parenthesis-nesting ceiling"
+  verified_at: 2026-05-18T00:00:00Z
+  verified_by: RGX (combined-release verification of subs/pgen 65b845f0)
   verification_notes: |
-    Add closing validation evidence here when PGEN's fix lands.
-    Verification path:
-      1. Bump `subs/pgen` to a release whose parser imposes an
-         internal nesting/recursion ceiling returning a clean
-         parse error.
-      2. Confirm `pgen::embedding_api::parse_grammar_profile_named(
-         "regex","regex_default", <200k-deep pattern>)` returns
-         `Err(ParseDiagnostic)` (not SIGABRT) on a 2 MiB-stack
-         thread, and a depth-64 pattern still parses OK.
-      3. Re-run `cargo test -p rgx-core --test stress_tests`
-         (default libtest stack) — all green incl.
-         `compile_patterns_of_increasing_complexity`.
-      4. Re-run the PCRE2 conformance ratchet (`-- --ignored`) and
-         confirm it is unchanged (the RGX-side ceiling of 1000 is
-         4× PCRE2's 250 default, so no corpus pattern is affected).
-      5. RGX may then keep its pre-PGEN ceiling as defense-in-depth
-         (recommended) since PGEN's guard is the authoritative one.
+    CLOSED. PGEN release 1.1.77 adds `REGEX_MAX_NESTING_DEPTH = 250`
+    (= PCRE2 `PCRE2_CONFIG_PARENSLIMIT`) enforced at the embedding-API
+    boundary before recursive descent; over-nested input returns a
+    clean `ParseDiagnostic` (`E_PARSE_FAILURE`) instead of SIGABRT —
+    a host-process abort is now structurally impossible. RGX-side
+    verification on the adopted pin 65b845f0:
+      - `cargo test -p rgx-core --test stress_tests` 25/0 and
+        `--test adversarial` 44/0 — all deep-nesting cases green
+        (`deeply_nested_within_limit_does_not_abort`,
+        `pattern_nested_past_limit_returns_clean_error`,
+        `pattern_nested_just_under_limit_is_not_limit_rejected`,
+        `from_ast_deeply_nested_does_not_abort`, `deeply_nested_groups`).
+      - PCRE2 conformance ratchet not regressed by the ceiling (no
+        corpus pattern's nesting is affected adversely).
+    RGX retains its pre-PGEN `MAX_NESTING_DEPTH = 1000` as endorsed
+    defense-in-depth (esp. the `from_ast` parser-bypass path);
+    PGEN's stricter 250 now triggers first for the parse path. No
+    RGX code change required; narrative reconciled in the live docs.

@@ -3377,8 +3377,22 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    const PASS_BASELINE: usize = 12_806;
-    const FAIL_BASELINE: usize = 4;
+    // 2026-05-18: rebaselined 12,806/4 → 12,805/5 on adopting the PGEN
+    // combined pin `65b845f0` (rel 1.1.77 / contract 1.1.79). This is a
+    // DELIBERATE, JUSTIFIED move (the harness's own sanctioned path):
+    //   +1  PGEN-RGX-0084 fixed — `\10` forward-ref (testinput1:3910)
+    //       now octal, closes (originally-filed defect: resolved).
+    //   -2  PGEN-RGX-0087 (NEW, same family as 0084, OPEN) — the 0084
+    //       fix did not extend to the `[89]`-leading multi-digit escape
+    //       sub-family (`\8N`/`\9N`): PCRE2 rejects, post-0084 PGEN
+    //       re-splits into `\8`/`\9` backref + literal → RGX too
+    //       permissive at testinput2:4671 (`\81`) + :4674 (`\80`).
+    //   net -1. NOT an RGX bug, NOT an RGX workaround
+    //   (feedback_no_pgen_workarounds); the −2 is a tracked PGEN-side
+    //   regression (pgen-issues/PGEN-RGX-0087.yaml). On the PGEN 0087
+    //   fix this restores toward 12,807 / 3 (3910 stays closed).
+    const PASS_BASELINE: usize = 12_805;
+    const FAIL_BASELINE: usize = 5;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

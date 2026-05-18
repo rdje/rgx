@@ -1,0 +1,150 @@
+id: PGEN-RGX-0087
+summary: |
+  Same PARENT FAMILY as PGEN-RGX-0084 (multi-digit `\NN` octal-vs-
+  backreference disambiguation at parse time), but a DISTINCT defect.
+
+  **PGEN-RGX-0084 itself is FIXED and CLOSED** — PGEN release 1.1.76
+  (commit b5036c4e) correctly disambiguates `\NN` by capturing-groups-
+  opened-up-to-that-position (the originally-reported `\10` forward-
+  reference case, conformance `testinput1:3910`, is verified closed on
+  the adopted pin 65b845f0).
+
+  PGEN-RGX-0087 is the residual the 0084 fix did **not** extend to: the
+  `[89]`-leading multi-digit escape sub-family `\8N` / `\9N`. For these,
+  the digits `8` and `9` are not octal digits, so the octal fallback is
+  unavailable; PCRE2 therefore **rejects the pattern at compile** rather
+  than degrading. PGEN's post-0084 PEG fallback chain instead backtracks
+  to `numeric_backreference_single = /([1-9])/`, matching the single
+  leading digit `8`/`9` as a numeric backreference and leaving the
+  trailing digit(s) as literal pieces. Downstream consumers (RGX) that
+  faithfully lower PGEN's AST then ACCEPT a pattern PCRE2 rejects.
+status: open
+opened_at: 2026-05-18T00:00:00Z
+first_seen_at: 2026-05-18T00:00:00Z
+last_updated_at: 2026-05-18T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.77
+rgx_commit: HEAD (combined-release verification of subs/pgen 65b845f0)
+family:
+  parent_report: PGEN-RGX-0084
+  relationship: |
+    Same parent family (multi-digit `\NN` octal-vs-backref
+    disambiguation). 0084 is fixed & closed; 0087 is the
+    `[89]`-leading sub-family the 0084 fix did not cover. NOT a
+    reopen of 0084 — a separate, family-linked follow-on.
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed)
+  parser_entrypoint: rgx-core/src/parsing.rs
+  pgen_commit: 65b845f09d7387aa6477e958cb213b7e1e7dab7e
+  api_version: "1.2.0"
+  regex_parser_release_version: "1.1.77"
+  regex_integration_contract_version: "1.1.79"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api
+  host_os_arch: Darwin arm64
+  patterns:
+    - source: subs/pcre2/testdata/testinput2 line 4671
+      pattern: '((((((((x))))))))\81'
+      groups_before_escape: 8
+    - source: subs/pcre2/testdata/testinput2 line 4674
+      pattern: '(...152 nested capturing groups...x...)\80'
+  notes: |
+    Surfaces as the two new "RGX too permissive" PCRE2 conformance
+    failures introduced by adopting the combined pin 65b845f0:
+    testinput2:4671 (`\81`) and testinput2:4674 (`\80`). RGX's PCRE2
+    differential ratchet moved 12,806 pass / 4 fail (old pin
+    08593d05) -> 12,805 pass / 5 fail (adopted pin 65b845f0): net
+    -1 (+1 from PGEN-RGX-0084's `\10` case closing, -2 from this
+    sub-family). RGX deliberately rebaselined the ratchet to
+    12,805 / 5 with this report as the explicit justification (the
+    conformance harness's sanctioned "intentional + justified +
+    explain in commit" path); no RGX-side workaround
+    (feedback_no_pgen_workarounds / feedback_family_fix_doctrine).
+expected_behavior: |
+  PCRE2 `pcre2pattern(3)` BACKREFERENCES + the "octal escapes" rules:
+  a backslash followed by digits is the longest digit run; if it is an
+  integer N with at least N capturing groups *up to that point* it is a
+  back reference; otherwise the digits are taken as an octal value *if
+  they qualify* (one digit 0-7, two digits up to 0o77, or three octal
+  digits). The digits `8` and `9` are NOT octal. So for `\8N` / `\9N`
+  where the full value is >= 10 and there are not that many groups:
+  it is neither a valid full back reference nor a valid octal escape,
+  and PCRE2 **rejects the pattern at compile** (empirically confirmed
+  by the differential harness: PCRE2 errors on
+  `/((((((((x))))))))\81/`). PGEN should likewise reject (surface a
+  clean `ParseDiagnostic`, e.g. `E_PARSE_FAILURE`) for the
+  `[89]`-leading multi-digit escape rather than re-splitting it into a
+  single-digit backreference plus literal digit(s).
+actual_behavior: |
+  PGEN release 1.1.77 (pin 65b845f0) parse of `((((((((x))))))))\81`
+  SUCCEEDS, emitting (see artifacts/PGEN-RGX-0087/pgen_ast_dump_81.json):
+
+      ... 8 nested {"kind":"capturing_group","type":"atom"} ...
+      {"atom":{"index":8,"kind":"numeric","type":"backreference"},...}
+      {"atom":"1","type":"piece"}                       # literal '1'
+
+  i.e. `\8` -> numeric backreference index 8, `1` -> literal. The
+  post-0084 EBNF:
+
+      backreference = numeric_backreference        -> $1   # N>=10, GATED by
+                                                           # @predicate fact_count_at_least(regex_capture_group,$index)
+                    | numeric_backreference_single -> $1   # N 1-9, UNGATED
+      backreference_digits        = /([1-9][0-9]+)/
+      backreference_digits_single = /([1-9])/
+
+  For `\81` with 8 groups the gated multi-digit branch fails
+  (8 < 81) and the PEG backtracks to `numeric_backreference_single`,
+  which matches the lone `8`. The grammar has no rule that the
+  `[89]`-leading multi-digit escape, when not a valid full backref,
+  is a hard error (PCRE2's behavior) rather than a degrade.
+reproducer_probe: |
+  RGX direct probe on pin 65b845f0 (RGX has zero `\NN` special-casing
+  — it faithfully lowers PGEN's atoms; so this is PGEN-side):
+    ((((((((x))))))))\81   -> RGX ACCEPT   (PCRE2 rejects)   [4671]
+    ((((((((x))))))))\82   -> RGX ACCEPT   (PCRE2 rejects)
+    ((((((((x))))))))\91   -> RGX REJECT   (\9 = backref to missing group 9; only 8 groups)
+    (((((((((x)))))))))\10 -> RGX ACCEPT   (valid post-0084 octal-digit path; correct)
+    (x)\81 / \8 / \80      -> RGX REJECT   (\8 = backref to missing group)
+  The divergence is specifically: enough groups exist that `\8`/`\9`
+  resolves as a *valid* single-digit backref, so PGEN's split yields
+  an accepted pattern where PCRE2 rejects the construct.
+rgx_side_manifestations: |
+  Beyond the two conformance cases (testinput2:4671/:4674), the
+  PGEN-0087 re-split also breaks a pre-existing RGX unit test that
+  asserts the *correct* PCRE2 behaviour:
+  `rgx-core/src/lib.rs::tests::parser_multi_digit_non_octal_backref_becomes_literal`
+  (`\89` → literal "89"; `\199` → \x01 + "99"). Post-0084 PGEN
+  re-splits `\89` into single-digit backref `\8` + literal `9`, so
+  `Regex::compile(r"\89")` errors instead of compiling the literal.
+  RGX `#[ignore]`d that test with an explicit PGEN-RGX-0087 reason
+  (NOT deleted, NOT expectation-corrupted) — re-enable on the PGEN
+  fix. Single-digit (`\2`) and 9-digit-octal-triplet sibling tests
+  are unaffected (0084 left single-digit handling unchanged).
+
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Verification path (mirrors PGEN-RGX-0084's, for the new sub-family):
+      1. Bump `subs/pgen` to a release whose `\NN` disambiguation also
+         rejects the `[89]`-leading multi-digit escape (`\8N`/`\9N`,
+         value >= 10, insufficient groups) as a clean parse error,
+         matching PCRE2.
+      2. Confirm `pgen::embedding_api::parse_grammar_profile_named(
+         "regex","regex_default","((((((((x))))))))\\81")` returns
+         `Err(ParseDiagnostic)` (not Ok-with-`\8`-backref).
+      3. Re-run `cargo test -p rgx-core --test pcre2_conformance --
+         --ignored --nocapture`; confirm testinput2:4671 and :4674
+         close and the ratchet ticks back up (+2 / -2): restore
+         PASS_BASELINE/FAIL_BASELINE toward 12,807 / 3 (3910 stays
+         closed from 0084) in the same commit, and drop this report's
+         line from the rebaseline justification.
+      4. PGEN-RGX-0084 stays CLOSED throughout (its `\10` case is and
+         remains fixed); only 0087 transitions to resolved.

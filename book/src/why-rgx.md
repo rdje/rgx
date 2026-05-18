@@ -108,7 +108,7 @@ This is the *trust knob* for accepting patterns from untrusted sources. A web se
 
 ### 7. PCRE2 conformance
 
-The features above sit on top of an engine that runs PCRE2's testdata at **12,806 / 4 / 0 / 0** (~99.97% pass rate). Patterns written for Perl, PHP, R, Julia, Ruby's PCRE backends, or any PCRE2 binding will match the same strings in rgx, with the same captures.
+The features above sit on top of an engine that runs PCRE2's testdata at **12,805 / 5 / 0 / 0** (~99.96% pass rate). Patterns written for Perl, PHP, R, Julia, Ruby's PCRE backends, or any PCRE2 binding will match the same strings in rgx, with the same captures.
 
 ## The embedded language set: why these five, not others?
 

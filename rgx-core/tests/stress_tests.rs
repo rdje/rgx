@@ -452,9 +452,12 @@ fn pattern_nested_past_limit_returns_clean_error() {
 
 #[test]
 fn pattern_nested_just_under_limit_is_not_limit_rejected() {
-    // 900 < 1000: the deterministic nesting guard must NOT fire here.
-    // It may still compile successfully or fail for an unrelated reason,
-    // but it must not be rejected as "nesting too deep" and must not abort.
+    // 900 < 1000: RGX's deterministic pre-PGEN nesting guard must NOT
+    // fire here. (As of PGEN 1.1.77 / PGEN-RGX-0085, PGEN's own stricter
+    // 250-deep ceiling rejects 900 first with a *different*, clean parse
+    // error — that is fine and expected; what this test pins is that
+    // RGX's own "nesting too deep" 1000-guard is not what trips, and
+    // that the process never aborts.)
     let pattern = nested_star_pattern(900);
     if let Err(e) = Regex::compile(&pattern) {
         assert!(

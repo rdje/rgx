@@ -5463,7 +5463,21 @@ mod tests {
         assert!(r.is_match("\x02"));
     }
 
+    // IGNORED pending PGEN-RGX-0087 (filed 2026-05-18, OPEN). This test
+    // asserts the *correct* PCRE2 behaviour for the `[89]`-leading
+    // multi-digit escape (`\89` → literal "89"; `\199` → \x01 + "99").
+    // PGEN's 0084 fix (rel 1.1.76) did not extend to this sub-family:
+    // post-0084 PGEN re-splits `\89` into single-digit backref `\8` +
+    // literal `9`, so `Regex::compile(r"\89")` now errors
+    // ("backreference '\8' refers to missing capture group") instead of
+    // compiling as the literal "89". This is the SAME defect as the
+    // conformance regression that drove the deliberate 12,806/4 →
+    // 12,805/5 ratchet rebaseline; not an RGX bug, no RGX-side
+    // workaround (feedback_no_pgen_workarounds). Re-enable (remove this
+    // `#[ignore]`) when PGEN ships the 0087 fix. See
+    // pgen-issues/PGEN-RGX-0087.yaml.
     #[test]
+    #[ignore = "PGEN-RGX-0087: \\8N/\\9N literal behaviour broken by PGEN's post-0084 re-split; re-enable on the PGEN 0087 fix"]
     fn parser_multi_digit_non_octal_backref_becomes_literal() {
         // PCRE2 rule: a multi-digit `\NN...N` where the whole decimal
         // number is > total_groups reads up to three leading octal

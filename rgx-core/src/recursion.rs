@@ -60,6 +60,18 @@ use crate::error::RgxError;
 /// through the `parsing.rs` typed-AST walker (the earliest point
 /// the structural nesting is visible, before the expensive compiler
 /// passes run).
+///
+/// **Defense-in-depth as of PGEN 1.1.77 (PGEN-RGX-0085).** PGEN now
+/// enforces its own `REGEX_MAX_NESTING_DEPTH = 250` ceiling at the
+/// embedding-API boundary *before* its recursive-descent parser
+/// runs, returning a clean parse error. Since 250 < 1000, PGEN's
+/// stricter ceiling triggers first on the normal parse path — this
+/// RGX-side limit is now belt-and-suspenders. It still matters for
+/// the `Regex::from_ast` parser-bypass path (which skips PGEN
+/// entirely) and as a backstop independent of the parser backend;
+/// the value is deliberately kept at 1000 (unchanged behaviour for
+/// every ≤250 pattern, which is every real-world / conformance
+/// pattern).
 pub(crate) const MAX_NESTING_DEPTH: usize = 1000;
 
 /// Stack space (bytes) that must remain before [`grow_stack`]

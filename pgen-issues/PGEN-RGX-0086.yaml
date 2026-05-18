@@ -12,7 +12,7 @@ summary: |
   `rust/src/embedding_api.rs` were not bumped in lockstep with the
   ledger — a ~46-minor-version under-report on the canonical
   downstream handoff surface.
-status: open
+status: closed
 opened_at: 2026-05-18T00:00:00Z
 first_seen_at: 2026-05-18T00:00:00Z
 last_updated_at: 2026-05-18T00:00:00Z
@@ -107,13 +107,20 @@ impact: |
   ledger (ideally a PGEN CI gate asserting
   `REGEX_PARSER_RELEASE_VERSION` == latest ledger "Fixed in").
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: resolved
+  fixed_in_pgen_release: "1.1.77"   # contract 1.1.79; pin 65b845f0
+  fixed_in_pgen_commit: ee5d8fea    # "RGX-0086 FIXED + tree CLOSED:
+                                    # embedding-API regex version consts
+                                    # synced to ledger-latest + drift gate"
+  verified_at: 2026-05-18T00:00:00Z
+  verified_by: RGX (source-verified on subs/pgen 65b845f0)
   verification_notes: |
-    Closed when a `subs/pgen` bump makes
-    `parser_embedding_api_contract().regex_parser_release_version`
-    match the ledger's latest "Fixed in" release for the built
-    tree. Then re-point PGEN-RGX-0085's version fields and RGX's
-    docs to the (now consistent) reported values and drop the
-    "known-stale" annotations.
+    CLOSED. `subs/pgen` @ 65b845f0 `rust/src/embedding_api.rs` now
+    hardcodes the ledger-latest values:
+      REGEX_PARSER_INTEGRATION_CONTRACT_VERSION = "1.1.79"  (L47)
+      REGEX_PARSER_RELEASE_VERSION              = "1.1.77"  (L50)
+    surfaced by `parser_embedding_api_contract()`. The previously
+    stale `1.1.29` / `1.1.31` constants are gone, and PGEN added a
+    ledger-derived drift gate so they cannot desync again. RGX docs'
+    version references are updated to `1.1.77` / `1.1.79` and the
+    former "known-stale, do not downgrade" caveat is dropped.
