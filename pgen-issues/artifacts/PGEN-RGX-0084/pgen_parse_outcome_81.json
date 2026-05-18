@@ -1,0 +1,9 @@
+{
+  "input": "((((((((x))))))))\\81",
+  "source": "subs/pcre2/testdata/testinput2 line 4671",
+  "pgen_outcome": "Ok (parse SUCCEEDS)",
+  "pgen_classification": "\\8 -> {index:8,kind:numeric,type:backreference}; trailing '1' -> literal piece  (see pgen_ast_dump_81.json)",
+  "pcre2_behavior": "REJECTS the pattern at compile",
+  "divergence": "RGX (faithfully consuming PGEN's AST: \\8 = valid backref to group 8, '1' literal) ACCEPTS a pattern PCRE2 rejects => conformance bucket 'RGX too permissive'",
+  "rgx_observed": "Regex::compile(\"((((((((x))))))))\\\\81\") -> Ok  (PCRE2: compile error)"
+}

@@ -329,11 +329,38 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 ### C10. Open upstream PGEN-RGX issues (blocking conformance / robustness)
 Tracked here so open PGEN-side dependencies are visible from the backlog, not buried in the C7 narrative. RGX cannot fix these directly (PGEN is the sole parser and read-only); no RGX-side workarounds per `feedback_no_pgen_workarounds`.
 
-> **Combined release incoming (per PGEN maintainer, 2026-05-18):** PGEN
-> has worked **0084** and is about to address **0085** and **0086**;
-> the fixes for **0084 + 0085 + 0086 will ship in one combined PGEN
-> release**. When it lands, do the "Verification on close" steps
-> **once for all three** in a single `subs/pgen` bump commit.
+> **Combined release LANDED but NOT ADOPTED — net conformance regression (2026-05-18).**
+> PGEN shipped 0084+0085+0086 in one release; RGX bumped `subs/pgen`
+> `08593d05`→`65b845f0` (rel **1.1.77** / contract **1.1.79**, AST schema `1`
+> unchanged) + regenerated the parser to verify. Result:
+> - **0085 ✅ clean RGX-side** — `REGEX_MAX_NESTING_DEPTH=250` ceiling; all
+>   deep-nesting stress/adversarial tests green; behaviour is more
+>   PCRE2-conformant (RGX's 1000 is now endorsed belt-and-suspenders).
+> - **0086 ✅ clean at source** — `embedding_api.rs` now hardcodes
+>   `REGEX_PARSER_RELEASE_VERSION="1.1.77"` / contract `"1.1.79"`; the
+>   stale 1.1.29/1.1.31 is gone.
+> - **0084 ❌ partial fix + regression** — closed testinput1:3910 (the
+>   originally-reported `\10` case) but is **family-incomplete**: for
+>   `\8N`/`\9N` (leading 8/9, value ≥10, insufficient groups) the new
+>   PEG fallback re-splits into single-digit backref `\8`/`\9` + literal
+>   digit, which PCRE2 **rejects** at compile. New "RGX too permissive"
+>   failures at `testinput2:4671 /((((((((x))))))))\81/` and `:4674`
+>   (`\80`). **PCRE2 differential ratchet: 12,806/4 → 12,805/5 — a NET
+>   REGRESSION of 1.** Augmented `pgen-issues/PGEN-RGX-0084.yaml`
+>   (`partial_fix_and_regression`, status stays `open`) + artifact
+>   bundle (AST dump proves PGEN emits `{index:8,kind:numeric,
+>   type:backreference}` + literal `"1"`).
+> **Decision (feedback_accuracy_first_then_speed — differential gate is
+> the merge condition; feedback_no_pgen_workarounds):** the combined
+> pin is **NOT adoptable** (net-regressing). The bump is **held
+> uncommitted** — `subs/pgen` sits at `65b845f0` in the worktree but is
+> **not staged**; RGX's clean/committed state remains the old pin
+> `08593d05` (12,806/4). **0084/0085/0086 all stay `open`** — none can be
+> RGX-verified-closed until PGEN completes the 0084 `[89]`-leading family
+> and ships an adoptable (non-regressing) combined pin. Then re-run the
+> "Verification on close" steps for all three in one `subs/pgen` bump
+> commit. 0073/0078 compile-time re-extract is deferred (moot on a
+> non-adoptable pin).
 
 - **PGEN-RGX-0084 — `\NN` forward-reference parsed as backref instead of octal/literal.** Filed 2026-05-08; **PGEN has worked it** (ships in the combined 0084+0085+0086 release). PGEN counts *whole-pattern* capturing groups instead of groups-seen-so-far, so `\10` in `()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+` is emitted as `numeric backreference index 10` when PCRE2's "up to that point" rule makes it the octal escape `\010` (U+0008). Sole cause of conformance failure `testinput1:3910` (the "PGEN-blocked (1)" residual in C7 / publish-readiness #3). Family scope: any two-digit `\NN` whose N exceeds groups-defined-so-far. Artifact bundle `pgen-issues/PGEN-RGX-0084.yaml` (+ `artifacts/PGEN-RGX-0084/`). Ratchet ticks 12,806→12,807 / 4→3 when the combined release lands and `subs/pgen` is bumped. No RGX-side fix.
 - **PGEN-RGX-0085 — parser/AST-dump stack-overflow on deep nesting.** Filed 2026-05-18 (see C9); **PGEN about to address it** (combined 0084+0085+0086 release). PGEN's `parse_regex_default_ast_dump` has no recursion ceiling; RGX-side mitigation shipped, PGEN owns the real fix.

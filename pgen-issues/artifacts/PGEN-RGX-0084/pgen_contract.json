@@ -1,0 +1,10 @@
+{
+  "_note": "Source-verified from subs/pgen @ 65b845f0 rust/src/embedding_api.rs:47,50 (parser_embedding_api_contract()).",
+  "regex_parser_release_version": "1.1.77",
+  "regex_integration_contract_version": "1.1.79",
+  "api_version": "1.2.0",
+  "regex_ast_dump_schema_version": "1",
+  "parser_family": "regex",
+  "profile": "regex_default",
+  "pgen_commit": "65b845f09d7387aa6477e958cb213b7e1e7dab7e"
+}

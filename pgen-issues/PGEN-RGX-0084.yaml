@@ -12,7 +12,7 @@ summary: |
 status: open
 opened_at: 2026-05-08T00:00:00Z
 first_seen_at: 2026-05-08T00:00:00Z
-last_updated_at: 2026-05-08T00:00:00Z
+last_updated_at: 2026-05-18T00:00:00Z
 parser_backend: pgen
 parser_backend_version: 1.1.74
 rgx_commit: 3c0c7188d77ad87e7a1f28327abd2ed4bc7c5f2b
@@ -165,3 +165,65 @@ resolution:
       3. Re-run `cargo test -p rgx-core --test pcre2_conformance --
             --ignored --nocapture` and confirm testinput1:3910 closes
          (ratchet baseline ticks +1 / -1).
+
+# ────────────────────────────────────────────────────────────────────
+partial_fix_and_regression:
+  recorded_at: 2026-05-18T00:00:00Z
+  recorded_by: RGX (combined-release verification of subs/pgen 65b845f0)
+  pgen_commit: 65b845f09d7387aa6477e958cb213b7e1e7dab7e
+  regex_parser_release_version: "1.1.77"   # 0084 fix shipped in rel 1.1.76
+  regex_integration_contract_version: "1.1.79"
+  status_note: |
+    PGEN-RGX-0084 must remain status:open. The rel-1.1.76 fix
+    (contract 1.1.78) DID close the originally-reported case
+    (testinput1:3910 `\10` forward-reference — verified: that case
+    no longer fails), but the fix is FAMILY-INCOMPLETE and INTRODUCED
+    a regression. Closing 0084 is blocked on the family completion
+    below.
+  what_the_fix_does_wrong: |
+    The new EBNF fallback chain is:
+      backreference = numeric_backreference        -> $1   # N>=10, GATED by @predicate fact_count_at_least(regex_capture_group,$index)
+                    | numeric_backreference_single -> $1   # N 1-9, UNGATED
+      backreference_digits        = /([1-9][0-9]+)/
+      backreference_digits_single = /([1-9])/
+    For `\81` where the multi-digit gated branch fails (fewer than 81
+    groups), the PEG backtracks to `numeric_backreference_single`,
+    which matches the single leading digit `8` as `[1-9]` => emits
+    {index:8,kind:numeric,type:backreference} and leaves the trailing
+    `1` to be parsed as a literal piece. (AST proof attached:
+    artifacts/PGEN-RGX-0084/pgen_ast_dump_81.json.)
+    PCRE2 does NOT degrade `\8N`/`\9N` that way: `8` and `9` are not
+    octal digits, so the octal fallback is unavailable, and PCRE2
+    REJECTS the pattern at compile rather than re-splitting into
+    `\8` + literal `1`. The 0084 fix modelled the valid-octal-digit
+    path (`\10` -> octal U+0008) but not the `[89]`-leading
+    multi-digit escape sub-family.
+  family_the_fix_must_also_cover:
+    - "`\\8N`/`\\9N` (leading digit 8 or 9, total value >= 10): not a valid full backref AND not octal-representable (8,9 not octal digits) => PCRE2 compile error, NOT \\8/\\9 single-digit backref + literal."
+  repro_cases:
+    - source: subs/pcre2/testdata/testinput2 line 4671
+      pattern: '((((((((x))))))))\81'
+      groups_before_escape: 8
+      pcre2: rejects at compile
+      pgen_post_0084: 'Ok — \8 = backreference index 8, "1" literal (WRONG)'
+      rgx_effect: 'Regex::compile() Ok => conformance bucket "RGX too permissive"'
+      artifacts: [repro_input_81.txt, pgen_ast_dump_81.json, pgen_parse_outcome_81.json]
+    - source: subs/pcre2/testdata/testinput2 line 4674
+      pattern: '(...152 nested groups...)\80'
+      pcre2: rejects at compile
+      pgen_post_0084: 'Ok (WRONG) — same family'
+      rgx_effect: 'second "RGX too permissive" conformance failure'
+      artifacts: [repro_input_80.txt]
+  conformance_impact: |
+    RGX PCRE2 differential ratchet: pre-bump 12,806 pass / 4 fail
+    (08593d05). Post-bump 65b845f0: 12,805 pass / 5 fail. Net -1:
+    +1 from testinput1:3910 closing, -2 from the two new
+    `\8N`/`\9N` "RGX too permissive" failures (testinput2:4671,
+    4674). The bump is therefore a NET CONFORMANCE REGRESSION and is
+    NOT adoptable by RGX until the family above is handled. No
+    RGX-side workaround (feedback_no_pgen_workarounds /
+    feedback_family_fix_doctrine).
+  pgen_side_companion_fixes_in_same_release:
+    - "PGEN-RGX-0085 (rel 1.1.77): nesting ceiling — VERIFIED CLEAN RGX-side (deep-nesting stress/adversarial green; behaviour more PCRE2-conformant)."
+    - "PGEN-RGX-0086 (rel 1.1.77/contract 1.1.79): version consts synced — VERIFIED CLEAN at source (REGEX_PARSER_RELEASE_VERSION=\"1.1.77\")."
+    - "But because all three shipped in ONE combined release and RGX cannot adopt a net-regressing pin, 0085/0086 cannot be marked RGX-verified-closed until 0084's family completion lands and the combined pin is adoptable."
