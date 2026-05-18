@@ -334,6 +334,12 @@ Tracked here so open PGEN-side dependencies are visible from the backlog, not bu
 - **PGEN-RGX-0073 / 0078 — compile-time / parse-time perf.** Open per README ("0073 PGEN regex-grammar parse-time perf; 0078 compile-time perf gap, Acknowledged/Deferred non-blocking"). Precondition for the ROADMAP `<5x of PCRE2 compile` target. No RGX-side fix.
 - **Verification on close**: after any `subs/pgen` bump that claims to address one of these, re-run `make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap`, the PCRE2 conformance ratchet, and the relevant report's `resolution.verification_notes` steps; flip the YAML `status`/`resolution` and bump the ratchet baselines in the same commit.
 
+### C11. rgx-capi header-drift CI gate (STABILITY.md §7) — planned
+- **What**: enforce `rgx-capi/STABILITY.md` §7 — any meaningful change to `rgx-capi/include/rgx.h` (declarations / signatures / constants / struct layouts) without a workspace `version` bump must fail CI.
+- **Status**: STABILITY.md drafted 2026-05-18 (publish-readiness #1, document half done). The *gate* is specified but not implemented; until then §7 is enforced by reviewer discipline.
+- **Plan**: `scripts/check-capi-abi.sh` — (1) `cargo build -p rgx-capi`, assert committed `include/rgx.h` is byte-identical to the regenerated one; (2) if the header's meaningful content differs from the merge-base, assert the workspace `version` also differs. Wire into `.github/workflows/ci.yml` + `scripts/run-local-ci.sh`. Gate-affecting (scripts/.github) → its own focused commit with a full green receipt + COMMIT.md doc-sync.
+- **Effort**: `small`. **Advances**: publish-readiness #1 (its declared "Next concrete step").
+
 ---
 
 ## Priority tiers

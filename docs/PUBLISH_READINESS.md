@@ -37,9 +37,9 @@ Status legend: **Not started** · **In progress** · **Complete** · **Blocked**
 | `rgx-cli` (command-line UX) | Probably YES, lighter touch | Scripts pipe through the CLI; flag-rename surprises break user scripts. |
 | PGEN regex grammar | OUT OF SCOPE for this doc | Lives in the PGEN project and is part of PGEN's own readiness bar. |
 
-**Current state.** Not started. The Phase 0 design doc (`docs/A9_LANGUAGE_BINDINGS_DESIGN.md` §4 ABI Stability) sketches the principles for the C ABI, but no separate contract document exists, and no CI gate enforces it.
+**Current state.** In progress. **`rgx-capi/STABILITY.md` drafted 2026-05-18** against the shipped Phase 1 surface — covers all five required elements: SemVer mapping (change → version digit), the append-only / never-renumber error-code rule (with the `-99` sentinel and `-4`/`-6` reserved gaps), the deprecation policy with concrete timelines (≥2 releases, replacement-ships-first), per-function stability tiers, and the header-drift CI-gate *contract* (§7) plus memory/threading invariants and a contributor checklist. The Phase 0 design doc (`docs/A9_LANGUAGE_BINDINGS_DESIGN.md` §4) is now superseded by STABILITY.md as the authoritative C-ABI contract. The CI *gate* itself (`scripts/check-capi-abi.sh` + wiring) is specified but not yet implemented — until then §7 is enforced by reviewer discipline.
 
-**Next concrete step.** Draft `rgx-capi/STABILITY.md` against the Phase 1 surface that just shipped. Defer the Rust-side contract until either crates.io publication is on the immediate horizon or a third-party Rust consumer materializes.
+**Next concrete step.** Implement the header-drift CI gate per STABILITY.md §7 (tracked: backlog "rgx-capi header-drift CI gate"). Then revisit the Rust-side (`rgx-core`) contract only when crates.io publication is on the immediate horizon or a third-party Rust consumer materializes.
 
 ---
 
