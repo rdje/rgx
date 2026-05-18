@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-18 - Docs: RUST_CODEBASE_ANALYSIS.md refreshed to current verified facts (bootstrap mandate)
+- Scope: SESSION_BOOTSTRAP instructs "update RUST_CODEBASE_ANALYSIS.md if necessary". It was deeply stale (conformance body "12,716/94" & "12,709/101", tests "1,118 lib/30 cli @ 6c9766c", "~58K LOC", no A9/TDFA/recursion.rs, "PGEN 1.1.75").
+- Changes: added an authoritative dated refresh block at the top of "Current verified snapshot" that supersedes all conflicting body figures with ground-truthed values — conformance 12,806/4/0/0 (harness baseline constants verified); 1,197 rgx-core lib + 41 cli + 17 capi + 25 stress tests; rgx-core ≈70.0K LOC; new `recursion.rs` (202) + `stacker` dep; new `rgx-capi` crate 688 LOC (A9 Phase 1); A9 Phase 0/1, C2 TDFA, C1 Step 8 noted as shipped; the PGEN version discrepancy (live contract 1.1.29/1.1.31 vs claimed 1.1.75/1.1.77) recorded as an open flagged question (not silently resolved); the gate-receipt validation flow noted. Historical narrative retained for context, explicitly marked not-re-verified.
+- Validation: doc-only (no code; *.md is outside the gate-affecting pathspec, so the pre-commit guard correctly does not require a receipt). Numbers ground-truthed via `wc -l`, the harness baseline constants, this session's green-gate test-result lines, and `parser_embedding_api_contract()` JSON.
+- Notes/impact: closes the bootstrap-mandated analysis-refresh step. The full per-line prose rewrite of the 285-line body is deliberately out of scope (much is still-informative history); the refresh block is the single authoritative current-state surface a future session reads first.
+
 ### 2026-05-18 - Hardening: gate-receipt guard so a red mandatory gate can't be self-reported green
 - Scope: user directive after the deep-nesting incident — "the flow didn't catch it sooner; make it rock solid." Roots of why a red gate slipped through for ~6 weeks: (1) sessions satisfied `cargo test -p rgx-core` with targeted/`--lib` runs instead of the full suite; (2) the pipeline exit-masking trap (`cargo test … | tail` returns the filter's exit 0, hiding a SIGABRT); (3) hosted CI couldn't build (fixed separately); (4) — newly discovered while building this — `scripts/check-ci-paths.sh` had itself been **red on benign pre-existing source**, so the canonical gate runner `run-local-ci.sh` couldn't even reach green, pushing everyone to ad-hoc subset runs.
 - Changes:

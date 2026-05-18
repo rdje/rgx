@@ -7,6 +7,17 @@ Live roadmap-grounded analysis of the Rust workspace in `rgx`.
 - Give future sessions one accurate Rust-specific status document to refresh when behavior changes.
 
 ## Current verified snapshot
+
+> **2026-05-18 refresh (head `2a49b37`) — authoritative current facts. These supersede any conflicting figure in the historical narrative below, which is retained for context but is NOT re-verified each session.**
+>
+> - **Conformance ratchet: 12,806 pass / 4 fail / 0 panic / 0 skip** — the harness baseline constants in `rgx-core/tests/pcre2_conformance.rs` are `PASS_BASELINE = 12_806`, `FAIL_BASELINE = 4`, `PANIC_BASELINE = 0`, `SKIP_BASELINE = 0`. Re-confirmed green this session. The body's "12,716 / 94" and "12,709 / 101" are **stale narrative** (snapshots from 2026-05-05 / 2026-04-27).
+> - **Tests: 1,197 `rgx-core` lib tests** (1 ignored) + **41 `rgx-cli`** + **17 `rgx-capi`** (+ C smoke) + integration suites incl. `tests/stress_tests.rs` **25** (4 new deep-nesting regression tests added 2026-05-18). The body's "1,118 lib / 30 cli @ `6c9766c`" is stale.
+> - **rgx-core ≈ 70.0K LOC** (`find rgx-core/src -name '*.rs' | wc -l` = 69,971), not the stale "~58K @ `6c9766c`". New module `rgx-core/src/recursion.rs` (202 lines — compile-time nesting DoS guard) + direct dep `stacker = "0.1"`. `rgx-cli` 1,955; **new crate `rgx-capi` 688 LOC** (A9 Phase 1 C ABI — `crate-type = ["cdylib","staticlib","rlib"]`, cbindgen `include/rgx.h`).
+> - **A9 language bindings**: Phase 0 (design doc `docs/A9_LANGUAGE_BINDINGS_DESIGN.md`) + Phase 1 (`rgx-capi` scaffolding: compile/free/retain/is_match/find_first/last_error/version + 7 stable error codes) **shipped 2026-05-13**. Phases 2–7 pending. The body predates A9 entirely.
+> - **C2 TDFA** (tagged-DFA capture recovery, Phases 0–4) and **C1 Step 8** (`Regex::uses_jit()` public introspection) shipped 2026-05-13 — not reflected in the body.
+> - **PGEN version reality (open discrepancy — BACKLOG C10 / tracked)**: `subs/pgen` pin `08593d05`; but the live `parser_embedding_api_contract()` reports `regex_parser_release_version = 1.1.29`, `regex_integration_contract_version = 1.1.31`, `api_version = 1.2.0`. README/MEMORY and the body claim "PGEN 1.1.75 / contract 1.1.77" for the same pin, and `subs/pgen/generated/regex_parser.rs` is dated 2026-05-05. Treat **1.1.29 / 1.1.31** as the authoritative *observed* values until the discrepancy is resolved (per `project_pgen_generated_files`, `regex_parser_bootstrap` must be re-run after any bump; local generated artifacts appear stale vs the claimed pin). New open PGEN report this session: **PGEN-RGX-0085** (parser stack-overflow on deep nesting; RGX-side mitigated, PGEN owns the real fix).
+> - **Validation flow**: the COMMIT.md mandatory gate is now enforced by a gate-receipt guard (`scripts/run-local-ci.sh` writes a tree-stamped receipt only on a real green; tracked `scripts/git-hooks/pre-commit` blocks gate-affecting commits without a fresh match; activate once via `./scripts/setup-hooks.sh`). Hosted CI is now buildable (toolchain pinned to MSRV 1.95.0). See CHANGES.md 2026-05-18 entries.
+
 - `README.md` remains the canonical repository entry point and onboarding map.
 - Validation snapshot:
   - `cargo test --manifest-path /Users/richarddje/Documents/github/rgx/Cargo.toml -p rgx-core --features lua safe_mode_lua_rgx_helpers_can_emit_results_from_statement_bodies -- --nocapture` => pass
