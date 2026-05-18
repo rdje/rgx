@@ -10,7 +10,7 @@ That decision rule has three properties worth restating:
 2. **The list is open-ended.** The original statement ended with "..." — new criteria may surface as work progresses.
 3. **Closing individual items does NOT mean "publication is closer."** Each closure is work toward the bar; "ready to publish" is a single discrete event when every criterion is green.
 
-**Publication target.** Per `MEMORY.md` (`project_release_strategy`), the public release vehicle is the PGEN regex parser, not the RGX crate(s) directly. The `rgx-capi` artefacts (`librgx.{so,dylib,a}` + `rgx.h`) can ship independently of crates.io — distribution there is through GitHub releases / package mirrors, not the Rust registry.
+**Publication target (updated 2026-05-18).** After the user turned both `rdje/rgx` and the `rdje/pgen` submodule public, the crates.io target was reopened to include **both the RGX crates (`rgx-core` / `rgx-cli`) and the PGEN regex parser** — then explicitly **put on hold**: *"Let's put and hold publishing on crates.io for now. Will do it at some point in the near future."* So crates.io is a **deferred near-future intent**, not the prior "PGEN regex parser only / RGX never" position and not an active workstream. The readiness-plan task is **parked** until the user reactivates it; this document continues to track the gates so the picture is ready when that happens. The `rgx-capi` artefacts (`librgx.{so,dylib,a}` + `rgx.h`) can still ship independently of crates.io (GitHub releases / package mirrors). See `project_release_strategy` memory for the full history.
 
 ---
 
