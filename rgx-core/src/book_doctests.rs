@@ -88,3 +88,38 @@ pub struct GsReplaceAndSplit;
 /// Getting Started → RegexBuilder & Configuration.
 #[doc = include_str!("../../book/src/getting-started/regex-builder.md")]
 pub struct GsRegexBuilder;
+
+// --- Campaign increment 2 (2026-05-18): core-api/* (the full
+// public type system; all pure-API + thread-safe, run as doctests). ---
+
+/// Core API → The Match Type.
+#[doc = include_str!("../../book/src/core-api/match-type.md")]
+pub struct CaMatchType;
+
+/// Core API → Iterators.
+#[doc = include_str!("../../book/src/core-api/iterators.md")]
+pub struct CaIterators;
+
+/// Core API → Position-Aware Matching.
+#[doc = include_str!("../../book/src/core-api/position-aware.md")]
+pub struct CaPositionAware;
+
+/// Core API → RegexSet.
+#[doc = include_str!("../../book/src/core-api/regex-set.md")]
+pub struct CaRegexSet;
+
+/// Core API → RegexCache (incl. the thread-safety example).
+#[doc = include_str!("../../book/src/core-api/regex-cache.md")]
+pub struct CaRegexCache;
+
+/// Core API → BytesRegex.
+#[doc = include_str!("../../book/src/core-api/bytes-regex.md")]
+pub struct CaBytesRegex;
+
+/// Core API → Safety Limits (incl. the compile-time nesting guard).
+#[doc = include_str!("../../book/src/core-api/safety-limits.md")]
+pub struct CaSafetyLimits;
+
+/// Core API → Error Diagnostics.
+#[doc = include_str!("../../book/src/core-api/error-diagnostics.md")]
+pub struct CaErrorDiagnostics;

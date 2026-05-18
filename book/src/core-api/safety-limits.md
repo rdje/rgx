@@ -20,7 +20,7 @@ Every match attempt executes a sequence of VM opcodes: match a character,
 try a branch, push a backtrack frame, and so on. `set_max_steps` caps the
 total number of opcode dispatches per attempt:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a+)+b")?;
 re.set_max_steps(Some(10_000));
@@ -56,7 +56,7 @@ are being cut short.
 
 Pass `None` to revert to the default (unlimited):
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 re.set_max_steps(Some(1000));
@@ -82,7 +82,7 @@ can undo choices when a branch fails. Deeply nested quantifiers and
 alternations can produce enormous stacks. `set_max_backtrack_frames` caps
 the depth:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a|b)*c")?;
 re.set_max_backtrack_frames(Some(5_000));
@@ -117,7 +117,7 @@ RGX supports recursive patterns (like `(?R)` for matching balanced
 parentheses). Each recursive invocation consumes stack space and processing
 time. `set_max_recursion_depth` limits how deep the recursion can go:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\(([^()]*|(?R))*\)")?;
 re.set_max_recursion_depth(Some(50));
@@ -136,7 +136,7 @@ but prevents runaway recursion from crashing the process.
 
 Pass `None` to revert to this default:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?R)?")?;
 re.set_max_recursion_depth(Some(10));
@@ -154,7 +154,7 @@ captures, the trail can grow far beyond what `set_max_backtrack_frames`
 alone defends against — a single backtrack frame can carry an arbitrarily
 long trail. `set_max_trail_entries` caps the trail length:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(.)*x")?;
 re.set_max_trail_entries(Some(100));
@@ -185,7 +185,7 @@ patterns or input from untrusted sources.
 
 ### Removing the limit
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(.)*x")?;
 re.set_max_trail_entries(Some(1_000));
@@ -209,7 +209,7 @@ This means you can:
 - **Change limits between calls** without recompiling the pattern.
 - **Use `Arc<Regex>`** from `RegexCache` and still configure safety limits.
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 use std::sync::Arc;
 use std::thread;
@@ -246,7 +246,7 @@ defends a different resource axis: CPU time (`max_steps`), backtrack-state
 count (`max_backtrack_frames`), recursion depth (`max_recursion_depth`),
 and per-state undo memory (`max_trail_entries`).
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 fn compile_safe(pattern: &str) -> Result<Regex, Box<dyn std::error::Error>> {
     let re = Regex::compile(pattern)?;
@@ -280,7 +280,7 @@ RGX does not currently expose the exhaustion reason in the return value.
 
 ## Practical example: safe user-facing search
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, RegexCache};
 use std::sync::Arc;
 
@@ -328,12 +328,16 @@ RGX therefore enforces a fixed **compile-time nesting limit**. A pattern
 nested deeper than the limit fails to compile with a clean, deterministic
 error instead of crashing:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 // Pathologically nested input is rejected, not crashed:
 let mut pattern = String::from("a");
 for _ in 0..5_000 { pattern = format!("({pattern})*"); }
-let err = Regex::compile(&pattern).unwrap_err();
+// `Regex` is not `Debug`, so use a match rather than `unwrap_err()`.
+let err = match Regex::compile(&pattern) {
+    Err(e) => e,
+    Ok(_) => unreachable!("a 5000-deep pattern must hit the nesting limit"),
+};
 assert!(err.to_string().contains("nesting too deep"));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```

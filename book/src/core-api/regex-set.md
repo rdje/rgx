@@ -11,7 +11,7 @@ single entry point for the whole battery of tests.
 all at once. If *any* pattern is invalid, the entire construction fails with
 a diagnostic that identifies which pattern was the problem:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[
     r"\d+",           // pattern 0: digits
@@ -25,7 +25,7 @@ assert_eq!(set.len(), 3);
 
 You can also create an empty set that matches nothing:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::empty();
 assert!(set.is_empty());
@@ -37,7 +37,7 @@ assert!(!set.is_match("anything"));
 When a pattern fails to compile, the error message includes the pattern
 index and the original text:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let result = RegexSet::new(&[r"\d+", r"(unclosed"]);
 assert!(result.is_err());
@@ -48,7 +48,7 @@ assert!(result.is_err());
 
 The simplest operation: does *any* pattern in the set match?
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[r"error", r"warn", r"fatal"])?;
 
@@ -66,7 +66,7 @@ line is worth processing further.
 When you need to know *which* patterns matched, use `matches`. It returns a
 `SetMatches` object:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[
     r"\d+",
@@ -102,7 +102,7 @@ assert!(!result.matched(99));
 `SetMatches::iter()` yields only the indices of patterns that matched. This
 is cleaner than checking each index manually:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[r"a", r"b", r"c", r"d", r"e"])?;
 let result = set.matches("ace");
@@ -115,7 +115,7 @@ assert_eq!(matched_indices, vec![0, 2, 4]);  // a, c, e
 `SetMatches` also implements `IntoIterator`, so you can consume it directly
 in a `for` loop:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[r"error", r"warn", r"critical"])?;
 let result = set.matches("critical error in subsystem");
@@ -134,7 +134,7 @@ for idx in result {
 
 These convenience predicates answer two common questions:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[r"\d", r"[a-z]", r"[A-Z]"])?;
 
@@ -162,7 +162,7 @@ for "all" to be true about.
 
 The `patterns()` method returns the pattern strings in their original order:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let set = RegexSet::new(&[r"\d+", r"\w+"])?;
 assert_eq!(set.patterns(), &[r"\d+".to_string(), r"\w+".to_string()]);
@@ -176,7 +176,7 @@ table of routes. Rather than testing each route sequentially and stopping at
 the first hit, `RegexSet` tells you which routes match, and you can pick
 the most specific one:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let routes = RegexSet::new(&[
     r"^/api/users/\d+$",     // 0: specific user
@@ -212,7 +212,7 @@ When multiple patterns can match the same path, you might want the most
 specific one. A simple approach: assign priorities by index order (lower
 index = higher priority) and take the first matched index:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let routes = RegexSet::new(&[
     r"^/api/users/\d+$",  // most specific first
@@ -231,7 +231,7 @@ assert_eq!(best, Some(0));  // most specific pattern wins
 Another natural fit is classifying text into categories. Here we tag log
 lines with severity levels:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 let severity = RegexSet::new(&[
     r"(?i)\b(fatal|panic)\b",    // 0: critical
@@ -261,7 +261,7 @@ assert_eq!(label, Some("WARNING"));
 
 Check whether an input string satisfies multiple constraints simultaneously:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexSet;
 // Password must have: uppercase, lowercase, digit, special char, length >= 8
 let rules = RegexSet::new(&[
