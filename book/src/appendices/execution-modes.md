@@ -27,7 +27,7 @@ rgx has three execution modes that control which features are available. Choose 
 
 ## Pure mode
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(r"\d+", ExecutionMode::Pure)?;
 // or equivalently:
@@ -43,7 +43,7 @@ Pure mode is the default when you use `Regex::compile`. It provides maximum perf
 
 ## Safe mode
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"\d+(?{lua:return tonumber(arg[0]) > 0})"#,
@@ -66,7 +66,7 @@ Native callbacks (`(?{native:...})`) are not allowed in Safe mode. This guarante
 
 ## Full mode
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"\d+(?{native:validate})",
@@ -110,7 +110,7 @@ Most applications fall into one of two patterns:
 
 The mode is set at compilation time and cannot be changed afterward. You can query it on the engine:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(r"\d+", ExecutionMode::Safe)?;
 // The mode is baked into the compiled regex
@@ -119,7 +119,7 @@ let re = Regex::with_mode(r"\d+", ExecutionMode::Safe)?;
 
 Attempting to register a native callback on a Safe-mode regex returns an error:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(r"\d+", ExecutionMode::Safe)?;
 let result = re.register_native("cb", |_| ExecResult::Success);

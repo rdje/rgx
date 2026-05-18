@@ -8,7 +8,7 @@ This chapter is about the security model: what is safe, what is not, how the san
 
 Everything starts with `ExecutionMode`. Every compiled `Regex` is bound to a mode, set at compile time, and the mode determines which code-block backends are allowed to run.
 
-```rust,ignore
+```rust,no_run
 pub enum ExecutionMode {
     /// Pure regex. No code blocks allowed.
     Pure,
@@ -105,10 +105,13 @@ The implication: **`Full` mode is only for trusted patterns.** If your code can 
 
 Sandboxes prevent API misuse. Resource limits prevent CPU and memory exhaustion. RGX has three configurable safety limits on every compiled `Regex`:
 
-```rust,ignore
+```rust
+# use rgx_core::Regex;
+# let re = Regex::compile(r"\d+")?;
 re.set_max_steps(Some(100_000));              // abort after N VM steps
 re.set_max_backtrack_frames(Some(1_000));     // cap backtrack stack size
 re.set_max_recursion_depth(Some(50));         // cap (?R)/subroutine depth
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 **`set_max_steps`** is the primary DoS protection. Every opcode execution increments a step counter, and when the counter exceeds the limit the VM aborts with an error. Pathological patterns like `(a+)+b` on adversarial input terminate cleanly instead of spinning for seconds.

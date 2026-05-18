@@ -56,7 +56,7 @@ If none of those appear in the AST, the classifier returns `NoBacktracking` and 
 
 `c2/program.rs::CompiledC2Program` is the C2 artifact for a single pattern. It holds **four Thompson NFAs**, one shared byte-class equivalence map, and a small handful of dispatch hints:
 
-```rust,ignore
+```text
 pub struct CompiledC2Program {
     pub byte_class_map: ByteClassMap,
     pub forward_anchored: Nfa,

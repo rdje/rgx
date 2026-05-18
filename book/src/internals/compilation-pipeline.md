@@ -46,7 +46,7 @@ PGEN's output is a grammar-level parse tree. That tree is not RGX's internal AST
 
 RGX's AST is intentionally small. A pattern like `(\d+)` becomes something shaped like this:
 
-```rust,ignore
+```text
 Expr::Group {
     index: 1,
     name: None,
@@ -158,7 +158,7 @@ Let's trace `\d+` through all four stages:
 
 **Stage 1 (parse)** produces an AST roughly like:
 
-```rust,ignore
+```text
 Expr::Plus {
     greedy: true,
     inner: Box::new(Expr::Class(CharClass::Digit)),
@@ -167,7 +167,7 @@ Expr::Plus {
 
 **Stage 2 (normalize)** adds an implicit whole-match capture wrapping the expression:
 
-```rust,ignore
+```text
 Expr::Group {
     index: 0,
     name: None,
@@ -190,7 +190,7 @@ Expr::Group {
 
 **Stage 4 (optimize)** attaches hints to the `Program`:
 
-```rust,ignore
+```text
 Program {
     opcodes: [...as above...],
     prefix_hint: PrefixHint::Class(CharClass::Digit),

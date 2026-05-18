@@ -202,3 +202,27 @@ pub struct RwTokenizer;
 /// Real-world → WAF Rule Engine (RegexSet + steering + events + vars).
 #[doc = include_str!("../../book/src/real-world/waf-engine.md")]
 pub struct RwWafEngine;
+
+// --- Campaign increment 6 (2026-05-18, FINAL): appendices/* +
+// internals/* user-facing API chapters. The internals architecture
+// chapters (compilation-pipeline, the-vm, jit-compiler,
+// nfa-dfa-engine, pgen-integration, pcre2-conformance-audit) +
+// appendices/context-reference document *engine-internal* design
+// pseudocode (private `Expr`/`Program`/`ExecContext` types, `…`
+// placeholders, no-body `extern "C"` signatures) — correctly
+// `text`, not runnable, intentionally NOT wired. Only the three
+// chapters with genuine user-facing API examples are wired. ---
+
+/// Appendices → Execution Modes (Pure/Safe/Full; lua block `no_run`).
+#[doc = include_str!("../../book/src/appendices/execution-modes.md")]
+pub struct ApxExecutionModes;
+
+/// Appendices → PCRE2 Compatibility (migration patterns; pcre2-crate
+/// before/after is `text` — external crate, not a dependency).
+#[doc = include_str!("../../book/src/appendices/pcre2-compatibility.md")]
+pub struct ApxPcre2Compatibility;
+
+/// Internals → Sandboxing & Security (ExecutionMode reproduction
+/// `no_run`; the safety-limit setters run with hidden setup).
+#[doc = include_str!("../../book/src/internals/sandboxing.md")]
+pub struct IntSandboxing;

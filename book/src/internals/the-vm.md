@@ -24,7 +24,7 @@ This architectural choice puts RGX in the same family as PCRE2. The VM structure
 
 At its heart, `vm.rs::RegexVM` is a boringly simple interpreter:
 
-```rust,ignore
+```text
 loop {
     let op = program.opcodes[ctx.pc];
     ctx.pc += 1;
@@ -59,7 +59,7 @@ Trace logging calls are compiled away in release builds. In debug builds they pr
 
 Every call to `find_first` or `find_all` creates an `ExecContext` — a plain struct holding everything the VM needs to step forward:
 
-```rust,ignore
+```text
 pub struct ExecContext<'t> {
     pub text: &'t [u8],           // the input text (borrowed, not owned)
     pub pos: usize,               // current byte position in text
@@ -133,7 +133,7 @@ The hard part of any backtracking VM is making backtrack cheap. When the VM trie
 
 RGX uses a **capture trail**. Every time the VM writes to a capture slot, it pushes a `TrailEntry` onto a trail stack:
 
-```rust,ignore
+```text
 pub struct TrailEntry {
     group: u32,
     which: SlotKind,    // start or end

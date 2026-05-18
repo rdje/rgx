@@ -75,7 +75,7 @@ If none of the exclusions appear, the eligibility check returns `true` and `comp
 
 Every JIT-compiled program produces a single Cranelift function with the same C ABI signature:
 
-```rust,ignore
+```text
 type JittedFn = unsafe extern "C" fn(
     text: *const u8,
     text_len: usize,
@@ -169,7 +169,7 @@ Cranelift can lower simple ops directly to native instructions (loads, stores, c
 
 Two helpers are wired into the codegen at C1 v1:
 
-```rust,ignore
+```text
 // Word boundary test for `\b` / `\B`.
 pub unsafe extern "C" fn rgx_runtime_word_boundary_test(
     text: *const u8,

@@ -6,7 +6,7 @@ This appendix documents every field and method available to callbacks in each la
 
 Native callbacks receive an `ExecContext` reference:
 
-```rust,ignore
+```text
 re.register_native("name", |ctx: &ExecContext| -> ExecResult {
     // ...
 });

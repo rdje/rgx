@@ -47,7 +47,7 @@ The adapter lives in `rgx-core/src/parsing.rs`. The file has a handful of respon
 
 **Backend selection.** A compile-time constant picks between PGEN and the legacy recursive-descent parser. In normal builds the constant is `true` (PGEN). When debugging an AST-level divergence, a developer can flip that switch locally, rebuild, and see whether the problem is in the parser adapter or downstream.
 
-```rust,ignore
+```text
 const USE_PGEN: bool = true;
 
 pub fn parse(pattern: &str) -> Result<Expr, CompileError> {
