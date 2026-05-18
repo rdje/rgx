@@ -80,7 +80,7 @@ if count > 0 {
 `tail_file` watches a file for new content and calls your closure for each match in newly appended lines. It returns a `TailHandle` that lets you stop the watcher.
 
 ```rust,no_run
-# use rgx_core::{Regex, file::TailOptions};
+# use rgx_core::{Regex, TailOptions};
 let re = Regex::compile(r"ERROR\s+(.*)")?;
 
 let handle = re.tail_file(
@@ -111,7 +111,7 @@ handle.stop();
 | `from_end` | `bool` | `true` | Start at end of file (only new content) |
 
 ```rust,no_run
-# use rgx_core::{Regex, file::TailOptions};
+# use rgx_core::{Regex, TailOptions};
 # use std::time::Duration;
 let re = Regex::compile(r"ERROR")?;
 
@@ -153,7 +153,7 @@ The `TailHandle` controls the background watcher:
 The watcher also stops automatically when the `TailHandle` is dropped. This means you can use it with RAII patterns:
 
 ```rust,no_run
-# use rgx_core::{Regex, file::TailOptions};
+# use rgx_core::{Regex, TailOptions};
 {
     let re = Regex::compile(r"ERROR").unwrap();
     let _handle = re.tail_file("/var/log/app.log", TailOptions::default(), |fm| {
@@ -175,7 +175,7 @@ The watcher also stops automatically when the `TailHandle` is dropped. This mean
 A production-style log monitor that watches for errors and tracks statistics:
 
 ```rust,no_run
-# use rgx_core::{Regex, file::TailOptions};
+# use rgx_core::{Regex, TailOptions};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::Duration;

@@ -156,7 +156,7 @@ pub use execution::{
     CodeBlockValue, ExecContext, ExecContextSnapshot, ExecResult, MatchContinuation, MatchOutcome,
     SteerResult, Value,
 };
-pub use file::FileMatch;
+pub use file::{FileMatch, TailHandle, TailOptions};
 pub use pattern::{CompiledPattern, Pattern};
 pub use regex_set::{RegexSet, SetMatches};
 pub use vars::VarsBuilder;

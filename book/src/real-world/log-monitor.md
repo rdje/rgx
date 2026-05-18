@@ -13,7 +13,7 @@ We want to match standard log lines like:
 ```
 
 ```rust
-# use rgx_core::{Regex, ExecutionMode, ExecResult, file::TailOptions};
+# use rgx_core::{Regex, ExecutionMode, ExecResult, TailOptions};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -31,7 +31,7 @@ let re = Regex::with_mode(
 The native callback classifies each log line and decides what action to take:
 
 ```rust
-# use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult, file::TailOptions};
+# use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult, TailOptions};
 # use std::sync::{Arc, Mutex};
 # use std::collections::HashMap;
 # let re = Regex::with_mode(r"(?P<ts>\S+ \S+)\s+(?P<level>\w+)\s+\[(?P<component>\w+)\]\s+(?P<message>.+)(?{native:classify})", ExecutionMode::Full)?;
@@ -71,7 +71,7 @@ re.register_native("classify", move |ctx| {
 ## Wiring it up
 
 ```rust,no_run
-# use rgx_core::{Regex, ExecutionMode, ExecResult, file::TailOptions};
+# use rgx_core::{Regex, ExecutionMode, ExecResult, TailOptions};
 # use std::sync::{Arc, Mutex};
 # use std::collections::HashMap;
 # use std::time::Duration;

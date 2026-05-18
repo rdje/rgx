@@ -82,7 +82,7 @@ See [Structured Events](./host-integration/structured-events.md). Useful for str
 
 ```rust,no_run
 # use rgx_core::Regex;
-# use rgx_core::file::TailOptions;
+# use rgx_core::TailOptions;
 let re = Regex::compile(r"ERROR\s+(\w+):\s*(.+)$")?;
 // `tail_file` returns a `TailHandle` that controls the watch.
 let _handle = re.tail_file("/var/log/app.log", TailOptions::default(), |m| {
