@@ -14,11 +14,14 @@ Seven capabilities set rgx apart from a conventional regex engine:
 
 A code block in a pattern runs *during* matching:
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r"(\d{4})-(\d{2})-(\d{2})(?{lua: return tonumber(MATCH:sub(6,7)) <= 12 })",
     ExecutionMode::Safe,
 )?;
+# let _ = re;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 The supported embedded languages are **Lua, JavaScript, Rhai, WASM, and native Rust callbacks**. Each runs in a sandboxed VM owned by rgx; the host application doesn't have to ship a scripting interpreter to use them. See [Predicate Callbacks](./host-integration/predicate-callbacks.md) and [Sandboxing & Security](./internals/sandboxing.md).
@@ -29,14 +32,17 @@ No other regex engine in widespread use offers this. Pattern-embedded predicates
 
 A code block can move the match cursor:
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
+# let re = Regex::with_mode(r"\w+(?{native:skip_quoted})", ExecutionMode::Full)?;
 re.register_native("skip_quoted", |ctx| {
-    if ctx.text().starts_with('"') {
-        ExecResult::Steer(SteerAction::Skip(/* find closing quote */))
+    if ctx.current_match().is_some_and(|s| s.starts_with('"')) {
+        ExecResult::Steer(SteerResult::Skip(2 /* past the closing quote */))
     } else {
         ExecResult::Success
     }
 })?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 `Steer` is a first-class return value from a callback. The engine accepts, fails, or *jumps* depending on what the code says. See [Match Steering](./host-integration/match-steering.md).
@@ -45,10 +51,12 @@ re.register_native("skip_quoted", |ctx| {
 
 Every `MatchResult` has a `code_result: Option<CodeBlockValue>` field. Inline code blocks can return *typed values*, not just success/failure flags:
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::{Regex, CodeBlockValue};
 let re = Regex::compile(r"(\d+)(?{lua: return tonumber(GROUP1) * 2})")?;
 let m = re.find_first("the answer is 21").unwrap();
-assert_eq!(m.code_result, Some(CodeBlockValue::Number(42.0)));
+assert_eq!(m.code_result, Some(CodeBlockValue::Numeric(42.0)));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 Regex becomes a tiny DSL where matches carry computed values back out. Tokenizers, parsers, log enrichers, and validators all benefit.
@@ -57,11 +65,13 @@ Regex becomes a tiny DSL where matches carry computed values back out. Tokenizer
 
 Observers receive a stream of `MatchEvent`s as the engine works — match start, match end, capture set, group entry/exit, code block executions:
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)\s(\w+)")?;
-re.with_event_observer(|event| {
+re.on_event(|event| {
     println!("{:?}", event);
 })?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 See [Structured Events](./host-integration/structured-events.md). Useful for streaming log scanners, IDE syntax highlighters, observability backends, and tests.
@@ -70,11 +80,16 @@ See [Structured Events](./host-integration/structured-events.md). Useful for str
 
 `Regex::tail_file(path, options, on_match)` streams a file as it grows, applying the regex to each new line:
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::Regex;
+# use rgx_core::file::TailOptions;
 let re = Regex::compile(r"ERROR\s+(\w+):\s*(.+)$")?;
-re.tail_file("/var/log/app.log", TailOptions::default(), |m| {
-    println!("error in {}: {}", &m.groups[1].unwrap().1, &m.groups[2].unwrap().1);
-})?;
+// `tail_file` returns a `TailHandle` that controls the watch.
+let _handle = re.tail_file("/var/log/app.log", TailOptions::default(), |m| {
+    // `m` is a `FileMatch`: the matching line plus its MatchResult.
+    println!("error on line {}: {}", m.line_number, m.line);
+});
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 See [Async I/O](./host-integration/async-io.md) and [File Matching & tail_file](./host-integration/file-matching.md). This is regex as a streaming primitive, not just a string operation.

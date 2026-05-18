@@ -52,3 +52,39 @@
 /// against).
 #[doc = include_str!("../../book/src/real-world/http-router.md")]
 pub struct HttpRouter;
+
+// --- Campaign increment 1 (2026-05-18): introduction + why-rgx +
+// getting-started/* (highest-traffic chapters; see BACKLOG C12). ---
+
+/// Introduction — the "Quick taste" example.
+#[doc = include_str!("../../book/src/introduction.md")]
+pub struct Introduction;
+
+/// Beyond regex (why-rgx) — the seven-differentiators tour. The
+/// lua / native / tail_file / observer fragments are `no_run`
+/// (feature- or IO-gated); they are still compiled, which is what
+/// caught the `SteerAction`→`SteerResult`,
+/// `CodeBlockValue::Number`→`Numeric`, and
+/// `with_event_observer`→`on_event` drift this chapter shipped.
+#[doc = include_str!("../../book/src/why-rgx.md")]
+pub struct WhyRgx;
+
+/// Getting Started → Installation & First Match.
+#[doc = include_str!("../../book/src/getting-started/first-match.md")]
+pub struct GsFirstMatch;
+
+/// Getting Started → Finding Matches.
+#[doc = include_str!("../../book/src/getting-started/finding-matches.md")]
+pub struct GsFindingMatches;
+
+/// Getting Started → Capture Groups.
+#[doc = include_str!("../../book/src/getting-started/capture-groups.md")]
+pub struct GsCaptureGroups;
+
+/// Getting Started → Replace & Split.
+#[doc = include_str!("../../book/src/getting-started/replace-and-split.md")]
+pub struct GsReplaceAndSplit;
+
+/// Getting Started → RegexBuilder & Configuration.
+#[doc = include_str!("../../book/src/getting-started/regex-builder.md")]
+pub struct GsRegexBuilder;
