@@ -18,7 +18,7 @@ When you enable case-insensitive matching -- either inline with `(?i)` or via `R
 
 ### Accented Latin
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)café")?;
 
@@ -33,7 +33,7 @@ The accented `é` (U+00E9) folds to `É` (U+00C9) and vice versa. This is not so
 
 ### Greek
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)αβγ")?;
 
@@ -45,7 +45,7 @@ assert!(re.is_match("Αβγ"));   // mixed
 
 ### Cyrillic
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)москва")?;
 
@@ -59,7 +59,7 @@ assert!(re.is_match("Москва"));   // title case
 
 If you prefer the builder API over inline flags:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexBuilder;
 let re = RegexBuilder::new(r"café")
     .case_insensitive()
@@ -75,7 +75,7 @@ The builder simply prepends `(?i)` before compilation, so the result is identica
 
 Case folding also applies inside `[...]` character classes:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)[àéîöü]")?;
 
@@ -97,7 +97,7 @@ assert!(re.is_match("Ü"));
 
 rgx implements PCRE2's `/i` semantic, which is **simple case folding** per the Unicode Character Database's `CaseFolding.txt` (`C + S` rows) — *not* the simple case mapping that `char::to_lowercase` / `char::to_uppercase` exposes. The difference is visible on a handful of codepoints whose "fold partner" is neither the upper nor lower form:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)s")?;
 
@@ -107,7 +107,7 @@ assert!(re.is_match("ſ"));   // LATIN SMALL LETTER LONG S (U+017F) folds to s u
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)k")?;
 
@@ -117,7 +117,7 @@ assert!(re.is_match("K"));   // KELVIN SIGN (U+212A) folds to k under /i
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)σ")?;
 
@@ -133,7 +133,7 @@ Under the hood, rgx consults `regex-syntax`'s simple-fold table (UCD `CaseFoldin
 
 Case folding inside a character class closes *bidirectionally* over the whole range, not just per-character. `[R-T]/i` contains not only `R`-`T` / `r`-`t` but also every character whose simple fold lands in the class — including `ſ` (U+017F, LATIN SMALL LETTER LONG S) which folds to `s`:
 
-```rust,ignore
+```rust
 # use rgx_core::RegexBuilder;
 let re = RegexBuilder::new(r"[R-T]+").case_insensitive().build()?;
 let m = re.find_first("Ssſ").unwrap();
@@ -159,7 +159,7 @@ The `\X` escape matches exactly one extended grapheme cluster, regardless of how
 
 ### Basic usage
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\X")?;
 
@@ -174,7 +174,7 @@ For plain ASCII, `\X` behaves like `.` -- it matches a single character. The pow
 
 The string `"e\u{0301}"` is the letter `e` followed by a combining acute accent (U+0301). Visually it renders as a single glyph. A plain `.` would match only the `e`, leaving the combining accent orphaned. `\X` matches the entire cluster:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\X")?;
 
@@ -189,7 +189,7 @@ assert_eq!(m.len(), 3);                // e(1 byte) + U+0301(2 bytes)
 
 Modern emoji like family groups are composed of multiple emoji code points joined by U+200D (Zero Width Joiner). `\X` treats the entire ZWJ sequence as one grapheme cluster:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\X")?;
 
@@ -203,7 +203,7 @@ assert_eq!(m.as_str(), family);   // entire ZWJ sequence is one grapheme
 
 `\X` with `find_iter` gives you a reliable count of user-visible "characters":
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\X")?;
 
@@ -236,7 +236,7 @@ Unicode assigns every code point to categories, scripts, and other properties. T
 
 ### General categories
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 // \p{L} — any Unicode letter (Latin, Greek, Cyrillic, CJK, ...)
 let re = Regex::compile(r"\p{L}+")?;
@@ -262,7 +262,7 @@ Common general categories:
 
 You can match by Unicode script to target a specific writing system:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\p{Greek}+")?;
 assert!(re.is_match("β"));
@@ -277,7 +277,7 @@ Some useful scripts: `Latin`, `Greek`, `Cyrillic`, `Arabic`, `Han`, `Hiragana`, 
 
 `\P{L}` matches anything that is *not* a letter:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\P{L}+")?;
 assert!(re.is_match("123"));
@@ -289,7 +289,7 @@ assert!(!re.is_match("β"));
 
 ### Finding Unicode letters in mixed text
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\p{L}+")?;
 let m = re.find("123β45").unwrap();
@@ -302,7 +302,7 @@ assert_eq!(m.end(), 5);   // β is 2 bytes in UTF-8
 
 If you specify a property name that does not exist, compilation fails with a clear error:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let result = Regex::compile(r"\p{Definitely_Not_A_Real_Property}");
 assert!(result.is_err());
@@ -346,7 +346,7 @@ Note that `\R` tries `\r\n` first, so a Windows-style line ending is consumed as
 
 ### Splitting lines portably
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\R")?;
 
@@ -358,7 +358,7 @@ assert_eq!(lines, ["line1", "line2", "line3", "line4"]);
 
 ### Counting line breaks
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\R")?;
 
@@ -384,7 +384,7 @@ This is useful when you explicitly want "match anything except newline" and want
 
 ### Basic usage
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\N+")?;
 
@@ -396,7 +396,7 @@ assert_eq!(m.as_str(), "hello");      // stops at newline
 
 ### `\N` is immune to dotall mode
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 // With (?s), dot matches newlines. But \N never does.
 let re = Regex::compile(r"(?s)\N+")?;
@@ -408,7 +408,7 @@ assert_eq!(m.as_str(), "hello");   // \N still stops at newline
 
 Compare with `.+` under `(?s)`:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?s).+")?;
 
@@ -429,7 +429,7 @@ assert_eq!(m.as_str(), "hello\nworld");   // dot crosses newline in dotall
 
 These features compose naturally. Here is an example that uses several together:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 // Match a Unicode letter word, case-insensitively, followed by
 // any newline sequence, followed by another word.
@@ -442,7 +442,7 @@ assert!(re.is_match("CAFÉ\r\nΩμέγα"));
 
 And counting grapheme clusters in internationalized text:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\X")?;
 

@@ -677,6 +677,38 @@ impl<'a> PgenAstAdapter<'a> {
         })
     }
 
+    /// Build the AST for `\N` (PCRE2 "any character except a
+    /// newline"). Unlike `.`, `\N` is **never** affected by `/s`
+    /// (`PCRE2_DOTALL`): `(?s)\N` still rejects the newline. The `Lf`
+    /// and `Nul` branches of [`Self::dot_ast`] deliberately hand back
+    /// the bare, dotall-sensitive `Regex::Dot` atom so codegen can
+    /// promote `.` to `AnyDotAll` under `/s`; reusing that for `\N`
+    /// (every `\N` site historically called `dot_ast`) let `(?s)\N`
+    /// wrongly swallow the newline. For exactly those two modes emit
+    /// an explicit negated newline class instead — a static class the
+    /// dotall pass cannot rewrite, giving the precise non-dotall `.`
+    /// semantics that are invariant under `/s`. Every other newline
+    /// mode already yields a dotall-immune explicit class / lookaround
+    /// from `dot_ast`, whose `.`/`\N` exclusion PCRE2 defines
+    /// identically, so delegate to it unchanged.
+    fn non_newline_ast(&self) -> Regex {
+        if matches!(self.newline_mode, NewlineMode::Lf | NewlineMode::Nul) {
+            let mut ranges: Vec<CharRange> = self
+                .newline_mode
+                .newline_chars()
+                .into_iter()
+                .map(CharRange::single)
+                .collect();
+            ranges.sort_by_key(|r| r.start);
+            return Regex::CharClass(CharClass::Custom {
+                ranges,
+                negated: true,
+                ci_override_ranges: None,
+            });
+        }
+        self.dot_ast()
+    }
+
     /// Build the AST for `\R`. In `BSR_UNICODE` mode (default) the
     /// sequence is the shared `Regex::NewlineSequence` node that the
     /// VM and C2 codegens already know how to expand. In
@@ -1483,7 +1515,7 @@ impl<'a> PgenAstAdapter<'a> {
             "\\B" => Ok(Regex::WordBoundary { positive: false }),
             "\\K" => Ok(Regex::MatchReset),
             "\\R" => Ok(self.newline_sequence_ast()),
-            "\\N" => Ok(self.dot_ast()),
+            "\\N" => Ok(self.non_newline_ast()),
             "\\X" => Ok(Regex::GraphemeCluster),
             "[[:<:]]" => Ok(Regex::Sequence(vec![
                 Regex::WordBoundary { positive: true },
@@ -2945,7 +2977,7 @@ impl<'a> PgenAstAdapter<'a> {
                 ci_override_ranges: None,
             })),
             'R' => Ok(self.newline_sequence_ast()),
-            'N' => Ok(self.dot_ast()),
+            'N' => Ok(self.non_newline_ast()),
             'X' => Ok(Regex::GraphemeCluster),
             'b' => {
                 if in_class_context {
@@ -4638,7 +4670,7 @@ impl<'a> PgenAstAdapter<'a> {
             // Route them to the nodes `convert_simple_escape`
             // already produces.
             "\\R" => Ok(self.newline_sequence_ast()),
-            "\\N" => Ok(self.dot_ast()),
+            "\\N" => Ok(self.non_newline_ast()),
             "\\X" => Ok(Regex::GraphemeCluster),
             other => Err(self.contract_error(&format!("unrecognized anchor '{other}'"))),
         }
@@ -4830,8 +4862,11 @@ impl<'a> PgenAstAdapter<'a> {
             // PCRE2 newline sequence (\R)
             'R' => Ok(self.newline_sequence_ast()),
 
-            // PCRE2 non-newline (\N) — matches any char except newline, same as . in non-dotall
-            'N' => Ok(self.dot_ast()),
+            // PCRE2 non-newline (\N) — any char except a newline.
+            // Distinct from `.`: `\N` is never affected by `/s`
+            // (`(?s)\N` still rejects the newline). See
+            // `non_newline_ast`.
+            'N' => Ok(self.non_newline_ast()),
 
             // PCRE2 extended grapheme cluster (\X)
             'X' => Ok(Regex::GraphemeCluster),

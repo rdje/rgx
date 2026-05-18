@@ -154,3 +154,29 @@ pub struct HiAsyncIo;
 /// Host Integration → File Matching & tail_file.
 #[doc = include_str!("../../book/src/host-integration/file-matching.md")]
 pub struct HiFileMatching;
+
+// --- Campaign increment 4 (2026-05-18): advanced/* (pure-API, no
+// feature/IO gating — every block is `rust` and actually runs as a
+// doctest). Two type/trait *reproductions* (`PartialMatchResult`,
+// `Replacer`) are `no_run` with hidden imports, and one deliberately
+// non-exhaustive streaming pseudo-fragment is `text`. ---
+
+/// Advanced → CaptureLocations (zero-allocation capture buffer reuse).
+#[doc = include_str!("../../book/src/advanced/capture-locations.md")]
+pub struct AdvCaptureLocations;
+
+/// Advanced → Match Semantics (LeftmostFirst vs LeftmostLongest).
+#[doc = include_str!("../../book/src/advanced/match-semantics.md")]
+pub struct AdvMatchSemantics;
+
+/// Advanced → Partial Matching (streaming / incremental input).
+#[doc = include_str!("../../book/src/advanced/partial-matching.md")]
+pub struct AdvPartialMatching;
+
+/// Advanced → The Replacer Trait (pluggable replacement strategy).
+#[doc = include_str!("../../book/src/advanced/replacer-trait.md")]
+pub struct AdvReplacerTrait;
+
+/// Advanced → Unicode (case folding, \X, \p{...}, \R, \N).
+#[doc = include_str!("../../book/src/advanced/unicode.md")]
+pub struct AdvUnicode;

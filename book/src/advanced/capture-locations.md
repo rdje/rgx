@@ -8,7 +8,7 @@ When you call `captures()` on a regex, it allocates a new `Captures` object (inc
 
 ## The pattern
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d+)-(\w+)")?;
 
@@ -32,7 +32,7 @@ The return value of `captures_read()` is `Option<Match>` -- the overall match, b
 
 Consider a log processor that extracts timestamps from millions of lines:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})")?;
 let mut locs = re.capture_locations();
@@ -76,7 +76,7 @@ The actual performance gain depends on your allocator, but eliminating millions 
 
 Creates a `CaptureLocations` buffer sized for this regex:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(a)(b)(c)")?;
 let locs = re.capture_locations();
@@ -91,7 +91,7 @@ assert!(!locs.is_empty());
 
 Fills `locs` with capture positions for the first match, returning the overall match:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)=(\d+)")?;
 let mut locs = re.capture_locations();
@@ -110,7 +110,7 @@ assert_eq!(locs.get(2), Some((4, 6)));   // "42"
 
 Same as `captures_read`, but starts the scan at byte position `start`. Positions in the result are absolute (relative to the beginning of `text`, not relative to `start`):
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d+)")?;
 let mut locs = re.capture_locations();
@@ -125,7 +125,7 @@ assert_eq!(locs.get(1), Some((9, 11)));   // absolute position of "22"
 
 Returns `Some((start, end))` for group `i`, or `None` if the group did not participate:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"a(b)?(c)")?;
 let mut locs = re.capture_locations();
@@ -143,7 +143,7 @@ assert_eq!(locs.get(2), Some((1, 2)));   // "c"
 
 The whole point is reuse. Here is the canonical loop:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)")?;
 let mut locs = re.capture_locations();
@@ -167,7 +167,7 @@ Each call to `captures_read` overwrites the previous contents of `locs`. There i
 
 If `captures_read` returns `None` (no match), the contents of `locs` are **not modified**. They retain whatever values they had from the previous successful match. Always check the return value before reading from `locs`:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\d+)")?;
 let mut locs = re.capture_locations();
@@ -206,7 +206,7 @@ assert!(re.captures_read("abc", &mut locs).is_none());
 
 Since `CaptureLocations` stores byte offset pairs, not string slices, you need to index into the original text yourself:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")?;
 let mut locs = re.capture_locations();
@@ -231,7 +231,7 @@ Note that named groups are accessed by their numeric index (1, 2, 3), not by nam
 
 Here is a realistic example: extracting key-value pairs from a large number of log lines.
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(\w+)=(\S+)")?;
 let mut locs = re.capture_locations();

@@ -7488,6 +7488,30 @@ mod tests {
     }
 
     #[test]
+    fn non_newline_is_immune_to_dotall() {
+        // `\N` is *never* affected by `/s` (PCRE2_DOTALL), unlike `.`.
+        // Regression: every `\N` lowering aliased the dotall-sensitive
+        // `.` atom (`dot_ast`), so `(?s)\N+` wrongly crossed the
+        // newline. Fixed by `non_newline_ast` (parsing.rs).
+        let re = Regex::compile(r"(?s)\N+").unwrap();
+        let m = re.find_first("hello\nworld").unwrap();
+        assert_eq!((m.start, m.end), (0, 5)); // stops at \n even under (?s)
+
+        // Sibling unblocked by the same fix: the conflation also lived
+        // in the `(*NUL)` newline branch (`dot_ast` returns bare
+        // `Regex::Dot` there too). Under (*NUL) the newline is NUL, so
+        // `\N` excludes `\0` and stays dotall-immune.
+        let re = Regex::compile(r"(*NUL)(?s)\N+").unwrap();
+        let m = re.find_first("ab\u{0}cd").unwrap();
+        assert_eq!((m.start, m.end), (0, 2)); // stops at the NUL terminator
+
+        // `.` under (?s) must still cross the newline (unchanged).
+        let re = Regex::compile(r"(?s).+").unwrap();
+        let m = re.find_first("hello\nworld").unwrap();
+        assert_eq!((m.start, m.end), (0, 11));
+    }
+
+    #[test]
     fn fail_verb_causes_no_match() {
         let re = Regex::compile("a(*FAIL)").unwrap();
         assert!(!re.is_match("a"));

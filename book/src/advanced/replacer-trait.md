@@ -6,7 +6,9 @@ The `replace`, `replace_all`, and `replacen` methods on `Regex` all accept any t
 
 ## The trait definition
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::Captures;
+# use std::borrow::Cow;
 pub trait Replacer {
     /// Append the replacement text for `caps` to `dst`.
     fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String);
@@ -34,7 +36,7 @@ rgx provides `Replacer` implementations for the types you use most often.
 
 String replacements support `$1`, `$name`, `${name}`, `$&`, and `$$` interpolation:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?P<first>\w+)\s(?P<last>\w+)")?;
 
@@ -66,7 +68,7 @@ Template syntax reference:
 
 **The `no_expansion` fast path**: when a `&str` replacement contains no `$` character at all, the `no_expansion` method returns `Some(text)`, and the engine skips capture extraction. This means a replacement like `"X"` is faster than `"$1"`, because no `Captures` object needs to be built.
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -80,7 +82,7 @@ assert_eq!(result, "aX bX cX");
 
 For dynamic replacement logic, pass a closure. The closure receives a `Captures` object and returns anything that implements `AsRef<str>`:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Captures};
 let re = Regex::compile(r"\w+")?;
 
@@ -93,7 +95,7 @@ assert_eq!(result, "HELLO WORLD");
 
 You get full access to all capture groups inside the closure:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Captures};
 let re = Regex::compile(r"(?P<n>\d+)")?;
 
@@ -111,7 +113,7 @@ Closures never trigger the `no_expansion` fast path -- the engine always builds 
 
 When your replacement string contains `$` characters that you do *not* want interpreted as capture references, wrap it in `NoExpand`:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, NoExpand};
 let re = Regex::compile(r"\d+")?;
 
@@ -124,7 +126,7 @@ assert_eq!(result, "price $$$");   // literal $$$, not interpolated
 
 Compare with a plain `&str`:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, NoExpand};
 let re = Regex::compile(r"(\d+)")?;
 
@@ -171,7 +173,7 @@ If you know your replacement is literal (no capture references), either ensure i
 
 You can implement `Replacer` on your own types for specialized replacement logic. Here is an example: a replacer that wraps every match in HTML tags based on a configurable tag name.
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Replacer, Captures};
 struct HtmlWrapper {
     tag: String,
@@ -202,7 +204,7 @@ assert_eq!(result, "<b>hello</b> <b>world</b>");
 
 Since `Replacer` takes `&mut self`, your type can maintain state across replacements:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Replacer, Captures};
 struct Counter {
     count: usize,
@@ -227,7 +229,7 @@ assert_eq!(result, "1 2 3 4");
 
 If your custom replacer always produces the same output regardless of the match, implement `no_expansion` for the fast path:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Replacer, Captures};
 # use std::borrow::Cow;
 struct Redactor;
@@ -264,7 +266,7 @@ All three methods accept any `Replacer`:
 
 All return `Cow<str>` -- `Cow::Borrowed(text)` when there are no matches (zero allocation), `Cow::Owned(result)` otherwise.
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"\d+")?;
 
@@ -291,7 +293,7 @@ assert_eq!(result, "no digits");
 
 If the pattern can match the empty string, `replace_all` will insert the replacement at every position between characters (but not twice at the same position):
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"")?;   // empty pattern matches everywhere
 
@@ -305,7 +307,7 @@ assert_eq!(result, "-a-b-");
 
 If a template references a capture group that did not participate in the match, it expands to the empty string:
 
-```rust,ignore
+```rust
 # use rgx_core::Regex;
 let re = Regex::compile(r"a(b)?c")?;
 
@@ -318,7 +320,7 @@ assert_eq!(result, "");   // group 1 did not participate
 
 The closure can return `String`, `&str`, `Cow<str>`, or anything that implements `AsRef<str>`:
 
-```rust,ignore
+```rust
 # use rgx_core::{Regex, Captures};
 let re = Regex::compile(r"\d+")?;
 
