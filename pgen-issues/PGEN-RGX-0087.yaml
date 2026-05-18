@@ -21,7 +21,7 @@ summary: |
 status: open
 opened_at: 2026-05-18T00:00:00Z
 first_seen_at: 2026-05-18T00:00:00Z
-last_updated_at: 2026-05-18T00:00:00Z
+last_updated_at: 2026-05-18T00:00:00Z  # fix_attempt_1 (rel 1.1.78) over-broad — see below
 parser_backend: pgen
 parser_backend_version: 1.1.77
 rgx_commit: HEAD (combined-release verification of subs/pgen 65b845f0)
@@ -148,3 +148,53 @@ resolution:
          line from the rebaseline justification.
       4. PGEN-RGX-0084 stays CLOSED throughout (its `\10` case is and
          remains fixed); only 0087 transitions to resolved.
+
+# ────────────────────────────────────────────────────────────────────
+fix_attempt_1:
+  recorded_at: 2026-05-18T00:00:00Z
+  pgen_release: "1.1.78"            # contract 1.1.80
+  pgen_commit: a81d7317aacbad89d626d874e25b3475ec2299c2
+  ledger: "PGEN-RGX-0087-0001 (RGX-0087.1+.2): [89]-leading multi-digit escape hard-rejects (PCRE2-faithful); tree CLOSED"
+  status_note: |
+    PGEN-RGX-0087 must remain status:open. The rel-1.1.78 attempt
+    CLOSED the two originally-reported cases (testinput2:4671 `\81`
+    + :4674 `\80` now correctly REJECT — verified absent from the
+    failure set) BUT is OVER-BROAD and introduced a larger
+    regression. Closing 0087 is blocked on the scope fix below.
+  what_the_fix_does_wrong: |
+    The new hard-reject for the `[89]`-leading multi-digit escape
+    also fires INSIDE `[...]` character classes, where the
+    backref-vs-octal disambiguation does not apply at all — a
+    character class has no backreferences, so `\8`/`\9` there are
+    octal/literal characters and PCRE2 ACCEPTS them. PGEN now
+    `E_PARSE_FAILURE`s. (`[\8-\9]` range form still accepts, so the
+    class handling is also internally inconsistent.) Separately, a
+    long octal-leading run `\6666666666` (testinput9:287) is now
+    accepted where PCRE2 rejects.
+  family_the_fix_must_also_cover:
+    - "Scope the `[89]`-leading-multidigit hard-reject to NON-character-class context. `\\8`/`\\9` as a standalone member of `[...]` (e.g. `[\\8]`, `[\\9]`, `[A\\8B\\9C]`) must remain ACCEPTED (octal/literal), matching PCRE2 10.47."
+    - "`[\\8-\\9]` vs `[\\8]` must be consistent."
+    - "testinput9:287 `(?i:A{1,}\\6666666666)` — PCRE2 rejects; long octal-leading run."
+  repro_cases:
+    - source: subs/pcre2/testdata/testinput1 line 1497
+      pattern: '^[A\8B\9C]+$'
+      pcre2: ACCEPT (subject "A8B9C", `\= Expect no match`)
+      pgen_1_1_78: 'REJECT E_PARSE_FAILURE pos 1 (WRONG)'
+      artifacts: [repro_input_classctx.txt, pgen_ast_dump_classctx.json, pgen_parse_outcome_classctx.json]
+    - probe: '[\8]'
+      pcre2: ACCEPT
+      pgen_1_1_78: 'REJECT (WRONG)'
+    - probe: '[\8-\9]'
+      pgen_1_1_78: 'ACCEPT (inconsistent with [\8] rejecting)'
+    - source: subs/pcre2/testdata/testinput9 line 287
+      pattern: '(?i:A{1,}\6666666666)'
+      pcre2: rejects at compile
+      pgen_1_1_78: 'ACCEPT (WRONG — new "too permissive")'
+  conformance_impact: |
+    RGX PCRE2 differential ratchet: 12,805 / 5 (pin 65b845f0) ->
+    12,801 / 9 (pin a81d7317): +2 (4671/4674 closed) -6 (5
+    class-context over-rejections + testinput9:287) = NET -4. WORSE
+    than the pre-1.1.78 state. The a81d7317 pin is therefore NOT
+    adoptable; RGX stays on 65b845f0 (commit 934a42e, 12,805/5).
+    No RGX-side workaround (feedback_no_pgen_workarounds /
+    feedback_family_fix_doctrine).

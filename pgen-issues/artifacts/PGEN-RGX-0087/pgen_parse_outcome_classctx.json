@@ -1,0 +1,18 @@
+{
+  "_release_under_test": "PGEN 1.1.78 / contract 1.1.80 / commit a81d7317 (the 0087 fix attempt)",
+  "verified_against": "PCRE2 10.47 oracle (subs/pcre2 testinput1:1497, testinput9:287)",
+  "0087_original_cases": "CLOSED — testinput2:4671 (\\81) + :4674 (\\80) now correctly REJECT (gone from the failure set).",
+  "NEW_over_rejection_regression": {
+    "family": "\\8 / \\9 as a standalone member INSIDE a [...] character class",
+    "examples": {
+      "[\\8]":          "PGEN REJECT (E_PARSE_FAILURE pos 0)  | PCRE2 ACCEPT (octal/literal in class — classes have no backreferences)",
+      "[\\9]":          "PGEN REJECT                          | PCRE2 ACCEPT",
+      "^[A\\8B\\9C]+$": "PGEN REJECT (testinput1:1497)        | PCRE2 ACCEPT (subject A8B9C, \\= Expect no match)",
+      "[\\8-\\9]":      "PGEN ACCEPT (range form)             | inconsistent with [\\8] rejecting"
+    },
+    "root_cause_hypothesis": "the 0087 [89]-leading-multidigit hard-reject rule also fires inside `char_class`, where the backref-vs-octal disambiguation does not apply at all (a class has no backreferences; \\8/\\9 there are octal/literal). The reject must be scoped to NON-class context.",
+    "also_new_too_permissive": "testinput9:287 /(?i:A{1,}\\6666666666)/ — PCRE2 rejects, PGEN/RGX accept (long octal-leading run)."
+  },
+  "conformance_delta": "RGX PCRE2 ratchet 12,805 / 5 (pin 65b845f0) -> 12,801 / 9 (pin a81d7317): +2 (4671/4674 closed) -6 (5 class-context over-rejections + testinput9:287) = NET -4. NOT adoptable.",
+  "rgx_action": "subs/pgen NOT bumped to a81d7317 (held at the last-good 65b845f0 / commit 934a42e, 12,805/5). No RGX workaround (feedback_no_pgen_workarounds)."
+}
