@@ -32,6 +32,41 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Examples are verified before deploy (next steps), which
+          # needs rgx-core to build → the pgen submodule.
+          submodules: recursive
+          token: ${{ secrets.RGX_SUBMODULES_TOKEN != '' && secrets.RGX_SUBMODULES_TOKEN || github.token }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblua5.4-dev libpcre2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Keep in lockstep with Cargo.toml rust-version / ci.yml.
+          toolchain: 1.95.0
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Bootstrap PGEN generated parser
+        # Fresh checkout lacks subs/pgen/generated/* (slice-5 pivot).
+        # Required before any cargo build. See ci.yml / README.
+        run: make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap
+
+      - name: Verify book examples (book MUST NOT deploy if any break)
+        # User requirement 2026-05-18: "if any example code does not
+        # compile and execute cleanly the book must not build." The
+        # book chapters are wired into rgx-core as doctests
+        # (rgx-core/src/book_doctests.rs); this compiles+RUNS every
+        # non-`ignore` block of every wired chapter exactly as a user
+        # pasting it would. A failure here fails this job, so the
+        # `deploy` job (needs: build) never runs and Pages is not
+        # updated with broken examples.
+        run: cargo test -p rgx-core --doc
 
       - name: Install mdBook
         # Pinned to the version validated locally against the current

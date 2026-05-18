@@ -86,6 +86,11 @@ run_step "cargo test -p rgx-cli --features all-languages" cargo test --manifest-
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets
 
+# Book examples are compiled+run as rgx-core doctests by the
+# `cargo test -p rgx-core` step above (via book_doctests.rs). This
+# guards the ratchet: the verified-chapter set must never shrink.
+run_step "./scripts/check-book-examples.sh (book-example ratchet)" ./scripts/check-book-examples.sh
+
 # Accuracy gate. The PCRE2 conformance ratchet is `#[ignore]`d so it
 # is not part of the default fast gate, but it is the merge condition
 # for any change touching parsing / the adapter / the VM / the

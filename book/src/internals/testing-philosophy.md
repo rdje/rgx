@@ -189,6 +189,24 @@ The only way past a red gate is the explicit, loud `git commit --no-verify`, whi
 
 The hardening proved itself the moment it shipped: the first full-gate run's *background notification said "exit code 0"* — the masking trap exactly — while the gate had in fact failed at the path audit and **no receipt was written**. Verifying by receipt rather than by pipeline exit caught the truth immediately. The lesson is general: **never conclude "pass" from filtered output; assert the real status.**
 
+## Verified book examples
+
+Every code example in this book is something a reader will copy, paste, and expect to work. An example that does not compile is a broken promise — and "nothing in this book is a promise that cannot be verified" has to apply to the book's *own* code too.
+
+`mdbook test` can't do this for an external crate (it invokes `rustdoc` without `--extern rgx_core=…`, so every `use rgx_core::…` fails to resolve). Instead, chapters are pulled into `rgx-core` itself as doctests — `rgx-core/src/book_doctests.rs` does `#[cfg(doctest)] #[doc = include_str!("…/chapter.md")]` per chapter. **`cargo test -p rgx-core` then compiles and runs every example as a real crate doctest**, with `rgx_core` and its whole dependency graph resolving natively — exactly the experience of a user who pasted the snippet into a project depending on `rgx-core`. No new CI: this rides the existing mandatory gate (receipt-guarded, ratcheted), so a broken example *cannot* land.
+
+And it *cannot ship either*: the `Deploy Book` workflow runs `cargo test -p rgx-core --doc` **before** `mdbook build` / the Pages upload, and the deploy job `needs:` it — so if any wired example fails to compile or run, the book is **not published**. A broken example can neither be committed nor deployed.
+
+The annotation contract keeps every visible snippet both clean and verified:
+
+- ```` ```rust ```` — compiled **and run** (pure-API examples).
+- ```` ```rust,no_run ```` — compiled & type-checked, not executed (servers, file/network IO, long-running, feature-gated). This still proves *it will compile for the user* — the common copy-paste failure mode is an API that drifted, which `no_run` catches.
+- ```` ```rust,ignore ```` — last resort only, each with a one-line justification; not verified.
+- Hidden `# ` lines carry imports and `fn main` so the *visible* snippet stays exactly what the reader pastes, while the compiled unit is complete.
+- Genuinely non-Rust illustrative blocks are fenced `text`, not `rust` — honest about what is and isn't runnable.
+
+Coverage is a **ratchet**, the same idiom as the PCRE2 conformance gate: chapters are wired in `book_doctests.rs` incrementally (highest-traffic first), `book/.examples-verified-chapters` records the count, and `scripts/check-book-examples.sh` (run by `run-local-ci.sh`) fails if it ever shrinks — you cannot re-`ignore` a block or un-wire a chapter to dodge the gate; the verified set only grows. The HTTP Router chapter was the first wired (the example the gap was first reported against); the rest follow chapter by chapter.
+
 ## What this buys us
 
 The payoff is confidence. When RGX claims "98% PCRE2 parity," that claim is backed by 250 parity fixtures. When it claims "correct under backtracking," that claim is backed by stress tests with thousands of iterations. When it claims "zero-overhead events," that claim is backed by benchmarks.

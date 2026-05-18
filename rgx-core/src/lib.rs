@@ -117,6 +117,13 @@ pub mod error;
 // DoS protection — the compile-time analog of the runtime limits).
 pub(crate) mod recursion;
 
+// The RGX Book's code examples, compiled+run as `rgx-core` doctests
+// (`cargo test -p rgx-core --doc`). Doctest-only; empty in normal
+// builds. See `book_doctests.rs` for the rationale and the
+// annotation/ratchet contract.
+#[cfg(doctest)]
+mod book_doctests;
+
 // Logging system
 pub mod log;
 

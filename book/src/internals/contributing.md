@@ -120,6 +120,30 @@ cargo test -p rgx-core --lib     # only in-source unit tests, no integration/str
 
 But before pushing, run the full suite at least once.
 
+## Book examples must compile
+
+Code in the book is copy-pasted by readers, so it is verified, not
+decorative. Chapters wired in `rgx-core/src/book_doctests.rs` are
+compiled+run as `rgx-core` doctests by `cargo test -p rgx-core`
+(see *Testing Philosophy → Verified book examples* for why this,
+not `mdbook test`).
+
+When editing or adding a book example:
+
+- Default to ```` ```rust ```` (compiled **and** run). Use
+  ```` ```rust,no_run ```` for servers / IO / network / long-running
+  / feature-gated snippets (still compiled — catches API drift).
+  Use ```` ```rust,ignore ```` only as a last resort, with a
+  one-line justification. Non-Rust illustrations get ```` ```text ````.
+- Keep the visible snippet exactly what a reader pastes; push
+  imports / `fn main` into hidden `# ` lines.
+- After editing a wired chapter: `cargo test -p rgx-core --doc`.
+- Wiring a new chapter is a ratchet step: add its
+  `#[doc = include_str!(…)]` line to `book_doctests.rs` **and** bump
+  `book/.examples-verified-chapters` in the same commit
+  (`scripts/check-book-examples.sh` enforces it, exactly like the
+  PCRE2 conformance ratchet — the verified set only ever grows).
+
 ## Formatting and linting
 
 RGX uses the standard Rust toolchain:

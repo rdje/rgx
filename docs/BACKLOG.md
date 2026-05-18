@@ -341,6 +341,13 @@ Tracked here so open PGEN-side dependencies are visible from the backlog, not bu
 - **Plan**: `scripts/check-capi-abi.sh` — (1) `cargo build -p rgx-capi`, assert committed `include/rgx.h` is byte-identical to the regenerated one; (2) if the header's meaningful content differs from the merge-base, assert the workspace `version` also differs. Wire into `.github/workflows/ci.yml` + `scripts/run-local-ci.sh`. Gate-affecting (scripts/.github) → its own focused commit with a full green receipt + COMMIT.md doc-sync.
 - **Effort**: `small`. **Advances**: publish-readiness #1 (its declared "Next concrete step").
 
+### C12. Verify all book code examples (ratcheted campaign) — foundation shipped 2026-05-18
+- **What**: every ```` ```rust ```` block in `book/src/**` must compile (and run, unless `no_run`) so copy-paste works. Census 2026-05-18: 293/297 were `rust,ignore`; the 4 compiled were broken.
+- **Mechanism (shipped)**: chapters wired into `rgx-core/src/book_doctests.rs` (`#[cfg(doctest)] #[doc = include_str!(…)]`) → `cargo test -p rgx-core` (existing mandatory gate, runs doctests) compiles+runs them with native dep resolution. `mdbook test` is unusable here (no `--extern rgx_core`). `scripts/check-book-examples.sh` ratchets the verified-chapter count (only grows; pcre2 idiom); `book/.examples-verified-chapters` is the baseline. Annotation contract documented in Testing-Philosophy + Contributing.
+- **Status**: ✅ Foundation + HTTP Router chapter verified (baseline=1). 4 broken blocks honestly re-fenced.
+- **Remaining (the campaign)**: ~290 `ignore` blocks across ~29 chapters. Convert incrementally, **highest-traffic first** (getting-started/* → core-api/* → host-integration/* → real-world/* → advanced/* → appendices/* → internals/*). Each increment: convert a chapter's blocks (hidden `# ` setup; `no_run` for IO/feature-gated; fix any real API drift the gate exposes — that is the value; `text` for non-Rust), add its `#[doc=include_str!]` line, bump `book/.examples-verified-chapters`, in one commit. Gate-affecting where it touches `rgx-core/src` / scripts.
+- **Effort**: `major` (campaign, multi-session — mirrors the +3,894 PCRE2-conformance push). **Note**: feature-gated chapters (lua/js/rhai/wasm) — keep blocks `no_run` (compile-checked under default features) unless the doctest is run under the feature.
+
 ---
 
 ## Priority tiers

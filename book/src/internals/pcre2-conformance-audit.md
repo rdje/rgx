@@ -237,7 +237,7 @@ fix N+2k : (*X)(*Y) in context D → recovers M'' cases (because nothing said th
 
 Each of #24, #36, the SKIP-overrides-COMMIT scanning-loop fix, and the in-progress `commit_saved_alt` proposal fits this signature. Concrete code reference: `rgx-core/src/vm.rs:2862-2864` shows `(*PRUNE)` clearing both `skip_position` and `committed`:
 
-```rust
+```rust,ignore
 ctx.backtrack_stack.clear();
 ctx.skip_position = None;
 ctx.committed = false;
@@ -253,7 +253,7 @@ This is the most instructive whack-a-mole instance because it self-disclosed:
 - **Engine fix #37 (2026-04-24)** — `(*SKIP)` inside failing lookahead propagates. Code added immediately after #28's block: `if !body_matched { if let Some(skip_pos) = assertion_ctx.skip_position { ctx.skip_position = Some(skip_pos); ctx.committed = true; } }`. CHANGES.md note: *"Mirrors engine fix #28's COMMIT-on-assertion-failure rule exactly."*
 - **2026-04-24 cleanup commit (no `Δ pass`)** — the cleanup commit's CHANGES.md entry says it best: *"engine fix #37 shipped unconditional `skip_position` / `committed` propagation on `!body_matched`. That's correct for positive assertions … but wrong for negative assertions. The pre-existing engine-fix-#28 `committed` propagation had the same latent asymmetry. No test in the current corpus exercises the divergence, but a negative lookahead like `(?!b(*SKIP)a)bnn` on `bnn` would have leaked SKIP and aborted the outer match incorrectly."* The fix combined both blocks under a single `propagate_captures && !body_matched` gate (current code at `rgx-core/src/vm.rs:6551-6559`):
 
-```rust
+```rust,ignore
 if propagate_captures && !body_matched {
     if assertion_ctx.committed {
         ctx.committed = true;
@@ -316,7 +316,7 @@ The backtracking verbs `(*COMMIT)`, `(*PRUNE)`, `(*SKIP)`, `(*SKIP:name)`, `(*TH
 
 The principled model is **per-verb effects on engine state**. Each verb is a pure transition function on the failure-relevant subset of `ExecContext`:
 
-```rust
+```rust,ignore
 struct VerbState {
     committed:        bool,                    // (*COMMIT) sets; later verbs may clear
     skip_position:    Option<usize>,           // (*SKIP) / (*SKIP:name) sets
@@ -367,7 +367,7 @@ Scope estimate: **medium** (4-7 days). Breakdown: (a) write the `VerbEffect` tab
 
 A unified contract would be a single `BoundaryPolicy` struct/enum carrying:
 
-```rust
+```rust,ignore
 struct BoundaryPolicy {
     propagate_captures_on_success: bool,   // positive vs negative
     propagate_captures_on_failure: bool,   // always false today
