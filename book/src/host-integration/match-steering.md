@@ -244,12 +244,16 @@ re.register_native("check_end", |ctx| {
 
 ## Example: smart tokenizer with early termination
 
-Combining steering with branch identification:
+Combining steering with branch identification. The pattern must be a
+**bare top-level alternation** with the code block *inside each arm* —
+a `(?:…)` wrapper around the alternation (or a single trailing code
+block) suppresses `matched_branch_number` (the engine tracks only the
+top-level alternation):
 
 ```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
-    r"(?:(\d+)|([a-zA-Z_]\w*)|(\S))(?{native:classify})",
+    r"(\d+)(?{native:classify})|([a-zA-Z_]\w*)(?{native:classify})|(\S)(?{native:classify})",
     ExecutionMode::Full,
 )?;
 

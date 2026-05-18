@@ -7554,6 +7554,58 @@ mod tests {
     }
 
     #[test]
+    fn matched_branch_number_in_code_block_requires_bare_top_level_alternation() {
+        // Companion to `matched_branch_number_requires_bare_top_level_alternation`
+        // for the *code-block* read path (`ctx.matched_branch_number()`).
+        // Pins the documented contract that host-integration
+        // data-exchange.md / match-steering.md must follow: branch
+        // tracking is available only for a BARE top-level alternation,
+        // with the code block placed *inside an arm*. A `(?:…)` wrapper
+        // (the bug those chapters shipped) yields `None` regardless of
+        // where the code block sits.
+        use crate::ExecutionMode;
+        use std::sync::{Arc, Mutex};
+        let probe = |pat: &str, input: &str| -> Vec<Option<usize>> {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let s = seen.clone();
+            let re = Regex::with_mode(pat, ExecutionMode::Full).unwrap();
+            re.register_native("tag", move |ctx| {
+                s.lock().unwrap().push(ctx.matched_branch_number());
+                crate::ExecResult::Success
+            })
+            .unwrap();
+            let _ = re.find_first(input);
+            let v = seen.lock().unwrap().clone();
+            v
+        };
+        // The three broken shapes the chapters shipped — all `None`:
+        // A) data-exchange: code block BEFORE a `(?:…)`-wrapped alternation.
+        assert_eq!(
+            probe(r"(?{native:tag})(?:(\d+)|([a-z]+)|([A-Z]+))", "abc"),
+            vec![None]
+        );
+        // B) match-steering: code block AFTER a `(?:…)`-wrapped alternation.
+        assert_eq!(
+            probe(r"(?:(\d+)|([a-zA-Z_]\w*)|(\S))(?{native:tag})", "abc"),
+            vec![None]
+        );
+        // E) code block inside the `(?:…)` wrapper.
+        assert_eq!(
+            probe(r"(?:(\d+)|([a-z]+)(?{native:tag}))", "abc"),
+            vec![None]
+        );
+        // The corrected shape — BARE top-level alternation, code block
+        // inside each arm — reports the 1-based branch number:
+        assert_eq!(
+            probe(
+                r"(\d+)(?{native:tag})|([a-z]+)(?{native:tag})|([A-Z]+)(?{native:tag})",
+                "abc"
+            ),
+            vec![Some(2)]
+        );
+    }
+
+    #[test]
     fn fail_verb_causes_no_match() {
         let re = Regex::compile("a(*FAIL)").unwrap();
         assert!(!re.is_match("a"));

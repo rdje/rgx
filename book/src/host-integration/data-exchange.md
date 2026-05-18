@@ -315,12 +315,19 @@ re.register_native("parse", |ctx| {
 
 ## Branch identification
 
-When your pattern uses top-level alternation, `matched_branch_number` tells you which branch won:
+When your pattern is a **bare top-level alternation** (not wrapped in
+`(?:…)`) and the code block sits *inside an arm*, `matched_branch_number`
+tells you which branch won:
 
 ```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
+// Bare top-level alternation, one code block per arm. A `(?:…)`
+// wrapper around the whole alternation, or a single code block
+// before/after it, would suppress branch tracking (the engine
+// only tracks the *top-level* alternation — see the regression
+// `matched_branch_number_in_code_block_requires_bare_top_level_alternation`).
 let re = Regex::with_mode(
-    r"(?{native:tag})(?:(\d+)|([a-z]+)|([A-Z]+))",
+    r"(\d+)(?{native:tag})|([a-z]+)(?{native:tag})|([A-Z]+)(?{native:tag})",
     ExecutionMode::Full,
 )?;
 
