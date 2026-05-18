@@ -1,0 +1,119 @@
+id: PGEN-RGX-0086
+summary: |
+  PGEN's embedding-API version constants are stale: at submodule pin
+  `08593d05`, `parser_embedding_api_contract()` reports
+  `regex_parser_release_version = "1.1.29"` /
+  `regex_integration_contract_version = "1.1.31"`, but PGEN's own
+  authoritative `PGEN_RELEASED_PARSER_BUG_LEDGER.md` records the
+  PGEN-RGX-0081/0082 fixes the pin is named after as released in
+  `regex parser release 1.1.75; regex integration contract 1.1.77`.
+  The `REGEX_PARSER_RELEASE_VERSION` /
+  `REGEX_PARSER_INTEGRATION_CONTRACT_VERSION` consts in
+  `rust/src/embedding_api.rs` were not bumped in lockstep with the
+  ledger — a ~46-minor-version under-report on the canonical
+  downstream handoff surface.
+status: open
+opened_at: 2026-05-18T00:00:00Z
+first_seen_at: 2026-05-18T00:00:00Z
+last_updated_at: 2026-05-18T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.75 (per PGEN ledger) / 1.1.29 (per embedding_api consts — the bug)
+rgx_commit: d686cad
+upstream_report:
+  reported: false
+  issue_id: null
+  issue_url: null
+  reported_at: null
+context:
+  feature_flag: default parser (PGEN-backed; feature `pgen-parser`)
+  parser_entrypoint: pgen::embedding_api::parser_embedding_api_contract
+  pgen_commit: 08593d05c2f298e6f4be524147258e187d92d92e
+  api_version: "1.2.0"
+  regex_parser_release_version_reported: "1.1.29"
+  regex_integration_contract_version_reported: "1.1.31"
+  regex_parser_release_version_per_ledger: "1.1.75"
+  regex_integration_contract_version_per_ledger: "1.1.77"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api
+  host_os_arch: Darwin arm64
+  notes: |
+    Discovered while investigating an apparent "stale generated
+    artifacts" discrepancy (RGX BACKLOG #14). The generated
+    artifacts are NOT stale (regenerated from the pin). The pinned
+    parser genuinely embodies the 1.1.75/1.1.77-era fixes (the
+    0081/0082 fix commit `9e7ca180` is the pin's parent and the
+    ledger labels it 1.1.75/1.1.77). Only the version *constants*
+    are stale. RGX's docs ("PGEN 1.1.75 / contract 1.1.77") are
+    correct in substance; the contract API under-reports.
+expected_behavior: |
+  `parser_embedding_api_contract().regex_parser_release_version`
+  and `.regex_integration_contract_version` must equal the
+  released-version labels PGEN's own
+  `PGEN_RELEASED_PARSER_BUG_LEDGER.md` assigns to the fixes present
+  in the built tree. For pin `08593d05` that is
+  `1.1.75` / `1.1.77`. The reporting protocol explicitly tells
+  downstreams to copy these fields verbatim ("not guessed from
+  memory"), so they are a contractual handoff surface and must be
+  bumped in lockstep with every ledger "Fixed in" entry.
+actual_behavior: |
+  Class: contract/handoff-metadata wrong (not a parse-result bug;
+  the structured `parser_embedding_api_contract()` artifact the
+  protocol §5 designates is itself incorrect).
+
+  At pin `08593d05`, `rust/src/embedding_api.rs`:
+    line 35: REGEX_PARSER_INTEGRATION_CONTRACT_VERSION = "1.1.31"
+    line 38: REGEX_PARSER_RELEASE_VERSION             = "1.1.29"
+  while `PGEN_RELEASED_PARSER_BUG_LEDGER.md` rows REGEX-0081 /
+  REGEX-0082 (the fixes the pin commit is titled for) carry
+  Fixed-in `regex parser release 1.1.75; regex integration
+  contract 1.1.77`. The constants appear last bumped at the
+  REGEX-0074 era ("release 1.1.29; contract 1.1.31"); ~46 minor
+  ledger releases since did not touch them.
+
+  Live contract JSON: `pgen-issues/artifacts/PGEN-RGX-0085/pgen_contract.json`.
+  Side-by-side evidence: `pgen-issues/artifacts/PGEN-RGX-0086/evidence.md`.
+reproduction: |
+  At the committed `subs/pgen` pin (`08593d05`):
+
+    grep -nE 'REGEX_PARSER_(RELEASE|INTEGRATION_CONTRACT)_VERSION' \
+      subs/pgen/rust/src/embedding_api.rs
+    # => "1.1.29" / "1.1.31"
+
+    grep -E 'REGEX-008[12]\b' \
+      subs/pgen/docs/contracts/PGEN_RELEASED_PARSER_BUG_LEDGER.md
+    # Fixed-in column => "regex parser release 1.1.75; regex
+    #                     integration contract 1.1.77"
+
+  Or at runtime:
+
+    let c = pgen::embedding_api::parser_embedding_api_contract();
+    assert_eq!(c.regex_parser_release_version, "1.1.75"); // FAILS: is "1.1.29"
+impact: |
+  Severity: medium (integrity / process, not a miscompile). Every
+  downstream that follows the reporting protocol's "copy from the
+  handoff surface" instruction records a version ~46 minors too
+  low. In RGX this nearly caused an accurate doc ("PGEN 1.1.75") to
+  be "corrected" *down* to 1.1.29 during BACKLOG #14; PGEN-RGX-0085
+  was filed carrying the stale 1.1.29/1.1.31 identity for the same
+  reason. Makes per-pin version provenance untrustworthy and
+  defeats the protocol's anti-guessing intent.
+
+  RGX-side handling: RGX docs continue to state the
+  ledger-authoritative 1.1.75 / 1.1.77 (correct in substance) and
+  annotate that the embedding-API constants are known-stale per
+  this report. No RGX workaround that rewrites the contract — the
+  fix is PGEN bumping its own constants in lockstep with its
+  ledger (ideally a PGEN CI gate asserting
+  `REGEX_PARSER_RELEASE_VERSION` == latest ledger "Fixed in").
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Closed when a `subs/pgen` bump makes
+    `parser_embedding_api_contract().regex_parser_release_version`
+    match the ledger's latest "Fixed in" release for the built
+    tree. Then re-point PGEN-RGX-0085's version fields and RGX's
+    docs to the (now consistent) reported values and drop the
+    "known-stale" annotations.

@@ -25,7 +25,7 @@ opened_at: 2026-05-18T00:00:00Z
 first_seen_at: 2026-05-18T00:00:00Z
 last_updated_at: 2026-05-18T00:00:00Z
 parser_backend: pgen
-parser_backend_version: 1.1.29
+parser_backend_version: 1.1.75 (per PGEN ledger; embedding_api consts under-report this as 1.1.29 — see PGEN-RGX-0086)
 rgx_commit: c924c2e784eb5ea65366147bcd35605771c06e61
 upstream_report:
   reported: false
@@ -47,17 +47,20 @@ context:
   rust_toolchain: rustc 1.95.0 (59807616e 2026-04-14)
   pattern: '(((…(a)*…)*)*  — N nested levels; see artifacts/repro_input*.txt'
   version_discrepancy_note: |
-    `parser_embedding_api_contract()` on the committed `subs/pgen`
-    pin (`08593d05`) reports regex_parser_release_version=1.1.29,
-    regex_integration_contract_version=1.1.31, api_version=1.2.0.
-    RGX's README/MEMORY currently claim PGEN 1.1.75 / contract
-    1.1.77 for the same pin, and the local
-    `subs/pgen/generated/regex_parser.rs` is dated 2026-05-05. The
-    authoritative live contract values are recorded here per the
-    reporting protocol; the RGX-side version-bookkeeping
-    discrepancy is tracked separately and does not affect this
-    bug's reproduction (the unbounded recursion is structural and
-    independent of the release-version label).
+    RESOLVED 2026-05-18 (was: "contract reports 1.1.29 vs README's
+    1.1.75"). The authoritative version of pin `08593d05` is
+    **release 1.1.75 / contract 1.1.77** per PGEN's own
+    `PGEN_RELEASED_PARSER_BUG_LEDGER.md` (the 0081/0082 fixes the
+    pin is named for are ledger-Fixed-in 1.1.75/1.1.77; the fix
+    commit `9e7ca180` is the pin's parent). RGX's README/MEMORY
+    "1.1.75/1.1.77" are correct in substance. The generated
+    artifacts are in sync with the pin (NOT stale). The defect is
+    PGEN-side: `embedding_api.rs`'s `REGEX_PARSER_RELEASE_VERSION`
+    /`..._INTEGRATION_CONTRACT_VERSION` consts were never bumped in
+    lockstep with the ledger, so `parser_embedding_api_contract()`
+    under-reports as 1.1.29/1.1.31 — filed as **PGEN-RGX-0086**.
+    This bug's reproduction is structural and independent of the
+    release-version label either way.
   notes: |
     Discovered while ground-truthing the workspace: the COMMIT.md
     mandatory gate `cargo test -p rgx-core` aborts because
