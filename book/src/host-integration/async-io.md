@@ -17,7 +17,7 @@ Normal matching is synchronous: the engine runs start to finish and returns a re
 
 The entry point is `find_first_suspendable`, which returns a `MatchOutcome` instead of `Option<MatchResult>`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"user:(\w+)(?{native:check_db})",
@@ -63,7 +63,8 @@ loop {
 
 ## MatchOutcome
 
-```rust,ignore
+```rust,no_run
+# use rgx_core::{MatchResult, MatchContinuation};
 pub enum MatchOutcome {
     /// Match completed synchronously.
     Completed(Option<MatchResult>),
@@ -94,7 +95,7 @@ The `ExecContextSnapshot` gives the resolver enough information to make its deci
 
 Imagine validating usernames against a database during pattern matching:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"@(\w+)(?{native:user_exists})",
@@ -146,9 +147,9 @@ loop {
 
 For async runtimes (tokio, async-std, smol), `find_first_async` drives the suspend/resume loop automatically:
 
-```rust,ignore
-use rgx_core::{Regex, ExecutionMode, ExecResult, ExecContextSnapshot};
-
+```rust,no_run
+# use rgx_core::{Regex, ExecutionMode, ExecResult, ExecContextSnapshot};
+# async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 let re = Regex::with_mode(
     r"@(\w+)(?{native:user_exists})",
     ExecutionMode::Full,
@@ -164,11 +165,14 @@ let result = re.find_first_async("@alice mentioned @dave", |name, ctx| async mov
         _ => ExecResult::Failure,
     }
 }).await;
+# let _ = result;
+# Ok(())
+# }
 ```
 
 The signature:
 
-```rust,ignore
+```text
 pub async fn find_first_async<F, Fut>(
     &self,
     text: &str,
@@ -185,7 +189,7 @@ The resolver receives the callback name and context snapshot, returns a future t
 
 A pattern can contain multiple unregistered callbacks. Each one causes a separate suspension:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"(\w+):(\w+)(?{native:check_auth})(?{native:check_quota})",
@@ -217,7 +221,7 @@ assert_eq!(resolved, 2);  // two suspensions, two resolutions
 
 You can register some callbacks and leave others for async resolution. Only unregistered native callbacks cause suspension; registered ones execute synchronously:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, MatchOutcome};
 let re = Regex::with_mode(
     r"(\d+)(?{native:validate})(?{native:check_remote})",

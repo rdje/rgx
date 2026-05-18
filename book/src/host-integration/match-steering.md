@@ -16,7 +16,7 @@ Standard predicate callbacks answer a binary question: does this match pass or f
 
 Return `ExecResult::Steer(...)` from a native callback:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
     r"(\w+)(?{native:route})",
@@ -39,7 +39,7 @@ re.register_native("route", |ctx| {
 
 In Lua code blocks, call functions on the `rgx` global table:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"(\w+)(?{lua:
@@ -70,7 +70,7 @@ The steer call sets the steering action, and the `return true` lets the engine k
 
 In JavaScript code blocks, use camelCase on the `rgx` object:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"(\w+)(?{js:
@@ -97,7 +97,7 @@ Available JavaScript steering functions:
 
 In Rhai code blocks, call the steering functions directly (they are registered as global functions):
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"(\w+)(?{rhai:
@@ -150,7 +150,7 @@ When should you use each variant?
 
 Use when the callback is purely informational or when the match should proceed normally after side-effect processing:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 # use std::sync::{Arc, Mutex};
 let re = Regex::with_mode(r"(\w+)(?{native:log})", ExecutionMode::Full)?;
@@ -168,7 +168,7 @@ re.register_native("log", move |ctx| {
 
 Use when the callback detects an invalid match that should be rejected:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(r"(\d+)(?{native:even_only})", ExecutionMode::Full)?;
 
@@ -187,7 +187,7 @@ re.register_native("even_only", |ctx| {
 
 Use to short-circuit matching when you've seen enough. This is valuable for "find the first valid thing" patterns where the remaining pattern structure is just for validation:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
     r"(?{native:gate}).*",
@@ -205,7 +205,7 @@ re.register_native("gate", |ctx| {
 
 Use to jump past known uninteresting content. This is useful for protocols or binary-like formats where you know the next N bytes can be skipped:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
     r"HEADER:(\d+):(?{native:skip_payload})",
@@ -225,7 +225,7 @@ re.register_native("skip_payload", |ctx| {
 
 Use when you know no further matches are possible or desirable. This stops the engine from trying subsequent start positions, which can be a significant performance win:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
     r"(END_MARKER|(\w+))(?{native:check_end})",
@@ -246,7 +246,7 @@ re.register_native("check_end", |ctx| {
 
 Combining steering with branch identification:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, SteerResult};
 let re = Regex::with_mode(
     r"(?:(\d+)|([a-zA-Z_]\w*)|(\S))(?{native:classify})",

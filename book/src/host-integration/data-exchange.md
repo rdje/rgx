@@ -6,7 +6,7 @@ Regex patterns in rgx can read host-provided data and produce structured output.
 
 The simplest form of data exchange is `set_variable`, which stores a string that code blocks can read:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(?P<price>\d+\.\d{2})(?{native:check_currency})",
@@ -44,7 +44,7 @@ For richer data, use `set_typed_variable` or its shorthand `set_var`. These stor
 | `Value::Map` | `Vec<(String, Value)>` | `{"host": "localhost"}` |
 | `Value::Null` | - | no value |
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value};
 let re = Regex::with_mode(r"(?{native:check})", ExecutionMode::Full)?;
 
@@ -94,7 +94,7 @@ assert!(re.is_match("x"));
 
 When you need to set many variables at once, `vars()` provides a chainable builder:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(r".", ExecutionMode::Full)?;
 
@@ -127,7 +127,7 @@ The builder writes each value eagerly. `hash("name")` opens a nested map scope, 
 
 For maximum brevity, the `vars!` macro sets multiple variables at once using declarative syntax:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, vars};
 let re = Regex::with_mode(r".", ExecutionMode::Full)?;
 
@@ -150,7 +150,7 @@ vars!(re, {
 
 The `value!` macro builds a standalone `Value`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Value, value};
 let config = value!({
     "host" => "localhost",
@@ -164,7 +164,7 @@ assert!(matches!(config, Value::Map(_)));
 
 You can pass a `value!` map directly to `set_vars` for bulk assignment:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, value};
 let re = Regex::with_mode(r".", ExecutionMode::Full)?;
 
@@ -182,7 +182,7 @@ re.set_vars(value!({
 
 Variables are exposed as global tables in Lua code blocks:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"\d+(?{lua:return tonumber(vars["threshold"]) > 0})"#,
@@ -197,7 +197,7 @@ assert!(re.is_match("42"));
 
 Variables are available on the global `vars` object:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"\d+(?{js:return parseInt(vars["threshold"]) > 0})"#,
@@ -212,7 +212,7 @@ assert!(re.is_match("42"));
 
 Variables are accessible through the `vars` map:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"\d+(?{rhai:vars["threshold"].parse_int() > 0})"#,
@@ -227,7 +227,7 @@ assert!(re.is_match("42"));
 
 Native callbacks receive the full `ExecContext`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(r"(?{native:validate})", ExecutionMode::Full)?;
 re.set_var("min", 10_i64)?;
@@ -254,7 +254,7 @@ Code blocks can produce values beyond simple pass/fail. These are captured as `C
 
 A code block that returns a number produces `CodeBlockValue::Numeric`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(\d+)(?{native:score})",
@@ -277,7 +277,7 @@ let result = re.find_first("item 42 here");
 
 A code block returning a string replacement value produces `CodeBlockValue::Replacement`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(\w+)(?{native:transform})",
@@ -295,7 +295,7 @@ re.register_native("transform", |ctx| {
 
 For complex output, return a full `Value`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult, Value};
 let re = Regex::with_mode(
     r"(?P<key>\w+)=(?P<val>\w+)(?{native:parse})",
@@ -317,7 +317,7 @@ re.register_native("parse", |ctx| {
 
 When your pattern uses top-level alternation, `matched_branch_number` tells you which branch won:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(?{native:tag})(?:(\d+)|([a-z]+)|([A-Z]+))",

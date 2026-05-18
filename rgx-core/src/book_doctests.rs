@@ -123,3 +123,34 @@ pub struct CaSafetyLimits;
 /// Core API → Error Diagnostics.
 #[doc = include_str!("../../book/src/core-api/error-diagnostics.md")]
 pub struct CaErrorDiagnostics;
+
+// --- Campaign increment 3 (2026-05-18): host-integration/* (all
+// feature/IO — every block `no_run`: compiled for drift detection,
+// not run since lua/js/rhai/wasm features are off in the default
+// doctest build and tail_file/suspendable do real IO). The c-abi
+// chapter is C, not Rust — out of this mechanism's scope, covered
+// by rgx-capi's C smoke test; intentionally NOT wired. ---
+
+/// Host Integration → Data Exchange.
+#[doc = include_str!("../../book/src/host-integration/data-exchange.md")]
+pub struct HiDataExchange;
+
+/// Host Integration → Predicate Callbacks.
+#[doc = include_str!("../../book/src/host-integration/predicate-callbacks.md")]
+pub struct HiPredicateCallbacks;
+
+/// Host Integration → Match Steering.
+#[doc = include_str!("../../book/src/host-integration/match-steering.md")]
+pub struct HiMatchSteering;
+
+/// Host Integration → Structured Events.
+#[doc = include_str!("../../book/src/host-integration/structured-events.md")]
+pub struct HiStructuredEvents;
+
+/// Host Integration → Async I/O.
+#[doc = include_str!("../../book/src/host-integration/async-io.md")]
+pub struct HiAsyncIo;
+
+/// Host Integration → File Matching & tail_file.
+#[doc = include_str!("../../book/src/host-integration/file-matching.md")]
+pub struct HiFileMatching;

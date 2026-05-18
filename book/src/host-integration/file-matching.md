@@ -6,7 +6,7 @@ rgx can match directly against files without requiring you to read the entire fi
 
 Read an entire file and find all matches across its full contents:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::Regex;
 let re = Regex::compile(r"TODO:?\s+(.+)")?;
 
@@ -24,7 +24,7 @@ println!("found {} TODOs", matches.len());
 
 Match a file line by line, getting line numbers with each result:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::Regex;
 let re = Regex::compile(r"ERROR\s+(.*)")?;
 
@@ -49,7 +49,7 @@ Line-by-line matching means multi-line patterns won't span across lines. Use `ma
 
 When you only need the count and want any registered callbacks to fire:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::Regex;
 let re = Regex::compile(r"(?i)error|warn|fatal")?;
 
@@ -64,7 +64,7 @@ println!("{count} log events matched");
 
 Line-by-line variant of `scan_file`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::Regex;
 let re = Regex::compile(r"CRITICAL")?;
 
@@ -79,7 +79,7 @@ if count > 0 {
 
 `tail_file` watches a file for new content and calls your closure for each match in newly appended lines. It returns a `TailHandle` that lets you stop the watcher.
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, file::TailOptions};
 let re = Regex::compile(r"ERROR\s+(.*)")?;
 
@@ -100,6 +100,7 @@ let handle = re.tail_file(
 
 // When done, stop the watcher.
 handle.stop();
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ### TailOptions
@@ -109,7 +110,7 @@ handle.stop();
 | `poll_interval` | `Duration` | 250ms | Fallback poll interval (see below) |
 | `from_end` | `bool` | `true` | Start at end of file (only new content) |
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, file::TailOptions};
 # use std::time::Duration;
 let re = Regex::compile(r"ERROR")?;
@@ -126,6 +127,7 @@ let handle = re.tail_file(
     },
 );
 # handle.stop();
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ### OS-native file watching
@@ -150,7 +152,7 @@ The `TailHandle` controls the background watcher:
 
 The watcher also stops automatically when the `TailHandle` is dropped. This means you can use it with RAII patterns:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, file::TailOptions};
 {
     let re = Regex::compile(r"ERROR").unwrap();
@@ -172,7 +174,7 @@ The watcher also stops automatically when the `TailHandle` is dropped. This mean
 
 A production-style log monitor that watches for errors and tracks statistics:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, file::TailOptions};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;

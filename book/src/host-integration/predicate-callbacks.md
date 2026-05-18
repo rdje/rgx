@@ -8,7 +8,7 @@ rgx hosts **five** embedded scripting environments for callbacks: native Rust, L
 
 Native callbacks are Rust closures registered by name. They receive an `ExecContext` with full match state and return an `ExecResult`.
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(\d{4})-(\d{2})-(\d{2})(?{native:validate_date})",
@@ -37,7 +37,7 @@ The pattern `(?{native:validate_date})` tells the engine: "at this point, call t
 
 Lua code blocks are embedded directly in the pattern with `(?{lua:...})`. No registration needed -- the code is the callback:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"(\d+)(?{lua:return tonumber(arg[1]) % 2 == 0})"#,
@@ -60,7 +60,7 @@ Inside Lua code blocks:
 
 JavaScript code blocks use `(?{js:...})`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"([\w.+-]+)@([\w.-]+)(?{js:return arg[2].split('.').length >= 2})"#,
@@ -82,7 +82,7 @@ Inside JavaScript code blocks:
 
 Rhai code blocks use `(?{rhai:...})`:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 let re = Regex::with_mode(
     r#"(\d+)(?{rhai:parse_int(arg[1]) >= 18})"#,
@@ -122,7 +122,7 @@ The `ExecutionMode` enum controls which callback types are allowed:
 | `Safe` | Yes | Yes | No | Yes |
 | `Full` | Yes | Yes | Yes | Yes |
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode};
 // Pure mode — code blocks are syntax errors
 assert!(Regex::with_mode(r"\d+", ExecutionMode::Pure).is_ok());
@@ -192,7 +192,7 @@ Native callbacks (`Full` mode) run as regular Rust closures and are not sandboxe
 
 You can chain multiple code blocks. Each acts as a gate:
 
-```rust,ignore
+```rust,no_run
 # use rgx_core::{Regex, ExecutionMode, ExecResult};
 let re = Regex::with_mode(
     r"(\d{4})-(\d{2})-(\d{2})(?{native:valid_range})(?{native:not_weekend})",
