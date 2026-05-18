@@ -43,6 +43,27 @@ if [[ "$have_pgen_checkout" != "1" ]]; then
   exit 0
 fi
 
+# PGEN no longer ships its generated parsers (slice-5 pivot, pgen
+# commit 0ed2b2ad — see the `project_pgen_generated_files` rule and
+# README "Build note"). On a FRESH checkout (CI, or a fresh clone)
+# `subs/pgen/generated/*` is absent, so pgen's
+# `include!("../../generated/return_annotation_parser.rs")` fails and
+# nothing downstream compiles. This was the actual cause of red CI on
+# `main` (the workflow never ran the mandated bootstrap). Run the
+# idempotent cold-clone bootstrap before any cargo step; skip the
+# slow `make` when the artifacts already exist (the common local
+# case). Generating the *untracked* `generated/` tree is the
+# sanctioned PGEN workflow — it does not modify pgen's tracked
+# content (subs/pgen still shows only `?`, never `M`).
+pgen_generated_dir="$repo_root/subs/pgen/generated"
+if [[ -f "$pgen_generated_dir/regex_parser.rs" \
+      && -f "$pgen_generated_dir/return_annotation_parser.rs" ]]; then
+  echo "[run-local-ci.sh] PGEN generated parsers present — skipping bootstrap."
+else
+  run_step "make -C subs/pgen/rust regex_parser_bootstrap (cold-clone PGEN parser gen)" \
+    make -C "$repo_root/subs/pgen/rust" SHELL=/bin/bash regex_parser_bootstrap
+fi
+
 run_step "cargo fmt --check (RGX workspace packages)" cargo fmt --manifest-path Cargo.toml -p rgx-core -p rgx-cli -p rgx-bench -p rgx-wasm --check
 
 # Keep package coverage explicit here. The submodule-backed PGEN default path has

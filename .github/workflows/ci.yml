@@ -42,6 +42,14 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Bootstrap PGEN generated parser
+        # PGEN no longer ships generated parsers (slice-5 pivot, pgen
+        # 0ed2b2ad). A fresh checkout lacks subs/pgen/generated/*, so
+        # pgen's include!() fails and nothing compiles — this was the
+        # cause of red CI on main. Idempotent cold-clone bootstrap (no
+        # Perl). See README "Build note" / project_pgen_generated_files.
+        run: make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap
+
       - name: Run local CI script
         run: ./scripts/run-local-ci.sh
 
@@ -76,6 +84,12 @@ jobs:
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+
+      - name: Bootstrap PGEN generated parser
+        # See the workspace job's step — required before any cargo
+        # build on a fresh checkout (this job does not run
+        # run-local-ci.sh, so it needs its own bootstrap).
+        run: make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap
 
       - name: Run criterion benchmarks
         run: |
@@ -124,6 +138,12 @@ jobs:
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+
+      - name: Bootstrap PGEN generated parser
+        # See the workspace job's step — required before any cargo
+        # build on a fresh checkout (this job does not run
+        # run-local-ci.sh, so it needs its own bootstrap).
+        run: make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap
 
       - name: Run rgx-vs-PCRE2 regression check
         run: |

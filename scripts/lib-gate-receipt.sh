@@ -32,18 +32,34 @@ rgx_gate_state_id() {
     'rgx-capi/cbindgen.toml' 'rgx-capi/include/*'
     ':(exclude)subs/pgen' ':(exclude)git_message_brief.txt'
   )
+  #
+  # Index-independent by construction: the identity is HEAD plus the
+  # *working-tree content* of every gate-affecting path (the union of
+  # tracked + untracked names, content hashed from disk via
+  # `git hash-object`). `git add` only moves a path between the
+  # tracked/untracked name sets — the union is unchanged and the
+  # on-disk content is unchanged — so the id is invariant whether a
+  # (new or modified) gate file is staged or not. (The earlier
+  # diff-HEAD + ls-files-others form was NOT staging-invariant: a new
+  # file flipped from the untracked branch to the diff branch on
+  # `git add`, changing the id and falsely staling the receipt for
+  # every gate-affecting commit that adds a file.)
   {
     git rev-parse HEAD
-    # Tracked modifications (staged + unstaged) to gate-affecting paths.
-    git -c core.autocrlf=false diff HEAD "${pathspec[@]}"
-    # New untracked gate-affecting files: name + content hash, sorted
-    # for determinism.
-    git ls-files --others --exclude-standard "${pathspec[@]}" \
-      | LC_ALL=C sort \
+    {
+      git ls-files "${pathspec[@]}"
+      git ls-files --others --exclude-standard "${pathspec[@]}"
+    } \
+      | LC_ALL=C sort -u \
       | while IFS= read -r f; do
-          [ -f "$f" ] || continue
-          printf '%s ' "$f"
-          git hash-object "$f"
+          if [ -f "$f" ]; then
+            printf '%s ' "$f"
+            git hash-object "$f"
+          else
+            # Tracked gate path deleted in the worktree — a deletion
+            # must still invalidate the receipt.
+            printf '%s DELETED\n' "$f"
+          fi
         done
   } | git hash-object --stdin
 }

@@ -238,12 +238,13 @@ Live forward-looking tracker for rgx.
 
 ### GitHub Pages for The RGX Book
 - Priority: `medium`
-- Status: `blocked` (Pages on private repos requires GitHub Pro)
-- Scope:
-  - User plans to subscribe to GitHub Pro soon, which unlocks Pages on private repos.
-  - **Re-add `.github/workflows/book.yml`** (was deleted to stop CI failures — git history has the working version, see commit that removed it).
-  - Enable Pages in repo settings → Source: GitHub Actions.
-  - Book will publish to `https://rdje.github.io/rgx`.
+- Status: `done` (2026-05-18)
+- Resolution: the user turned `rdje/rgx` (and `rdje/pgen`) **public** and re-enabled GitHub Actions + Pages. Public repos get Pages for free, so the original "blocked pending GitHub Pro" rationale is obsolete (not merely satisfied).
+- Shipped:
+  - `.github/workflows/book.yml` restored from git history (`3ded2e3^`), modernised: mdBook pin `v0.4.40` → `v0.5.2` (the version verified to build the current book sources clean locally). Uses the current Pages-via-Actions pattern (`upload-pages-artifact@v3` + `deploy-pages@v4` + `github-pages` environment); checks out **without** submodules (the book is pure markdown — no cargo, no `subs/pgen`).
+  - `book/book.toml` gains `site-url = "/rgx/"` so absolute links + the generated 404 page resolve correctly under the project-Pages subpath.
+  - `.github/workflows/book.yml` added to `scripts/check-ci-paths.sh` `required_paths`.
+- Remaining (repo settings, user action): confirm Pages → Source: "GitHub Actions" in repo settings. The book then publishes to `https://rdje.github.io/rgx` on every push to `main` touching `book/**`.
 
 ### Public release preparation
 - Priority: `high` once codebase is ready

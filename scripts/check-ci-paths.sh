@@ -24,6 +24,7 @@ echo "[check-ci-paths.sh] Verifying required CI paths exist and are tracked by g
 
 required_paths=(
   ".github/workflows/ci.yml"
+  ".github/workflows/book.yml"
   "scripts/check-ci-paths.sh"
   "scripts/capture-benchmark-trends.sh"
   "scripts/run-local-ci.sh"

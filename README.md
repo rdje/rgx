@@ -83,7 +83,7 @@ Build a robust, high-performance, extensible regex engine that:
 ### Start here (fast ramp-up)
 If you are new to the repo, use this order:
 1. `README.md` (this file) for the full navigation map.
-2. **[The RGX Book](book/src/SUMMARY.md)** — comprehensive mdBook documentation covering every feature with examples. Read online at [rdje.github.io/rgx](https://rdje.github.io/rgx) or build locally with `mdbook serve book`.
+2. **[The RGX Book](book/src/SUMMARY.md)** — comprehensive mdBook documentation covering every feature with examples. Read online at [rdje.github.io/rgx](https://rdje.github.io/rgx) (auto-deployed from `main` via `.github/workflows/book.yml` on every change under `book/**`) or build locally with `mdbook serve book`.
 3. [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for user-facing usage and behavior.
 4. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
 5. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
@@ -199,7 +199,7 @@ That submodule-backed path now covers:
 - and it intentionally avoids the flakier umbrella `cargo test --workspace` path, which has shown intermittent hangs while rebuilding the submodule-backed `pgen` dependency
 
 Fresh clones should use `git clone --recurse-submodules ...` or run `git submodule update --init --recursive` before building.
-Because `subs/pgen` is private, hosted GitHub CI may need a `RGX_SUBMODULES_TOKEN` secret if the default `GITHUB_TOKEN` cannot read `rdje/pgen`.
+As of 2026-05-18 both `rdje/rgx` and the `rdje/pgen` submodule are **public**, so a plain `--recurse-submodules` clone works for everyone and hosted CI's default `GITHUB_TOKEN` can read `rdje/pgen`. The `RGX_SUBMODULES_TOKEN` secret is retained only as an optional fallback (the `.github/workflows/*` `token:` expressions prefer it when set, else fall back to `github.token`) and is no longer required.
 
 Tracing examples:
 ```bash

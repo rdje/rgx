@@ -12,6 +12,10 @@ default-theme = "rust"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/rdje/rgx"
 edit-url-template = "https://github.com/rdje/rgx/edit/main/book/src/{path}"
+# Project Pages site is served under the /rgx/ subpath
+# (https://rdje.github.io/rgx/). mdBook uses this for absolute links
+# and the generated 404 page so they resolve correctly off-root.
+site-url = "/rgx/"
 
 [output.html.search]
 enable = true

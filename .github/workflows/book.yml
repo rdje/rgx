@@ -1,0 +1,65 @@
+name: Deploy Book
+
+# Restored 2026-05-18 after the user re-enabled GitHub Actions +
+# GitHub Pages (was removed in 3ded2e3 "until GitHub Pro"). This is
+# the current Pages-via-Actions pattern (upload-pages-artifact +
+# deploy-pages + the github-pages environment) — no gh-pages branch.
+# The book is pure mdBook markdown, so this job needs neither cargo
+# nor the private subs/pgen submodule.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'book/**'
+      - '.github/workflows/book.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build mdBook
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install mdBook
+        # Pinned to the version validated locally against the current
+        # book sources (`mdbook build book`, 2026-05-18). Bump in
+        # lockstep with the mdBook devs use locally so CI and local
+        # builds never diverge.
+        run: |
+          mkdir -p $HOME/bin
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz -C $HOME/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Build book
+        run: mdbook build book
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
