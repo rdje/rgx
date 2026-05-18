@@ -86,6 +86,12 @@ run_step "cargo test -p rgx-cli --features all-languages" cargo test --manifest-
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets
 
+# rgx-capi ABI/header-drift gate (rgx-capi/STABILITY.md §7): the
+# committed cbindgen header must equal a fresh regeneration, and any
+# ABI-meaningful header change must come with a workspace version
+# bump. Also builds rgx-capi, extending workspace build coverage.
+run_step "./scripts/check-capi-abi.sh (rgx-capi ABI/header-drift gate)" ./scripts/check-capi-abi.sh
+
 # Book examples are compiled+run as rgx-core doctests by the
 # `cargo test -p rgx-core` step above (via book_doctests.rs). This
 # guards the ratchet: the verified-chapter set must never shrink.

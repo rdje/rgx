@@ -27,6 +27,7 @@ required_paths=(
   ".github/workflows/book.yml"
   "scripts/check-ci-paths.sh"
   "scripts/capture-benchmark-trends.sh"
+  "scripts/check-capi-abi.sh"
   "scripts/run-local-ci.sh"
   "Cargo.toml"
   "Cargo.lock"
@@ -98,7 +99,7 @@ if grep -RInE --include='*.rs' "$absolute_path_pattern" rgx-core rgx-cli rgx-ben
 fi
 
 echo "[check-ci-paths.sh] Checking CI workflow and helper scripts for absolute filesystem paths"
-if grep -InE "$absolute_path_pattern" .github/workflows/ci.yml scripts/run-local-ci.sh scripts/capture-benchmark-trends.sh >"$ci_path_report"; then
+if grep -InE "$absolute_path_pattern" .github/workflows/ci.yml scripts/run-local-ci.sh scripts/capture-benchmark-trends.sh scripts/check-capi-abi.sh >"$ci_path_report"; then
   echo "[check-ci-paths.sh] Absolute filesystem paths are not allowed in CI workflow/script files:" >&2
   cat "$ci_path_report" >&2
   exit 1

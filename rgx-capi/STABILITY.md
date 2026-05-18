@@ -190,10 +190,18 @@ Gate contract:
   the ABI-stability note; bump it in lockstep with a MAJOR-class
   change.
 
-Implementation of this gate (a `scripts/check-capi-abi.sh` wired
-into CI + `run-local-ci.sh`) is the immediate follow-up to this
-document; until it lands, the gate is enforced by reviewer
-discipline against this section. Tracked in the backlog.
+**Implemented.** `scripts/check-capi-abi.sh` enforces both checks
+and is wired into `scripts/run-local-ci.sh` — which *is* the CI
+gate (the "Workspace checks" job runs `run-local-ci.sh`), so the
+gate runs on every PR/push and is receipt-guarded by the
+pre-commit hook. "ABI-meaningful content" is the header minus the
+pinned banner and the cbindgen tool-version stamp; the check is
+deliberately conservative (any other header change, doc comments
+included, requires a workspace `version` bump — the header is
+machine-generated, so every content change is a deliberate event).
+When neither `origin/main` nor `main` is reachable (initial /
+detached checkout) the version comparison is skipped with a clear
+message; the byte-identical regeneration check always runs.
 
 ## 8. Memory & threading invariants (contractual)
 
@@ -236,8 +244,8 @@ When changing `rgx-capi`:
    the regenerated header in the same commit.
 6. Bump the workspace `version` per step 1; add a `CHANGES.md`
    entry and update this document if a tier/policy changed.
-7. The header-drift gate (§7) must pass (or, until implemented,
-   the reviewer verifies §7 by hand).
+7. The header-drift gate (§7) must pass —
+   `scripts/check-capi-abi.sh`, run by the CI gate.
 
 ---
 

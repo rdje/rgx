@@ -32,6 +32,8 @@ Produces, in `target/release/`:
 
 The C header is regenerated on every build and lives at `rgx-capi/include/rgx.h`. It is also committed to the source tree so contributors can inspect the API without running a build.
 
+A CI gate (`scripts/check-capi-abi.sh`, per the [ABI stability contract](https://github.com/rdje/rgx/blob/main/rgx-capi/STABILITY.md)) enforces two invariants on every push: the committed header must be byte-identical to a fresh cbindgen regeneration (you cannot forget to commit it), and any ABI-meaningful change to the header must come with a workspace version bump. The header is therefore a trustworthy, always-current description of the ABI.
+
 ## The API surface (Phase 1)
 
 ```c
