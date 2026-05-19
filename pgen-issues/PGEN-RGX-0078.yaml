@@ -38,10 +38,11 @@ summary: |
   PCRE2-relative measurement on every release without depending on
   RGX. See `pgen_iteration_flow/README.md` for the full recipe.
 
-status: open
+status: open   # measurement-only refresh 2026-05-19 — NOT a new filing;
+               # see measurement_refresh block at end of file
 opened_at: 2026-05-01T00:00:00Z
 first_seen_at: 2026-05-01T00:00:00Z
-last_updated_at: 2026-05-01T00:00:00Z
+last_updated_at: 2026-05-19T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -368,3 +369,66 @@ impact: |
   - **0078 (this report)**: methodology-correction follow-up. Same
     perf concern, integration-side metric, distinct closure
     criterion. Provides self-contained PGEN-side iteration tooling.
+
+# === Measurement refresh (2026-05-19) — RGX-side, measurement-only ===
+# This is NOT a new upstream filing and NOT a status change. Per the
+# 2026-05-19 user directive ("capture the metrics in the docs, file no
+# PGEN bug report"), 0078 stays `status: open` as a tracker; this block
+# records the current numbers so the report isn't frozen at the stale
+# 1.1.40-era figures. The original report body above is preserved
+# verbatim as the filing-time record.
+measurement_refresh:
+  measured_at: 2026-05-19T00:00:00Z
+  pgen_pin: db6f8c68
+  parser_release_version: "1.1.81"
+  integration_contract_version: "1.1.83"
+  host_cpu: "Apple Silicon"
+  allocator: "macOS system libmalloc (default; not mimalloc)"
+  method: |
+    Same-session, same machine:
+      - PGEN parse p50: rgx-core/examples/pgen_compile_perf_dump.rs
+        (5000 samples / 200 warmup), 8-pattern corpus.
+      - PGEN share of Regex::compile: rgx-core/examples/compile_phase_split.rs.
+      - PCRE2 10.47 baseline: pgen_iteration_flow/pcre2_compile_baseline.c
+        + pcre2_compile_jit_baseline.c vs homebrew libpcre2-8
+        (10000-compile batch mean).
+  pgen_parse_p50_ns:
+    literal_simple:  24125
+    digit_sequence:  60375
+    character_class: 94417
+    alternation:     59750
+    capture_groups:  124083
+    url_simple:      57583
+    email_basic:     82041
+    anchor_complex:  187625
+  pcre2_compile_p50_ns_no_jit:
+    literal_simple:  182
+    digit_sequence:  286
+    character_class: 623
+    alternation:     300
+    capture_groups:  446
+    url_simple:      273
+    email_basic:     285
+    anchor_complex:  608
+  geomean_pgen_parse_vs_pcre2_no_jit_compile: "≈214x"
+  geomean_pgen_parse_vs_pcre2_jit_compile:    "≈32x"
+  pgen_parse_share_of_regex_compile: "≈63–86%"
+  trend_vs_1_1_40_filing: |
+    Raw PGEN parse p50 is ~2.0–3.8x faster than the 1.1.40-era baseline
+    this corpus was first measured against; geomean-vs-PCRE2-no-JIT
+    moved from the originally-filed ~360x to ≈214x. The "~80x" figure
+    quoted in some prior notes was PGEN's own-methodology (mimalloc /
+    internal harness) number and is NOT reproduced by RGX's standard
+    default-allocator measurement.
+  closure_criterion_status: |
+    Integration-side criterion (geomean PGEN-parse / PCRE2-no-JIT-compile
+    < 5x) is NOT met (≈214x). Remains open; no RGX-side fix (PGEN is the
+    sole parser); no new PGEN report filed (user directive).
+  refreshed_artifacts:
+    - artifacts/PGEN-RGX-0078/measurements/pgen_parse_p50.txt
+    - artifacts/PGEN-RGX-0078/measurements/pcre2_compile_p50.txt
+    - artifacts/PGEN-RGX-0078/measurements/ratio_table.md
+    - artifacts/PGEN-RGX-0078/measurements/host_metadata.txt
+  also_documented_in:
+    - "Book → Performance → 'Compile-time performance'"
+    - "README (PGEN-RGX-0073 paragraph), RUST_CODEBASE_ANALYSIS, docs/BACKLOG.md C10, ROADMAP '<5x compile' entry"
