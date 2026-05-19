@@ -154,6 +154,11 @@ The second persists a full bundle (inputs, parse outcomes, AST dumps, p50s)
 under `pgen-issues/artifacts/PGEN-RGX-0078/`; the companion PCRE2 C baselines
 live in that bundle's `pgen_iteration_flow/`.
 
+The complete, reproducible specification of every constant, entry point,
+statistic, and environment control behind these numbers — written so PGEN can
+replicate the exact methodology on its side from a self-contained, RGX-free
+bundle — is [Performance Measurement Methodology](./measurement-methodology.md).
+
 ## What is NOT optimized yet
 
 Being honest about what we have not done is part of the deal.

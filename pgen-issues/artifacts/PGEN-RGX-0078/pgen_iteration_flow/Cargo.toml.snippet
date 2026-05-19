@@ -1,0 +1,13 @@
+# Add to pgen/rust/Cargo.toml after the existing `[[example]]` blocks.
+
+[[example]]
+name = "pgen_pcre2_compile_ratio"
+path = "examples/pgen_pcre2_compile_ratio.rs"
+required-features = ["generated_parsers"]
+
+[dev-dependencies]
+# Adds the libpcre2-8 Rust binding for the compile-ratio bench. Used
+# only by the bench example; production code is unaffected. The crate
+# transitively links libpcre2-8 from the system package manager (brew,
+# apt, dnf etc.), so build hosts need libpcre2-8 installed.
+pcre2 = "0.2"

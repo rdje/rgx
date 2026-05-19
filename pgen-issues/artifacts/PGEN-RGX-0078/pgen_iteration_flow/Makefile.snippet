@@ -1,0 +1,39 @@
+# Add to pgen/rust/Makefile.
+#
+# NOTE: Makefile recipe lines MUST be indented with a real TAB, not
+# spaces. This file already uses tabs; if your editor converts them,
+# re-tab the recipe bodies before committing into PGEN's Makefile.
+#
+# Assumes PGEN's Makefile defines RUST_DIR (PGEN's `rust/` dir). The
+# vendored layout this snippet expects:
+#   pgen/rust/examples/pgen_pcre2_compile_ratio.rs
+#   pgen/perf/{pcre2_compile_baseline.c,pcre2_compile_jit_baseline.c}
+# Adapt RUST_DIR / the perf/ path to match PGEN's tree.
+
+PCRE2_PREFIX ?= $(shell brew --prefix pcre2 2>/dev/null || echo /usr/local)
+
+.PHONY: regex_pcre2_compile_perf_gate
+regex_pcre2_compile_perf_gate:
+	@echo "🧱 Running regex compile-time perf gate (PGEN parse vs PCRE2 compile)..."
+	cd $(RUST_DIR) && cargo run --release \
+	    --features generated_parsers \
+	    --example pgen_pcre2_compile_ratio
+	@echo "✅ regex compile-time perf gate completed."
+
+# Optional: cross-validate the Rust microbench against standalone C baselines.
+.PHONY: regex_pcre2_compile_perf_gate_cross_check
+regex_pcre2_compile_perf_gate_cross_check:
+	@echo "🧪 Building + running C-side PCRE2 baselines (cross-check)..."
+	cc -O2 -I$(PCRE2_PREFIX)/include -L$(PCRE2_PREFIX)/lib \
+	    -o $(RUST_DIR)/target/pcre2_compile_baseline \
+	    perf/pcre2_compile_baseline.c -lpcre2-8
+	cc -O2 -I$(PCRE2_PREFIX)/include -L$(PCRE2_PREFIX)/lib \
+	    -o $(RUST_DIR)/target/pcre2_compile_jit_baseline \
+	    perf/pcre2_compile_jit_baseline.c -lpcre2-8
+	@echo "=== PCRE2 compile (no JIT) ==="
+	@$(RUST_DIR)/target/pcre2_compile_baseline
+	@echo "=== PCRE2 compile + JIT ==="
+	@$(RUST_DIR)/target/pcre2_compile_jit_baseline
+
+.PHONY: regex_pcre2_compile_perf_gate_full
+regex_pcre2_compile_perf_gate_full: regex_pcre2_compile_perf_gate regex_pcre2_compile_perf_gate_cross_check

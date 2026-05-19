@@ -59,6 +59,7 @@
 - [The JIT Compiler](./internals/jit-compiler.md)
 - [PGEN Integration](./internals/pgen-integration.md)
 - [Performance](./internals/performance.md)
+- [Performance Measurement Methodology](./internals/measurement-methodology.md)
 - [Sandboxing & Security](./internals/sandboxing.md)
 - [Testing Philosophy](./internals/testing-philosophy.md)
 - [Project Status & Roadmap](./internals/project-status.md)
