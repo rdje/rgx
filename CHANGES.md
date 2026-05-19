@@ -14,6 +14,17 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-19 - PGEN-RGX-0079/0080/0081/0082 CLOSED (early typed-shape cluster verified-on-close on db6f8c68)
+- Scope: user-directed ("verify-on-pin, then file/close") audit of the four early parser-shape reports that were `status: open` in the ledger while the narrative docs said "only 0073 open" — a real ledger-vs-doc accuracy gap. Outcome: all four are **fixed** on the adopted pin `db6f8c68`; nothing needed filing upstream.
+- 0079 `\o{1239}`/`\o{8}`/`\o{12abc}` (non-octal-digit braced octal): PGEN now returns `E_PARSE_FAILURE`; RGX `Regex::compile` is `Err` (PCRE2 error-164 faithful). Valid `\o{377}` still parses as octal U+00FF.
+- 0080 `a{ 1 , 2 }`/`a{1 ,2}`/`a{1, 2}`: now the identical quantifier AST as `a{1,2}` (whitespace anywhere inside `{m,n}` ignored — PCRE2 default mode); end-to-end `is_match("aa")` parity.
+- 0081 `\g` bracket forms: typed AST emits distinct `kind`s (`subroutine_named`/`named_braced`/`numeric_backreference`/`subroutine_numeric`); `^(a|b)\g{1}$` (backref) vs `^(a|b)\g<1>$` (subroutine) PCRE2-faithful; RGX consumes the typed `kind` directly (the heuristic the report contemplated was never shipped — no-workarounds honored).
+- 0082 `(?{native:NAME})`: `code_block` content preserved; the report's 11 `full_mode_native_*` lib tests all pass.
+- Actions: YAMLs → `status: closed` (`resolution: resolved`, `no_workaround_adopted: true`, per-report `verification_db6f8c68/` artifacts). New family regression test `pgen_rgx_0079_0080_0081_parser_shape_family_is_pcre2_faithful` (rgx-core/src/lib.rs). Docs reconciled: README L189, Book `internals/pcre2-conformance-audit.md` tracker line, RUST_CODEBASE_ANALYSIS, BACKLOG C10, MEMORY f/u 21. Ledger now: only **PGEN-RGX-0073** substantively open (0078 = its superseded re-file).
+- Process correction (recorded for honesty/continuity): an initial pass wrongly judged 0079/0080 "still broken" and escalated a non-existent "verification-tooling integrity defect" — root cause was probing a **stale `target/debug/rgx`** binary linked against the pre-`db6f8c68` parser. The two embedding entrypoints (`parse_regex_default_ast_dump`, `parse_grammar_profile_ast_dump_named`) both funnel into the same `run_grammar_parse_ast_dump` and cannot diverge. Bad closures were reverted and redone correctly with freshly-rebuilt binaries + conformance cross-check. New memory: `feedback_rebuild_after_pgen_bump`.
+- Validation: gate-affecting (lib.rs regression test + book/docs; subs/pgen pin unchanged from `e48b6dc`) → full `run-local-ci.sh` with `RGX_RUN_CONFORMANCE=1`, verified by receipt+banner, ratchet green 12,806/4. Committed locally then pushed (user: "push whenever you can").
+- Notes/impact: the `pgen-issues/` ledger now matches the narrative — 87 of 88 closed, the lone substantive open report being the compile-time perf tracker 0073.
+
 ### 2026-05-19 - PGEN-RGX-0088 CLOSED + pin db6f8c68 (rel 1.1.81/contract 1.1.83) adopted; octal `>0o377` cluster fully resolved; ratchet held 12,806/4 (1↔1 swap, no rebaseline)
 - Scope: PGEN shipped the 0088 fix. Verified-on-close per BACKLOG C10. `\NN…` octal-vs-backref cluster (0084/0085/0086/0087/0088) now **fully resolved**.
 - Background: 0087's FIX2.3 (rel 1.1.80) added a bare-octal `>\377` overflow reject that was grammar-only & UNCONDITIONAL — it over-rejected octal valid under UTF (`/\777/I,utf` = U+01FF; PCRE2 accepts). Filed as PGEN-RGX-0088 (distinct defect, not a 0087 reopen).

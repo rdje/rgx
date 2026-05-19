@@ -1,0 +1,13 @@
+{
+  "api_version": "1.2.0",
+  "grammar": "regex",
+  "profile": "regex_default",
+  "status": "success",
+  "diagnostic": null,
+  "ast_dump": {
+    "dump_json": "{\n  \"content\": {\n    \"Json\": {\n      \"pattern\": [\n        [\n          [\n            {\n              \"atom\": {\n                \"kind\": \"numeric_backreference\",\n                \"ref\": {\n                  \"sign\": [],\n                  \"value\": 1\n                },\n                \"type\": \"backreference\"\n              },\n              \"quantifier\": [],\n              \"type\": \"piece\"\n            }\n          ]\n        ],\n        []\n      ],\n      \"type\": \"regex\"\n    }\n  },\n  \"rule_name\": \"regex\",\n  \"span\": {\n    \"end\": 3,\n    \"start\": 0\n  }\n}",
+    "truncated": false,
+    "full_bytes": 541,
+    "emitted_bytes": 541
+  }
+}

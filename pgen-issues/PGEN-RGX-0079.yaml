@@ -1,7 +1,7 @@
 id: PGEN-RGX-0079
 summary: |
   Braced octal escape `\o{...}` containing a non-octal digit (e.g. `\o{1239}`) is silently misparsed as a simple_escape for `\o` followed by a counted_quantifier `{1239}` instead of being rejected as an invalid octal escape. Same shape as PGEN-RGX-0006 (closed in PGEN 1.1.3) — that fix only handled valid-octal-digit content; non-octal contents still fall back to the literal+quantifier interpretation.
-status: open
+status: closed
 opened_at: 2026-05-03T00:00:00Z
 first_seen_at: 2026-05-03T00:00:00Z
 last_updated_at: 2026-05-03T00:00:00Z
@@ -182,3 +182,32 @@ impact: |
   no-PGEN-workarounds rule (see `feedback_no_pgen_workarounds.md` in the
   RGX session memory: "Parsing issues must be fixed in PGEN, not hacked
   around in RGX"). Filed here per that policy.
+
+resolution:
+  status: resolved
+  fixed_in_pgen_release: "<=1.1.81 (filed @1.1.29; exact fix release unrecorded)"
+  fixed_in_pgen_commit: "verified resolved at db6f8c68 (rel 1.1.81 / contract 1.1.83)"
+  verified_at: 2026-05-19T00:00:00Z
+  verified_by: >
+    RGX verification-on-close on the adopted pin db6f8c68 with
+    freshly-rebuilt binaries (a stale target/ binary initially gave a
+    false "still broken" reading — see feedback_rebuild_after_pgen_bump),
+    cross-checked by the PCRE2 differential conformance ratchet
+    (12,806/4 green; testinput2:3979 `/^A\o{1239}B/` no longer in the
+    "RGX too permissive" bucket).
+  method: |
+    On db6f8c68 the embedding-API AST dump returns
+    `status:"failure"` / `E_PARSE_FAILURE` for `\o{1239}`, `\o{8}`,
+    `\o{12abc}` (PGEN now rejects the invalid braced-octal at parse
+    time instead of the silent `\o`+`{N}` counted_quantifier misparse).
+    Valid `\o{377}` still parses as octal U+00FF. End-to-end RGX:
+    `Regex::compile(r"\o{1239}")` is now `Err` (PCRE2 error-164
+    faithful) while `\o{377}` matches U+00FF.
+  evidence:
+    - artifacts/PGEN-RGX-0079/verification_db6f8c68/o1239_rejected.json
+    - artifacts/PGEN-RGX-0079/verification_db6f8c68/o8_rejected.json
+    - artifacts/PGEN-RGX-0079/verification_db6f8c68/o377_valid_octal.json
+  regression_test: rgx-core/src/lib.rs::pgen_rgx_0079_0080_0081_parser_shape_family_is_pcre2_faithful
+  no_workaround_adopted: true   # the RGX-side adapter reject this report
+                                # contemplated was never shipped; fix is
+                                # purely PGEN-side (feedback_no_pgen_workarounds).

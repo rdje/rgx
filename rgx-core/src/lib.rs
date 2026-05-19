@@ -5553,6 +5553,67 @@ mod tests {
     }
 
     #[test]
+    fn pgen_rgx_0079_0080_0081_parser_shape_family_is_pcre2_faithful() {
+        // Verification-on-close family regression for the early parser-shape
+        // cluster, all fixed in the adopted PGEN pin db6f8c68 (rel 1.1.81).
+        // Cross-checked by the PCRE2 differential conformance ratchet
+        // (12,806/4 green); these lock the specific behaviours.
+
+        // PGEN-RGX-0079 — braced octal `\o{...}` with a non-octal digit is
+        // a parse error (PCRE2 error 164), not a silent `\o`+`{N}` misparse.
+        assert!(Regex::compile(r"\o{1239}").is_err(), "\\o{{1239}} rejects");
+        assert!(
+            Regex::compile(r"\o{8}").is_err(),
+            "\\o{{8}} rejects (8 not octal)"
+        );
+        assert!(
+            Regex::compile(r"\o{12abc}").is_err(),
+            "\\o{{12abc}} rejects"
+        );
+        // valid octal still works: \o{377} = 0o377 = U+00FF
+        let r = Regex::compile(r"\o{377}").expect("\\o{377} is valid octal");
+        assert!(r.is_match("\u{ff}"), "\\o{{377}} matches U+00FF");
+
+        // PGEN-RGX-0080 — whitespace anywhere inside `{m,n}` is ignored
+        // (PCRE2 default mode), not backtracked into a literal sequence.
+        for p in [r"a{ 1 , 2 }", r"a{1 ,2}", r"a{1, 2}", r"a{ 1,2 }"] {
+            let re = Regex::compile(p).unwrap_or_else(|e| panic!("{p} must compile: {e}"));
+            assert!(
+                re.is_match("aa"),
+                "{p} must behave like a{{1,2}} (match \"aa\")"
+            );
+            assert!(
+                re.is_match("a"),
+                "{p} must behave like a{{1,2}} (match \"a\")"
+            );
+            assert!(!re.is_match("b"), "{p} must not match \"b\"");
+        }
+
+        // PGEN-RGX-0081 — `\g` bracket form distinguishes backreference
+        // (brace/bare) from subroutine call (angle): the typed AST carries
+        // distinct kinds and the engine honours PCRE2 semantics.
+        let backref = Regex::compile(r"^(a|b)\g{1}$").expect("\\g{1} backref compiles");
+        assert!(
+            backref.is_match("aa"),
+            "(a|b)\\g{{1}} backref matches \"aa\""
+        );
+        assert!(
+            backref.is_match("bb"),
+            "(a|b)\\g{{1}} backref matches \"bb\""
+        );
+        assert!(
+            !backref.is_match("ab"),
+            "(a|b)\\g{{1}} backref rejects \"ab\""
+        );
+        let subr = Regex::compile(r"^(a|b)\g<1>$").expect("\\g<1> subroutine compiles");
+        assert!(subr.is_match("ab"), "(a|b)\\g<1> subroutine matches \"ab\"");
+        assert!(subr.is_match("aa"), "(a|b)\\g<1> subroutine matches \"aa\"");
+
+        // PGEN-RGX-0082 (native `(?{native:NAME})` content preservation) is
+        // covered end-to-end by the `full_mode_native_code_block_*` suite.
+    }
+
+    #[test]
     fn parser_nine_digit_backref_becomes_octal_triplet_plus_literal() {
         // Regression for PCRE2 testinput1:6539 (`/\214748364/`).
         // With no groups, `\214748364` reads the first three digits

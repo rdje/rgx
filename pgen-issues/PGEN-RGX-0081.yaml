@@ -1,7 +1,7 @@
 id: PGEN-RGX-0081
 summary: |
   Typed `\g`-prefixed backref/subroutine shape lost the bracket-form distinction. PGEN now emits the same `{type:"backreference", kind:"subroutine", ref:<...>}` typed object for `\g<n>` (subroutine call), `\g{n}` (back-reference), and `\gN` (back-reference) — so downstream consumers cannot recover PCRE2's "angle/apostrophe = subroutine, brace/bare = backreference" rule from the AST. RGX previously distinguished them via the legacy un-typed `subroutine_ref` array's first element (`<` vs `{`); after slices 11+12+13 typed the family, that signal is gone.
-status: open
+status: closed
 opened_at: 2026-05-04T00:00:00Z
 first_seen_at: 2026-05-04T00:00:00Z
 last_updated_at: 2026-05-04T00:00:00Z
@@ -108,3 +108,42 @@ impact: |
   mis-handles `\g<N>` (numeric subroutine call) — that pattern flows
   to backreference instead of recursion. No reliable workaround
   without bracket-form context.
+
+resolution:
+  status: resolved
+  fixed_in_pgen_release: "1.1.75"   # typed `kind` distinction for the
+                                    # `\g`-prefixed family; cited in
+                                    # rgx-core/src/parsing.rs ("Post-
+                                    # PGEN-RGX-0081 (release 1.1.75)").
+  fixed_in_pgen_commit: "verified resolved at db6f8c68 (rel 1.1.81 / contract 1.1.83)"
+  verified_at: 2026-05-19T00:00:00Z
+  verified_by: >
+    RGX verification-on-close on the adopted pin db6f8c68 with
+    freshly-rebuilt binaries, cross-checked by the PCRE2 differential
+    conformance ratchet (12,806/4 green).
+  method: |
+    On db6f8c68 the typed AST carries a *distinct* `kind` per `\g`
+    bracket form, so PCRE2's "angle/apostrophe = subroutine,
+    brace/bare = back-reference" rule is fully recoverable:
+      `\g<n>` -> backreference kind:"subroutine_named"
+      `\g{n}` -> backreference kind:"named_braced"
+      `\g1`   -> backreference kind:"numeric_backreference"
+      `\g<1>` -> backreference kind:"subroutine_numeric"
+    End-to-end discriminator with a multi-alternative group:
+      `^(a|b)\g{1}$`  (backref)     matches "aa"/"bb", rejects "ab"
+      `^(a|b)\g<1>$`  (subroutine)  matches "ab" (re-runs the group)
+    — PCRE2-faithful.
+  evidence:
+    - artifacts/PGEN-RGX-0081/verification_db6f8c68/g_angle_n__subroutine_named.json
+    - artifacts/PGEN-RGX-0081/verification_db6f8c68/g_brace_n__named_braced.json
+    - artifacts/PGEN-RGX-0081/verification_db6f8c68/g_bare1__numeric_backreference.json
+    - artifacts/PGEN-RGX-0081/verification_db6f8c68/g_angle1__subroutine_numeric.json
+  regression_test: rgx-core/src/lib.rs::pgen_rgx_0079_0080_0081_parser_shape_family_is_pcre2_faithful
+  no_workaround_adopted: true
+  no_workaround_note: |
+    The heuristic `ref`-shape dispatch this report contemplated was
+    NEVER shipped in RGX. `rgx-core/src/parsing.rs` consumes the typed
+    `kind` directly via explicit `subroutine_named` / `subroutine_numeric`
+    / `named_braced` arms (commented "Post-PGEN-RGX-0081 (release
+    1.1.75)"). The no-PGEN-workarounds rule
+    (`feedback_no_pgen_workarounds`) was honored end-to-end.

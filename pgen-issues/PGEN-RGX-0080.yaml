@@ -1,7 +1,7 @@
 id: PGEN-RGX-0080
 summary: |
   Counted quantifier `{m,n}` accepts whitespace at the outer boundaries (`a{ 1,2 }`) but rejects it between the digits and the comma (`a{ 1 , 2 }`, `a{1 ,2}`, `a{1, 2}`). PCRE2 allows whitespace anywhere inside `{...}` in default mode (not just under `/x` extended). When PGEN can't fit the inner-whitespace shape into the quantifier rule, it backtracks to a literal `{`, separate digit pieces, comma, etc., producing a structurally-wrong but successful parse.
-status: open
+status: closed
 opened_at: 2026-05-03T00:00:00Z
 first_seen_at: 2026-05-03T00:00:00Z
 last_updated_at: 2026-05-03T00:00:00Z
@@ -165,3 +165,29 @@ impact: |
   rewrite it as a quantifier. This is a workaround, not a fix, and
   is rejected by the project's no-PGEN-workarounds rule (see
   `feedback_no_pgen_workarounds.md`). Filed here per that policy.
+
+resolution:
+  status: resolved
+  fixed_in_pgen_release: "<=1.1.81 (filed @1.1.29; exact fix release unrecorded)"
+  fixed_in_pgen_commit: "verified resolved at db6f8c68 (rel 1.1.81 / contract 1.1.83)"
+  verified_at: 2026-05-19T00:00:00Z
+  verified_by: >
+    RGX verification-on-close on the adopted pin db6f8c68 with
+    freshly-rebuilt binaries, cross-checked by the PCRE2 differential
+    conformance ratchet (12,806/4 green; testinput1:6679
+    `/a{ 1 , 2 }/` no longer in the false-negative bucket).
+  method: |
+    On db6f8c68 the embedding-API AST dump for `a{ 1 , 2 }`,
+    `a{1 ,2}`, `a{1, 2}` is the *identical* typed shape as the
+    baseline `a{1,2}` — `piece{ atom:"a", quantifier{ min:1, max:2 } }`
+    — i.e. whitespace anywhere inside `{...}` is ignored (PCRE2 default
+    mode), not backtracked into a literal sequence. End-to-end RGX:
+    all four whitespace variants `is_match("aa")` == true, identical
+    to `a{1,2}`.
+  evidence:
+    - artifacts/PGEN-RGX-0080/verification_db6f8c68/a_1_2_quantifier.json
+    - artifacts/PGEN-RGX-0080/verification_db6f8c68/a12_baseline.json
+  regression_test: rgx-core/src/lib.rs::pgen_rgx_0079_0080_0081_parser_shape_family_is_pcre2_faithful
+  no_workaround_adopted: true   # the contemplated shape-rewrite
+                                # workaround was never shipped; fix is
+                                # PGEN-side (feedback_no_pgen_workarounds).

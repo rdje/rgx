@@ -1,7 +1,7 @@
 id: PGEN-RGX-0082
 summary: |
   PGEN's typed `code_block` shape drops the body content for `(?{native:NAME})` patterns. The typed AST emits `{kind:"code_block", lang:"native", content:[]}` — content is an empty array, so the callback name `NAME` is unrecoverable. The Perl-style `(?{ NAME })` form (no `lang:` prefix) preserves content correctly: `{kind:"code_block", lang:null, content:[" ","N","A","M","E"," "]}`.
-status: open
+status: closed
 opened_at: 2026-05-04T00:00:00Z
 first_seen_at: 2026-05-04T00:00:00Z
 last_updated_at: 2026-05-04T00:00:00Z
@@ -114,3 +114,33 @@ impact: |
   but that requires the adapter to track byte spans through PGEN's
   AST — substantial refactor and against the
   no-PGEN-workarounds rule. Filed here per that policy.
+
+resolution:
+  status: resolved
+  fixed_in_pgen_release: "<=1.1.81 (filed @1.1.74; exact fix release unrecorded)"
+  fixed_in_pgen_commit: "verified resolved at db6f8c68 (rel 1.1.81 / contract 1.1.83)"
+  verified_at: 2026-05-19T00:00:00Z
+  verified_by: >
+    RGX verification-on-close on the adopted pin db6f8c68 with
+    freshly-rebuilt binaries; the 11 `full_mode_native_*` lib tests
+    (the ones this report listed as failing at filing time) all pass;
+    cross-checked by the PCRE2 differential conformance ratchet
+    (12,806/4 green).
+  method: |
+    On db6f8c68 the typed `code_block` atom for `(?{native:check_env})`
+    preserves the body: `kind:"code_block", lang:"native",
+    content:["c","h","e","c","k","_","e","n","v"]` (was `content:[]`,
+    name unrecoverable). End-to-end: `cargo test -p rgx-core
+    --features pgen-parser --lib full_mode_native` → 11/11 pass
+    (`full_mode_native_code_block_can_use_registered_callback`,
+    `..._can_access_host_variables`, `..._can_access_match_metadata`,
+    replace/find_all/numeric variants) — the native callback name now
+    resolves and the callback fires.
+  evidence:
+    - artifacts/PGEN-RGX-0082/verification_db6f8c68/native_check_env_content_preserved.json
+  regression_test: >
+    rgx-core/src/lib.rs `full_mode_native_*` suite (11 tests) — the
+    report's own listed failing tests, now all green.
+  no_workaround_adopted: true   # the manual source-span parse this
+                                # report contemplated was never shipped;
+                                # fix is PGEN-side (feedback_no_pgen_workarounds).
