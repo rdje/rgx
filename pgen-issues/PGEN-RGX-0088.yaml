@@ -1,0 +1,82 @@
+id: PGEN-RGX-0088
+summary: |
+  Family-linked to PGEN-RGX-0084/0087 (the `\NN…` octal-vs-backref /
+  octal-range cluster, ledger `REGEX-008x`). **PGEN-RGX-0087 is
+  FIXED & CLOSED** (rel 1.1.80, pin 5fd20609 — FIX2.1+.2 scoped the
+  `[89]`-leading hard-reject to non-class context, FIX2.3 added the
+  octal `>\377` overflow reject). PGEN-RGX-0088 is the NEW residual
+  FIX2.3 introduced, NOT a 0087 reopen.
+
+  FIX2.3 rejects every bare `\ddd` octal payload whose value exceeds
+  `0o377`, grammar-only and **unconditionally**. That is PCRE2-
+  faithful for 8-bit non-UTF mode (PCRE2 error 151). But in **UTF
+  mode** an octal escape up to the Unicode codepoint max is valid —
+  `\777` = U+01FF — and PCRE2 10.47 **accepts** it. PGEN's parser is
+  mode-agnostic (it does not see `utf` / 8-bit / 16-/32-bit at parse
+  time), so FIX2.3's unconditional `>0o377` hard-reject is OVER-BROAD:
+  it rejects `\777`-class octal escapes that PCRE2 accepts under UTF.
+status: open
+opened_at: 2026-05-19T00:00:00Z
+first_seen_at: 2026-05-19T00:00:00Z
+last_updated_at: 2026-05-19T00:00:00Z
+parser_backend: pgen
+parser_backend_version: 1.1.80
+family:
+  parent_cluster: "REGEX-008x octal-vs-backref (PGEN-RGX-0084 / 0087)"
+  relationship: |
+    Introduced by PGEN-RGX-0087 FIX2.3 (rel 1.1.80). 0087's reported
+    cases are fixed & 0087 is CLOSED; 0088 is the new, distinct
+    UTF-mode-octal-range residual the overflow reject did not scope.
+    NOT a reopen of 0087.
+upstream_report: { reported: false, issue_id: null, issue_url: null, reported_at: null }
+context:
+  pgen_commit: 5fd20609a8a2e4daecfe491f6975d599931bda72
+  regex_parser_release_version: "1.1.80"
+  regex_integration_contract_version: "1.1.82"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api
+  host_os_arch: Darwin arm64
+  patterns:
+    - source: subs/pcre2/testdata/testinput10 line 218
+      pattern: '/\777/I,utf'
+      note: 'UTF-8 mode; PCRE2 ACCEPTS (\777 = U+01FF); subjects \x{1ff} and \777'
+expected_behavior: |
+  Under UTF (PCRE2 `,utf` / `(*UTF)` / 16-/32-bit), a bare octal
+  escape is valid up to the Unicode codepoint maximum, so `\777`
+  (U+01FF), `\400`, `\6666` etc. are valid characters and PCRE2
+  10.47 ACCEPTS them. Only in 8-bit non-UTF mode is `>0o377` an
+  error (151). PGEN parses mode-agnostically, so it must NOT
+  unconditionally hard-reject `>0o377`: either defer the range
+  check to the consumer/mode, or emit the octal atom and let the
+  width/UTF context decide (the pre-FIX2.3 behaviour for the
+  in-range part), rather than a blanket parse-time reject.
+actual_behavior: |
+  PGEN 1.1.80 (pin 5fd20609) REJECTS `\777`, `(?u)\777`, `\400`,
+  `(?u)\400`, `(?u)\777ABC` — uniformly, regardless of UTF mode
+  (inline `(?u)` does not change it; the grammar reject is
+  unconditional). `\377` still ACCEPTs (boundary correct). PCRE2
+  10.47 accepts `\777` under `,utf`.
+conformance_impact: |
+  Sole new failure introduced by adopting pin 5fd20609:
+  testinput10:218 `/\777/I,utf` (RGX rejects; PCRE2 accepts). The
+  pin is still a NET IMPROVEMENT — PGEN-RGX-0087's testinput2:4671
+  + :4674 closed (+2), this opened (−1): RGX PCRE2 ratchet
+  12,805 / 5 (pin 65b845f0) -> 12,806 / 4 (pin 5fd20609). RGX
+  ADOPTS 5fd20609 and rebaselines to 12,806/4 (the differential
+  harness's "NEW BASELINE ELIGIBLE — lock in the improvement"
+  path); the residual −1 is this report. No RGX workaround
+  (feedback_no_pgen_workarounds).
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    1. Bump subs/pgen to a release where octal `>0o377` is no longer
+       an unconditional parse-time hard-reject (mode-deferred, or the
+       octal atom is emitted for the consumer to range-check by width).
+    2. Probe: `\777`, `(?u)\777`, `\400` ACCEPT; `\377` still ACCEPT;
+       8-bit-non-UTF overflow still rejects per PCRE2.
+    3. Re-run `cargo test -p rgx-core --test pcre2_conformance --
+       --ignored`; confirm testinput10:218 closes and bump
+       PASS_BASELINE/FAIL_BASELINE toward 12,807/3 in the same commit.

@@ -1,0 +1,1 @@
+/\777/I,utf  (PCRE2 testinput10:218 — UTF-8 mode; subjects \x{1ff} and \777)

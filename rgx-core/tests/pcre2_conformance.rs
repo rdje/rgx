@@ -3377,22 +3377,27 @@ fn run_full_conformance() {
     // literal+class paths, `find_all` literal+class paths, plus the
     // SIMD path). Recovers testinput1:5429 / 5486 / 6355 (Cluster 1D
     // backtracking-verb interactions). +3 passes, FN 30 → 27.
-    // 2026-05-18: rebaselined 12,806/4 → 12,805/5 on adopting the PGEN
-    // combined pin `65b845f0` (rel 1.1.77 / contract 1.1.79). This is a
-    // DELIBERATE, JUSTIFIED move (the harness's own sanctioned path):
-    //   +1  PGEN-RGX-0084 fixed — `\10` forward-ref (testinput1:3910)
-    //       now octal, closes (originally-filed defect: resolved).
-    //   -2  PGEN-RGX-0087 (NEW, same family as 0084, OPEN) — the 0084
-    //       fix did not extend to the `[89]`-leading multi-digit escape
-    //       sub-family (`\8N`/`\9N`): PCRE2 rejects, post-0084 PGEN
-    //       re-splits into `\8`/`\9` backref + literal → RGX too
-    //       permissive at testinput2:4671 (`\81`) + :4674 (`\80`).
-    //   net -1. NOT an RGX bug, NOT an RGX workaround
-    //   (feedback_no_pgen_workarounds); the −2 is a tracked PGEN-side
-    //   regression (pgen-issues/PGEN-RGX-0087.yaml). On the PGEN 0087
-    //   fix this restores toward 12,807 / 3 (3910 stays closed).
-    const PASS_BASELINE: usize = 12_805;
-    const FAIL_BASELINE: usize = 5;
+    // 2026-05-19: rebaselined 12,805/5 → 12,806/4 (IMPROVEMENT — the
+    // harness's "NEW BASELINE ELIGIBLE, lock in the improvement" path)
+    // on adopting the PGEN pin `5fd20609` (rel 1.1.80 / contract
+    // 1.1.82). History from the 12,806/4 era this codebase started at:
+    //   • PGEN-RGX-0084 (`\10` forward-ref, testinput1:3910): CLOSED
+    //     (rel 1.1.76) — stays closed.
+    //   • PGEN-RGX-0087 (`[89]`-leading `\8N`/`\9N`, testinput2:4671 +
+    //     :4674): CLOSED (rel 1.1.80, FIX2.1+.2+.3) — both cases now
+    //     correctly REJECT; the rel-1.1.78 class-context over-reject
+    //     was fixed by FIX2.1. (+2 vs the interim 12,805/5.)
+    //   • PGEN-RGX-0088 (NEW, OPEN, distinct from 0087): FIX2.3's
+    //     bare-octal `>\377` overflow reject is grammar-only and
+    //     UNCONDITIONAL, so it over-rejects octal valid under UTF mode
+    //     (`/\777/I,utf` = U+01FF — PCRE2 accepts). Sole new failure:
+    //     testinput10:218 (−1). NOT an RGX bug / no workaround
+    //     (feedback_no_pgen_workarounds); tracked
+    //     pgen-issues/PGEN-RGX-0088.yaml. Net vs the interim 12,805/5
+    //     is +1/−1 = a genuine improvement; restores toward 12,807/3
+    //     when PGEN ships the 0088 (UTF-mode octal) fix.
+    const PASS_BASELINE: usize = 12_806;
+    const FAIL_BASELINE: usize = 4;
     const PANIC_BASELINE: usize = 0;
     const SKIP_BASELINE: usize = 0;
 

@@ -10,7 +10,7 @@ PGEN is a parser generator with its own repository, its own release cadence, and
 
 PGEN ships a grammar for the regex language. That grammar describes everything PCRE2 understands: literals, classes, escapes, groups, quantifiers, lookarounds, conditionals, subroutines, code blocks, backtracking verbs, extended character classes, and so on. When PGEN is compiled, that grammar produces a parser that reads pattern strings and emits a parse tree.
 
-RGX consumes PGEN through the `subs/pgen` git submodule, currently pinned to release **1.1.77** (integration contract 1.1.79) at commit `65b845f0`. Fresh clones need `git clone --recurse-submodules` or a subsequent `git submodule update --init --recursive` — this is covered in the [Contributing](./contributing.md) chapter.
+RGX consumes PGEN through the `subs/pgen` git submodule, currently pinned to release **1.1.80** (integration contract 1.1.82) at commit `5fd20609`. Fresh clones need `git clone --recurse-submodules` or a subsequent `git submodule update --init --recursive` — this is covered in the [Contributing](./contributing.md) chapter.
 
 ## Why bother with an external parser
 

@@ -329,43 +329,33 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 ### C10. Open upstream PGEN-RGX issues (blocking conformance / robustness)
 Tracked here so open PGEN-side dependencies are visible from the backlog, not buried in the C7 narrative. RGX cannot fix these directly (PGEN is the sole parser and read-only); no RGX-side workarounds per `feedback_no_pgen_workarounds`.
 
-> **Combined release ADOPTED with one tracked regression (2026-05-18).**
-> PGEN shipped 0084+0085+0086 in one release; RGX adopted `subs/pgen`
-> `08593d05`→`65b845f0` (rel **1.1.77** / contract **1.1.79**, AST schema
-> `1` unchanged → no walker migration). Per the user's explicit call
-> (the originally-filed 0084 defect is genuinely fixed; keep the pin;
-> split the residual into a new sibling report):
-> - **PGEN-RGX-0084 ✅ CLOSED** — the `\10` forward-reference defect
->   (`testinput1:3910`) is fixed in PGEN rel 1.1.76 and verified closed
->   on the adopted pin (it left the failure set; the +1 in the pass
->   delta).
-> - **PGEN-RGX-0085 ✅ CLOSED** — `REGEX_MAX_NESTING_DEPTH=250` ceiling;
->   deep-nesting stress/adversarial all green; RGX's 1000 reconciled to
->   endorsed belt-and-suspenders (recursion.rs + stress-test comments
->   updated; no behaviour change).
-> - **PGEN-RGX-0086 ✅ CLOSED** — version consts synced at source
->   (`REGEX_PARSER_RELEASE_VERSION="1.1.77"` / contract `"1.1.79"`;
->   stale 1.1.29/1.1.31 gone + PGEN ledger-drift gate added).
-> - **PGEN-RGX-0087 🔴 NEW, OPEN** — *same parent family as 0084* but a
->   distinct defect the 0084 fix did not extend to: the `[89]`-leading
->   multi-digit escape `\8N`/`\9N` (PCRE2 rejects; post-0084 PGEN
->   re-splits into `\8`/`\9` backref + literal → RGX too permissive at
->   `testinput2:4671` `\81` + `:4674` `\80`). Full repro + AST-dump
->   bundle at `pgen-issues/artifacts/PGEN-RGX-0087/`. No RGX workaround.
-> **Conformance ratchet DELIBERATELY rebaselined 12,806/4 → 12,805/5**
-> (`pcre2_conformance.rs` `PASS_BASELINE`/`FAIL_BASELINE`, with an
-> in-source justification): net −1 = +1 (0084 `\10` closed) −2 (0087
-> family). This is the conformance harness's own sanctioned
-> "intentional + justified + explain in commit" path, not
-> greenwashing — RGX now carries a **known, PGEN-tracked −1 PCRE2
-> regression (0087)**; it restores toward 12,807/3 when PGEN ships the
-> 0087 fix (3910 stays closed). 0073/0078 compile-time re-extract still
-> deferred (independent of this).
+> **PGEN octal-vs-backref cluster (0084/0085/0086/0087) RESOLVED;
+> pin `5fd20609` adopted (2026-05-19).** Iterated across PGEN releases:
+> 0084/0085/0086 closed at `65b845f0` (rel 1.1.77); 0087's `[89]`-leading
+> family then took two PGEN attempts — rel-1.1.78 over-rejected `\8`/`\9`
+> inside `[...]` (caught + reported), rel-1.1.80 (FIX2.1+.2 scoped the
+> hard-reject to non-class context, FIX2.3 added octal `>\377` overflow
+> reject) is correct. RGX now at `subs/pgen` **`5fd20609`** (rel
+> **1.1.80** / contract **1.1.82**, AST schema `1` unchanged):
+> - **PGEN-RGX-0084 ✅ CLOSED** — `\10` forward-ref (`testinput1:3910`), rel 1.1.76.
+> - **PGEN-RGX-0085 ✅ CLOSED** — `REGEX_MAX_NESTING_DEPTH=250` ceiling, rel 1.1.77; RGX's 1000 = endorsed defense-in-depth (recursion.rs + stress-test comments updated, no behaviour change).
+> - **PGEN-RGX-0086 ✅ CLOSED** — embedding-API version consts synced + PGEN ledger-drift gate, rel 1.1.77.
+> - **PGEN-RGX-0087 ✅ CLOSED** — `[89]`-leading `\8N`/`\9N`, rel 1.1.80 (FIX2.1+.2+.3). Verified on `5fd20609`: `\81`@8g / `\89` / `\80` REJECT; `[\8]` / `[\9]` / `^[A\8B\9C]+$` ACCEPT (class-context over-reject fixed); `\199`→`\x01`+"99"; `\10`/`\8` byte-identical. testinput2:4671 + :4674 CLOSED. Unit test rewritten PCRE2-faithful + un-`#[ignore]`d.
+> - **PGEN-RGX-0088 🔴 NEW, OPEN** — *introduced by 0087's FIX2.3, distinct defect (not a 0087 reopen)*: the bare-octal `>\377` overflow reject is grammar-only & UNCONDITIONAL, so it over-rejects octal valid under **UTF mode** (`/\777/I,utf` = U+01FF — PCRE2 accepts; PGEN parses mode-agnostically). Sole new failure: `testinput10:218`. `pgen-issues/PGEN-RGX-0088.yaml` + artifacts. No RGX workaround.
+> **Conformance ratchet rebaselined `12,805/5 → 12,806/4`** (an
+> IMPROVEMENT — the harness's own "NEW BASELINE ELIGIBLE, lock in the
+> improvement" path; in-source justification in `pcre2_conformance.rs`):
+> +2 (0087's 4671/4674 closed) −1 (0088's testinput10:218) vs the
+> interim 12,805/5 → net **+1/−1**. RGX now carries one **known,
+> PGEN-tracked −1 (0088)**; restores toward 12,807/3 on PGEN's 0088
+> (UTF-mode octal) fix. 0073/0078 compile-time re-extract still deferred
+> (independent).
 
 - ✅ **PGEN-RGX-0084 — CLOSED 2026-05-18** (`\NN` forward-reference parsed as backref instead of octal/literal). Fixed in PGEN rel 1.1.76 (commit `b5036c4e`), verified on adopted pin `65b845f0`: `testinput1:3910` (`()()()()()()()()()(?:(?(10)\10a|b)(X|Y))+`) left the failure set (+1 pass). YAML `status: closed`; original artifact `artifacts/PGEN-RGX-0084/ast_dump.json`. The `[89]`-leading sub-family the fix did not extend to is **not** a 0084 reopen — tracked as the new sibling **PGEN-RGX-0087** (below).
 - ✅ **PGEN-RGX-0085 — CLOSED 2026-05-18** (parser/AST-dump stack-overflow on deep nesting). Fixed in PGEN rel 1.1.77 (commit `2f6be365`): `REGEX_MAX_NESTING_DEPTH=250` ceiling at the embedding boundary → clean parse error, abort structurally impossible. Verified RGX-side (stress 25/0, adversarial 44/0). RGX's pre-PGEN `MAX_NESTING_DEPTH=1000` reconciled to endorsed defense-in-depth (recursion.rs doc + the `pattern_nested_just_under_limit_is_not_limit_rejected` comment updated; no behaviour change).
 - ✅ **PGEN-RGX-0086 — CLOSED 2026-05-18** (stale embedding-API version constants). Fixed in PGEN rel 1.1.77 (commit `ee5d8fea`): `embedding_api.rs` now hardcodes `REGEX_PARSER_RELEASE_VERSION="1.1.77"` / contract `"1.1.79"` (stale 1.1.29/1.1.31 gone) + a PGEN ledger-drift gate. RGX docs' version refs updated to **1.1.77 / 1.1.79**; the former "known-stale, do not downgrade" caveat is **dropped** (no longer applicable). (This also retires former BACKLOG #14 / the C9 "stale generated-artifacts" framing — confirmed: artifacts always matched the pin; only the handoff constants were stale, now fixed.)
-- 🔴 **PGEN-RGX-0087 — OPEN, filed 2026-05-18** (`[89]`-leading multi-digit escape `\8N`/`\9N`). **Same parent family as 0084** (multi-digit `\NN` octal-vs-backref disambiguation) but a distinct defect the 0084 fix did not extend to: `8`/`9` are not octal digits, so PCRE2 *rejects* `\8N`/`\9N` (value ≥10, insufficient groups) at compile; post-0084 PGEN re-splits into single-digit backref `\8`/`\9` + literal digit, so RGX is "too permissive" at `testinput2:4671` (`\81`) + `:4674` (`\80`). −2 conformance vs the +1 from 0084 → the deliberate 12,806/4 → 12,805/5 ratchet rebaseline. YAML `pgen-issues/PGEN-RGX-0087.yaml` + artifact bundle `artifacts/PGEN-RGX-0087/` (AST dump proves PGEN emits `{index:8,kind:numeric,type:backreference}` + literal `"1"`). No RGX-side fix (`feedback_no_pgen_workarounds`); closes when PGEN extends the family and the ratchet restores toward 12,807/3. Also `#[ignore]`'d (with a PGEN-RGX-0087 reason, not deleted/expectation-corrupted) the pre-existing unit test `parser_multi_digit_non_octal_backref_becomes_literal` (`\89`→"89", `\199`→\x01+"99") which the same defect breaks; re-enable on the 0087 fix.
+- ✅ **PGEN-RGX-0087 — CLOSED 2026-05-19** (`[89]`-leading multi-digit escape `\8N`/`\9N`; same parent family as 0084). Took 3 PGEN releases: rel-1.1.78 hard-rejected but was over-broad (also rejected `\8`/`\9` inside `[...]` — reported via `fix_attempt_1` + class-context artifacts); rel-1.1.80 **FIX2.1+.2** scoped the hard-reject to non-class context + **FIX2.3** added the octal `>\377` overflow reject. Verified on adopted pin `5fd20609`: `\81`@8g / `\89` / `\80` REJECT (= PCRE2); `[\8]` / `[\9]` / `^[A\8B\9C]+$` / `[\88]` ACCEPT (over-reject fixed); `\199`→`\x01`+"99"; `\10`/`\377`/`[\377]`/`\012`/`\8`@8g byte-identical. `testinput2:4671` + `:4674` CLOSED (+2). YAML `status: closed` (`fix_attempt_1` + `fix_attempt_2_and_CLOSED` audit trail). The `parser_multi_digit_non_octal_backref_becomes_literal` test was rewritten PCRE2-faithful (`\89` rejects; `\199`→`\x01`+"99"; `[A\8B\9C]` accepts), renamed `parser_eight_nine_leading_multidigit_escape_is_pcre2_faithful`, and un-`#[ignore]`d.
+- 🔴 **PGEN-RGX-0088 — OPEN, filed 2026-05-19** (octal `>\377` over-reject under UTF mode). **Introduced by 0087's FIX2.3**, a *distinct* defect (NOT a 0087 reopen): the bare-octal overflow reject is grammar-only & UNCONDITIONAL, but under UTF an octal escape is valid up to the codepoint max — `/\777/I,utf` = U+01FF, PCRE2 ACCEPTS. PGEN parses mode-agnostically (no `utf`/8-bit/16-/32-bit at parse time) so it over-rejects. Sole new failure: `testinput10:218` (−1, hence 12,806/4 not 12,807/3). YAML `pgen-issues/PGEN-RGX-0088.yaml` + artifacts. No RGX-side fix (`feedback_no_pgen_workarounds`); restores toward 12,807/3 when PGEN mode-defers the octal-range check.
 - **PGEN-RGX-0073 — compile-time perf (the substantive, still-open perf tracker).** This *is* the compile-time issue: PGEN's `regex` parse is 65–99% of RGX's total `Regex::compile` wall-clock budget. PGEN has done extensive optimization ("did its best" — Optim #1–#15 + mimalloc + cached worker thread + inline fast path, bringing the embedding-API geomean ratio vs PCRE2-no-JIT from ~360x → ~80x), but the PGEN regex-parser compile time is **not yet in an acceptable range** — closing the residual structural gap (specialised regex-grammar codegen or sustained parser hot-path work) is ongoing PGEN-side. Precondition for the ROADMAP `<5x of PCRE2 compile` target. No RGX-side fix.
 - **PGEN-RGX-0078 — PCRE2-relative metric re-file of 0073: considered fixed/superseded** (per PGEN maintainer, 2026-05-18). 0078 was the methodology-correction follow-up that re-stated 0073's concern as the PCRE2-relative ratio; the substantive remaining work lives under **0073**. (RGX's report YAML stays formally `open` until the next `subs/pgen` bump lets the verification-on-close run; the *status here* is the maintainer's authoritative narrative — 0078 is not an independent open Deferred peer of 0073.)
 - **Verification on close**: after any `subs/pgen` bump that claims to address these, re-run `make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap`, the PCRE2 conformance ratchet, and each addressed report's `resolution.verification_notes` steps; flip the YAML `status`/`resolution` and bump the ratchet baselines **in the same commit** (for the 0084+0085+0086 combined release, all three in one commit).

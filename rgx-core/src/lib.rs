@@ -5463,37 +5463,30 @@ mod tests {
         assert!(r.is_match("\x02"));
     }
 
-    // IGNORED pending PGEN-RGX-0087 (filed 2026-05-18, OPEN). This test
-    // asserts the *correct* PCRE2 behaviour for the `[89]`-leading
-    // multi-digit escape (`\89` → literal "89"; `\199` → \x01 + "99").
-    // PGEN's 0084 fix (rel 1.1.76) did not extend to this sub-family:
-    // post-0084 PGEN re-splits `\89` into single-digit backref `\8` +
-    // literal `9`, so `Regex::compile(r"\89")` now errors
-    // ("backreference '\8' refers to missing capture group") instead of
-    // compiling as the literal "89". This is the SAME defect as the
-    // conformance regression that drove the deliberate 12,806/4 →
-    // 12,805/5 ratchet rebaseline; not an RGX bug, no RGX-side
-    // workaround (feedback_no_pgen_workarounds). Re-enable (remove this
-    // `#[ignore]`) when PGEN ships the 0087 fix. See
-    // pgen-issues/PGEN-RGX-0087.yaml.
+    // PCRE2-faithful behaviour of the `[89]`-leading multi-digit
+    // escape, verified against the PCRE2 10.47 oracle (NOT the parser
+    // fix — `feedback_corpus_expected_from_spec_not_fix`). Tracked as
+    // PGEN-RGX-0087 (CLOSED — PGEN rel 1.1.80 / contract 1.1.82,
+    // commit 5fd20609; FIX2.1+.2 scoped the hard-reject to non-class
+    // context, FIX2.3 added octal `>\377` overflow rejection). The
+    // prior assertion (`\89` → literal "89") encoded pre-0084 PGEN
+    // behaviour and was NOT PCRE2-faithful: PCRE2 *rejects* `\89` at
+    // compile (error 115). This test now asserts the oracle directly.
     #[test]
-    #[ignore = "PGEN-RGX-0087: \\8N/\\9N literal behaviour broken by PGEN's post-0084 re-split; re-enable on the PGEN 0087 fix"]
-    fn parser_multi_digit_non_octal_backref_becomes_literal() {
-        // PCRE2 rule: a multi-digit `\NN...N` where the whole decimal
-        // number is > total_groups reads up to three leading octal
-        // digits as an octal escape; any remaining decimal digits
-        // stand for themselves as literal characters. First digit 8
-        // or 9 ⇒ zero octal digits consumed ⇒ the whole sequence is
-        // literal.
-        let r =
-            Regex::compile(r"\89").expect("\\89 with no groups should compile as literal \"89\"");
+    fn parser_eight_nine_leading_multidigit_escape_is_pcre2_faithful() {
+        // `\89`, no groups: `8`/`9` are not octal digits and there is
+        // no group 8/9 — neither a valid back reference nor a valid
+        // octal escape. PCRE2 10.47 REJECTS at compile; PGEN
+        // (PGEN-RGX-0087, rel 1.1.80) likewise hard-rejects.
         assert!(
-            r.is_match("89"),
-            "\\89 should match the literal text \"89\""
+            Regex::compile(r"\89").is_err(),
+            "\\89 (no groups) must be rejected, matching PCRE2 10.47"
         );
 
-        // Leading 1 is a valid octal digit; 9 is not. So `\199`
-        // consumes one octal digit (0o1 = '\u{1}') then literal "99".
+        // `\199`, no groups: leading `1` IS a valid octal digit, `9`
+        // is not — PCRE2 reads one octal digit (0o1 = U+0001) then
+        // literal "99". (PGEN-RGX-0087 also corrected this from a wrong
+        // numeric-backref classification to the octal escape.)
         let r = Regex::compile(r"\199")
             .expect("\\199 with no groups should compile as Char(0o1) + literal \"99\"");
         assert!(
@@ -5503,6 +5496,16 @@ mod tests {
         assert!(
             !r.is_match("199"),
             "\\199 must not match literal \"199\" — the leading 1 is octal, not decimal"
+        );
+
+        // `\8`/`\9` as a standalone member INSIDE a character class is
+        // octal/literal there (a class has no backreferences) — PCRE2
+        // ACCEPTS. (PGEN-RGX-0087 FIX2.1 scoped the hard-reject to
+        // non-class context; regression-guards the rel-1.1.78
+        // over-rejection.)
+        assert!(
+            Regex::compile(r"[A\8B\9C]").is_ok(),
+            "\\8/\\9 inside [...] must be accepted (octal/literal in class), matching PCRE2 10.47"
         );
     }
 
