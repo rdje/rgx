@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-05-19 - Fresh regex compile-time (PGEN parser) re-measurement on db6f8c68; stale ~360x→~80x / 65–99% numbers corrected
+- Scope: user asked to re-measure regex compile-time (= how fast the PGEN regex parser is, the dominant component of `Regex::compile`) on the current pin and refresh the book; explicit directive: capture metrics in the docs, **file no PGEN bug report**.
+- Method (same-session, Apple Silicon, default allocator): `compile_phase_split.rs` (PGEN share of compile) + `pgen_compile_perf_dump.rs` (PGEN parse p50, 5000 samples, 8-pattern corpus) on pin `db6f8c68` (PGEN 1.1.81 / contract 1.1.83); PCRE2 10.47 `pcre2_compile()` ± JIT C baselines (`pgen_iteration_flow/`) built against homebrew libpcre2-8, 10000-compile batch mean.
+- Result: PGEN parse p50 **24µs–188µs/pattern**; PGEN parse = **≈63–86%** of `Regex::compile` wall-clock; **geomean ≈214× vs PCRE2-no-JIT compile / ≈32× vs PCRE2+JIT**. Trend vs the committed PGEN-1.1.40-era baseline: raw PGEN parse p50 **~2.0–3.8× faster**; geomean-vs-no-JIT ~360× → ~214×.
+- Correction: the docs' "embedding-API geomean ~360x → **~80x** vs PCRE2-no-JIT" / "**65–99%** of compile" is **not reproduced** by RGX's standard measurement — the ~80× was PGEN's own benchmark methodology (mimalloc / internal harness). README L189, RUST_CODEBASE_ANALYSIS L66+L219, BACKLOG C10 0073 bullet corrected to the RGX-measured ~214× / ≈63–86%.
+- Artifacts refreshed (measurement-only, **no report status change, no upstream filing**): `pgen-issues/artifacts/PGEN-RGX-0078/measurements/{pgen_parse_p50.txt,pcre2_compile_p50.txt,ratio_table.md,host_metadata.txt}` + regenerated `pgen_inputs/`, `pgen_parse_outcomes/`, `pgen_ast_dumps/`, `pgen_contract.json`, `patterns.tsv`.
+- Book (the world): new **"Compile-time performance"** section in `book/src/internals/performance.md` (was absent — a real coverage gap) with the fresh table, the PGEN-parser-bound explanation, the trend, the honest "~80× was PGEN-methodology" note, the ROADMAP `<5×` target, and reproduce-it-yourself commands.
+- 0073/0078 remain open trackers, unchanged in status; PGEN is the sole parser so parser-speed work is PGEN-side with no RGX workaround.
+- Validation: docs/artifacts-only (no `.rs`/Cargo/scripts/subs change) → non-gate-affecting per COMMIT.md; `cargo fmt -p rgx-core --check` clean (no Rust touched). Committed locally then pushed (user: "push whenever you can").
+
 ### 2026-05-19 - PGEN-RGX-0079/0080/0081/0082 CLOSED (early typed-shape cluster verified-on-close on db6f8c68)
 - Scope: user-directed ("verify-on-pin, then file/close") audit of the four early parser-shape reports that were `status: open` in the ledger while the narrative docs said "only 0073 open" — a real ledger-vs-doc accuracy gap. Outcome: all four are **fixed** on the adopted pin `db6f8c68`; nothing needed filing upstream.
 - 0079 `\o{1239}`/`\o{8}`/`\o{12abc}` (non-octal-digit braced octal): PGEN now returns `E_PARSE_FAILURE`; RGX `Regex::compile` is `Err` (PCRE2 error-164 faithful). Valid `\o{377}` still parses as octal U+00FF.

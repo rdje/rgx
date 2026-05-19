@@ -100,6 +100,60 @@ As of the C1 production cutover, RGX runs three execution tiers in parallel:
 
 The dispatch chain (DFA → Pike-VM → JIT → backtracking VM) is described in detail in the C2 and C1 chapters. Each tier handles the patterns it's best at and falls through to the next tier when ineligible.
 
+## Compile-time performance
+
+Everything above is *match* throughput. Compile time — the cost of turning a
+pattern string into a runnable `Regex` — is a separate story, and an honest one.
+
+RGX does not have its own parser: **PGEN is the sole parser** (see
+[PGEN Integration](./pgen-integration.md)). So `Regex::compile` time is
+dominated by PGEN's regex parse, and RGX's downstream phases (AST → bytecode +
+C2 build, engine construction) are a comparatively thin slice. Phase-splitting
+`Regex::compile` over the standard 8-pattern bench corpus
+(`rgx-core/examples/compile_phase_split.rs`) shows PGEN parse is
+**≈ 63–86 %** of total compile wall-clock; lazy engine-artifact construction
+already drove the `Engine::new` share down to ~0–1 %.
+
+Latest measurement — **PGEN `db6f8c68` (release 1.1.81 / contract 1.1.83),
+2026-05-19, Apple Silicon, default allocator**, PGEN parse p50 over 5000
+samples vs PCRE2 10.47 `pcre2_compile()` (10 000-compile batch mean):
+
+| Pattern | PGEN parse p50 | vs PCRE2 (no JIT) | vs PCRE2 (+JIT) |
+|---|--:|--:|--:|
+| `test` | 24 µs | 133× | 15× |
+| `\d{3}-\d{2}-\d{4}` | 60 µs | 211× | 28× |
+| `[a-zA-Z0-9._%+-]+@…` | 94 µs | 152× | 34× |
+| `cat\|dog\|bird` | 60 µs | 199× | 31× |
+| `(\d{4})-(\d{2})-(\d{2})` | 124 µs | 278× | 44× |
+| `https?://\S+` | 58 µs | 211× | 26× |
+| `\b\w+@\w+\.\w+\b` | 82 µs | 288× | 32× |
+| `^(\d+)\s+(?P<word>\w+)\s+(?:foo\|bar)$` | 188 µs | 309× | 60× |
+| **geomean** | | **≈ 214×** | **≈ 32×** |
+
+This is the known structural gap, tracked PGEN-side as `PGEN-RGX-0073`. It is
+**not** an RGX-side defect and there is no RGX-side fix: per the
+PGEN-is-the-sole-parser design, parser speed work lands in PGEN, not in an RGX
+workaround. The trend is real — raw PGEN parse p50 is **~2–3.8× faster** than
+the PGEN-1.1.40-era baseline this corpus was first measured against, and the
+geomean-vs-PCRE2-no-JIT ratio has moved from ~360× (at the original filing) to
+**~214×** today. (An earlier "~80×" figure quoted in some notes came from
+PGEN's own benchmark methodology — mimalloc, its internal harness — and is not
+reproduced by RGX's standard default-allocator measurement; the numbers above
+are the RGX-side ground truth.) The ROADMAP target is **< 5× of PCRE2
+compile**; closing the remaining gap is sustained PGEN parser work and is the
+precondition for that target.
+
+Reproduce both measurements yourself from the repo root:
+
+```text
+cargo run --release -p rgx-core --example compile_phase_split --features pgen-parser
+cargo run --release -p rgx-core --example pgen_compile_perf_dump --features pgen-parser
+```
+
+The second persists a full bundle (inputs, parse outcomes, AST dumps, p50s)
+under `pgen-issues/artifacts/PGEN-RGX-0078/`; the companion PCRE2 C baselines
+live in that bundle's `pgen_iteration_flow/`.
+
 ## What is NOT optimized yet
 
 Being honest about what we have not done is part of the deal.

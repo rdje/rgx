@@ -1,12 +1,6 @@
-Darwin 25.4.0 arm64
+# host metadata — fresh 0078 re-measure
+Tue May 19 18:08:04 CEST 2026
+Darwin Richards-Mac-mini.local 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:25 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T6041 arm64 arm Darwin
 Apple M4 Pro
-12 cores
-PCRE2: 10.46
-Rust: rustc 1.95.0 (59807616e 2026-04-14)
-PGEN pin: 056f67842955dd4271cbf6fc6158f9cb9c64002e
-PGEN parser_release: pub const REGEX_PARSER_RELEASE_VERSION: &str = "1.1.29";
-PGEN integration_contract: pub const REGEX_PARSER_INTEGRATION_CONTRACT_VERSION: &str = "1.1.31";
-Allocator: macOS system libmalloc (default; not mimalloc)
-Methodology: cargo run --release, 5000 samples per pattern, 200-sample warmup discarded
-Trace: disabled (PGEN_TRACE_VERBOSITY unset)
-Slowdown character: corpus-wide, deterministic, weakly size-correlated
+pcre2: homebrew 10.47 (lrwxr-xr-x 1 richarddje admin 44 May  3 00:09 /opt/homebrew/lib/libpcre2-8.dylib -> ../Cellar/pcre2/10.47_1/lib/libpcre2-8.dylib)
+pgen pin: db6f8c6836fefa5a57b1337d3ffbf6f15774089f (rel 1.1.81 / contract 1.1.83)
