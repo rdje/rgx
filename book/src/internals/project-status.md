@@ -16,7 +16,7 @@ The numbers and status claims here are tied to what is in the repository as of t
 | Property test cases | **11 properties × 256+ cases** per run |
 | Fuzz targets | **4** (cargo-fuzz) |
 | Clippy errors | **Zero** on RGX-owned code |
-| PGEN dependency | Pinned to **1.1.10**, commit `8783757`, via `subs/pgen` submodule |
+| PGEN dependency | Pinned to **1.1.81** (contract 1.1.83), commit `db6f8c68`, via `subs/pgen` submodule |
 | Crates.io publication | **Not yet** — pending public release prep |
 
 The parity number is worth elaborating. "98%" is a rough hand-maintained estimate of tracked feature families in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. The remaining 2% is concentrated in a handful of low-priority edge cases plus the performance story (JIT). The matrix has individual line items for every feature — if you want the details, read the matrix directly.
@@ -126,8 +126,8 @@ None of these are blockers for using the code. They are blockers for calling it 
 
 Every RGX build depends on PGEN. The current state:
 
-- **Version:** 1.1.10
-- **Commit:** `8783757`
+- **Version:** 1.1.81 (integration contract 1.1.83)
+- **Commit:** `db6f8c68`
 - **Integration:** `subs/pgen` git submodule
 - **Workflow:** `git submodule update --init --recursive` on fresh clones, or `git clone --recurse-submodules`
 

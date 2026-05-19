@@ -89,8 +89,8 @@ The `pgen-issues/artifacts/` subdirectory holds additional supporting material â
 
 RGX pins PGEN to a **specific commit**, not a range. The current pin is:
 
-- Release: **PGEN 1.1.10**
-- Commit: `8783757`
+- Release: **PGEN 1.1.81** (integration contract 1.1.83)
+- Commit: `db6f8c68`
 - Submodule path: `subs/pgen`
 
 This choice is deliberate. Regex parsing is sensitive to grammar changes, and an accidental PGEN bump between RGX releases could silently change what patterns RGX accepts. Pinning to a commit means:
