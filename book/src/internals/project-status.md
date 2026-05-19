@@ -8,18 +8,18 @@ The numbers and status claims here are tied to what is in the repository as of t
 
 | Dimension | Status |
 |-----------|--------|
-| PCRE2 feature parity | **~98%** of tracked feature families |
-| Real-world pattern coverage | **~95%** of PCRE2 patterns expected to work |
+| PCRE2 conformance (measured, gate-enforced) | **12,806 / 4 / 0 / 0** (pass/fail/panic/skip) on PCRE2 10.47 `testdata` |
+| PCRE2 feature-family parity (hand-maintained estimate) | **~98%** of tracked families in `docs/PCRE2_COMPATIBILITY_MATRIX.md` |
 | Host integration layers | **6 of 6** shipped (Data, Callbacks, Steering, Events, Async, File) |
 | Public API stability | Pre-release — API surface settled but not tagged 1.0 |
-| Test count | **~633** tests on default paths (unit, integration, adversarial, stress, parity, smoke, CLI) |
+| Test count | **1,200+** `rgx-core` lib tests plus cli / capi / integration / property / fuzz / parity / smoke suites; the `run-local-ci.sh` gate is the source of truth (exact counts drift per commit) |
 | Property test cases | **11 properties × 256+ cases** per run |
 | Fuzz targets | **4** (cargo-fuzz) |
 | Clippy errors | **Zero** on RGX-owned code |
 | PGEN dependency | Pinned to **1.1.81** (contract 1.1.83), commit `db6f8c68`, via `subs/pgen` submodule |
 | Crates.io publication | **Not yet** — pending public release prep |
 
-The parity number is worth elaborating. "98%" is a rough hand-maintained estimate of tracked feature families in `docs/PCRE2_COMPATIBILITY_MATRIX.md`. The remaining 2% is concentrated in a handful of low-priority edge cases plus the performance story (JIT). The matrix has individual line items for every feature — if you want the details, read the matrix directly.
+Two different numbers, do not conflate them. The **conformance count (12,806 / 4 / 0 / 0)** is measured and gate-enforced — CI fails if it regresses; the 4 failures are individually adjudicated, by-design residuals (see [PCRE2 Conformance Residual](./pcre2-conformance-residual.md)), *not* JIT-related. The **"~98% feature-family parity"** is a separate, rough, hand-maintained estimate over the families in `docs/PCRE2_COMPATIBILITY_MATRIX.md`; the missing ~2% is low-priority edge cases. JIT is a *performance* difference, not a conformance or feature gap. If you want the details, read the matrix directly.
 
 ## What's actually shipped
 
@@ -55,7 +55,7 @@ These are the remaining items, grouped by priority.
 
 **C1 — JIT compilation.** ✅ Shipped. The C1 production cutover landed a Cranelift-based JIT that translates RGX bytecode into native machine code for the JIT-eligible subset (literals, char classes, anchors, word boundaries, all six optimized quantifiers, capture groups 1..=16, runtime safety limits). The JIT'd function is called via a stable C ABI signature; the engine layer dispatches to it as the third tier in the 4-tier `DFA → Pike-VM → JIT → backtracking VM` chain. The `jit` Cargo feature is now default-on; users who don't want Cranelift in their dependency tree can opt out via `default-features = false`. See [The JIT Compiler](./jit-compiler.md) for the design.
 
-**C2 — NFA/DFA hybrid.** ✅ Shipped. The C2 production cutover landed the full sparse-set Pike-VM, lazy DFA cache, byte-class equivalence partitioning, two-pass capture recovery, and a 3-tier dispatch chain (DFA → Pike-VM → existing backtracking VM) that automatically routes each pattern through the engine that handles it best. Patterns the DFA can handle now run **~1.9x faster than PCRE2**; pure-literal patterns **~3.2x faster than PCRE2**; pathological backtracking patterns gain the O(nm) Pike-VM bound. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the design.
+**C2 — NFA/DFA hybrid.** ✅ Shipped. The C2 production cutover landed the full sparse-set Pike-VM, lazy DFA cache, byte-class equivalence partitioning, two-pass capture recovery, and a 3-tier dispatch chain (DFA → Pike-VM → existing backtracking VM) that automatically routes each pattern through the engine that handles it best. In the dated `c2-step8-final` benchmark capture, DFA-eligible patterns ran **~1.9x faster than PCRE2** and pure-literal patterns **~3.2x faster** (these are pre-TDFA and stale — see the freshness caveat in [Performance](./performance.md)); pathological backtracking patterns gain the O(nm) Pike-VM bound regardless. See [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the design.
 
 ### Tier 3: Parity edge cases
 

@@ -151,7 +151,7 @@ A few rules apply everywhere in the codebase, and the test suite is built to enf
 3. **Declared capabilities do not count until they ship end-to-end.** An opcode that exists in `vm.rs` but is never emitted by the compiler does not mean the feature works. The capability matrix tracks what actually runs through the pipeline, not what has been scaffolded.
 4. **Documentation follows verified behavior, not aspiration.** If a chapter in this book claims something works, the corresponding test exists.
 
-These rules sound bureaucratic. In practice they are the reason RGX can claim ~98% PCRE2 parity with a straight face: everything in that number has a test proving it.
+These rules sound bureaucratic. In practice they are the reason the headline correctness number is a gate-enforced fact, not a slogan: RGX runs PCRE2 10.47's `testdata` at 12,806 / 4 / 0 / 0, and CI fails if that ratchet regresses. (The "~98% feature-family parity" figure quoted elsewhere is a separate, explicitly hand-maintained estimate — the conformance count is the measured one.)
 
 ## What to read next
 

@@ -1,6 +1,6 @@
 # PCRE2 Compatibility
 
-rgx targets **98% parity** with PCRE2's feature set. If you're migrating from PCRE2-based tools (grep -P, PHP, Perl), most patterns will work unchanged.
+rgx runs PCRE2 10.47's `testdata` corpus at **12,806 / 4 / 0 / 0** (pass / fail / panic / skip) — a gate-enforced number, not an estimate. The 4 residuals are individually documented and by-design (see [PCRE2 Conformance Residual](../internals/pcre2-conformance-residual.md)). Separately, a hand-maintained feature-area matrix (`docs/PCRE2_COMPATIBILITY_MATRIX.md`) tracks parity at roughly 98% of feature families — that figure is an estimate, the conformance count above is the measured fact. If you're migrating from PCRE2-based tools (`grep -P`, PHP, Perl), most patterns will work unchanged.
 
 ## What works
 
@@ -30,7 +30,7 @@ The following PCRE2 features are fully supported:
 |---------|--------|-------|
 | JIT compilation | Not implemented | rgx uses its own VM with SIMD acceleration instead |
 
-PCRE2's JIT compiler translates regex bytecode to native machine code for frequently-used patterns. rgx takes a different performance approach: a custom VM with SIMD-accelerated scanning, cache-friendly data structures, and graduated execution modes. In benchmarks, rgx is competitive with PCRE2-JIT for most patterns and faster for patterns that benefit from SIMD literal scanning.
+PCRE2's JIT compiler translates regex bytecode to native machine code. rgx takes a different approach: a custom VM with SIMD-accelerated literal scanning, a lazy DFA, a tagged DFA for captures, and an optional Cranelift JIT. The honest performance picture is workload-dependent and is *not* a blanket "competitive with PCRE2-JIT" claim: rgx is faster than PCRE2 on literal-prefix and capture-heavy `find_all` workloads, slower on word-boundary patterns, and materially slower on first-time *compile* (the parser is the dominant cost). See [Performance](../internals/performance.md) for the measured per-pattern table and [Performance Measurement Methodology](../internals/measurement-methodology.md) for how it is measured and the freshness caveats.
 
 ## Engine model: rgx is Unicode-only
 
@@ -91,4 +91,4 @@ Key differences:
 
 ## Feature parity tracking
 
-The full PCRE2 compatibility matrix is maintained in the project repository. As of the current release, 98% of PCRE2's test suite passes with rgx. The remaining 2% consists of the JIT-specific behavior noted above.
+The full PCRE2 compatibility matrix is maintained in the project repository (`docs/PCRE2_COMPATIBILITY_MATRIX.md`). The measured fact is the conformance ratchet: **12,806 pass / 4 fail / 0 panic / 0 skip** against PCRE2 10.47's `testdata`. The 4 failures are *not* "JIT-specific behavior" — they are a small set of individually-adjudicated, by-design residuals (e.g. RGX being Unicode/code-point-only where an 8-bit-non-UTF PCRE2 build differs). Each one is enumerated with its rationale in [PCRE2 Conformance Residual](../internals/pcre2-conformance-residual.md). JIT is a *performance* difference, not a conformance gap.

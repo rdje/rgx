@@ -1,12 +1,25 @@
 # Performance
 
-RGX is fast. It is competitive with PCRE2 and Rust's `regex` crate on a wide range of patterns, and on several benchmarks it is actually faster than PCRE2. The honest summary: RGX is fast **enough** to be practical, sometimes the fastest, sometimes second.
+RGX's match speed is **workload-dependent**. It is faster than PCRE2 on literal-prefix and capture-heavy `find_all` workloads and slower on word-boundary patterns. It has not been benchmarked head-to-head against Rust's `regex` crate, so no claim is made there. There is no single "RGX is N× faster" number — anyone quoting one without naming the operation, input size, and build is selling, not measuring.
 
 This chapter is about what "fast enough" means, how we measured it, and what we did (and did not do) to get here.
 
 ## Honest numbers
 
-Here is where RGX sits against PCRE2 on the current benchmark suite (after the C2 NFA/DFA hybrid and C1 JIT production cutovers), measured by `rgx-bench` against PCRE2 10.x:
+> **Freshness caveat — read this before quoting the table.** The numbers
+> below are from one dated `rgx-bench` capture (the `c2-step8-final`
+> label, pre-TDFA). They are **stale and partially superseded**: the
+> tagged-DFA work shipped *after* this capture and made
+> `find_all`/`capture_groups` materially faster than the "~1.9× faster"
+> shown here — the post-TDFA measurement is `12 ns` vs PCRE2's `561 ns`
+> (`find_all/capture_groups`) in [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md).
+> A clean, current re-measure on an idle machine is outstanding
+> (tracked) and a contaminated attempt was discarded — see
+> [Performance Measurement Methodology](./measurement-methodology.md#known-failure-mode-load-contamination).
+> Treat the table as **directional, not current**: faster on literal
+> and capture workloads, slower on word-boundary (`email`) patterns.
+
+Where RGX sat against PCRE2 in the `c2-step8-final` capture, measured by `rgx-bench` against PCRE2 10.x:
 
 | Benchmark | RGX vs PCRE2 | Interpretation |
 |-----------|--------------|----------------|
@@ -20,7 +33,7 @@ Here is where RGX sits against PCRE2 on the current benchmark suite (after the C
 
 These are **wins** in most cases. On patterns with strong literal content the memmem fast path is so effective that RGX outruns PCRE2 by several times. On patterns the C2 lazy DFA can handle (no zero-width assertions, no lazy quantifiers), the dispatch chain delivers another factor-of-two over PCRE2 — see [The NFA/DFA Hybrid Engine](./nfa-dfa-engine.md) for the dispatch design. On patterns the JIT can handle but C2 can't (anchors, word boundaries, lazy quantifiers), the C1 JIT delivers a constant-factor speedup over the existing VM — see [The JIT Compiler](./jit-compiler.md) for the codegen design.
 
-Older versions of this chapter would have shown a very different story. Before the optimizations described below, RGX was roughly **50-70x slower** than PCRE2 on the same suite. The path from "50x slower" to "3x faster" is the subject of the rest of this chapter, and the most recent stretch of that path is the C2 production cutover described in the dedicated chapter.
+Older versions of this chapter would have shown a very different story. Before the optimizations described below, RGX was roughly **50-70x slower** than PCRE2 on the same suite. The path from "50x slower across the board" to "faster than PCRE2 on literal and capture workloads, slower on word-boundary patterns" is the subject of the rest of this chapter, and the most recent stretch of that path is the C2 production cutover described in the dedicated chapter.
 
 ## Methodology: rgx-bench
 

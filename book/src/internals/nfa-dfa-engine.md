@@ -208,7 +208,7 @@ Both C2 dispatch loops use a shared `PrefixScanner` to skip non-candidate scan p
 | `CharClass(id)` | tight scalar loop calling the program's class table |
 | `None` | identity (every position is a candidate) |
 
-The scanner is the reason `(\d{4})-(\d{2})-(\d{2})` running through the DFA dispatch is **31x faster than the pre-C2 baseline** and **1.9x faster than PCRE2** — the DFA simulator only runs at byte positions that begin with a digit, instead of every position.
+The scanner is the reason `(\d{4})-(\d{2})-(\d{2})` running through the DFA dispatch is **31x faster than the pre-C2 baseline** and, in the dated `c2-step8-final` capture, **1.9x faster than PCRE2** — the DFA simulator only runs at byte positions that begin with a digit, instead of every position. (That 1.9× is pre-TDFA and stale; post-TDFA the same pattern's `find_all` is much faster — see [Measured impact](#measured-impact) and the freshness caveat in [Performance](./performance.md).)
 
 ## Differential testing
 

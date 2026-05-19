@@ -9,7 +9,7 @@ rgx does everything a traditional regex engine does: find patterns, extract capt
 - **Rust developers** who need regex and want an API that feels native
 - **Systems programmers** who need safety limits, byte-level matching, or file watching
 - **Application developers** who want programmable patterns with embedded Lua, JavaScript, or Rhai
-- **Anyone migrating from PCRE2** — rgx covers 98% of PCRE2's feature set
+- **Anyone migrating from PCRE2** — rgx runs PCRE2 10.47's `testdata` corpus at 12,806 / 4 / 0 / 0 (pass / fail / panic / skip); the 4 residuals are documented and by-design (see [PCRE2 Compatibility](./appendices/pcre2-compatibility.md))
 
 ## How this book is organized
 

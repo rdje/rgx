@@ -1,6 +1,11 @@
 # Beyond regex: what rgx adds
 
-Most users come to rgx looking for a regex engine. rgx is one — a fast, PCRE2-compatible engine with a Pike-VM, an NFA/DFA hybrid, a tagged DFA for captures, and (optionally) a JIT. The benchmarks tell that story: rgx matches or beats PCRE2 on every pattern in the headline bench corpus, and on capture-heavy patterns it's 47× faster.
+Most users come to rgx looking for a regex engine. rgx is one — a PCRE2-compatible engine with a Pike-VM, an NFA/DFA hybrid, a tagged DFA for captures, and (optionally) a JIT. Two verifiable facts, not slogans:
+
+- **Correctness:** rgx runs PCRE2 10.47's `testdata` corpus at **12,806 / 4 / 0 / 0** (pass / fail / panic / skip). The 4 residuals are individually documented and by-design — see [PCRE2 Conformance Residual](./internals/pcre2-conformance-residual.md).
+- **Speed is workload-dependent, not one number.** rgx is *faster* than PCRE2 on literal-prefix and capture-heavy `find_all` workloads and *slower* on word-boundary patterns such as `\b\w+@\w+\.\w+\b`. The measured per-pattern table, the methodology, and the known-stale caveats live in [Performance](./internals/performance.md) and [Performance Measurement Methodology](./internals/measurement-methodology.md). Any "rgx is N× faster" claim without a named operation, input size, and build is marketing, not a measurement.
+
+Speed is not the reason to choose rgx over your language's PCRE2 binding. The reason is everything below.
 
 But "fast regex engine" undersells what rgx actually is. rgx is a **programmable text-processing platform** that uses PCRE2 syntax as its surface. The regex is the access point; the engine underneath can run code, steer its own behavior, stream events, watch files, and return computed values — all driven by syntax that fits inside a regex literal.
 
