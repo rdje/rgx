@@ -3387,15 +3387,24 @@ fn run_full_conformance() {
     //     :4674): CLOSED (rel 1.1.80, FIX2.1+.2+.3) — both cases now
     //     correctly REJECT; the rel-1.1.78 class-context over-reject
     //     was fixed by FIX2.1. (+2 vs the interim 12,805/5.)
-    //   • PGEN-RGX-0088 (NEW, OPEN, distinct from 0087): FIX2.3's
-    //     bare-octal `>\377` overflow reject is grammar-only and
-    //     UNCONDITIONAL, so it over-rejects octal valid under UTF mode
-    //     (`/\777/I,utf` = U+01FF — PCRE2 accepts). Sole new failure:
-    //     testinput10:218 (−1). NOT an RGX bug / no workaround
-    //     (feedback_no_pgen_workarounds); tracked
-    //     pgen-issues/PGEN-RGX-0088.yaml. Net vs the interim 12,805/5
-    //     is +1/−1 = a genuine improvement; restores toward 12,807/3
-    //     when PGEN ships the 0088 (UTF-mode octal) fix.
+    //   • PGEN-RGX-0088: CLOSED (PGEN rel 1.1.81 / `db6f8c68`,
+    //     2026-05-19) — FIX2.3's blanket octal-`>\377` parse-reject was
+    //     reverted to mode-agnostic octal-atom emission. testinput10:218
+    //     `/\777/I,utf` CLOSED. Count stays 12,806/4 (NOT a rebaseline):
+    //     adopting it re-exposes `testinput9:287 /(?i:A{1,}\6666666666)/`
+    //     ("RGX too permissive") — a 1↔1 swap. That residual is a
+    //     PERMANENT, by-design RGX-Unicode-vs-PCRE2-8-bit-library
+    //     divergence (testinput9 is `# 8-bit library`, `#forbid_utf`;
+    //     `\666`=0o666=438>255 errors only in 8-bit; RGX is a
+    //     Unicode/codepoint engine with no 8-bit mode, so `\666`=U+01B6
+    //     is the correct PCRE2-`,utf`-faithful behaviour). NOT a 0088
+    //     reopen, NOT a PGEN bug (mode-agnostic emission is the
+    //     prescribed-correct fix), NOT an RGX defect. Thoroughly
+    //     documented in book/src/internals/pcre2-conformance-residual.md
+    //     + appendices/pcre2-compatibility.md.
+    // Current 4 residuals: testinput2:6592/6595/6601 (#59 cross-subexpr
+    // alt-frame promotion, RGX engine-side) + testinput9:287 (the
+    // 8-bit/Unicode octal divergence above).
     const PASS_BASELINE: usize = 12_806;
     const FAIL_BASELINE: usize = 4;
     const PANIC_BASELINE: usize = 0;

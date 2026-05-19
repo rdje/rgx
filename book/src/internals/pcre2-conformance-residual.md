@@ -19,6 +19,9 @@ The harness sorts the 107 failures into **5 buckets**. Each bucket is a differen
 | [**3. false positive**](#bucket-3--false-positives-6-cases) | 4 | PCRE2 says no match; RGX matches | Cluster 3A SKIP-in-failing-lookbehind. Per-case targeted analysis. |
 | [**4. other (substitute-mode output)**](#bucket-4--substitute-mode-output-divergence-5-cases) | 3 | `/replace=TEMPLATE` tests where `replace_all` output disagrees | Substitute family — needs Replacer-trait fallible refactor + harness `Expected::SubstituteFailure` split. |
 | [**5. RGX too permissive**](#bucket-5--rgx-too-permissive-4-cases) | 4 | PCRE2 rejects at compile; RGX accepts | Substitute family — same Replacer rework. See Bucket 5 §below for per-case empirical analysis. |
+| [**6. by-design engine-model divergence**](#bucket-6--by-design-engine-model-divergences-permanent-not-defects-not-fixable-without-a-non-feature) | (post-snapshot) | RGX(Unicode) vs PCRE2(8-bit-library) — *permanent, won't-fix, not a defect* | **Do not "fix".** Cluster 6A = octal `>0o377` (`testinput9:287`); see Bucket 6 §below for the full rationale. |
+
+> **Snapshot note (2026-05-19).** The counts in the table above are the frozen **2026-05-07** snapshot (107 failures). The *current* ratchet is **`PASS_BASELINE = 12_806 / FAIL_BASELINE = 4`** (`rgx-core/tests/pcre2_conformance.rs`). Of those 4 live residuals: `testinput2:6592/6595/6601` (Cluster 1/2 subroutine-stack family, RGX engine-side) and **`testinput9:287` (Bucket 6, Cluster 6A — the permanent RGX-Unicode-vs-PCRE2-8-bit octal divergence, NOT a defect)**. The PGEN octal-vs-backref cluster (PGEN-RGX-0084/0085/0086/0087/0088) is fully resolved; 6A is the prescribed, expected consequence of PGEN-RGX-0088's correct mode-agnostic-emission fix.
 
 **The dominant remaining family is subroutine-stack reification** (BACKLOG C8.3.1). It closes ~22 cases across Buckets 1+2: Cluster 1A residual palindromes (5 FN) + Cluster 1B residual recursion (3 FN) + Cluster 1G:6450 quantified subroutine call (1 FN) + Cluster 2A balanced-bracket (4 SM) + Cluster 2E `(?0)` (2 SM) + Cluster 2G/8109 nested-bracket recursion (8 SM). Per family-fix doctrine, this is the next session's target. Multi-day work: explicit subroutine call frames preserving caller capture state, plus a "previous iteration's completed capture" read-only slot fully threaded through `Call` / `CallReturning` / recursive-pattern dispatch.
 
@@ -463,6 +466,73 @@ Same root cause as Cluster 1C (napla compile path). Expected to close alongside 
 **Status as of 2026-05-06**: analysis complete (RGX engine bugs identified per case, no PGEN involvement), but no engine commits yet — the RGX `Replacer` trait error-return refactor is the long-pole and warrants its own session. Closing this bucket honestly takes one substitute-API commit (Replacer → fallible) plus the three per-case validations plus the harness `Expected::SubstituteFailure` split. Total: ~5 small commits across one session, +3 ratchet (case 4 stays open).
 
 **No fudging policy** (2026-05-06): the previous draft of this section suggested adding a harness pass-through when `replace=` was in modifiers and `Expected::CompileError` was set. That would have hidden the RGX/PCRE2 substitute divergence, not closed it. Per CLAUDE.md and the no-PGEN-workarounds policy applied here to RGX-itself: every divergence gets analyzed and addressed engine-side, not papered over in the harness.
+
+---
+
+# Bucket 6 — by-design engine-model divergences (permanent; not defects, not fixable without a non-feature)
+
+These are **not** RGX bugs and **not** PGEN bugs. They are the irreducible
+consequence of differentially testing a **Unicode / code-point engine**
+(RGX) against PCRE2 test files written **only for PCRE2's 8-bit library**.
+They will never close without giving RGX a fake "8-bit non-UTF mode" it
+deliberately does not have — which would be a regression of RGX's design,
+not a fix. They are listed here so they are never mistaken for a
+regression and never "fixed" by accident.
+
+## Cluster 6A — octal escape `\ddd` with value `> 0o377` (1 case)
+
+| File:line | Pattern | Subject | Verdict |
+|---|---|---|---|
+| testinput9:287 | `(?i:A{1,}\6666666666)` | `A\x{1b6}6666666` | RGX accepts; PCRE2-8-bit rejects (error 151) — **by-design divergence, won't-fix** |
+
+**The two engines genuinely disagree, and both are correct for their own
+model:**
+
+- **PCRE2 here is the 8-bit library.** `testinput9`'s header is literally
+  `# This set of tests is run only with the 8-bit library. They must not
+  require UTF-8 or Unicode property support.` plus `#forbid_utf`. In an
+  8-bit, non-UTF library a character is one byte (0–255). A bare octal
+  escape that exceeds `\377` (= 0o377 = 255) therefore *cannot* denote a
+  character, so `pcre2_compile` raises **error 151, "octal value is
+  greater than \377 in 8-bit non-UTF-8 mode"**. `\666` = 0o666 = 438 >
+  255 ⇒ reject. This is correct **for an 8-bit engine**.
+
+- **RGX is a Unicode / code-point engine, by design.** It has no 8-bit
+  non-UTF mode (the same way PCRE2 *with* `,utf`, or the PCRE2 16-/32-bit
+  libraries, have none). For RGX every octal escape up to the Unicode
+  scalar maximum is a valid character: `\666` = the code point U+01B6,
+  and PCRE2 reads at most three octal digits, so `\6666666666` is U+01B6
+  followed by the literal text `6666666`. RGX accepting this is the
+  **PCRE2-`,utf`-faithful** behaviour — `pcre2test 10.47` under `,utf`
+  *also* accepts `\6666666666` (see `testinput10`). RGX is matching the
+  Unicode oracle, exactly as it should.
+
+So on the *same* input, "accept" (RGX / PCRE2-UTF / PCRE2-16-/32-bit) and
+"reject" (PCRE2-8-bit-non-UTF) are *both* spec-correct — for different
+engine models. RGX picked the Unicode model deliberately and globally;
+this single corpus line happens to assert the 8-bit model. There is no
+"right" answer that satisfies both, and adding an 8-bit-overflow mode to
+RGX purely to match an 8-bit-only test file would be a deliberate
+de-featuring of a Unicode engine.
+
+**Why this is the parser-correct locus too.** PGEN parses
+mode-agnostically (it never sees `utf` / width). `PGEN-RGX-0087-FIX2.3`
+briefly made the octal-`>0o377` boundary a *parse-time* hard-reject;
+that was filed as `PGEN-RGX-0088` and PGEN reverted it (rel 1.1.81,
+`db6f8c68`) back to **mode-agnostic octal-atom emission** — precisely
+because a mode-agnostic grammar must not make a mode-dependent range
+decision. PGEN-RGX-0088 is **CLOSED and correct**; this residual is the
+*expected, prescribed* consequence of that correct fix, surfacing only
+because the differential corpus includes PCRE2's 8-bit-only file.
+
+**Status: permanent, won't-fix, not counted as a defect.** It is one of
+the 4 ratcheted residuals (`PASS_BASELINE = 12_806 / FAIL_BASELINE = 4`)
+purely because the differential harness runs PCRE2's 8-bit `testinput9`
+against a Unicode engine; it is *not* an open work item. If a future RGX
+ever grows an explicit opt-in 8-bit/byte mode (no such feature is
+planned), this would close for free under that mode. Cross-ref:
+`pgen-issues/PGEN-RGX-0088.yaml`, `appendices/pcre2-compatibility.md`
+("Engine model: RGX is Unicode-only").
 
 ---
 

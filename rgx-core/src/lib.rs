@@ -5509,6 +5509,49 @@ mod tests {
         );
     }
 
+    // PGEN-RGX-0088 (CLOSED — PGEN rel 1.1.81 / contract 1.1.83, commit
+    // db6f8c68): a bare octal escape `>0o377` is mode-dependent. PGEN's
+    // 0087-FIX2.3 made it an unconditional parse-time hard-reject, which
+    // is PCRE2-faithful only for the 8-bit non-UTF library; under
+    // UTF / 16-/32-bit it is a valid codepoint. The fix reverts to
+    // mode-agnostic octal-atom emission (the parser must not make a
+    // mode-dependent decision). RGX is a Unicode/code-point engine, so
+    // an octal escape up to U+10FFFF is a valid character — this is the
+    // correct, PCRE2-`,utf`-faithful behaviour (it is exactly why
+    // PCRE2's 8-bit-only `testinput9:287` `\6666666666` is a permanent
+    // RGX-Unicode-vs-PCRE2-8-bit-library residual, not a defect).
+    #[test]
+    fn octal_escape_over_0o377_is_a_codepoint_not_a_parse_reject() {
+        // `\777` = 0o777 = U+01FF — a valid codepoint for a Unicode
+        // engine; must compile and match U+01FF (PGEN-RGX-0088).
+        let r = Regex::compile(r"\777").expect("\\777 must compile (octal U+01FF)");
+        assert!(r.is_match("\u{1ff}"), "\\777 should match U+01FF");
+        assert!(
+            !r.is_match("777"),
+            "\\777 is the octal codepoint, not literal \"777\""
+        );
+
+        // 3 octal digits + trailing literals (PCRE2 reads at most 3):
+        // `\6666666666` = 0o666 (U+01B6) then literal "6666666". Octal
+        // overflow is NOT a parse error in a Unicode engine.
+        let r = Regex::compile(r"\6666666666")
+            .expect("\\6666666666 must compile (octal \\666=U+01B6 + literal \"6666666\")");
+        assert!(r.is_match("\u{1b6}6666666"));
+
+        // In-class octal `>0o377` likewise accepts (mode-agnostic).
+        assert!(Regex::compile(r"[\666\777]").is_ok());
+
+        // Boundary + the 0087 family stay correct (FIX2.3-independent).
+        assert!(
+            Regex::compile(r"\377").is_ok(),
+            "\\377 (= 0o377 boundary) accepts"
+        );
+        assert!(
+            Regex::compile(r"\89").is_err(),
+            "\\89 still rejects (PGEN-RGX-0087)"
+        );
+    }
+
     #[test]
     fn parser_nine_digit_backref_becomes_octal_triplet_plus_literal() {
         // Regression for PCRE2 testinput1:6539 (`/\214748364/`).

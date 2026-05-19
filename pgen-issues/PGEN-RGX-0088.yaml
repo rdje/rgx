@@ -15,7 +15,7 @@ summary: |
   mode-agnostic (it does not see `utf` / 8-bit / 16-/32-bit at parse
   time), so FIX2.3's unconditional `>0o377` hard-reject is OVER-BROAD:
   it rejects `\777`-class octal escapes that PCRE2 accepts under UTF.
-status: open
+status: closed
 opened_at: 2026-05-19T00:00:00Z
 first_seen_at: 2026-05-19T00:00:00Z
 last_updated_at: 2026-05-19T00:00:00Z
@@ -68,15 +68,47 @@ conformance_impact: |
   path); the residual −1 is this report. No RGX workaround
   (feedback_no_pgen_workarounds).
 resolution:
-  status: unresolved
-  fixed_in_rgx_commit: null
-  verified_at: null
+  status: resolved
+  fixed_in_pgen_release: "1.1.81"   # contract 1.1.83
+  fixed_in_pgen_commit: db6f8c68    # "RGX-0088.1+.2: scoped revert of
+                                    # FIX2.3's mode-blind octal->0o377
+                                    # parse-reject; PGEN-RGX-0088 RESOLVED"
+  verified_at: 2026-05-19T00:00:00Z
+  verified_by: RGX (PCRE2 differential conformance on subs/pgen db6f8c68)
   verification_notes: |
-    1. Bump subs/pgen to a release where octal `>0o377` is no longer
-       an unconditional parse-time hard-reject (mode-deferred, or the
-       octal atom is emitted for the consumer to range-check by width).
-    2. Probe: `\777`, `(?u)\777`, `\400` ACCEPT; `\377` still ACCEPT;
-       8-bit-non-UTF overflow still rejects per PCRE2.
-    3. Re-run `cargo test -p rgx-core --test pcre2_conformance --
-       --ignored`; confirm testinput10:218 closes and bump
-       PASS_BASELINE/FAIL_BASELINE toward 12,807/3 in the same commit.
+    CLOSED. PGEN rel 1.1.81 reverts exactly FIX2.3's two grammar
+    edits: octal `>0o377` is no longer an unconditional parse-time
+    reject — PGEN emits the octal atom mode-agnostically (the
+    report-prescribed resolution; a mode-agnostic grammar must not
+    make a mode-dependent range decision). Verified on db6f8c68:
+      - `\777` ACCEPT, matches U+01FF; `\400`/`\666`/`\6666666666`/
+        `[\666]`/`[\777]` ACCEPT (octal atom). `\377`/`[\377]`/`\012`
+        byte-identical accept.
+      - 0087 family byte-identical / FIX2.3-independent: `\81`@8g /
+        `\89` / `\80` REJECT; `[\8]`/`[\9]`/`^[A\8B\9C]+$`/`[\88]`
+        ACCEPT; `\199`→\x01+"99"; `\10`@9g / `\8`@8g unchanged.
+      - PCRE2 differential: the originally-reported defect
+        `testinput10:218 /\777/I,utf` is CLOSED (RGX now accepts
+        \777=U+01FF, matching PCRE2 `,utf`). Ratchet unchanged
+        12,806 / 4 (gate green, no rebaseline).
+    Regression test added:
+    `rgx-core/src/lib.rs::tests::octal_escape_over_0o377_is_a_codepoint_not_a_parse_reject`.
+  not_a_reopen_and_not_a_new_bug: |
+    Closing this re-exposes `testinput9:287 /(?i:A{1,}\6666666666)/`
+    as "RGX too permissive" (PCRE2 rejects, RGX accepts) — the swap
+    that keeps the ratchet at 12,806/4 (testinput10:218 −1,
+    testinput9:287 +1). This is **NOT** a 0088 reopen, **NOT** a
+    PGEN bug, and **NOT** an RGX defect:
+      - `testinput9` is PGEN/PCRE2's **8-bit-library-only** testfile
+        (`# run only with the 8-bit library`, `#forbid_utf`). There,
+        `\666` = 0o666 = 438 > 255 ⇒ PCRE2 error 151.
+      - RGX is a Unicode / code-point engine *by design* (no 8-bit
+        non-UTF mode); `\666` is the valid codepoint U+01B6. RGX
+        accepting `\666`+literals is the PCRE2-`,utf`-faithful
+        behaviour — exactly what PGEN-RGX-0088 made correct.
+      - It is a permanent, expected RGX-Unicode-vs-PCRE2-8-bit
+        differential residual (a Unicode engine cannot match an
+        8-bit-overflow rejection without modelling an 8-bit mode it
+        does not have, by design). Catalogued as a known residual;
+        no PGEN report (PGEN's mode-agnostic emission is correct per
+        this very report's prescribed resolution), no RGX fix.
