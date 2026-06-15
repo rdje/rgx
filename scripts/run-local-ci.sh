@@ -92,6 +92,14 @@ run_step "cargo test -p rgx-core --features javascript" cargo test --manifest-pa
 run_step "cargo test -p rgx-core --features rhai" cargo test --manifest-path Cargo.toml -p rgx-core --features rhai
 run_step "cargo test -p rgx-core --features wasm" cargo test --manifest-path Cargo.toml -p rgx-core --features wasm
 run_step "cargo check -p rgx-core --features all-languages" cargo check --manifest-path Cargo.toml -p rgx-core --features all-languages
+
+# The pgen-free reference build (`--no-default-features`) is a supported config
+# (the recursive-descent `parser.rs` reference backend). Keep it COMPILING so it
+# cannot silently bit-rot — this guards the family of failures reported by
+# downstream consumers in BUILD-FLOW (CharRange feature-gate, non-exhaustive
+# match, invalid `_` value expressions). No PGEN bootstrap needed for this path.
+run_step "cargo check -p rgx-core --no-default-features (pgen-free reference build)" cargo check --manifest-path Cargo.toml -p rgx-core --no-default-features
+
 run_step "cargo test -p rgx-cli --features all-languages" cargo test --manifest-path Cargo.toml -p rgx-cli --features all-languages
 
 run_step "cargo clippy --workspace --all-targets" cargo clippy --manifest-path Cargo.toml --workspace --all-targets

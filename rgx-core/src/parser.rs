@@ -114,6 +114,21 @@ impl<'a> Parser<'a> {
             Regex::Recursion { .. } => "Recursion",
             Regex::FlagGroup { .. } => "FlagGroup",
             Regex::WhitespaceLiteral(_) => "WhitespaceLiteral",
+            // PGEN-path AST nodes — never produced by this recursive-descent
+            // reference parser, but listed so the match stays exhaustive in the
+            // `--no-default-features` build (where this module is compiled).
+            Regex::RelativeBackreference(_) => "RelativeBackreference",
+            Regex::ReturnedCaptureSubroutine { .. } => "ReturnedCaptureSubroutine",
+            Regex::Callout(_) => "Callout",
+            Regex::MatchReset => "MatchReset",
+            Regex::NewlineSequence => "NewlineSequence",
+            Regex::GraphemeCluster => "GraphemeCluster",
+            Regex::Accept => "Accept",
+            Regex::Commit => "Commit",
+            Regex::Prune => "Prune",
+            Regex::Skip(_) => "Skip",
+            Regex::Then => "Then",
+            Regex::Mark(_) => "Mark",
         };
         trace_exit!("parser", "Parser::regex_kind", "ok=true,kind={}", kind);
         kind
@@ -553,7 +568,10 @@ impl<'a> Parser<'a> {
                 Ok(Regex::CharClass(CharClass::Custom {
                     ranges,
                     negated,
-                    ci_override_ranges: _,
+                    // The recursive-descent reference parser does not compute
+                    // case-insensitive override ranges (a PGEN-path / engine
+                    // concern); `_` here was an invalid value expression.
+                    ci_override_ranges: None,
                 }))
             }
             Some(Token::UnicodeClass { name }) => {

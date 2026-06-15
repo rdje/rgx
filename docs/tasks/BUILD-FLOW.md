@@ -52,11 +52,11 @@ pgen-free reference build has bit-rotted: 36 compile errors).
   Commit: `see Commit Log (leaf BUILD-FLOW.1)`
 
 - ID: `BUILD-FLOW.2`
-  Status: `pending`
+  Status: `done`
   Goal: `Path B — fix the --no-default-features (pgen-free reference) build: B1 CharRange feature-gate (import gated on pgen-parser but posix_class_ranges() uses it unconditionally — parsing.rs:7293), B2 non-exhaustive ast::Regex match in the recursive-descent parser (parser.rs), B3 any residual edition/_ / unreachable issues surfaced once B1/B2 clear.`
   Acceptance: `cargo build -p rgx-core --no-default-features compiles with 0 errors; default build unchanged; full run-local-ci.sh green + PCRE2 conformance ratchet held (parsing-touching). GATE-AFFECTING.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `B1: moved CharRange to an UNGATED import in parsing.rs (it's a plain AST type used by ungated posix-class helpers; the default/PGEN build is semantically unchanged). B2: added the 12 missing PGEN-path variants to parser.rs::regex_kind (RelativeBackreference/ReturnedCaptureSubroutine/Callout/MatchReset/NewlineSequence/GraphemeCluster/Accept/Commit/Prune/Skip/Then/Mark) — explicit arms, no wildcard masking; parser.rs only compiles in the no-default build. B3: parser.rs ci_override_ranges: _ → None (the `_` was an invalid value expression; the reference parser computes no CI-override ranges). 36 → 0 errors. Default build still compiles unchanged. Added a durable guard: run-local-ci.sh now runs `cargo check -p rgx-core --no-default-features` so this family can't bit-rot again. **Full RGX_RUN_CONFORMANCE=1 run-local-ci.sh GREEN — the no-default-features check passed and pcre2_full_testdata_conformance ... ok (ratchet held 12,806/4); receipt matches tree.** GATE-AFFECTING.`
+  Commit: `see Commit Log (leaf BUILD-FLOW.2)`
 
 - ID: `BUILD-FLOW.3`
   Status: `pending`
@@ -69,10 +69,9 @@ pgen-free reference build has bit-rotted: 36 compile errors).
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `BUILD-FLOW.2` | `pending` | Restore the pgen-free reference build (real bit-rot, 36 errors); gate-affecting. |
-| 2 | `BUILD-FLOW.3` | `pending` | Verify + card + downstream response + close. |
+| 1 | `BUILD-FLOW.3` | `pending` | Verify end-to-end + KM card + downstream response + close. |
 
-(`.1` completed 2026-06-15 — root Makefile (`make`) hides the PGEN bootstrap; README documents it for direct + submodule-consumer use.)
+(`.1`/`.2` completed 2026-06-15 — `make` build entrypoint (Path A); pgen-free `--no-default-features` build restored 36→0 errors + a CI guard against recurrence (Path B), full gate + conformance GREEN.)
 
 ## Decisions
 
@@ -104,12 +103,14 @@ pgen-free reference build has bit-rotted: 36 compile errors).
 | --- | --- | --- | --- |
 | `2026-06-15` | — | reproduced Path A (report) + Path B (36 errors at HEAD, `cargo build -p rgx-core --no-default-features`) | `reproduced` |
 | `2026-06-15` | `.1` | `make help` lists targets; `make bootstrap` idempotent no-op when parser present (rc 0); README documents direct + submodule-consumer use; non-gate-affecting | `pass` |
+| `2026-06-15` | `.2` | B1/B2/B3 fixed → `--no-default-features` 36→0 errors; default build unchanged; CI guard added (`cargo check --no-default-features`); **RGX_RUN_CONFORMANCE=1 run-local-ci.sh GREEN, ratchet held 12,806/4**; GATE-AFFECTING | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
-| `.1` | `BUILD-FLOW.1 — add make build entrypoint that hides the PGEN bootstrap` | docs/tooling (root Makefile + README); not pushed unless user asks. |
+| `.1` | `BUILD-FLOW.1 — add make build entrypoint that hides the PGEN bootstrap` (`aa0297b`) | docs/tooling (root Makefile + README); not pushed unless user asks. |
+| `.2` | `BUILD-FLOW.2 — fix the --no-default-features (pgen-free) build` | gate-affecting; full gate + conformance green; not pushed unless user asks. |
 
 ## Changelog
 

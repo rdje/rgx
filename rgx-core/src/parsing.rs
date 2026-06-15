@@ -4,13 +4,15 @@
 //! parser.  All pattern text is fed through the PGEN embedding API and the
 //! resulting AST dump is converted into the rgx-internal `Regex` AST.
 
-use crate::ast::Regex;
+// `CharRange` is a plain AST type used by the POSIX-class range helpers
+// (`posix_class_ranges` / `ucp_posix_class_ranges`), which compile in both the
+// default (PGEN) build and the `--no-default-features` reference build, so its
+// import must NOT be gated on `pgen-parser`.
+use crate::ast::{CharRange, Regex};
 use crate::error::Result;
 #[cfg(feature = "pgen-parser")]
 use crate::{
-    ast::{
-        AnchorType, CharClass, CharRange, ConditionalTest, GroupKind, Quantifier, RecursionTarget,
-    },
+    ast::{AnchorType, CharClass, ConditionalTest, GroupKind, Quantifier, RecursionTarget},
     error::RgxError,
 };
 use crate::{low_log, trace_decision, trace_enter, trace_exit};
