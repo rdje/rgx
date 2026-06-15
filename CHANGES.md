@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Decompose the roadmap into task trees (leaf TASKTREE-ADOPT.2)
+- Scope: promote the 7 roadmap-derived Proposed Task Trees into real `docs/tasks/<TREE>.md` files so every open ROADMAP/BACKLOG lane is tree-owned. Docs-only.
+- Changes:
+  - Created `docs/tasks/{COMPILE-PERF-0073, RUNTIME-REMEASURE, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION, A9-BINDINGS, RELEASE-CRATESIO}.md`, each grounded in ROADMAP/BACKLOG/RUST_CODEBASE_ANALYSIS: goal, non-goals, acceptance, a real child-leaf decomposition (shipped sub-items recorded as `done (historical)`, dead-ends recorded as `deferred` with the 2026-05-13 investigation rationale), frontier, blockers with unblock conditions.
+  - `docs/TASK_TREE.md`: split the index into **Active** (TASKTREE-ADOPT, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION) and **Blocked/Deferred/Parked** (COMPILE-PERF-0073, RUNTIME-REMEASURE, A9-BINDINGS, RELEASE-CRATESIO); Proposed section emptied (all promoted).
+  - `LIVE_ACHIEVEMENT_STATUS.md`: lane→tree board now lists all 8 trees with status + frontier; latest-completed-slice updated.
+  - `docs/tasks/TASKTREE-ADOPT.md`: `.2` marked `done`; frontier → `.3`.
+- Validation: docs-only / non-gate-affecting; `mdbook build book` clean; internal links resolve.
+- Notes/impact: 3 trees are active with pickable frontiers (PERF-SOTA-GAPS.1 inner-literal prefilter; PCRE2-1047-SYNTAX.1 A12 capture-return VM; CODEBLOCK-EXPANSION.1 inline-lang ergonomics); the other 4 carry explicit re-activation conditions. Next: `TASKTREE-ADOPT.3` (retro-audit shipped work into trees).
+
 ### 2026-06-15 - Adopt repo-local task-tree tracking workflow (leaf TASKTREE-ADOPT.1)
 - Scope: user directive — adopt PGEN's repo-local task-tree tracking system in RGX (per `/Users/richarddje/Documents/github/pgen/docs/TASK_TREE_README.md`). Installation + wire-up slice; no code touched.
 - Changes:

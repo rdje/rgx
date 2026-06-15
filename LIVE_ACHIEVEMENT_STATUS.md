@@ -31,28 +31,25 @@ forward plan in `ROADMAP.md`.
 
 ## Active Lanes → Task Trees
 
+Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
+
 | Roadmap lane | Owning tree | Status | Current frontier |
 | --- | --- | --- | --- |
-| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) | `active` | `TASKTREE-ADOPT.2` — decompose the roadmap into trees |
+| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) | `active` | `TASKTREE-ADOPT.3` — retro-audit shipped work |
+| Next — SOTA algorithmic perf gaps | [`PERF-SOTA-GAPS`](docs/tasks/PERF-SOTA-GAPS.md) | `active` | `.1` — inner-literal prefilter |
+| Next — PCRE2 10.47+ syntax alignment | [`PCRE2-1047-SYNTAX`](docs/tasks/PCRE2-1047-SYNTAX.md) | `active` | `.1` — A12 capture-return VM semantics |
+| Next — code-block expansion | [`CODEBLOCK-EXPANSION`](docs/tasks/CODEBLOCK-EXPANSION.md) | `active` | `.1` — inline-language ergonomics |
+| Next — compile-time `<5×` | [`COMPILE-PERF-0073`](docs/tasks/COMPILE-PERF-0073.md) | `blocked` | PGEN-side (`PGEN-RGX-0073`) |
+| Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
+| Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
+| Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
 
-All other roadmap lanes are either shipped (recorded in `CHANGES.md` /
-`RUST_CODEBASE_ANALYSIS.md`) or captured as `Proposed Task Trees` in
-[`docs/TASK_TREE.md`](docs/TASK_TREE.md) pending decomposition by
-`TASKTREE-ADOPT.2`.
-
-## Open Lanes Not Yet Tree-Owned (captured; awaiting `TASKTREE-ADOPT.2`)
-
-| Item | Disposition | Source |
-| --- | --- | --- |
-| Compile-time gap to `<5×` PCRE2 (`PGEN-RGX-0073`) | `blocked` — PGEN-side, sole-parser design | ROADMAP "Next — perf" |
-| Runtime (match-speed) clean re-measure + Book "Honest numbers" refresh | `pending` — needs a quiescent machine (task #57) | ROADMAP "Next — perf validation" |
-| SOTA algorithmic perf gaps (inner-literal prefilter, SIMD byte-class, …) | `proposed` | ROADMAP "Next — surveyed" |
-| PCRE2 10.47+ downstream syntax alignment | `proposed` | ROADMAP "Next" |
-| Inline-language (Lua/JS/Rhai) ergonomics expansion | `proposed` | ROADMAP "Next" |
-| A9 language bindings Phases 2–7 (over shipped `rgx-capi`) | `deferred` — pending demand signal | ROADMAP "Later" |
-| crates.io publication readiness | `parked` — user is the trigger | ROADMAP "Later" / `project_release_strategy` |
+Shipped lanes remain recorded in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`;
+their retroactive mapping into trees is owned by `TASKTREE-ADOPT.3`.
 
 ## Latest Completed Slice
 
+- `2026-06-15` — `TASKTREE-ADOPT.2`: decomposed all 7 open ROADMAP/BACKLOG
+  lanes into real task trees (3 active, 2 blocked, 1 deferred, 1 parked).
 - `2026-06-15` — `TASKTREE-ADOPT.1`: installed the repo-local task-tree
   tracking workflow and wired it into RGX's live docs and the Book.

@@ -57,30 +57,37 @@ the RGX Book (`book/src/internals/contributing.md`), and the auto-memory
 
 ## Active Task Trees
 
+Trees that are open with at least one eligible (pickable) frontier leaf. PNT
+selects the first eligible leaf of the first active tree unless the user names
+another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
+
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
-| `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `active` | `TASKTREE-ADOPT.2` (decompose roadmap) | Governance / process |
+| `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `active` | `TASKTREE-ADOPT.3` (retro-audit) | Governance / process |
+| `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
+| `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
+| `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
+
+## Blocked / Deferred / Parked Task Trees
+
+Captured and tree-owned, but not PNT-eligible until their condition clears.
+
+| Tree | File | Status | Condition to re-activate |
+| --- | --- | --- | --- |
+| `COMPILE-PERF-0073` | [tasks/COMPILE-PERF-0073.md](tasks/COMPILE-PERF-0073.md) | `blocked` | PGEN ships a faster regex-grammar parser (`PGEN-RGX-0073`; sole-parser design — no RGX fix) |
+| `RUNTIME-REMEASURE` | [tasks/RUNTIME-REMEASURE.md](tasks/RUNTIME-REMEASURE.md) | `blocked` | A quiescent machine for a trustworthy benchmark capture (task #57) |
+| `A9-BINDINGS` | [tasks/A9-BINDINGS.md](tasks/A9-BINDINGS.md) | `deferred` | A real user/use-case pulling for a specific binding (Phase 0/1 shipped) |
+| `RELEASE-CRATESIO` | [tasks/RELEASE-CRATESIO.md](tasks/RELEASE-CRATESIO.md) | `parked` | Explicit user authorization (`project_release_strategy`) |
 
 ## Proposed Task Trees
 
-These are captured (so the intent survives session loss) but **not** activated.
-They are derived from the open/forward items in `ROADMAP.md` and
-`docs/BACKLOG.md`. `TASKTREE-ADOPT.2` promotes them into real tree files (or
-revises this list) when picked.
-
-| Proposed tree | Intent | Source lane | Disposition |
-| --- | --- | --- | --- |
-| `COMPILE-PERF-0073` | Track `Regex::compile` compile-time gap to PCRE2 (`<5×` target). | Next — perf | `blocked` (PGEN-side; `PGEN-RGX-0073`, sole-parser design — no RGX fix) |
-| `RUNTIME-REMEASURE` | Clean-machine runtime (match-speed) benchmark re-measure + refresh Book "Honest numbers". | Next — perf validation loop | `pending` (task #57; needs quiescent machine) |
-| `PERF-SOTA-GAPS` | SOTA algorithmic perf gaps (inner-literal prefilter, SIMD byte-class, etc.). | Next — surveyed-not-planned | `proposed` |
-| `PCRE2-1047-SYNTAX` | PCRE2 10.47+ downstream syntax alignment (returned-capture subroutine grouplists, `VERSION[...]`, wider `(?[...])`). | Next | `proposed` |
-| `CODEBLOCK-EXPANSION` | Inline-language ergonomics (Lua/JS/Rhai) before wider wasm/native ABI growth. | Next | `proposed` |
-| `A9-BINDINGS` | Language bindings Phases 2–7 over the shipped `rgx-capi` C ABI. | Later | `deferred` (pending demand signal) |
-| `RELEASE-CRATESIO` | crates.io publication readiness (rgx-core/rgx-cli + PGEN parser). | Later — public release | `parked` (per `project_release_strategy`; user is the trigger) |
+None outstanding — the 7 roadmap-derived proposals were promoted into real tree
+files by `TASKTREE-ADOPT.2` on `2026-06-15`. New proposals are added here before
+activation.
 
 ## Completed Task Trees
 
-None yet.
+None yet. (`TASKTREE-ADOPT` closes when `.3` completes.)
 
 ## Coverage Note
 

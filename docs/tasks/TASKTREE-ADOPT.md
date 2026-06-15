@@ -61,11 +61,11 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
   Commit: `see Commit Log (leaf TASKTREE-ADOPT.1)`
 
 - ID: `TASKTREE-ADOPT.2`
-  Status: `pending`
+  Status: `done`
   Goal: `Decompose the live ROADMAP / BACKLOG open lanes into task trees: promote the Proposed Task Trees in docs/TASK_TREE.md into real tree files (or revise/retire entries with reason), so every open lane is tree-owned.`
   Acceptance: `Each open roadmap/backlog lane has an owning docs/tasks/<TREE>.md (or a justified Proposed/parked/deferred entry); docs/TASK_TREE.md tables reflect reality; LIVE_ACHIEVEMENT_STATUS.md links lanes → trees.`
-  Verification: `pending — likely splits per lane on pick.`
-  Commit: `pending`
+  Verification: `7 tree files created (COMPILE-PERF-0073, RUNTIME-REMEASURE, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION, A9-BINDINGS, RELEASE-CRATESIO); docs/TASK_TREE.md Active/Blocked-Deferred-Parked tables + LIVE_ACHIEVEMENT_STATUS.md board updated; mdbook build clean; docs-only.`
+  Commit: `see Commit Log (leaf TASKTREE-ADOPT.2)`
 
 - ID: `TASKTREE-ADOPT.3`
   Status: `pending`
@@ -78,8 +78,9 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `TASKTREE-ADOPT.2` | `pending` | Decompose the roadmap so future code work has trees to be owned by. Prerequisite for PNT under the new doctrine. |
-| 2 | `TASKTREE-ADOPT.3` | `pending` | Retro-audit shipped history into trees once the forward trees exist. |
+| 1 | `TASKTREE-ADOPT.3` | `pending` | Retro-audit shipped history into trees now that the forward trees exist. Closes `TASKTREE-ADOPT`. |
+
+(`TASKTREE-ADOPT.2` completed 2026-06-15 — 7 roadmap lanes decomposed into trees.)
 
 ## Decisions
 
@@ -114,15 +115,20 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
 | Date | Leaf | Checks | Result |
 | --- | --- | --- | --- |
 | `2026-06-15` | `TASKTREE-ADOPT.1` | `mdbook build book` (clean, exit 0); docs-only / non-gate-affecting per COMMIT.md (no Rust/Cargo/CI/scripts/subs staged); staged set verified to exclude `subs/pgen`; brief cleared + untracked post-commit | `pass` |
+| `2026-06-15` | `TASKTREE-ADOPT.2` | 7 tree files created + index tables + board updated; `mdbook build book` clean; docs-only / non-gate-affecting; staged set excludes `subs/pgen` | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
-| `TASKTREE-ADOPT.1` | `Docs: adopt task-tree tracking workflow (leaf TASKTREE-ADOPT.1)` (`3fbdd73`) | Install + wire-up slice; 13 files; committed local-only, not pushed unless user asks. |
+| `TASKTREE-ADOPT.1` | `Docs: adopt task-tree tracking workflow (leaf TASKTREE-ADOPT.1)` (`d261366`) | Install + wire-up slice; 13 files; committed local-only, not pushed unless user asks. |
+| `TASKTREE-ADOPT.2` | `Docs: decompose roadmap into task trees (leaf TASKTREE-ADOPT.2)` | 7 tree files + index/board; docs-only; not pushed unless user asks. |
 
 ## Changelog
 
 - `2026-06-15`: Created task tree; `.1` install slice executed and recorded as
   `done` pending its commit; `.2` (roadmap decomposition) and `.3` (retro
   audit) placed on the frontier.
+- `2026-06-15`: `.2` completed — decomposed all 7 open ROADMAP/BACKLOG lanes
+  into real task trees (3 active, 2 blocked, 1 deferred, 1 parked); index
+  tables + `LIVE_ACHIEVEMENT_STATUS.md` board updated. Frontier → `.3`.
