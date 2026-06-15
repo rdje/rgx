@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Verify memory architecture end-to-end + close the tree (leaf MEMORY-ARCHITECTURE-DOC.5)
+- Scope: verify the adopted memory architecture end-to-end and close `MEMORY-ARCHITECTURE-DOC`. Docs-only.
+- Changes: `MEMORY-ARCHITECTURE-DOC` → `done` (all `.1`–`.5`); moved to Completed Task Trees in `docs/TASK_TREE.md` (out of Active); `LIVE_ACHIEVEMENT_STATUS.md` snapshot + governance row + latest-slice updated; `MEMORY.md` pointer overwritten (governance lane closed → next is the active code trees).
+- Validation: full `./scripts/run-local-ci.sh` was GREEN at `.4` (same gate-affecting scripts). Gates demonstrably bite: `.4` committed *through* its own newly-active hooks (pre-commit memory-arch ok + "gate receipt fresh and matching"); a live non-compliant commit subject was REJECTED by the active commit-msg hook during this slice's verification; the E2 self-check fails on a planted line-cap breach. Docs-only / non-gate-affecting.
+- Notes/impact: RGX now runs the full durable memory architecture — A (`MEMORY.md` 25-line pointer) / B (task-trees) / C (`docs/decisions/`) / D (git) — with E1 (bootstrap pointers) / E2 (self-check) / E3 (hooks) / E4 (CI) enforcement, all four hard to bypass. Both the task-tree and memory-architecture standards are now adopted + enforced.
+
 ### 2026-06-15 - Install memory-architecture enforcement E1–E4 (leaf MEMORY-ARCHITECTURE-DOC.4)
 - Scope: install the mechanical enforcement that makes the memory architecture hard to ignore. GATE-AFFECTING (scripts/CI/hooks).
 - Changes:

@@ -3,7 +3,7 @@
 ## Metadata
 
 - Tree ID: `MEMORY-ARCHITECTURE-DOC`
-- Status: `active`
+- Status: `done`
 - Roadmap lane: `Governance / process (memory durability)`
 - Created: `2026-06-15`
 - Last updated: `2026-06-15`
@@ -44,9 +44,9 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 ## Task Tree
 
 - ID: `MEMORY-ARCHITECTURE-DOC`
-  Status: `active`
+  Status: `done`
   Goal: `RGX governed by the durable memory architecture (layers A/B/C/D + E1–E4).`
-  Children: `.1` `.2` `.3` `.4` `.5`
+  Children: `.1` `.2` `.3` `.4` `.5` (all `done`)
 
 - ID: `MEMORY-ARCHITECTURE-DOC.1`
   Status: `done`
@@ -77,21 +77,21 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
   Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.4)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.5`
-  Status: `pending`
+  Status: `done`
   Goal: `Verify end-to-end (full run-local-ci.sh green incl. memory-arch check; prove the gates bite) + sync live docs (CHANGES/LIVE_ACHIEVEMENT_STATUS/TASK_TREE) + close the tree.`
   Acceptance: `Full gate green by receipt+banner; demonstrated hook rejection/acceptance; live docs synced; tree → done/Completed.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `Full run-local-ci.sh GREEN at .4 (same scripts). Gates demonstrably bite: E2 planted-breach RC1; .4 committed THROUGH the active hooks (pre-commit memory-arch ok + "gate receipt fresh and matching"); a live bad-subject commit attempt was REJECTED by the active commit-msg hook before the real .5 commit. Live docs synced (TASK_TREE Completed table; LIVE_ACHIEVEMENT_STATUS board+slice; MEMORY pointer). Tree closed.`
+  Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.5)`
 
 ## Current Frontier
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify end-to-end + sync live docs + close the tree. |
+| — | — | — | All leaves `done`. `MEMORY-ARCHITECTURE-DOC` complete → Completed Task Trees in `docs/TASK_TREE.md`. |
 
-(`.1`–`.4` completed 2026-06-15 — standard + README; layer C `docs/decisions/`
+(`.1`–`.5` all completed 2026-06-15 — standard + README; layer C `docs/decisions/`
 + 4 ADRs; MEMORY.md demoted 4785→25 + doctrine flipped; enforcement E1–E4
-installed, gates proven to bite, full run-local-ci.sh GREEN.)
+installed + active, gates proven to bite, full run-local-ci.sh GREEN; verified + closed.)
 
 ## Decisions
 
@@ -128,6 +128,7 @@ installed, gates proven to bite, full run-local-ci.sh GREEN.)
 | `2026-06-15` | `.2` | docs/decisions/INDEX.md + 4 ADRs present + indexed; docs-only / non-gate-affecting | `pass` |
 | `2026-06-15` | `.3` | MEMORY.md 4785→25 lines (≤ cap); history in git (b636076:MEMORY.md=4785); CLAUDE/COMMIT/SESSION_BOOTSTRAP doctrine flipped; docs-only | `pass` |
 | `2026-06-15` | `.4` | E2 check bites (clean RC0 / planted-breach RC1); E3 commit-msg accept/reject correct; check-ci-paths green; **full run-local-ci.sh GREEN + receipt**; hooks composed in scripts/git-hooks/; GATE-AFFECTING | `pass` |
+| `2026-06-15` | `.5` | full gate GREEN at .4; .4 committed through active hooks; live bad-subject commit REJECTED by the active commit-msg hook; live docs synced; tree closed; docs-only | `pass` |
 
 ## Commit Log
 
@@ -136,10 +137,16 @@ installed, gates proven to bite, full run-local-ci.sh GREEN.)
 | `.1` | `MEMORY-ARCHITECTURE-DOC.1 — author standard + README pointer` (`1976563`) | docs-only; not pushed unless user asks. |
 | `.2` | `MEMORY-ARCHITECTURE-DOC.2 — layer C docs/decisions + 4 migrated ADRs` (`b636076`) | docs-only; not pushed unless user asks. |
 | `.3` | `MEMORY-ARCHITECTURE-DOC.3 — demote MEMORY.md to resume pointer + flip doctrine` (`88ff418`) | docs-only; not pushed unless user asks. |
-| `.4` | `MEMORY-ARCHITECTURE-DOC.4 — install enforcement E1-E4` | gate-affecting; full run-local-ci.sh green; committed through its own newly-active hooks; not pushed unless user asks. |
+| `.4` | `MEMORY-ARCHITECTURE-DOC.4 — install enforcement E1-E4` (`501166f`) | gate-affecting; full run-local-ci.sh green; committed through its own newly-active hooks; not pushed unless user asks. |
+| `.5` | `MEMORY-ARCHITECTURE-DOC.5 — verify end-to-end + sync live docs; close tree` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 
 - `2026-06-15`: Created from the user directive to adopt the durable
   memory-architecture standard (leaf owns the adoption per the Code-Change
-  Doctrine — it touches `scripts/`, `.githooks/`, CI).
+  Doctrine — it touches `scripts/`, hooks, CI).
+- `2026-06-15`: All five leaves completed in sequence; tree **closed**. Memory
+  layers A (demoted MEMORY.md) / B (task-trees) / C (`docs/decisions/`) / D
+  (git) + enforcement E1–E4 all in place and active. Adapted the `.githooks/`
+  knob to RGX's existing `scripts/git-hooks/` (`core.hooksPath`) so the
+  gate-receipt guard is preserved. Knowledge Map intentionally not adopted.

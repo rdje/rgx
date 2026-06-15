@@ -27,8 +27,12 @@ forward plan in `ROADMAP.md`.
 - **Engine:** 4-tier dispatch (DFA → Pike-VM → JIT → backtracking VM) plus AC
   literal-alternation and TDFA capture recovery, all default-on. C1 (JIT) and
   C2 (NFA/DFA hybrid) shipped.
-- **Process:** task-tree governance adopted `2026-06-15`. The Code-Change
-  Doctrine is now binding — no code change without an owning task-tree leaf.
+- **Process:** task-tree governance + the durable memory architecture (layers
+  A `MEMORY.md` / B task-trees / C `docs/decisions/` / D git, with E1–E4
+  enforcement) both adopted `2026-06-15`. The Code-Change Doctrine is binding —
+  no code change without an owning task-tree leaf; `core.hooksPath` enforces the
+  memory-arch check + gate-receipt + work-unit-id commit subjects locally, and
+  `run-local-ci.sh`/CI enforces server-side.
 
 ## Active Lanes → Task Trees
 
@@ -43,7 +47,7 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
 | Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
 | Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
-| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
+| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) · [`MEMORY-ARCHITECTURE-DOC`](docs/tasks/MEMORY-ARCHITECTURE-DOC.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
 
 Ledger reconciled (`LEDGER-HYGIENE`, 2026-06-15): `PGEN-RGX-0078` is the sole
 top-level open report (`0073` closed/superseded). Shipped lanes remain recorded
@@ -51,6 +55,10 @@ in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-06-15` — `MEMORY-ARCHITECTURE-DOC` (`.1`–`.5`): adopted the durable
+  memory architecture — standard + layer-C `docs/decisions/` (4 ADRs) + MEMORY.md
+  demoted to a 25-line resume pointer + E1–E4 enforcement (active, full
+  run-local-ci.sh green, gates proven to bite).
 - `2026-06-15` — `LEDGER-HYGIENE.1`: closed `PGEN-RGX-0073` (superseded by
   `0078`); confirmed `0078` is the sole top-level open report; corrected
   `RETRO-AUDIT` D1's loose-grep overcount.
