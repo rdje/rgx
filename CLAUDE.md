@@ -63,7 +63,7 @@ Follow `COMMIT.md` exactly. The critical step most likely to be skipped:
 **Live continuity docs (internal):**
 2. `CHANGES.md` — new entry for every shipped feature/fix
 3. `docs/BACKLOG.md` — mark completed items
-4. `MEMORY.md` — append dated session notes (NEVER delete old entries)
+4. `MEMORY.md` — **OVERWRITE** the bounded layer-A resume pointer (current state / active frontier / next action; keep ≤ cap). Do **NOT** append — durable history lives in the task-trees (`docs/tasks/`), decision records (`docs/decisions/`), and git. See `MEMORY_ARCHITECTURE.md`.
 5. `README.md` — PGEN version pins, submodule refs, doc index (when changed)
 6. `RUST_CODEBASE_ANALYSIS.md` — when architecture/roadmap changed
 7. `DEVELOPMENT_NOTES.md` — when durable engineering understanding changed
@@ -91,8 +91,8 @@ Follow `COMMIT.md` exactly. The critical step most likely to be skipped:
 
 ## Session bootstrap
 
-- Read `SESSION_BOOTSTRAP.md` → `README.md` → `MEMORY.md` → `COMMIT.md` in that order.
-- `MEMORY.md` has dated session entries. Read the latest one for current state.
+- Read `SESSION_BOOTSTRAP.md` → `README.md` → `MEMORY_ARCHITECTURE.md` → `MEMORY.md` → `COMMIT.md` in that order.
+- `MEMORY.md` is the bounded **layer-A resume pointer** — read it for current state + the active frontier (durable history is in `docs/tasks/`, `docs/decisions/`, and git).
 - Read `LIVE_ACHIEVEMENT_STATUS.md` (status board) → `docs/TASK_TREE.md` (workflow + active-tree index) → the active task files it names under `docs/tasks/`.
 - `docs/BACKLOG.md` has the task inventory with completion status.
 

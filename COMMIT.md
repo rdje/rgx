@@ -47,8 +47,8 @@ RGX tracks work with the repo-local task-tree workflow
   - Live roadmap-grounded analysis of the Rust workspace.
   - Update before Rust-focused commits when code changes alter architecture, feature readiness, validation results, or roadmap alignment.
 - `MEMORY.md`
-  - Live continuity memory for cross-session resume/handoff.
-  - Update before commit for any completed task.
+  - The bounded **layer-A resume pointer** (`MEMORY_ARCHITECTURE.md`): current state / active frontier / next action only. **Overwrite-only, kept ≤ cap.**
+  - Update (overwrite the current-state block) before commit for any completed task. Do NOT append — durable history is the task-trees + `docs/decisions/` + git.
 - `DEVELOPMENT_NOTES.md`
   - Durable technical knowledge base and reliability snapshot.
   - Update when durable engineering understanding changes.
@@ -80,7 +80,7 @@ RGX tracks work with the repo-local task-tree workflow
          completed slice when project state changed
    - [ ] `CHANGES.md` — new entry for every shipped feature/fix
    - [ ] `docs/BACKLOG.md` — mark completed items
-   - [ ] `MEMORY.md` — append dated session notes (never delete old entries)
+   - [ ] `MEMORY.md` — **overwrite** the layer-A resume pointer (current state / frontier / next action; ≤ cap). Do NOT append (history is git + task-trees).
    - [ ] `README.md` — PGEN version pins, submodule references, doc index (when changed)
    - [ ] `RUST_CODEBASE_ANALYSIS.md` — when architecture/roadmap alignment changed
    - [ ] `DEVELOPMENT_NOTES.md` — when durable engineering understanding changed
@@ -125,7 +125,7 @@ RGX tracks work with the repo-local task-tree workflow
 - A tracked `pre-commit` hook (`scripts/git-hooks/pre-commit`, activated once via `./scripts/setup-hooks.sh`) blocks committing a worktree whose content has no fresh green receipt. Bypassing it (`git commit --no-verify`) is an explicit, loud, last-resort act that must be called out in the commit body and justified — never a silent default.
 
 ## Handoff usage
-- New AI should read `MEMORY.md` first, then `COMMIT.md`.
-- `MEMORY.md` explains *what* is happening now.
+- New AI should read `MEMORY.md` (the resume pointer) first, then `COMMIT.md`.
+- `MEMORY.md` explains *what* is happening now (current state + active frontier); deeper history is in the task-trees + git.
 - `COMMIT.md` explains *how* to finalize work safely and consistently.
 - `RUST_CODEBASE_ANALYSIS.md` explains how the current Rust workspace lines up with `ROADMAP.md`.

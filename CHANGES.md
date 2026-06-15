@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Demote MEMORY.md to the bounded resume pointer + flip doctrine (leaf MEMORY-ARCHITECTURE-DOC.3)
+- Scope: make MEMORY.md layer A (bounded, overwrite-only resume pointer) and update the project doctrine from "append forever / never delete" to the layered memory model. Docs-only.
+- Changes: `MEMORY.md` **4785 → 25 lines** (resume-pointer template: how-to-resume + an overwrite-only current-state block with latest commit, active work-unit + frontier, next action, blockers, invariants). The full pre-demotion log is preserved in git (`git show b636076:MEMORY.md` = 4785 lines) — not deleted, just no longer carried forward. Doctrine flipped in `CLAUDE.md` (commit-workflow step 4 + session-bootstrap), `COMMIT.md` (Files-involved entry, the doc-sync gate row, the handoff section), and `SESSION_BOOTSTRAP.md` (added `MEMORY_ARCHITECTURE.md` to the ritual; MEMORY.md described as the layer-A pointer).
+- Validation: MEMORY.md ≤ cap (25 ≤ 60); history confirmed intact in git; docs-only / non-gate-affecting; doctrine docs internally consistent.
+- Notes/impact: continuity now reads A (pointer) → B (active task-tree) → C (decisions) → D (git), per `MEMORY_ARCHITECTURE.md`. Next: `.4` install the E1–E4 enforcement (gate-affecting).
+
 ### 2026-06-15 - Add layer-C decision records (leaf MEMORY-ARCHITECTURE-DOC.2)
 - Scope: create the layer-C decision store and migrate durable cross-cutting facts out of harness-only `~/.claude` memory into the tracked repo. Docs-only.
 - Changes: new `docs/decisions/INDEX.md` + 4 ADRs — `0001` PGEN sole parser / no RGX workarounds, `0002` `subs/pgen` read-only + regenerate `generated/*`, `0003` crates.io on hold (user-triggered), `0004` accuracy-first (conformance ratchet is the merge gate). Each is Context→Decision→Consequences and records that it supersedes the corresponding harness-only note as the in-repo system of record.

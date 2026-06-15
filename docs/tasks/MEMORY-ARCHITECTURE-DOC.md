@@ -63,11 +63,11 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
   Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.2)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.3`
-  Status: `pending`
+  Status: `done`
   Goal: `Demote MEMORY.md (4760+ lines) to the bounded layer-A resume pointer (history stays in git); update CLAUDE.md/COMMIT.md/SESSION_BOOTSTRAP.md doctrine from "append-forever/never-delete" to the layered model.`
   Acceptance: `MEMORY.md <= cap, resume-pointer template (current state/frontier/next action); doctrine docs updated + internally consistent; the pre-demotion MEMORY.md remains in git history.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `MEMORY.md 4785 → 25 lines (cap 60); resume-pointer template (how-to-resume + overwrite current-state block). Pre-demotion content preserved: git show b636076:MEMORY.md = 4785 lines. Doctrine flipped append-forever→layered in CLAUDE.md (×2), COMMIT.md (×3: Files-involved, doc-sync gate, handoff), SESSION_BOOTSTRAP.md (+MEMORY_ARCHITECTURE.md in the ritual). Docs-only / non-gate-affecting.`
+  Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.3)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.4`
   Status: `pending`
@@ -87,12 +87,11 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `MEMORY-ARCHITECTURE-DOC.3` | `pending` | Demote MEMORY.md before installing the check (else the cap check fails on commit). |
-| 2 | `MEMORY-ARCHITECTURE-DOC.4` | `pending` | Install enforcement once A/B/C exist and MEMORY.md is within cap. |
-| 3 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify + close. |
+| 1 | `MEMORY-ARCHITECTURE-DOC.4` | `pending` | Install enforcement now that A/B/C exist and MEMORY.md is within cap. GATE-AFFECTING. |
+| 2 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify + close. |
 
-(`.1` completed 2026-06-15 — standard authored + README routed. `.2` completed
-2026-06-15 — layer C `docs/decisions/` + INDEX + 4 ADRs.)
+(`.1`/`.2`/`.3` completed 2026-06-15 — standard authored + README routed; layer C
+`docs/decisions/` + 4 ADRs; MEMORY.md demoted 4785→25 lines + doctrine flipped.)
 
 ## Decisions
 
@@ -127,13 +126,15 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 | `2026-06-15` | — | tree created | `n/a` |
 | `2026-06-15` | `.1` | MEMORY_ARCHITECTURE.md present at root (verbatim); README references it; docs-only / non-gate-affecting | `pass` |
 | `2026-06-15` | `.2` | docs/decisions/INDEX.md + 4 ADRs present + indexed; docs-only / non-gate-affecting | `pass` |
+| `2026-06-15` | `.3` | MEMORY.md 4785→25 lines (≤ cap); history in git (b636076:MEMORY.md=4785); CLAUDE/COMMIT/SESSION_BOOTSTRAP doctrine flipped; docs-only | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
 | `.1` | `MEMORY-ARCHITECTURE-DOC.1 — author standard + README pointer` (`1976563`) | docs-only; not pushed unless user asks. |
-| `.2` | `MEMORY-ARCHITECTURE-DOC.2 — layer C docs/decisions + 4 migrated ADRs` | docs-only; not pushed unless user asks. |
+| `.2` | `MEMORY-ARCHITECTURE-DOC.2 — layer C docs/decisions + 4 migrated ADRs` (`b636076`) | docs-only; not pushed unless user asks. |
+| `.3` | `MEMORY-ARCHITECTURE-DOC.3 — demote MEMORY.md to resume pointer + flip doctrine` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 
