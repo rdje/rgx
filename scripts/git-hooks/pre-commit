@@ -21,6 +21,14 @@ repo_root="$(git rev-parse --show-toplevel)"
 # stores). Cheap; fails fast on a non-compliant tree.
 "$repo_root/scripts/check_memory_architecture.sh"
 
+# Knowledge Map gate (KNOWLEDGE_MAP_ARCHITECTURE.md §6) — regenerate the derived
+# map, stage it (so it is always in sync at zero agent cost), then validate
+# facts + derive-and-diff sync. Runs on EVERY commit (before the gate-receipt
+# early-exit) so a doc-only fact-card change is still checked.
+"$repo_root/knowledge-map/scripts/gen_knowledge_map.sh" >/dev/null
+git add "$("$repo_root/knowledge-map/scripts/gen_knowledge_map.sh" --print-map-path)" 2>/dev/null || true
+"$repo_root/knowledge-map/scripts/check_knowledge_map.sh"
+
 # shellcheck source=scripts/lib-gate-receipt.sh
 . "$repo_root/scripts/lib-gate-receipt.sh"
 

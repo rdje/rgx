@@ -42,6 +42,11 @@ run_step "./scripts/check-ci-paths.sh --allow-dirty-worktree" ./scripts/check-ci
 # cannot merge. Path-only; runs even in the no-PGEN fallback below.
 run_step "./scripts/check_memory_architecture.sh (memory-architecture invariants)" ./scripts/check_memory_architecture.sh
 
+# Knowledge Map gate (KNOWLEDGE_MAP_ARCHITECTURE.md §6 — the un-bypassable CI
+# backstop): validate fact cards + assert KNOWLEDGE_MAP.md is in sync
+# (derive-and-diff). Path-only; runs even in the no-PGEN fallback below.
+run_step "./knowledge-map/scripts/check_knowledge_map.sh (knowledge-map gate)" ./knowledge-map/scripts/check_knowledge_map.sh
+
 if [[ "$have_pgen_checkout" != "1" ]]; then
   echo "[run-local-ci.sh] Skipping cargo-based validation because the PGEN submodule is not initialized."
   echo "[run-local-ci.sh] Only path-audit checks ran in this fallback mode."

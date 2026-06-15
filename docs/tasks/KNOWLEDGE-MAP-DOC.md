@@ -62,11 +62,11 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
   Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.2)`
 
 - ID: `KNOWLEDGE-MAP-DOC.3`
-  Status: `pending`
+  Status: `done`
   Goal: `Wire enforcement: fold the KM gen+stage+check into scripts/git-hooks/pre-commit (after the memory-arch check, before/with the gate-receipt guard); add check_knowledge_map.sh as a run-local-ci.sh step (E4); register the new required paths in check-ci-paths.sh; setup-hooks.sh chmods the KM scripts.`
   Acceptance: `pre-commit runs the KM gate; run-local-ci.sh runs the KM check; check-ci-paths green with new paths. GATE-AFFECTING → run-local-ci.sh green receipt required.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `pre-commit: KM gen+stage+check folded in AFTER the memory-arch check + BEFORE the gate-receipt early-exit (so doc-only card commits are still checked). run-local-ci.sh: KM check added as a step (log shows "Running …check_knowledge_map.sh (knowledge-map gate)" → "knowledge-map: OK"). check-ci-paths.sh: registers the 4 new paths + abs-path audit clean over the bundle (no /Users/ or /home/). setup-hooks.sh chmods the KM scripts. **Full ./scripts/run-local-ci.sh GREEN — receipt written + matches tree.** GATE-AFFECTING.`
+  Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.3)`
 
 - ID: `KNOWLEDGE-MAP-DOC.4`
   Status: `pending`
@@ -79,10 +79,9 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `KNOWLEDGE-MAP-DOC.3` | `pending` | Wire enforcement now that 4 cards + the map exist. GATE-AFFECTING → full run-local-ci.sh. |
-| 2 | `KNOWLEDGE-MAP-DOC.4` | `pending` | Verify + close. |
+| 1 | `KNOWLEDGE-MAP-DOC.4` | `pending` | Verify end-to-end + sync live docs + close the tree. |
 
-(`.1`/`.2` completed 2026-06-15 — bundle copied + installed; 4 seed cards → map 4 facts/22 keys, in sync.)
+(`.1`–`.3` completed 2026-06-15 — bundle copied + installed; 4 seed cards → map 4 facts/22 keys; enforcement wired (pre-commit + run-local-ci.sh + check-ci-paths), full gate GREEN.)
 
 ## Decisions
 
@@ -113,13 +112,15 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 | `2026-06-15` | — | tree created | `n/a` |
 | `2026-06-15` | `.1` | bundle copied; install ok (0-fact map, check OK); pathspec test = not gate-affecting; README+AGENTS routed; docs-only | `pass` |
 | `2026-06-15` | `.2` | 4 seed cards; map regenerated (4 facts/22 keys); check_knowledge_map.sh green (valid, unique, in sync); docs-only | `pass` |
+| `2026-06-15` | `.3` | KM gate folded into pre-commit + run-local-ci.sh (log shows the step green) + check-ci-paths paths + setup-hooks chmod; **full run-local-ci.sh GREEN + receipt**; GATE-AFFECTING | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
 | `.1` | `KNOWLEDGE-MAP-DOC.1 — copy KM bundle + install + route docs` (`2c4dbda`) | docs-only; not pushed unless user asks. |
-| `.2` | `KNOWLEDGE-MAP-DOC.2 — seed 4 fact cards + regenerate map` | docs-only; not pushed unless user asks. |
+| `.2` | `KNOWLEDGE-MAP-DOC.2 — seed 4 fact cards + regenerate map` (`9335be3`) | docs-only; not pushed unless user asks. |
+| `.3` | `KNOWLEDGE-MAP-DOC.3 — wire KM enforcement (hook + CI + paths)` | gate-affecting; full run-local-ci.sh green; not pushed unless user asks. |
 
 ## Changelog
 

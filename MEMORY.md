@@ -17,8 +17,8 @@ carried forward.
 
 ## Current state (OVERWRITE this block each update — do not append)
 - latest_commit: `8b0ae4a` — "MEMORY-ARCHITECTURE-DOC.5 …" (the KNOWLEDGE-MAP-DOC.1 commit lands on top; run `git log -1` for the true head; ahead of origin: ~12; push only on user request, `feedback_no_auto_push`).
-- active_work_unit: `KNOWLEDGE-MAP-DOC` → frontier leaf: `.3` (pending) — wire enforcement.
-- next_action: `KNOWLEDGE-MAP-DOC.3` — fold KM gen+stage+check into scripts/git-hooks/pre-commit + add check_knowledge_map.sh to run-local-ci.sh + register paths in check-ci-paths.sh + setup-hooks.sh chmod; **GATE-AFFECTING → full ./scripts/run-local-ci.sh**. Then `.4` verify + close. Then the active CODE trees (`PERF-SOTA-GAPS.1` etc.). (`.1`/`.2` done: bundle copied + 4 seed cards → map 4 facts/22 keys, in sync.)
+- active_work_unit: `KNOWLEDGE-MAP-DOC` → frontier leaf: `.4` (pending) — verify + close.
+- next_action: `KNOWLEDGE-MAP-DOC.4` — prove the derive-and-diff gate bites on a hand-edited/out-of-sync map + sync live docs (TASK_TREE Completed, board) + close the tree. Docs-only. Then the active CODE trees (`PERF-SOTA-GAPS.1` etc.). (`.1`–`.3` done: bundle + 4 cards + enforcement wired, full gate GREEN incl. the KM step.)
 - enforcement ACTIVE in this clone: `core.hooksPath = scripts/git-hooks` (memory-arch + gate-receipt pre-commit; work-unit-id commit-msg). Memory layers A/B/C/D + E1–E4 in place; KM bundle copied (map derive-and-diff gate wires in at `.3`).
 - other active trees (pick after MEMORY-ARCHITECTURE-DOC closes): `PERF-SOTA-GAPS.1` (inner-literal prefilter), `PCRE2-1047-SYNTAX.1` (A12 capture-return VM semantics), `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics; preliminary read = likely at-parity). Blocked/deferred/parked: `COMPILE-PERF-0078`, `RUNTIME-REMEASURE`, `A9-BINDINGS`, `RELEASE-CRATESIO`.
 - in_flight_uncommitted: none.

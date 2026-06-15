@@ -11,7 +11,9 @@ cd "$repo_root"
 
 chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg \
   scripts/setup-hooks.sh scripts/lib-gate-receipt.sh \
-  scripts/check_memory_architecture.sh 2>/dev/null || true
+  scripts/check_memory_architecture.sh \
+  knowledge-map/scripts/gen_knowledge_map.sh \
+  knowledge-map/scripts/check_knowledge_map.sh 2>/dev/null || true
 git config core.hooksPath scripts/git-hooks
 
 echo "[setup-hooks.sh] core.hooksPath -> scripts/git-hooks"

@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Wire Knowledge Map enforcement (leaf KNOWLEDGE-MAP-DOC.3)
+- Scope: install the KM derive-and-diff enforcement (hook + CI). GATE-AFFECTING (scripts).
+- Changes: `scripts/git-hooks/pre-commit` folds in the KM gen+stage+check AFTER the memory-arch check and BEFORE the gate-receipt early-exit (so doc-only fact-card commits are still checked, and the regenerated map is auto-staged → drift is structurally impossible); `scripts/run-local-ci.sh` runs `check_knowledge_map.sh` as a step (server-side backstop / E4); `scripts/check-ci-paths.sh` registers the new required paths (both KM scripts, the standard, `KNOWLEDGE_MAP.md`); `scripts/setup-hooks.sh` chmods the KM scripts.
+- Validation: full `./scripts/run-local-ci.sh` GREEN — the log shows "Running …check_knowledge_map.sh (knowledge-map gate)" → "knowledge-map: OK (facts valid, ids unique, map in sync)"; check-ci-paths abs-path audit clean over the bundle; green receipt written + matching.
+- Notes/impact: the KM now has the full four-layer defense (cards self-describe → hook regenerates+stages+checks locally → CI re-checks server-side). Next: `.4` verify (prove the derive-and-diff gate bites on a hand-edit) + close.
+
 ### 2026-06-15 - Seed Knowledge Map fact cards (leaf KNOWLEDGE-MAP-DOC.2)
 - Scope: seed `docs/knowledge/` with durable structural fact cards (the kind a future session would otherwise re-derive) and regenerate the map. Docs-only.
 - Changes: 4 cards — `pcre2-conformance-ratchet` (baseline location/value + the 4 by-design residuals), `pgen-sole-open-bug` (0078 sole open, replaces 0073), `pgen-build-regenerate` (fresh-clone/bump regenerate step + read-only submodule), `governance-entrypoints` (task-trees + Code-Change Doctrine + memory layers + read-first order). Each carries `answers:` (query-shaped synonyms), `date`, `evidence`, and a one-command `reverify`. `KNOWLEDGE_MAP.md` regenerated → **4 facts / 22 question keys**.
