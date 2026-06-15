@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Copy the Knowledge Map bundle + install (leaf KNOWLEDGE-MAP-DOC.1)
+- Scope: adopt the portable Knowledge Map (KM) retrieval layer (from `pgen/knowledge-map/`) — step 1: copy the bundle + install + route docs. Additive (indexes/converts nothing). Docs-only.
+- Changes: `cp -r` the `knowledge-map/` bundle into RGX root (standard `KNOWLEDGE_MAP_ARCHITECTURE.md`, FAQ, README, install.sh, `scripts/{gen,check}_knowledge_map.sh` + `knowledge_map.conf`, `templates/FACT_TEMPLATE.md`, `hooks/pre-commit.snippet`, `ci/knowledge-map-gate.yml`); `bash knowledge-map/install.sh` created `docs/knowledge/` (with a README pointer) and generated the first `KNOWLEDGE_MAP.md` (0 facts, derive-and-diff check OK). README root-md index + ramp-up + `AGENTS.md` updated to route to the map ("grep KNOWLEDGE_MAP.md before re-deriving"). New owning tree `docs/tasks/KNOWLEDGE-MAP-DOC.md` (4 leaves).
+- Validation: docs-only / non-gate-affecting — empirically confirmed `knowledge-map/scripts/*` does NOT match the top-level `scripts/*` gate pathspec (git anchors it at root); committed through the active hooks (memory-arch ok; gate-receipt skipped, nothing gate-affecting staged).
+- Notes/impact: scans `docs/knowledge/` + `docs/decisions/`; current ADRs have no `answers:` front-matter so they're not indexed (no duplication). Next: `.2` seed fact cards, `.3` wire enforcement (gate-affecting), `.4` verify + close.
+
 ### 2026-06-15 - Verify memory architecture end-to-end + close the tree (leaf MEMORY-ARCHITECTURE-DOC.5)
 - Scope: verify the adopted memory architecture end-to-end and close `MEMORY-ARCHITECTURE-DOC`. Docs-only.
 - Changes: `MEMORY-ARCHITECTURE-DOC` → `done` (all `.1`–`.5`); moved to Completed Task Trees in `docs/TASK_TREE.md` (out of Active); `LIVE_ACHIEVEMENT_STATUS.md` snapshot + governance row + latest-slice updated; `MEMORY.md` pointer overwritten (governance lane closed → next is the active code trees).

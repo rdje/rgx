@@ -1,0 +1,10 @@
+# --- Knowledge Map (KM) gate — append these lines to your .githooks/pre-commit ---------
+# Regenerate the derived map, stage it (so it is always in sync, at zero agent cost), then
+# validate facts + sync. The regenerate-and-stage step makes drift structurally impossible.
+# Requires: git config core.hooksPath .githooks   (one-time, per clone)
+
+ROOT="$(git rev-parse --show-toplevel)"
+"$ROOT/knowledge-map/scripts/gen_knowledge_map.sh" >/dev/null
+git add "$("$ROOT/knowledge-map/scripts/gen_knowledge_map.sh" --print-map-path)" 2>/dev/null || true
+"$ROOT/knowledge-map/scripts/check_knowledge_map.sh"
+# ---------------------------------------------------------------------------------------

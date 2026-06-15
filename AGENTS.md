@@ -22,3 +22,9 @@ Memory layers: **A** `MEMORY.md` (resume pointer) · **B** task-trees
 (`docs/tasks/`) · **C** decision records (`docs/decisions/`) · **D** git history.
 Nothing important may live only in this conversation — route it to a layer and
 commit before the turn ends.
+
+**Before re-deriving any fact from code or runtime, grep `KNOWLEDGE_MAP.md`** —
+the question-keyed retrieval index (Knowledge Map, `knowledge-map/KNOWLEDGE_MAP_ARCHITECTURE.md`).
+Re-deriving an already-logged structural/causal fact is *archaeology*; if you do
+have to establish a new durable fact, write a card under `docs/knowledge/`
+(copy `knowledge-map/templates/FACT_TEMPLATE.md`) so nobody derives it twice.

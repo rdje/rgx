@@ -1,0 +1,16 @@
+# Knowledge Map (KM) CI gate — the un-bypassable backstop (MEMORY_ARCHITECTURE §9 E4).
+#
+# Either add this as its own GitHub Actions workflow (.github/workflows/knowledge-map-gate.yml),
+# or copy the run step into an existing pipeline. `--no-verify` skips the local hook but NOT
+# this: a stale map or an invalid fact fails the build and cannot merge.
+name: knowledge-map-gate
+on:
+  push:
+  pull_request:
+jobs:
+  knowledge-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate facts + assert the Knowledge Map is in sync
+        run: bash knowledge-map/scripts/check_knowledge_map.sh

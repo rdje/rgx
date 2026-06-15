@@ -63,6 +63,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
+| `KNOWLEDGE-MAP-DOC` | [tasks/KNOWLEDGE-MAP-DOC.md](tasks/KNOWLEDGE-MAP-DOC.md) | `active` | `KNOWLEDGE-MAP-DOC.1` (copy bundle) | Governance / process (fact retrieval) |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
