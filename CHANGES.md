@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Add `make` build entrypoint that hides the PGEN bootstrap (leaf BUILD-FLOW.1)
+- Scope: fix the downstream/submodule build-UX issue reported by LINKEDSPEC (`RGX-BUILD-REPRO`) — a fresh checkout's `cargo build` fails because PGEN's generated parser isn't present and the bootstrap step wasn't discoverable/automated. Path A. Non-gate-affecting (root Makefile + README).
+- Changes: new root `Makefile` — one command (`make`) initializes the `subs/pgen` submodule if needed, runs the PGEN `regex_parser_bootstrap` only when the generated parser is missing (idempotent), then `cargo build`. Targets: `build`(default)/`bootstrap`/`submodules`/`test`/`gate`/`clean`/`help`; `submodules` inits only `subs/pgen` (the build dep — not the heavy `subs/pcre2`, which is conformance-only). README "Build, test, run" rewritten to lead with `make`, document the submodule-consumer one-liner (`make -C path/to/rgx bootstrap`), and explain why true zero-step `cargo build` isn't possible from RGX (cargo compiles the `pgen` dependency before RGX's build script, and `subs/pgen` is read-only — the zero-step fix is a PGEN-upstream `build.rs`).
+- Validation: `make help` lists targets; `make bootstrap` is a verified no-op when the parser is present (rc 0); non-gate-affecting (root Makefile not in the gate pathspec).
+- Notes/impact: a submodule consumer now runs one documented command (`make -C path/to/rgx bootstrap`) once, then their `cargo build` works. Next: `BUILD-FLOW.2` restores the `--no-default-features` (pgen-free) build (36 errors: CharRange feature-gate, non-exhaustive match, edition `_`); `.3` verify + close.
+
 ### 2026-06-15 - Verify Knowledge Map gate + close the tree (leaf KNOWLEDGE-MAP-DOC.4)
 - Scope: verify the KM enforcement end-to-end and close `KNOWLEDGE-MAP-DOC`. Docs-only.
 - Changes: `KNOWLEDGE-MAP-DOC` → `done` (all `.1`–`.4`); moved to Completed Task Trees in `docs/TASK_TREE.md`; `LIVE_ACHIEVEMENT_STATUS.md` snapshot + governance row + latest-slice updated; `MEMORY.md` pointer overwritten (entire governance lane closed → next is the active code trees).
