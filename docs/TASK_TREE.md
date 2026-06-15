@@ -63,7 +63,6 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
-| `KNOWLEDGE-MAP-DOC` | [tasks/KNOWLEDGE-MAP-DOC.md](tasks/KNOWLEDGE-MAP-DOC.md) | `active` | `KNOWLEDGE-MAP-DOC.1` (copy bundle) | Governance / process (fact retrieval) |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
@@ -94,6 +93,7 @@ activation.
 | `RETRO-AUDIT` | [tasks/RETRO-AUDIT.md](tasks/RETRO-AUDIT.md) | `2026-06-15` | Evidence-based audit of all major shipped subsystems (C1/C2/TDFA/AC, host-integration, A/B API, A9 capi, conformance); all verified present; drift D1 (PGEN-RGX ledger) flagged → `LEDGER-HYGIENE`. |
 | `LEDGER-HYGIENE` | [tasks/LEDGER-HYGIENE.md](tasks/LEDGER-HYGIENE.md) | `2026-06-15` | Closed `PGEN-RGX-0073` (superseded by `0078`); confirmed `0078` is the sole top-level open report; corrected D1's loose-grep overcount (only 0073 was actually open, not 15 files). |
 | `MEMORY-ARCHITECTURE-DOC` | [tasks/MEMORY-ARCHITECTURE-DOC.md](tasks/MEMORY-ARCHITECTURE-DOC.md) | `2026-06-15` | Adopted the durable memory architecture: standard authored; layer C `docs/decisions/` + 4 ADRs; MEMORY.md demoted 4785→25 lines + doctrine flipped; E1–E4 enforcement installed + active (full run-local-ci.sh green; gates proven to bite). |
+| `KNOWLEDGE-MAP-DOC` | [tasks/KNOWLEDGE-MAP-DOC.md](tasks/KNOWLEDGE-MAP-DOC.md) | `2026-06-15` | Adopted the Knowledge Map retrieval layer: `knowledge-map/` bundle + `docs/knowledge/` (4 seed fact cards → derived `KNOWLEDGE_MAP.md`, 22 question keys); pre-commit gen+stage+check + run-local-ci.sh/CI derive-and-diff gate (proven to bite). |
 
 ## Coverage Note
 

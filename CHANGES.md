@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Verify Knowledge Map gate + close the tree (leaf KNOWLEDGE-MAP-DOC.4)
+- Scope: verify the KM enforcement end-to-end and close `KNOWLEDGE-MAP-DOC`. Docs-only.
+- Changes: `KNOWLEDGE-MAP-DOC` → `done` (all `.1`–`.4`); moved to Completed Task Trees in `docs/TASK_TREE.md`; `LIVE_ACHIEVEMENT_STATUS.md` snapshot + governance row + latest-slice updated; `MEMORY.md` pointer overwritten (entire governance lane closed → next is the active code trees).
+- Validation: full `./scripts/run-local-ci.sh` was GREEN at `.3` (incl. the wired KM step). Derive-and-diff gate **proven to bite**: a hand-edited `KNOWLEDGE_MAP.md` → "OUT OF SYNC" (rc=1); an invalid fact card (missing `title`/`date`/`evidence-or-reverify`) → "missing required front-matter"; regenerate restored green + a clean worktree. `.3` committed *through* the active hook chain (memory-arch + KM gen/stage/check + gate-receipt all fired).
+- Notes/impact: RGX now runs all three composable governance standards — task-trees (work) + memory architecture (continuity) + Knowledge Map (retrieval) — each with mechanical, hard-to-bypass enforcement. A logged structural/causal fact is now one `KNOWLEDGE_MAP.md` lookup away; new durable facts get a card in `docs/knowledge/` lazily.
+
 ### 2026-06-15 - Wire Knowledge Map enforcement (leaf KNOWLEDGE-MAP-DOC.3)
 - Scope: install the KM derive-and-diff enforcement (hook + CI). GATE-AFFECTING (scripts).
 - Changes: `scripts/git-hooks/pre-commit` folds in the KM gen+stage+check AFTER the memory-arch check and BEFORE the gate-receipt early-exit (so doc-only fact-card commits are still checked, and the regenerated map is auto-staged → drift is structurally impossible); `scripts/run-local-ci.sh` runs `check_knowledge_map.sh` as a step (server-side backstop / E4); `scripts/check-ci-paths.sh` registers the new required paths (both KM scripts, the standard, `KNOWLEDGE_MAP.md`); `scripts/setup-hooks.sh` chmods the KM scripts.

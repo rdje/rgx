@@ -3,7 +3,7 @@
 ## Metadata
 
 - Tree ID: `KNOWLEDGE-MAP-DOC`
-- Status: `active`
+- Status: `done`
 - Roadmap lane: `Governance / process (fact retrieval)`
 - Created: `2026-06-15`
 - Last updated: `2026-06-15`
@@ -43,9 +43,9 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 ## Task Tree
 
 - ID: `KNOWLEDGE-MAP-DOC`
-  Status: `active`
+  Status: `done`
   Goal: `RGX has the KM retrieval layer (derived map + fact cards + derive-and-diff enforcement).`
-  Children: `.1` `.2` `.3` `.4`
+  Children: `.1` `.2` `.3` `.4` (all `done`)
 
 - ID: `KNOWLEDGE-MAP-DOC.1`
   Status: `done`
@@ -69,19 +69,19 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
   Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.3)`
 
 - ID: `KNOWLEDGE-MAP-DOC.4`
-  Status: `pending`
+  Status: `done`
   Goal: `Verify end-to-end (full run-local-ci.sh green; derive-and-diff gate bites on a planted edit) + sync live docs (CHANGES/LIVE_ACHIEVEMENT_STATUS/TASK_TREE/MEMORY) + close the tree.`
   Acceptance: `Full gate green; demonstrated KM gate rejection of a hand-edited/out-of-sync map; live docs synced; tree → done/Completed.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `Full run-local-ci.sh GREEN at .3 (incl. the KM step). Derive-and-diff gate proven to bite: a hand-edited KNOWLEDGE_MAP.md → "OUT OF SYNC" (rc=1); an invalid card (missing title/date/evidence-or-reverify) → "missing required front-matter"; regenerate restored green + clean worktree. .3 committed THROUGH the active hook chain (memory-arch + KM gen/stage/check + gate-receipt all fired). Live docs synced (TASK_TREE Completed; board; MEMORY pointer). Tree closed.`
+  Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.4)`
 
 ## Current Frontier
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `KNOWLEDGE-MAP-DOC.4` | `pending` | Verify end-to-end + sync live docs + close the tree. |
+| — | — | — | All leaves `done`. `KNOWLEDGE-MAP-DOC` complete → Completed Task Trees in `docs/TASK_TREE.md`. |
 
-(`.1`–`.3` completed 2026-06-15 — bundle copied + installed; 4 seed cards → map 4 facts/22 keys; enforcement wired (pre-commit + run-local-ci.sh + check-ci-paths), full gate GREEN.)
+(`.1`–`.4` all completed 2026-06-15 — bundle + 4 seed cards (4 facts/22 keys) + enforcement (pre-commit + CI + paths), full gate GREEN, derive-and-diff gate proven to bite; verified + closed.)
 
 ## Decisions
 
@@ -113,6 +113,7 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 | `2026-06-15` | `.1` | bundle copied; install ok (0-fact map, check OK); pathspec test = not gate-affecting; README+AGENTS routed; docs-only | `pass` |
 | `2026-06-15` | `.2` | 4 seed cards; map regenerated (4 facts/22 keys); check_knowledge_map.sh green (valid, unique, in sync); docs-only | `pass` |
 | `2026-06-15` | `.3` | KM gate folded into pre-commit + run-local-ci.sh (log shows the step green) + check-ci-paths paths + setup-hooks chmod; **full run-local-ci.sh GREEN + receipt**; GATE-AFFECTING | `pass` |
+| `2026-06-15` | `.4` | derive-and-diff gate bites (out-of-sync map → rc1; invalid card → missing-field); restored green+clean; live docs synced; tree closed; docs-only | `pass` |
 
 ## Commit Log
 
@@ -120,10 +121,16 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 | --- | --- | --- |
 | `.1` | `KNOWLEDGE-MAP-DOC.1 — copy KM bundle + install + route docs` (`2c4dbda`) | docs-only; not pushed unless user asks. |
 | `.2` | `KNOWLEDGE-MAP-DOC.2 — seed 4 fact cards + regenerate map` (`9335be3`) | docs-only; not pushed unless user asks. |
-| `.3` | `KNOWLEDGE-MAP-DOC.3 — wire KM enforcement (hook + CI + paths)` | gate-affecting; full run-local-ci.sh green; not pushed unless user asks. |
+| `.3` | `KNOWLEDGE-MAP-DOC.3 — wire KM enforcement (hook + CI + paths)` (`a24d2d2`) | gate-affecting; full run-local-ci.sh green; not pushed unless user asks. |
+| `.4` | `KNOWLEDGE-MAP-DOC.4 — verify gate bites + sync live docs; close tree` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 
 - `2026-06-15`: Created from the user directive to adopt the Knowledge Map
   architecture (leaf owns it per the Code-Change Doctrine — it touches
   `knowledge-map/scripts/`, `scripts/`, hooks, CI).
+- `2026-06-15`: All four leaves completed in sequence; tree **closed**. KM
+  retrieval layer live — derived `KNOWLEDGE_MAP.md` over `docs/knowledge/`
+  (+`docs/decisions/`) cards, enforced by the pre-commit gen+stage+check and the
+  `run-local-ci.sh`/CI derive-and-diff gate. Knowledge Map standard was already
+  referenced by `MEMORY_ARCHITECTURE.md` §5; this makes it operational.
