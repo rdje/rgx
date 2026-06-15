@@ -212,6 +212,35 @@ Pipeline in `rgx-core`:
 7. Remove/finish placeholder VM/compiler paths and TODO opcode branches
 8. Expand the staged code-block rollout with the preferred inline-language direction in mind: prioritize Lua/JavaScript/Rhai ergonomics first, while treating further wasm ABI/result work as secondary unless product needs force it higher
 
+## Task-tree governance (binding — adopted 2026-06-15)
+- RGX adopted the repo-local task-tree tracking workflow from the sibling PGEN
+  project (`docs/TASK_TREE_README.md` → `docs/TASK_TREE.md` → `docs/tasks/*`).
+  It is a companion to the roadmap, not a replacement: the roadmap states which
+  lanes exist; a task tree owns one top-level task's recursive breakdown,
+  current frontier, acceptance, blockers, decisions, validation, and completion
+  evidence.
+- **Code-Change Doctrine (non-negotiable):** no code change may be committed
+  unless a task-tree leaf owns it first. "Code change" = Rust sources, Cargo
+  manifests/lock, build scripts, generated artifacts, CI, `scripts/`, or a
+  `subs/pgen` pin bump. Implement exactly one leaf at a time; never implement a
+  container; split a too-large leaf into child leaves first.
+- The **leaf ID** is RGX's commit-traceability key (subject or first body
+  line). RGX has no `PGEN-<FAMILY>-<NNNN>` slice-ID scheme, so the leaf ID is
+  the join between tree and commit.
+- **PNT** = pick the first eligible leaf from the active tree's current frontier
+  (`docs/TASK_TREE.md`) and roll. Crash/handoff recovery reads the frontier to
+  resume exactly where the prior session stopped.
+- **Rationale (user, 2026-06-15):** task-tree ownership forces each change to be
+  scoped, justified, independently verified, and lock-stepped with the docs and
+  the Book before it lands — it raises code-review quality and keeps the
+  roadmap, the codebase, and the mdBook locked together with no drift. This is a
+  signoff-quality discipline, not bureaucracy. Mirrored in `CLAUDE.md`,
+  `COMMIT.md`, the Book (`internals/contributing.md`), and the auto-memory
+  (`feedback_task_tree_workflow`).
+- IDs are permanent once published; never renumber closed nodes. Live docs link
+  to the trees and summarize state changes — they never duplicate the whole
+  tree.
+
 ## Documentation policy
 - `CHANGES.md` is the living progress ledger
 - `README.md` is the single entry point for project onboarding/navigation and should be updated when objective/onboarding/path maps change (not required on every commit)

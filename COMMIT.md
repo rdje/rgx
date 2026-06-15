@@ -10,6 +10,27 @@ Live commit workflow contract for `rgx`.
 - Run after each completed task or activity.
 - Run after task-related docs/test updates are done.
 - Prefer one focused commit per completed task (avoid mixing unrelated work).
+- For task-tree-managed work: run after **each completed leaf**, before
+  selecting another leaf.
+
+## Task-Tree Workflow Rule (binding)
+RGX tracks work with the repo-local task-tree workflow
+(`docs/TASK_TREE.md`). The **Code-Change Doctrine** is non-negotiable:
+
+- **No code change may be committed unless a task-tree leaf owns it.** "Code
+  change" = any edit to Rust sources, `Cargo.toml`/`Cargo.lock`, build scripts,
+  generated artifacts, `.github/workflows/*`, `scripts/*`, or a `subs/pgen`
+  pin bump. Before touching code, create/extend a tree so a leaf owns the
+  change, implement only that leaf, then run this workflow.
+- **The leaf ID goes in the commit subject or first body line** (e.g.
+  `... (leaf TASKTREE-ADOPT.2)`). The leaf ID is RGX's commit-traceability key.
+- **Update the owning `docs/tasks/<TREE>.md` file** when node status, frontier,
+  blockers, decisions, validation, or completion evidence changes (this is part
+  of the step-3 documentation-sync gate below).
+- Pure non-code documentation slices (live docs, the Book, `pgen-issues/`,
+  workflow docs) may be committed without a task-tree leaf, but still follow
+  the rest of this workflow. When a change touches both, treat it as a code
+  change and require a leaf.
 
 ## Files involved and what each one means
 - `COMMIT.md`
@@ -51,6 +72,12 @@ Live commit workflow contract for `rgx`.
    - [ ] `book/src/**` — new chapter or section for any user-visible change. The book must cover every aspect of RGX: features, architecture, rationale, design decisions, performance, sandboxing model. The book is what the world sees.
 
    **Track B: Live continuity docs (session-internal)**
+   - [ ] `docs/tasks/<TREE>.md` — update the owning task tree (node status,
+         frontier, verification log, commit log) for task-tree-managed work
+   - [ ] `docs/TASK_TREE.md` — update the Active/Proposed/Completed tables when
+         a tree's status or frontier changed
+   - [ ] `LIVE_ACHIEVEMENT_STATUS.md` — update the lane→tree board / latest
+         completed slice when project state changed
    - [ ] `CHANGES.md` — new entry for every shipped feature/fix
    - [ ] `docs/BACKLOG.md` — mark completed items
    - [ ] `MEMORY.md` — append dated session notes (never delete old entries)
@@ -65,6 +92,8 @@ Live commit workflow contract for `rgx`.
 6. Prepare `git_message_brief.txt` with:
    - concise title (≤70 characters, active voice)
    - 2–5 line body explaining the *why* at a high level (the diff shows the *what*)
+   - **The leaf ID** in the subject or first body line for task-tree-managed
+     work (e.g. `(leaf <TREE>.<path>)`).
    - **No `Co-Authored-By` trailers.** Per user preference, RGX commit messages do not carry agent co-authorship trailers.
    - **Keep it brief.** The gory details belong in `CHANGES.md`; engineering rationale belongs in `DEVELOPMENT_NOTES.md`. The commit message is the headline, not the full ledger entry.
 7. Commit:
@@ -87,6 +116,9 @@ Live commit workflow contract for `rgx`.
 - Never proceed to commit with unresolved clippy errors.
 - Clippy warnings are tolerated for now unless policy changes.
 - Keep commits task-scoped and validation-backed.
+- **Never commit a code change that is not owned by a task-tree leaf** (Code-Change Doctrine, `docs/TASK_TREE.md`).
+- **Never finalize a task-tree leaf without updating its `docs/tasks/<TREE>.md` file** and naming the leaf ID in the commit subject or first body line.
+- Commit one completed leaf at a time; do not select another leaf before the prior leaf's commit workflow has completed.
 - Never finalize a Rust-focused commit without deciding whether `RUST_CODEBASE_ANALYSIS.md` changed.
 - Keep the formatting gate scoped to RGX workspace packages so local external dependencies (for example the sibling `pgen` checkout) do not leak into RGX commit validation.
 - The gate is "green" only when `./scripts/run-local-ci.sh` exited 0 for the *exact tree being committed* — proven by a fresh matching receipt, not by eyeballing filtered output. A red gate must never be self-reported green; if the gate fails, the commit does not happen.

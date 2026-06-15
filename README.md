@@ -88,9 +88,10 @@ If you are new to the repo, use this order:
 4. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
 5. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
 6. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
-7. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
-8. [`COMMIT.md`](COMMIT.md) before making/committing changes.
-9. [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants.
+7. [`LIVE_ACHIEVEMENT_STATUS.md`](LIVE_ACHIEVEMENT_STATUS.md) and [`docs/TASK_TREE.md`](docs/TASK_TREE.md) for the high-level status board and the task-tree execution ledger (read the active task files it names).
+8. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
+9. [`COMMIT.md`](COMMIT.md) before making/committing changes.
+10. [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants.
 
 ## Repository path map (project files)
 ### Workspace / crates
@@ -143,10 +144,15 @@ If you are new to the repo, use this order:
 - [`PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md`](PGEN_REGEX_EMBEDDED_CODE_BLOCK_CONTRACT_PROPOSAL.md) — proposed embedded code-block contract shape to forward upstream
 - [`PROJECT_VISION.md`](PROJECT_VISION.md) — long-term project direction
 - [`ROADMAP.md`](ROADMAP.md) — execution roadmap (`Now`/`Next`/`Later`)
+- [`LIVE_ACHIEVEMENT_STATUS.md`](LIVE_ACHIEVEMENT_STATUS.md) — high-level status board linking roadmap lanes to active task trees
 - [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) — live roadmap-grounded Rust workspace analysis
 - [`WARP.md`](WARP.md) — Warp-specific repository guidance
 
 ### `docs/` markdown files
+- [`docs/TASK_TREE_README.md`](docs/TASK_TREE_README.md) — task-tree tracking setup/usage guide (portable)
+- [`docs/TASK_TREE.md`](docs/TASK_TREE.md) — repo-local task-tree workflow spec, active-tree index, PNT rules, Code-Change Doctrine
+- [`docs/tasks/TEMPLATE.md`](docs/tasks/TEMPLATE.md) — copyable skeleton for a new task tree
+- [`docs/tasks/`](docs/tasks/) — one file per top-level task tree (the execution ledger)
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — end-user guide
 - [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) — feature status matrix
 - [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) — PCRE2 parity matrix

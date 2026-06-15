@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Adopt repo-local task-tree tracking workflow (leaf TASKTREE-ADOPT.1)
+- Scope: user directive — adopt PGEN's repo-local task-tree tracking system in RGX (per `/Users/richarddje/Documents/github/pgen/docs/TASK_TREE_README.md`). Installation + wire-up slice; no code touched.
+- Changes:
+  - New `docs/TASK_TREE_README.md` (portable setup/usage guide, adapted to RGX's live-doc set), `docs/TASK_TREE.md` (operating spec: active-tree index, status vocabulary, ID/node/frontier/PNT/splitting/completion/blocker rules, the binding **Code-Change Doctrine**, leaf-ID commit convention), `docs/tasks/TEMPLATE.md`, and the first active tree `docs/tasks/TASKTREE-ADOPT.md`.
+  - New `LIVE_ACHIEVEMENT_STATUS.md` high-level board (RGX previously had none) linking roadmap lanes → active task trees; seeds the open-lane capture and the latest-completed-slice line.
+  - Wired the workflow into `README.md` (ramp-up order + doc index), `SESSION_BOOTSTRAP.md` (startup ritual rewritten), `COMMIT.md` (Task-Tree Workflow Rule + leaf-ID requirement + doc-sync gate + invariants), `CLAUDE.md` (binding Code-Change Doctrine section + bootstrap), and the Book (`book/src/internals/contributing.md` governance section + further-reading links).
+  - Captured the open ROADMAP/BACKLOG lanes as `Proposed Task Trees` (COMPILE-PERF-0073, RUNTIME-REMEASURE, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION, A9-BINDINGS, RELEASE-CRATESIO) so the intent survives session loss; their promotion into real tree files is owned by `TASKTREE-ADOPT.2`.
+- Validation: docs-only / non-gate-affecting (no `.rs`/Cargo/CI/`scripts`/`subs` touched → pre-commit gate-receipt guard allows it); `mdbook build book` clean; internal markdown links resolve.
+- Notes/impact: from now on, **no code change in RGX may be committed unless a task-tree leaf owns it** (leaf ID in the commit subject/first body line). Forward frontier: `TASKTREE-ADOPT.2` (decompose the roadmap into trees) then `TASKTREE-ADOPT.3` (retroactively audit shipped work into trees).
+
 ### 2026-05-19 - Book: kill performance/parity overclaims — state only verifiable facts (no-BS pass)
 - Scope: user audit directive — "Claiming things that aren't true is truly embarrassing… State only verifiable facts about RGX… if it is good it is good, if it is bad it is bad." Corrected every false / unverifiable / stale-presented-as-current performance & parity claim across the sell surface and internals.
 - `why-rgx.md` opener: removed **"rgx matches or beats PCRE2 on every pattern"** (false — the book's own Performance chapter shows `email` 2.6–3× slower) and the bare headline **"47× faster"**. Replaced with two verifiable facts: conformance 12,806/4/0/0 on PCRE2 10.47 testdata, and an explicit "speed is workload-dependent, not one number; any N× claim without operation/input/build is marketing."

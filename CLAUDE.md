@@ -3,6 +3,31 @@
 This file is loaded automatically at the start of every Claude Code session.
 These rules are non-negotiable.
 
+## Task-tree tracking (binding — Code-Change Doctrine)
+
+RGX tracks all work with the repo-local task-tree workflow. The operating spec
+is `docs/TASK_TREE.md`; the portable guide is `docs/TASK_TREE_README.md`; each
+top-level task owns one file under `docs/tasks/`.
+
+- **No code change may happen unless it is first owned by a task-tree leaf.**
+  "Code change" = any edit to Rust sources, `Cargo.toml`/`Cargo.lock`, build
+  scripts, generated artifacts, `.github/workflows/*`, `scripts/*`, or a
+  `subs/pgen` pin bump. Before touching code, create or extend a tree so a leaf
+  owns the change; implement only that leaf; then run the `COMMIT.md` workflow.
+- **The leaf ID is the commit-traceability key** — put it in the commit subject
+  or first body line (e.g. `(leaf TASKTREE-ADOPT.2)`). RGX does not use a
+  separate slice-ID scheme.
+- **Implement one leaf at a time.** Never implement a container node. If a leaf
+  is too big, split it into child leaves first.
+- **PNT** ("pick the next task") = select the first eligible leaf from the
+  active tree's current frontier (`docs/TASK_TREE.md`) and roll.
+- Keep node IDs stable forever; never renumber closed nodes.
+- Pure non-code documentation slices (live docs, the Book, `pgen-issues/`,
+  workflow docs) may be committed without a leaf — the doctrine governs **code**
+  changes. When in doubt, require a leaf.
+- The roadmap, the codebase, and the mdBook must stay locked together — no
+  drift. The task tree is the execution ledger that keeps them aligned.
+
 ## Two separate documentation tracks
 
 These serve different audiences and are NOT interchangeable. Both must be updated.
@@ -68,6 +93,7 @@ Follow `COMMIT.md` exactly. The critical step most likely to be skipped:
 
 - Read `SESSION_BOOTSTRAP.md` → `README.md` → `MEMORY.md` → `COMMIT.md` in that order.
 - `MEMORY.md` has dated session entries. Read the latest one for current state.
+- Read `LIVE_ACHIEVEMENT_STATUS.md` (status board) → `docs/TASK_TREE.md` (workflow + active-tree index) → the active task files it names under `docs/tasks/`.
 - `docs/BACKLOG.md` has the task inventory with completion status.
 
 ## Testing

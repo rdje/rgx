@@ -68,6 +68,44 @@ RGX has a repository-wide commit contract documented in `COMMIT.md`. Every contr
 
 The point of the commit contract is that the history is readable months later. A green CI run on every commit means bisecting a regression is always possible.
 
+## Task-tree governance (the Code-Change Doctrine)
+
+RGX tracks work with a repo-local **task-tree** workflow (adopted from the
+sibling PGEN project). It is a companion to the roadmap, not a replacement: the
+roadmap (`ROADMAP.md`, `RUST_CODEBASE_ANALYSIS.md`, `docs/BACKLOG.md`, and the
+`LIVE_ACHIEVEMENT_STATUS.md` board) says *what lanes exist and which is active*;
+a task tree owns the *recursive breakdown* of one top-level task — its subtasks,
+current frontier, acceptance criteria, blockers, decisions, validation, and
+completion evidence.
+
+The workflow lives in three places:
+
+- `docs/TASK_TREE_README.md` — the portable setup/usage guide.
+- `docs/TASK_TREE.md` — the operating spec: the active-tree index, the status
+  vocabulary, the ID/node/frontier/completion rules, and the **PNT** ("pick the
+  next task") selection rules.
+- `docs/tasks/<TREE>.md` — one file per top-level task, copied from
+  `docs/tasks/TEMPLATE.md`.
+
+The binding rule is the **Code-Change Doctrine**:
+
+> No code change happens unless it is first owned by a task-tree **leaf**.
+
+Before you touch Rust source, `Cargo.toml`, build scripts, generated artifacts,
+CI, `scripts/`, or the `subs/pgen` pin, there must be a leaf node that owns the
+change. You implement exactly that one leaf, then run the commit workflow with
+the **leaf ID in the commit subject or first body line** (e.g.
+`(leaf PCRE2-1047-SYNTAX.3)`). The leaf ID is RGX's commit-traceability key.
+
+Why this discipline? The tree's explicit goal / acceptance / verification /
+blocker structure forces every change to be scoped, justified, independently
+verified, and lock-stepped with the docs and this book before it lands — and it
+lets a crashed or handed-off session resume exactly where the previous one
+stopped, because the frontier records what is eligible to pick next. Pure
+documentation slices (live docs, this book, `pgen-issues/`) can be committed
+without a leaf; when a change touches both code and docs, it counts as a code
+change and needs a leaf.
+
 ## Running tests
 
 ### The day-to-day loop
@@ -245,6 +283,8 @@ The engine is complicated. The project does not have to be.
 - `COMMIT.md` — the commit contract. Read this before your first commit.
 - `CHANGES.md` — the authoritative ledger of shipped changes.
 - `ROADMAP.md` — forward-looking planning.
+- `LIVE_ACHIEVEMENT_STATUS.md` — high-level status board (lanes → active task trees).
+- `docs/TASK_TREE.md` / `docs/TASK_TREE_README.md` — the task-tree workflow and the Code-Change Doctrine.
 - `docs/BACKLOG.md` — complete inventory of remaining work.
 - `docs/TESTING_PHILOSOPHY.md` — the hostile skepticism doctrine.
 - `docs/PCRE2_COMPATIBILITY_MATRIX.md` — what's shipped vs what's a gap.
