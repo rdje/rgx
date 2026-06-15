@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Seed Knowledge Map fact cards (leaf KNOWLEDGE-MAP-DOC.2)
+- Scope: seed `docs/knowledge/` with durable structural fact cards (the kind a future session would otherwise re-derive) and regenerate the map. Docs-only.
+- Changes: 4 cards — `pcre2-conformance-ratchet` (baseline location/value + the 4 by-design residuals), `pgen-sole-open-bug` (0078 sole open, replaces 0073), `pgen-build-regenerate` (fresh-clone/bump regenerate step + read-only submodule), `governance-entrypoints` (task-trees + Code-Change Doctrine + memory layers + read-first order). Each carries `answers:` (query-shaped synonyms), `date`, `evidence`, and a one-command `reverify`. `KNOWLEDGE_MAP.md` regenerated → **4 facts / 22 question keys**.
+- Validation: `check_knowledge_map.sh` green — required fields present, ids unique, derive-and-diff in sync; cards are durable conclusions, not volatile metrics (per the KM boundary). Docs-only / non-gate-affecting; committed through the active hooks.
+- Notes/impact: archaeology for those four facts is now one lookup. Next: `.3` wire the KM gate into the pre-commit hook + run-local-ci.sh (gate-affecting), `.4` verify + close.
+
 ### 2026-06-15 - Copy the Knowledge Map bundle + install (leaf KNOWLEDGE-MAP-DOC.1)
 - Scope: adopt the portable Knowledge Map (KM) retrieval layer (from `pgen/knowledge-map/`) — step 1: copy the bundle + install + route docs. Additive (indexes/converts nothing). Docs-only.
 - Changes: `cp -r` the `knowledge-map/` bundle into RGX root (standard `KNOWLEDGE_MAP_ARCHITECTURE.md`, FAQ, README, install.sh, `scripts/{gen,check}_knowledge_map.sh` + `knowledge_map.conf`, `templates/FACT_TEMPLATE.md`, `hooks/pre-commit.snippet`, `ci/knowledge-map-gate.yml`); `bash knowledge-map/install.sh` created `docs/knowledge/` (with a README pointer) and generated the first `KNOWLEDGE_MAP.md` (0 facts, derive-and-diff check OK). README root-md index + ramp-up + `AGENTS.md` updated to route to the map ("grep KNOWLEDGE_MAP.md before re-deriving"). New owning tree `docs/tasks/KNOWLEDGE-MAP-DOC.md` (4 leaves).

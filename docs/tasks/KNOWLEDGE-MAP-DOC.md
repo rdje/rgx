@@ -55,11 +55,11 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
   Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.1)`
 
 - ID: `KNOWLEDGE-MAP-DOC.2`
-  Status: `pending`
+  Status: `done`
   Goal: `Seed initial fact cards under docs/knowledge/ for durable structural facts established this session (e.g. conformance-ratchet location/value; sole-open-PGEN-bug; subs/pgen regenerate-after-bump; the two governance standards' entrypoints). Regenerate the map.`
   Acceptance: `>=3 valid fact cards (required fields + answers:); KNOWLEDGE_MAP.md regenerated + in sync; check_knowledge_map.sh green.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `4 cards: pcre2-conformance-ratchet, pgen-sole-open-bug, pgen-build-regenerate, governance-entrypoints — each durable/structural (not volatile metrics), with answers:/date/evidence/reverify. Map regenerated → 4 facts / 22 question keys; check_knowledge_map.sh green (fields valid, ids unique, derive-and-diff in sync). Docs-only.`
+  Commit: `see Commit Log (leaf KNOWLEDGE-MAP-DOC.2)`
 
 - ID: `KNOWLEDGE-MAP-DOC.3`
   Status: `pending`
@@ -79,11 +79,10 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `KNOWLEDGE-MAP-DOC.2` | `pending` | Seed cards now the bundle + map exist. |
-| 2 | `KNOWLEDGE-MAP-DOC.3` | `pending` | Wire enforcement once cards exist (so the gate runs against real facts). GATE-AFFECTING. |
-| 3 | `KNOWLEDGE-MAP-DOC.4` | `pending` | Verify + close. |
+| 1 | `KNOWLEDGE-MAP-DOC.3` | `pending` | Wire enforcement now that 4 cards + the map exist. GATE-AFFECTING → full run-local-ci.sh. |
+| 2 | `KNOWLEDGE-MAP-DOC.4` | `pending` | Verify + close. |
 
-(`.1` completed 2026-06-15 — bundle copied + installed; first map generated.)
+(`.1`/`.2` completed 2026-06-15 — bundle copied + installed; 4 seed cards → map 4 facts/22 keys, in sync.)
 
 ## Decisions
 
@@ -113,12 +112,14 @@ place. `KNOWLEDGE_MAP.md` is a **derived** artifact (question-keyed index) over
 | --- | --- | --- | --- |
 | `2026-06-15` | — | tree created | `n/a` |
 | `2026-06-15` | `.1` | bundle copied; install ok (0-fact map, check OK); pathspec test = not gate-affecting; README+AGENTS routed; docs-only | `pass` |
+| `2026-06-15` | `.2` | 4 seed cards; map regenerated (4 facts/22 keys); check_knowledge_map.sh green (valid, unique, in sync); docs-only | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
-| `.1` | `KNOWLEDGE-MAP-DOC.1 — copy KM bundle + install + route docs` | docs-only; not pushed unless user asks. |
+| `.1` | `KNOWLEDGE-MAP-DOC.1 — copy KM bundle + install + route docs` (`2c4dbda`) | docs-only; not pushed unless user asks. |
+| `.2` | `KNOWLEDGE-MAP-DOC.2 — seed 4 fact cards + regenerate map` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 
