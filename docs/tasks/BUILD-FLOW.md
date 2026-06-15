@@ -42,7 +42,7 @@ pgen-free reference build has bit-rotted: 36 compile errors).
 - ID: `BUILD-FLOW`
   Status: `done`
   Goal: `Downstream/submodule consumers build RGX with zero friction.`
-  Children: `.1` `.2` `.3` (all `done`)
+  Children: `.1` `.2` `.3` `.4` (all `done`)
 
 - ID: `BUILD-FLOW.1`
   Status: `done`
@@ -64,6 +64,13 @@ pgen-free reference build has bit-rotted: 36 compile errors).
   Acceptance: `Both build paths verified; KNOWLEDGE_MAP card for "how do I build RGX as a submodule"; downstream answer recorded; tree closed.`
   Verification: `Both paths verified in .1/.2 (make bootstrap idempotent rc0; --no-default-features 0 errors; default + conformance green). KM card rgx-build-as-submodule added (+ refreshed pgen-build-regenerate to point at make bootstrap); map → 5 facts / 28 keys, in sync. Downstream answer recorded below (for LINKEDSPEC RGX-BUILD-REPRO). Tree closed → Completed.`
   Commit: `see Commit Log (leaf BUILD-FLOW.3)`
+
+- ID: `BUILD-FLOW.4`
+  Status: `done`
+  Goal: `Add a discoverable handoff/integration document that precisely describes how a downstream consumer builds a fully featured + functional RGX (+ PGEN regex parser): prerequisites, submodule topology, the make flow + why plain cargo build is cold-fragile, Cargo path-dep wiring + feature flags, the pgen-free option, the C ABI, post-bump steps, verification, troubleshooting, pins.`
+  Acceptance: `docs/INTEGRATION.md exists, accurate to the workspace (MSRV 1.95; default = std+pgen-parser+jit; optional lua/js/rhai/wasm; rgx-capi C ABI; PGEN pin db6f8c68/1.1.81); linked from README (build section + doc index) and the KM card; KM in sync.`
+  Verification: `docs/INTEGRATION.md authored (13 sections), grounded in verified facts from rgx-core/Cargo.toml (default features, MSRV), rgx-capi/Cargo.toml (crate-type), and the Makefile. README build section + docs/ index point to it; KM card rgx-build-as-submodule now names it as the canonical home (map regenerated, in sync). Docs-only / non-gate-affecting.`
+  Commit: `see Commit Log (leaf BUILD-FLOW.4)`
 
 ## Current Frontier
 
@@ -126,6 +133,7 @@ submodule consumer today.
 | `2026-06-15` | `.1` | `make help` lists targets; `make bootstrap` idempotent no-op when parser present (rc 0); README documents direct + submodule-consumer use; non-gate-affecting | `pass` |
 | `2026-06-15` | `.2` | B1/B2/B3 fixed → `--no-default-features` 36→0 errors; default build unchanged; CI guard added (`cargo check --no-default-features`); **RGX_RUN_CONFORMANCE=1 run-local-ci.sh GREEN, ratchet held 12,806/4**; GATE-AFFECTING | `pass` |
 | `2026-06-15` | `.3` | KM card `rgx-build-as-submodule` added (map → 5 facts/28 keys, in sync); downstream answer recorded; tree closed; docs-only | `pass` |
+| `2026-06-15` | `.4` | `docs/INTEGRATION.md` authored (downstream handoff guide, 13 sections, fact-grounded); README + KM card route to it; map in sync; docs-only | `pass` |
 
 ## Commit Log
 
@@ -133,16 +141,21 @@ submodule consumer today.
 | --- | --- | --- |
 | `.1` | `BUILD-FLOW.1 — add make build entrypoint that hides the PGEN bootstrap` (`aa0297b`) | docs/tooling (root Makefile + README); not pushed unless user asks. |
 | `.2` | `BUILD-FLOW.2 — fix the --no-default-features (pgen-free) build` (`c8eb604`) | gate-affecting; full gate + conformance green; not pushed unless user asks. |
-| `.3` | `BUILD-FLOW.3 — KM card + downstream response; close tree` | docs-only; not pushed unless user asks. |
+| `.3` | `BUILD-FLOW.3 — KM card + downstream response; close tree` (`53f809d`) | docs-only; not pushed unless user asks. |
+| `.4` | `BUILD-FLOW.4 — add docs/INTEGRATION.md downstream handoff guide` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 
 - `2026-06-15`: Created from the LINKEDSPEC `RGX-BUILD-REPRO` downstream report
   (submodule consumer can't build RGX). Leaf owns the fix per the Code-Change
   Doctrine (touches build tooling + Rust source).
-- `2026-06-15`: All three leaves completed; tree **closed**. Path A (`make`
+- `2026-06-15`: First three leaves completed; tree closed. Path A (`make`
   entrypoint) + Path B (`--no-default-features` restored 36→0 + CI guard) both
   shipped; full gate + PCRE2 conformance GREEN (ratchet held 12,806/4); KM card
   added; downstream answer recorded. A submodule consumer can now build RGX with
   one command. (Open follow-up for the PGEN maintainer: a pgen `build.rs` that
   self-generates the parser would enable true zero-step `cargo build`.)
+- `2026-06-15`: Re-opened to add `.4` (user request) — a dedicated, discoverable
+  handoff/integration document `docs/INTEGRATION.md` for downstream consumers,
+  precisely describing how to build a fully featured RGX (+ PGEN). Linked from
+  README + the KM card. Tree closed again with 4 leaves.

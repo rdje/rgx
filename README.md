@@ -152,6 +152,7 @@ If you are new to the repo, use this order:
 - [`WARP.md`](WARP.md) — Warp-specific repository guidance
 
 ### `docs/` markdown files
+- [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — **downstream consumer guide**: precisely how to build a fully featured RGX (+ PGEN regex parser) as a submodule / path dep / C ABI
 - [`docs/TASK_TREE_README.md`](docs/TASK_TREE_README.md) — task-tree tracking setup/usage guide (portable)
 - [`docs/TASK_TREE.md`](docs/TASK_TREE.md) — repo-local task-tree workflow spec, active-tree index, PNT rules, Code-Change Doctrine
 - [`docs/tasks/TEMPLATE.md`](docs/tasks/TEMPLATE.md) — copyable skeleton for a new task tree
@@ -196,6 +197,9 @@ before building your own workspace — then your `cargo build` finds PGEN's pars
 ```bash
 make -C path/to/rgx bootstrap     # generates subs/pgen/generated/* (idempotent)
 ```
+**Downstream/integration consumers:** the precise build & integration handoff
+guide (prerequisites, submodule topology, feature flags, the pgen-free option,
+the C ABI, troubleshooting) is **[`docs/INTEGRATION.md`](docs/INTEGRATION.md)**.
 
 Or drive cargo directly (after `make bootstrap` at least once):
 ```bash

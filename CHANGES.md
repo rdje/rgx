@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Add downstream build/integration handoff guide (leaf BUILD-FLOW.4)
+- Scope: add a dedicated, discoverable document precisely describing how a downstream consumer builds a fully featured + functional RGX (+ PGEN regex parser). User-requested. Docs-only.
+- Changes: new `docs/INTEGRATION.md` (13 sections: TL;DR, what "fully featured" means, prerequisites, submodule topology, why cold `cargo build` fails, Cargo path-dep wiring + feature flags, the pgen-free `--no-default-features` option, post-bump steps, verification, the `rgx-capi` C ABI, troubleshooting, current pins). Grounded in verified facts: MSRV 1.95; `rgx-core` default = `std`+`pgen-parser`+`jit`; optional `lua`/`javascript`/`rhai`/`wasm`/`all-languages`; `rgx-capi` `cdylib`+`staticlib`+`rlib`; PGEN pin `db6f8c68`/1.1.81; binary `rgx`. README (build section + docs index) and the KM card `rgx-build-as-submodule` now route to it. `BUILD-FLOW` re-opened to own this as `.4`, then closed again (4 leaves).
+- Validation: docs-only / non-gate-affecting; KM derive-and-diff in sync; internal links resolve.
+- Notes/impact: a downstream/submodule consumer now has one precise handoff document for a fully-featured build (and the lighter pgen-free option), distinct from the terse README block.
+
 ### 2026-06-15 - Knowledge Map card for the build flow + close BUILD-FLOW (leaf BUILD-FLOW.3)
 - Scope: add a retrieval card for the build question, record the downstream answer, and close `BUILD-FLOW`. Docs-only.
 - Changes: new KM card `docs/knowledge/rgx-build-as-submodule.md` (answers "how do I build RGX / as a submodule" with the two working paths) + refreshed `pgen-build-regenerate` to point at `make bootstrap`; `KNOWLEDGE_MAP.md` regenerated → 5 facts / 28 question keys (in sync). `docs/tasks/BUILD-FLOW.md` records the **Downstream response** for LINKEDSPEC `RGX-BUILD-REPRO` (Path A `make`/`make bootstrap`; Path B `--no-default-features` now compiles). Tree → Completed; `LIVE_ACHIEVEMENT_STATUS.md` + `MEMORY.md` pointer updated.

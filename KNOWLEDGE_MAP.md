@@ -79,6 +79,6 @@ _How to build RGX (incl. as a git submodule) — two working paths_
 
 - **answers:** how do I build RGX | how do I build RGX as a git submodule | cargo build fails couldn't read return_annotation_parser.rs | how do I build rgx-core without PGEN | what is the simple command to build RGX and its dependencies | downstream project cannot compile RGX
 - **date:** 2026-06-15 · **status:** current
-- **evidence:** `Makefile (root targets build/bootstrap/...); README "Build, test, run"; docs/tasks/BUILD-FLOW.md`
+- **evidence:** `docs/INTEGRATION.md (downstream consumer guide); Makefile (root targets build/bootstrap/...); README "Build, test, run`
 - **reverify:** `make -C . bootstrap`
 - **source:** [`docs/knowledge/rgx-build-as-submodule.md`](docs/knowledge/rgx-build-as-submodule.md)

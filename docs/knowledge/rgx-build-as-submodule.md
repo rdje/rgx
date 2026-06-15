@@ -11,7 +11,7 @@ answers:
 date: 2026-06-15
 status: current
 tags: [build, downstream, submodule, pgen, make]
-evidence: Makefile (root targets build/bootstrap/...); README "Build, test, run"; docs/tasks/BUILD-FLOW.md
+evidence: docs/INTEGRATION.md (downstream consumer guide); Makefile (root targets build/bootstrap/...); README "Build, test, run"
 reverify: make -C . bootstrap
 ---
 
@@ -31,5 +31,8 @@ options:
    step in `run-local-ci.sh` keeps it from bit-rotting. (Note: the reference
    parser supports less syntax than PGEN — the default path is the full engine.)
 
-Fixed under the `BUILD-FLOW` task-tree (LINKEDSPEC `RGX-BUILD-REPRO`). Related:
-[[pgen-build-regenerate]] (why the generated parser is missing on a cold clone).
+Full precise recipe (prerequisites, submodule topology, feature flags, the
+pgen-free option, the C ABI, troubleshooting): **`docs/INTEGRATION.md`** — the
+downstream consumer / handoff guide. Fixed under the `BUILD-FLOW` task-tree
+(LINKEDSPEC `RGX-BUILD-REPRO`). Related: [[pgen-build-regenerate]] (why the
+generated parser is missing on a cold clone).
