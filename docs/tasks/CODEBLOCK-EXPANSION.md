@@ -85,6 +85,20 @@ guarantees explicit.
   test coverage; if no concrete gap is found, `.1` may close as "surface
   already at parity" with that finding recorded.
 
+- **Investigation note (2026-06-15, preliminary — `.1` NOT yet picked/closed):**
+  a first read of `execution.rs` confirms all three inline hosts register
+  `emit_numeric` / `emit_replacement` / `steer_*` and handle both bare-expression
+  and explicit-`return` bodies (Rhai: global fns + `register_fn`, return handles
+  `bool`/`i64`/`f64`/`ImmutableString`/`String`, `execution.rs:738+`/`832+`; Lua:
+  `rgx` table + `eval_user_code` direct-eval-then-`return {code}`-fallback,
+  `execution.rs:918+`/`1053+`; JS: `rgx` object + direct-eval-then-IIFE-fallback,
+  `execution.rs:1165+`/`1283+`). The visible differences (e.g. Rhai registering
+  both `i64` and `f64` `emit_numeric` while JS exposes only `f64`) appear
+  **intrinsic to each host's type system**, not parity defects. A signoff-quality
+  determination requires (a) reading the full ~800-line three-backend span +
+  their feature-gated tests and (b) the heavy `lua`+`javascript`+`rhai` gate.
+  Recommended next-session entry point for this leaf.
+
 ## Blockers
 
 - None for `.1`.
