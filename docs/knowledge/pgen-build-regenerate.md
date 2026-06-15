@@ -17,9 +17,11 @@ reverify: ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_anno
 Since PGEN commit `0ed2b2ad`, PGEN no longer tracks its generated parser
 artifacts (`subs/pgen/generated/*` — too large to vendor). On a fresh clone or
 after every `subs/pgen` pin bump they are absent and `cargo build -p rgx-core`
-fails (PGEN's `include!` of the generated parser). Fix: run
+fails (PGEN's `include!` of the generated parser). Fix: run **`make bootstrap`**
+at the RGX root (the simple wrapper — see [[rgx-build-as-submodule]]), which runs
 `make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap` (idempotent
-cold-clone bootstrap), then rebuild — never trust a stale `target/` after a bump.
+cold-clone bootstrap) for you, then rebuild — never trust a stale `target/`
+after a bump.
 
 `subs/pgen` is **read-only** from RGX; scope tooling (`cargo fmt -p rgx-core`,
 never bare). The expected clean state shows only `?? subs/pgen` (regenerated

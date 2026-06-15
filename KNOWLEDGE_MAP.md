@@ -3,14 +3,19 @@
 > **AUTO-GENERATED — DO NOT EDIT.** Regenerate with `knowledge-map/scripts/gen_knowledge_map.sh`.
 > Source of truth = YAML front-matter in: `docs/knowledge docs/decisions`. Edit the fact files, never this map.
 > A fact is any `.md` whose front-matter has a non-empty `answers:` list.
-> **4** facts · **22** question keys.
+> **5** facts · **28** question keys.
 
 ## Questions → fact
 
 - "are the conformance residuals bugs" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "can I make a code change without a task" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
+- "cargo build fails couldn't read return_annotation_parser.rs" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "cargo build fails missing generated parser" -> [pgen-build-regenerate](docs/knowledge/pgen-build-regenerate.md) · 2026-06-15 · reverify: `ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_annotation_parser.rs`
 - "did 0078 replace 0073" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-06-15 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
+- "downstream project cannot compile RGX" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
+- "how do I build RGX as a git submodule" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
+- "how do I build RGX" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
+- "how do I build rgx-core without PGEN" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "how do I regenerate the PGEN regex parser" -> [pgen-build-regenerate](docs/knowledge/pgen-build-regenerate.md) · 2026-06-15 · reverify: `ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_annotation_parser.rs`
 - "how does memory and continuity work in RGX" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
 - "how is work tracked in RGX" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
@@ -23,6 +28,7 @@
 - "what is the Code-Change Doctrine" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
 - "what is the merge gate for parsing / VM / compiler changes" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "what is the only open PGEN bug" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-06-15 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
+- "what is the simple command to build RGX and its dependencies" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "what should an agent read first" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
 - "where is the conformance ratchet baseline" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "where is the task tree / how do I pick the next task" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
@@ -67,3 +73,12 @@ _PGEN-RGX-0078 is the sole open PGEN bug; it replaces 0073; all others addressed
 - **evidence:** `pgen-issues/PGEN-RGX-0078.yaml (status open); PGEN-RGX-0073.yaml (status closed, superseded_by 0078)`
 - **reverify:** `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
 - **source:** [`docs/knowledge/pgen-sole-open-bug.md`](docs/knowledge/pgen-sole-open-bug.md)
+
+### rgx-build-as-submodule
+_How to build RGX (incl. as a git submodule) — two working paths_
+
+- **answers:** how do I build RGX | how do I build RGX as a git submodule | cargo build fails couldn't read return_annotation_parser.rs | how do I build rgx-core without PGEN | what is the simple command to build RGX and its dependencies | downstream project cannot compile RGX
+- **date:** 2026-06-15 · **status:** current
+- **evidence:** `Makefile (root targets build/bootstrap/...); README "Build, test, run"; docs/tasks/BUILD-FLOW.md`
+- **reverify:** `make -C . bootstrap`
+- **source:** [`docs/knowledge/rgx-build-as-submodule.md`](docs/knowledge/rgx-build-as-submodule.md)

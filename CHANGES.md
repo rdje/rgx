@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Knowledge Map card for the build flow + close BUILD-FLOW (leaf BUILD-FLOW.3)
+- Scope: add a retrieval card for the build question, record the downstream answer, and close `BUILD-FLOW`. Docs-only.
+- Changes: new KM card `docs/knowledge/rgx-build-as-submodule.md` (answers "how do I build RGX / as a submodule" with the two working paths) + refreshed `pgen-build-regenerate` to point at `make bootstrap`; `KNOWLEDGE_MAP.md` regenerated → 5 facts / 28 question keys (in sync). `docs/tasks/BUILD-FLOW.md` records the **Downstream response** for LINKEDSPEC `RGX-BUILD-REPRO` (Path A `make`/`make bootstrap`; Path B `--no-default-features` now compiles). Tree → Completed; `LIVE_ACHIEVEMENT_STATUS.md` + `MEMORY.md` pointer updated.
+- Validation: KM derive-and-diff in sync; docs-only / non-gate-affecting.
+- Notes/impact: a project that git-submodules RGX can now build it with one command (`make` / `make -C path/to/rgx bootstrap`) or via the pgen-free `--no-default-features` reference build. `BUILD-FLOW` closed.
+
 ### 2026-06-15 - Fix the `--no-default-features` (pgen-free) build (leaf BUILD-FLOW.2)
 - Scope: restore the pgen-free reference build (`cargo build -p rgx-core --no-default-features`) reported broken by LINKEDSPEC (`RGX-BUILD-REPRO` Path B — 36 errors). The recursive-descent `parser.rs` reference backend is a supported config; it had bit-rotted. GATE-AFFECTING.
 - Changes: **B1** — `CharRange` was imported only under `#[cfg(feature = "pgen-parser")]` in `parsing.rs` but `posix_class_ranges()`/`ucp_posix_class_ranges()` use it ungated → moved `CharRange` to an ungated `use crate::ast::{CharRange, Regex}` (default/PGEN build semantically unchanged; cleared 33 errors). **B2** — `parser.rs::regex_kind` (a trace-label helper, compiled only in the no-default build) was non-exhaustive → added the 12 PGEN-path variant arms explicitly (no wildcard masking). **B3** — `parser.rs` `ci_override_ranges: _` (an invalid `_` value expression) → `None` (the reference parser computes no CI-override ranges). 36 → 0 errors; default build unchanged. Added a durable guard: `scripts/run-local-ci.sh` now runs `cargo check -p rgx-core --no-default-features` so this family cannot bit-rot again.

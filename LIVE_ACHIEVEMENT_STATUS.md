@@ -57,6 +57,10 @@ in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-06-15` — `BUILD-FLOW` (`.1`–`.3`): zero-friction build for downstream /
+  submodule consumers (from LINKEDSPEC's repro). Root `make` hides the PGEN
+  bootstrap (Path A); the pgen-free `--no-default-features` build is restored
+  (36→0 errors) and CI-guarded (Path B). Full gate + PCRE2 conformance GREEN.
 - `2026-06-15` — `KNOWLEDGE-MAP-DOC` (`.1`–`.4`): adopted the Knowledge Map
   retrieval layer — `knowledge-map/` bundle + 4 seed fact cards → derived
   `KNOWLEDGE_MAP.md` (22 question keys) + pre-commit/CI derive-and-diff gate
