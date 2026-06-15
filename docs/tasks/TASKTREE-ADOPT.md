@@ -3,7 +3,7 @@
 ## Metadata
 
 - Tree ID: `TASKTREE-ADOPT`
-- Status: `active`
+- Status: `done`
 - Roadmap lane: `Governance / process (cross-cutting)`
 - Created: `2026-06-15`
 - Last updated: `2026-06-15`
@@ -49,9 +49,9 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
 ## Task Tree
 
 - ID: `TASKTREE-ADOPT`
-  Status: `active`
+  Status: `done`
   Goal: `RGX governed by the task-tree workflow; roadmap/codebase/Book locked together.`
-  Children: `TASKTREE-ADOPT.1`, `TASKTREE-ADOPT.2`, `TASKTREE-ADOPT.3`
+  Children: `TASKTREE-ADOPT.1`, `TASKTREE-ADOPT.2`, `TASKTREE-ADOPT.3` (all `done`)
 
 - ID: `TASKTREE-ADOPT.1`
   Status: `done`
@@ -64,23 +64,25 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
   Status: `done`
   Goal: `Decompose the live ROADMAP / BACKLOG open lanes into task trees: promote the Proposed Task Trees in docs/TASK_TREE.md into real tree files (or revise/retire entries with reason), so every open lane is tree-owned.`
   Acceptance: `Each open roadmap/backlog lane has an owning docs/tasks/<TREE>.md (or a justified Proposed/parked/deferred entry); docs/TASK_TREE.md tables reflect reality; LIVE_ACHIEVEMENT_STATUS.md links lanes → trees.`
-  Verification: `7 tree files created (COMPILE-PERF-0073, RUNTIME-REMEASURE, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION, A9-BINDINGS, RELEASE-CRATESIO); docs/TASK_TREE.md Active/Blocked-Deferred-Parked tables + LIVE_ACHIEVEMENT_STATUS.md board updated; mdbook build clean; docs-only.`
+  Verification: `7 tree files created (COMPILE-PERF-0078 [created as COMPILE-PERF-0073, renamed in .3 per maintainer], RUNTIME-REMEASURE, PERF-SOTA-GAPS, PCRE2-1047-SYNTAX, CODEBLOCK-EXPANSION, A9-BINDINGS, RELEASE-CRATESIO); docs/TASK_TREE.md Active/Blocked-Deferred-Parked tables + LIVE_ACHIEVEMENT_STATUS.md board updated; mdbook build clean; docs-only.`
   Commit: `see Commit Log (leaf TASKTREE-ADOPT.2)`
 
 - ID: `TASKTREE-ADOPT.3`
-  Status: `pending`
+  Status: `done`
   Goal: `Retroactively audit shipped code changes (roadmap Done / BACKLOG shipped / PGEN-RGX ledger / engine fixes) and annotate verified outcomes back into task trees, per the user doctrine for past changes.`
   Acceptance: `A retro-audit method is recorded; shipped work is mapped to trees with verified outcomes annotated; gaps/drift between roadmap, codebase, and Book are flagged for follow-up trees.`
-  Verification: `pending — likely splits per subsystem/era on pick.`
-  Commit: `pending`
+  Verification: `Created docs/tasks/RETRO-AUDIT.md — 8 audit leaves, all subsystems verified by codebase evidence sweep (C1/C2/TDFA/AC, host-integration, A/B API, A9 capi, conformance ratchet 12,806/4); drift D1 (PGEN-RGX ledger status) flagged → LEDGER-HYGIENE proposed. Also reconciled the maintainer's 2026-06-15 ledger correction (0078 replaces 0073; 0078 sole open bug, all others addressed) across the live docs + renamed COMPILE-PERF-0073 → COMPILE-PERF-0078.`
+  Commit: `see Commit Log (leaf TASKTREE-ADOPT.3)`
 
 ## Current Frontier
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `TASKTREE-ADOPT.3` | `pending` | Retro-audit shipped history into trees now that the forward trees exist. Closes `TASKTREE-ADOPT`. |
+| — | — | — | All leaves `done`. `TASKTREE-ADOPT` is complete → moved to Completed Task Trees in `docs/TASK_TREE.md`. |
 
-(`TASKTREE-ADOPT.2` completed 2026-06-15 — 7 roadmap lanes decomposed into trees.)
+(`TASKTREE-ADOPT.1`/`.2`/`.3` all completed 2026-06-15. Follow-on work lives in
+the active trees `PERF-SOTA-GAPS` / `PCRE2-1047-SYNTAX` / `CODEBLOCK-EXPANSION`
+and the proposed `LEDGER-HYGIENE`.)
 
 ## Decisions
 
@@ -116,13 +118,15 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
 | --- | --- | --- | --- |
 | `2026-06-15` | `TASKTREE-ADOPT.1` | `mdbook build book` (clean, exit 0); docs-only / non-gate-affecting per COMMIT.md (no Rust/Cargo/CI/scripts/subs staged); staged set verified to exclude `subs/pgen`; brief cleared + untracked post-commit | `pass` |
 | `2026-06-15` | `TASKTREE-ADOPT.2` | 7 tree files created + index tables + board updated; `mdbook build book` clean; docs-only / non-gate-affecting; staged set excludes `subs/pgen` | `pass` |
+| `2026-06-15` | `TASKTREE-ADOPT.3` | RETRO-AUDIT.md created (8 leaves) via codebase evidence sweep; maintainer ledger correction (0078 replaces 0073) reconciled across live docs; tree renamed COMPILE-PERF-0073→0078; `mdbook build book` clean; docs-only | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
 | `TASKTREE-ADOPT.1` | `Docs: adopt task-tree tracking workflow (leaf TASKTREE-ADOPT.1)` (`d261366`) | Install + wire-up slice; 13 files; committed local-only, not pushed unless user asks. |
-| `TASKTREE-ADOPT.2` | `Docs: decompose roadmap into task trees (leaf TASKTREE-ADOPT.2)` | 7 tree files + index/board; docs-only; not pushed unless user asks. |
+| `TASKTREE-ADOPT.2` | `Docs: decompose roadmap into task trees (leaf TASKTREE-ADOPT.2)` (`7a3ec39`) | 7 tree files + index/board; docs-only; not pushed unless user asks. |
+| `TASKTREE-ADOPT.3` | `Docs: retro-audit shipped code into trees + ledger reconcile (leaf TASKTREE-ADOPT.3)` | RETRO-AUDIT tree + 0078-replaces-0073 reconcile + rename; docs-only; not pushed unless user asks. |
 
 ## Changelog
 
@@ -132,3 +136,9 @@ roadmap, the codebase, and the mdBook stay locked together with no drift.
 - `2026-06-15`: `.2` completed — decomposed all 7 open ROADMAP/BACKLOG lanes
   into real task trees (3 active, 2 blocked, 1 deferred, 1 parked); index
   tables + `LIVE_ACHIEVEMENT_STATUS.md` board updated. Frontier → `.3`.
+- `2026-06-15`: `.3` completed — created `RETRO-AUDIT` (8 leaves, evidence-based
+  audit of all major shipped subsystems; drift D1 flagged → `LEDGER-HYGIENE`).
+  Folded in the maintainer's ledger correction (`0078` replaces `0073`; `0078`
+  the sole open PGEN bug, all others addressed) and renamed
+  `COMPILE-PERF-0073` → `COMPILE-PERF-0078`. **`TASKTREE-ADOPT` is now `done`**
+  → Completed Task Trees.

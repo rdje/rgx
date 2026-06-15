@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Retro-audit shipped code into trees + PGEN ledger reconcile (leaf TASKTREE-ADOPT.3)
+- Scope: retroactively audit the shipped (pre-task-tree) codebase and annotate verified outcomes into a task tree, per the doctrine for past code changes; fold in the maintainer's 2026-06-15 PGEN-ledger correction. Docs-only.
+- Changes:
+  - New `docs/tasks/RETRO-AUDIT.md` — 8 audit leaves (method; C1 JIT; C2/TDFA/AC/SIMD-prefix-scan; host-integration 6 layers; A/B public API; conformance program + PGEN ledger; rgx-capi A9 Phase 0/1; drift findings). Every major subsystem **verified present by a codebase evidence sweep** (c1/, c2/{…,tdfa,simd_scan}, ac.rs, recursion.rs, file.rs, events.rs, execution.rs, vm.rs opcodes incl. CallReturning=0x46, lib.rs uses_jit/uses_c2/uses_tdfa + safety setters, rgx-capi exports, pcre2_conformance.rs PASS_BASELINE=12_806/FAIL=4, book/src/internals/*). No code/Book drift found.
+  - **Drift D1 flagged** — PGEN-RGX ledger `status:` field drift: 16 `status: open` matches on disk but, per the maintainer (PGEN authority), **`PGEN-RGX-0078` is the sole active/open bug (PGEN not yet addressed it) and every other report has been addressed**. Dispatched to new `LEDGER-HYGIENE` proposed tree (flip 15 stale YAMLs to closed, leave 0078).
+  - **Maintainer ledger correction reconciled across live docs**: `0078` **replaces** `0073`; the compile-time tree was **renamed `COMPILE-PERF-0073` → `COMPILE-PERF-0078`** (`git mv`; rename history recorded in its changelog); updated `docs/TASK_TREE.md`, `LIVE_ACHIEVEMENT_STATUS.md`, `RELEASE-CRATESIO.md`, `TASKTREE-ADOPT.md`. (Supersedes the earlier MEMORY f/u-16 framing that called 0073 the active tracker.)
+  - `TASKTREE-ADOPT` closed (all of `.1`/`.2`/`.3` done) → Completed Task Trees, alongside `RETRO-AUDIT`. Active trees going forward: `PERF-SOTA-GAPS`, `PCRE2-1047-SYNTAX`, `CODEBLOCK-EXPANSION`.
+- Validation: docs-only / non-gate-affecting; `mdbook build book` clean; the conformance ratchet (12,806/4) is untouched and remains the binding correctness gate.
+- Notes/impact: RGX history is now audited and tree-mapped; the roadmap, codebase, and Book are confirmed locked together (only the ledger `status:` cleanup D1 remains, as `LEDGER-HYGIENE`).
+
 ### 2026-06-15 - Decompose the roadmap into task trees (leaf TASKTREE-ADOPT.2)
 - Scope: promote the 7 roadmap-derived Proposed Task Trees into real `docs/tasks/<TREE>.md` files so every open ROADMAP/BACKLOG lane is tree-owned. Docs-only.
 - Changes:

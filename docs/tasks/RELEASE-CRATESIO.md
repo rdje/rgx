@@ -77,7 +77,7 @@ until the user triggers it.
   rgx-core/rgx-cli AND the PGEN regex parser is a near-future intent, ON HOLD;
   user is the trigger). Binary rename (`rgx`), per-crate metadata, READMEs, and
   Apache-2.0 LICENSE already shipped (BACKLOG A8). The PGEN regex parser is the
-  eventual release vehicle, gated on PGEN compile-time work (`COMPILE-PERF-0073`).
+  eventual release vehicle, gated on PGEN compile-time work (`COMPILE-PERF-0078`).
 
 ## Open Questions
 

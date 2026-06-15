@@ -63,7 +63,6 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
-| `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `active` | `TASKTREE-ADOPT.3` (retro-audit) | Governance / process |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
@@ -74,20 +73,27 @@ Captured and tree-owned, but not PNT-eligible until their condition clears.
 
 | Tree | File | Status | Condition to re-activate |
 | --- | --- | --- | --- |
-| `COMPILE-PERF-0073` | [tasks/COMPILE-PERF-0073.md](tasks/COMPILE-PERF-0073.md) | `blocked` | PGEN ships a faster regex-grammar parser (`PGEN-RGX-0073`; sole-parser design — no RGX fix) |
+| `COMPILE-PERF-0078` | [tasks/COMPILE-PERF-0078.md](tasks/COMPILE-PERF-0078.md) | `blocked` | PGEN addresses `PGEN-RGX-0078` (sole open bug; replaces `0073`) — faster regex-grammar parser; sole-parser design, no RGX fix |
 | `RUNTIME-REMEASURE` | [tasks/RUNTIME-REMEASURE.md](tasks/RUNTIME-REMEASURE.md) | `blocked` | A quiescent machine for a trustworthy benchmark capture (task #57) |
 | `A9-BINDINGS` | [tasks/A9-BINDINGS.md](tasks/A9-BINDINGS.md) | `deferred` | A real user/use-case pulling for a specific binding (Phase 0/1 shipped) |
 | `RELEASE-CRATESIO` | [tasks/RELEASE-CRATESIO.md](tasks/RELEASE-CRATESIO.md) | `parked` | Explicit user authorization (`project_release_strategy`) |
 
 ## Proposed Task Trees
 
-None outstanding — the 7 roadmap-derived proposals were promoted into real tree
-files by `TASKTREE-ADOPT.2` on `2026-06-15`. New proposals are added here before
+| Proposed tree | Intent | Source | Disposition |
+| --- | --- | --- | --- |
+| `LEDGER-HYGIENE` | Reconcile the `pgen-issues/` ledger to the maintainer's state: flip the 15 stale `status: open` YAMLs (`0021/0022/0023/0027/0028/0033/0034/0035/0036/0037/0038/0039/0053` + `0073`) to `closed`, leave `0078` open, reconcile the report count, align live-doc/Book narrative. | `RETRO-AUDIT` drift D1 | `proposed` (single non-code doc slice) |
+
+The 7 roadmap-derived proposals were promoted into real tree files by
+`TASKTREE-ADOPT.2` on `2026-06-15`. New proposals are added here before
 activation.
 
 ## Completed Task Trees
 
-None yet. (`TASKTREE-ADOPT` closes when `.3` completes.)
+| Tree | File | Closed | Outcome |
+| --- | --- | --- | --- |
+| `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `2026-06-15` | Task-tree workflow installed (`.1`), roadmap decomposed into 7 trees (`.2`), shipped code retro-audited (`.3`). |
+| `RETRO-AUDIT` | [tasks/RETRO-AUDIT.md](tasks/RETRO-AUDIT.md) | `2026-06-15` | Evidence-based audit of all major shipped subsystems (C1/C2/TDFA/AC, host-integration, A/B API, A9 capi, conformance); all verified present; drift D1 (PGEN-RGX ledger) flagged → `LEDGER-HYGIENE`. |
 
 ## Coverage Note
 
