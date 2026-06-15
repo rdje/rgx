@@ -88,7 +88,7 @@ If you are new to the repo, use this order:
 4. [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md) for shipped vs scaffolded features.
 5. [`docs/PCRE2_COMPATIBILITY_MATRIX.md`](docs/PCRE2_COMPATIBILITY_MATRIX.md) for parity status and known gaps.
 6. [`ROADMAP.md`](ROADMAP.md) and [`RUST_CODEBASE_ANALYSIS.md`](RUST_CODEBASE_ANALYSIS.md) for roadmap intent versus validated Rust implementation status.
-7. [`LIVE_ACHIEVEMENT_STATUS.md`](LIVE_ACHIEVEMENT_STATUS.md) and [`docs/TASK_TREE.md`](docs/TASK_TREE.md) for the high-level status board and the task-tree execution ledger (read the active task files it names).
+7. [`LIVE_ACHIEVEMENT_STATUS.md`](LIVE_ACHIEVEMENT_STATUS.md) and [`docs/TASK_TREE.md`](docs/TASK_TREE.md) for the high-level status board and the task-tree execution ledger (read the active task files it names). [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md) explains how memory/continuity is layered and enforced.
 8. [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) and [`MEMORY.md`](MEMORY.md) for current technical context and continuity.
 9. [`COMMIT.md`](COMMIT.md) before making/committing changes.
 10. [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants.
@@ -136,6 +136,7 @@ If you are new to the repo, use this order:
 - [`README.md`](README.md) — single entry point and navigation hub
 - [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants (loaded automatically)
 - [`SESSION_BOOTSTRAP.md`](SESSION_BOOTSTRAP.md) — new-session bootstrap instructions for AI/LLM handoff
+- [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md) — durable, harness-agnostic memory standard (4 layers A/B/C/D + E1–E4 enforcement); the system of record for how continuity works
 - [`CHANGES.md`](CHANGES.md) — authoritative change ledger
 - [`COMMIT.md`](COMMIT.md) — commit workflow contract and invariants
 - [`DEVELOPMENT_NOTES.md`](DEVELOPMENT_NOTES.md) — technical knowledge base

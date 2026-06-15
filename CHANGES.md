@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Author durable memory-architecture standard (leaf MEMORY-ARCHITECTURE-DOC.1)
+- Scope: adopt the portable, harness-agnostic Durable Agent Memory Architecture (from specforge) — step 1: author the standard + route to it. Docs-only.
+- Changes: new `MEMORY_ARCHITECTURE.md` at repo root (verbatim project-agnostic standard — 4 durability properties; layers A resume-pointer / B task-trees / C decision records / D git; write/read paths; §9 E1–E4 enforcement; §9.1 agnostic kit); README root-md index + ramp-up order reference it. New owning tree `docs/tasks/MEMORY-ARCHITECTURE-DOC.md` (5 leaves) registered in `docs/TASK_TREE.md`.
+- Validation: docs-only / non-gate-affecting; standard self-consistent; README links resolve.
+- Notes/impact: RGX already has layer B (task-trees). The remaining leaves add A (demote MEMORY.md, .3), C (docs/decisions, .2), and E1–E4 enforcement (.4) + verify (.5). Knowledge Map is explicitly out of scope.
+
 ### 2026-06-15 - Close PGEN-RGX-0073 (superseded by 0078) — ledger hygiene (leaf LEDGER-HYGIENE.1)
 - Scope: reconcile the `pgen-issues/` ledger to the maintainer's authoritative state (PGEN-RGX-0078 is the sole open bug and replaces 0073; all other reports addressed). Resolves `RETRO-AUDIT` drift D1. Non-code (tracker + docs).
 - Changes:
