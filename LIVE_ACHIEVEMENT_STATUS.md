@@ -43,14 +43,17 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
 | Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
 | Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
-| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
+| Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
 
-Pending follow-up: [`LEDGER-HYGIENE`](docs/TASK_TREE.md) (`proposed`) — reconcile
-the `pgen-issues/` ledger to "`0078` sole open, all others addressed" (drift D1).
-Shipped lanes remain recorded in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
+Ledger reconciled (`LEDGER-HYGIENE`, 2026-06-15): `PGEN-RGX-0078` is the sole
+top-level open report (`0073` closed/superseded). Shipped lanes remain recorded
+in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-06-15` — `LEDGER-HYGIENE.1`: closed `PGEN-RGX-0073` (superseded by
+  `0078`); confirmed `0078` is the sole top-level open report; corrected
+  `RETRO-AUDIT` D1's loose-grep overcount.
 - `2026-06-15` — `TASKTREE-ADOPT.3`: retro-audited shipped code into the
   `RETRO-AUDIT` tree (all major subsystems verified present); flagged the
   PGEN-RGX ledger drift (D1) and folded in the maintainer correction

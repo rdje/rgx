@@ -80,12 +80,9 @@ Captured and tree-owned, but not PNT-eligible until their condition clears.
 
 ## Proposed Task Trees
 
-| Proposed tree | Intent | Source | Disposition |
-| --- | --- | --- | --- |
-| `LEDGER-HYGIENE` | Reconcile the `pgen-issues/` ledger to the maintainer's state: flip the 15 stale `status: open` YAMLs (`0021/0022/0023/0027/0028/0033/0034/0035/0036/0037/0038/0039/0053` + `0073`) to `closed`, leave `0078` open, reconcile the report count, align live-doc/Book narrative. | `RETRO-AUDIT` drift D1 | `proposed` (single non-code doc slice) |
-
-The 7 roadmap-derived proposals were promoted into real tree files by
-`TASKTREE-ADOPT.2` on `2026-06-15`. New proposals are added here before
+None outstanding. The 7 roadmap-derived proposals were promoted into real tree
+files by `TASKTREE-ADOPT.2`, and `LEDGER-HYGIENE` (from `RETRO-AUDIT` drift D1)
+was executed + completed on `2026-06-15`. New proposals are added here before
 activation.
 
 ## Completed Task Trees
@@ -94,6 +91,7 @@ activation.
 | --- | --- | --- | --- |
 | `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `2026-06-15` | Task-tree workflow installed (`.1`), roadmap decomposed into 7 trees (`.2`), shipped code retro-audited (`.3`). |
 | `RETRO-AUDIT` | [tasks/RETRO-AUDIT.md](tasks/RETRO-AUDIT.md) | `2026-06-15` | Evidence-based audit of all major shipped subsystems (C1/C2/TDFA/AC, host-integration, A/B API, A9 capi, conformance); all verified present; drift D1 (PGEN-RGX ledger) flagged → `LEDGER-HYGIENE`. |
+| `LEDGER-HYGIENE` | [tasks/LEDGER-HYGIENE.md](tasks/LEDGER-HYGIENE.md) | `2026-06-15` | Closed `PGEN-RGX-0073` (superseded by `0078`); confirmed `0078` is the sole top-level open report; corrected D1's loose-grep overcount (only 0073 was actually open, not 15 files). |
 
 ## Coverage Note
 

@@ -18,10 +18,11 @@ summary: |
   correct on every measured pattern; only wall-clock time is at
   issue.
 
-status: open
+status: closed   # superseded by PGEN-RGX-0078 (maintainer 2026-06-15: "0078 replace 0073")
 opened_at: 2026-04-25T00:00:00Z
 first_seen_at: 2026-04-25T00:00:00Z
-last_updated_at: 2026-04-25T00:00:00Z
+last_updated_at: 2026-06-15T00:00:00Z
+closed_at: 2026-06-15T00:00:00Z
 
 # === Parser identity (per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md §1) ===
 parser_backend: pgen
@@ -347,7 +348,8 @@ impact: |
     "pathological performance or resource usage".
 
 resolution:
-  status: unresolved
+  status: superseded
+  superseded_by: PGEN-RGX-0078   # maintainer 2026-06-15: 0078 replaces 0073; compile-time perf tracking continues under 0078 (still open, PGEN-side). The 0073 report is closed; the underlying wall-clock issue is NOT fixed, it is tracked by 0078.
   fixed_in_rgx_commit: null
   verified_at: 2026-05-01T00:00:00Z
   verification_notes: |

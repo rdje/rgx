@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Close PGEN-RGX-0073 (superseded by 0078) — ledger hygiene (leaf LEDGER-HYGIENE.1)
+- Scope: reconcile the `pgen-issues/` ledger to the maintainer's authoritative state (PGEN-RGX-0078 is the sole open bug and replaces 0073; all other reports addressed). Resolves `RETRO-AUDIT` drift D1. Non-code (tracker + docs).
+- Changes:
+  - `pgen-issues/PGEN-RGX-0073.yaml`: top-level `status: open` → `closed` (+ `closed_at`, `last_updated_at` 2026-06-15); `resolution.status: unresolved` → `superseded` with `superseded_by: PGEN-RGX-0078` (the underlying wall-clock perf issue is NOT fixed — it is tracked by the still-open 0078).
+  - New `docs/tasks/LEDGER-HYGIENE.md` (single-leaf tree, executed + closed).
+  - **Corrected drift D1**: the earlier "16 matches / ~15 stale files" came from a loose `grep -l "status: open"` (matched nested blocks). The accurate `^status: open` check shows only `0073` + `0078` were ever top-level open; the 13 files D1 listed were already closed. So the real fix was a single flip. Correction recorded in `RETRO-AUDIT.md` D1 (honest audit trail).
+  - `docs/TASK_TREE.md` (LEDGER-HYGIENE → Completed; Proposed emptied), `LIVE_ACHIEVEMENT_STATUS.md` (board + latest slice).
+- Validation: `grep '^status: open' pgen-issues/PGEN-RGX-*.yaml` returns exactly `PGEN-RGX-0078`; docs-only / non-gate-affecting; `mdbook build book` clean; conformance ratchet untouched (12,806/4).
+- Notes/impact: the on-disk ledger now matches the narrative — `0078` is the sole open PGEN bug, all others closed/addressed. No code or behavior change.
+
 ### 2026-06-15 - Retro-audit shipped code into trees + PGEN ledger reconcile (leaf TASKTREE-ADOPT.3)
 - Scope: retroactively audit the shipped (pre-task-tree) codebase and annotate verified outcomes into a task tree, per the doctrine for past code changes; fold in the maintainer's 2026-06-15 PGEN-ledger correction. Docs-only.
 - Changes:

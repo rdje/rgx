@@ -124,14 +124,21 @@ documented; `drift` when the codebase and the docs disagree.
   stale and should read `status: closed`; only `0078` stays open.** Secondary:
   docs say "88 reports filed (0001–0088)" but 86 report files exist on disk
   (gaps in the 0001–0088 range).
-  **Disposition:** spawn `LEDGER-HYGIENE` (proposed) — batch-flip the 15 stale
-  files (`0021/0022/0023/0027/0028/0033/0034/0035/0036/0037/0038/0039/0053`
-  + `0073`) to `status: closed` with a resolution note, leave `0078` open,
-  reconcile the report count, and align the live-doc/Book narrative to
-  "0078 is the sole open tracker; all others addressed." This is a
+  **Disposition:** spawn `LEDGER-HYGIENE` (proposed) — reconcile the ledger to
+  "`0078` is the sole open tracker; all others addressed." This is a
   `pgen-issues/`-and-docs change (non-code), so it can be a single doc slice.
   **No code or behavior is affected** — the ratchet (12,806/4) is the binding
   correctness gate and is green.
+
+  > **CORRECTION (`LEDGER-HYGIENE`, 2026-06-15):** the "16 matches / ~15 stale
+  > files" figure above came from a **loose** `grep -l "status: open"` that
+  > matched the string anywhere in a file (nested fix-attempt/history blocks).
+  > The accurate **top-level** check (`^status: open`) shows only **two**
+  > reports open on disk — `0073` and `0078`. The 13 files D1 listed were
+  > already `status: closed`; they were never stale. The real remediation was a
+  > single flip (`0073 → closed`, superseded by `0078`), done in
+  > `LEDGER-HYGIENE.1`. D1's count is left here as written with this correction
+  > appended (honest audit trail).
 
 - **No code/Book drift found** in C1, C2/TDFA/AC, host-integration layers, the
   A/B public-API surface, A9 Phase 1, or the conformance baselines: every
