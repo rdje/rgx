@@ -56,11 +56,11 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
   Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.1)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.2`
-  Status: `pending`
+  Status: `done`
   Goal: `Create docs/decisions/ (layer C) + INDEX.md; migrate key durable facts out of harness-only ~/.claude auto-memory into tracked ADR-style decision records.`
   Acceptance: `docs/decisions/INDEX.md + >=3 migrated decision records (Context→Decision→Consequences), indexed; cross-linked from relevant task-trees where useful.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `docs/decisions/INDEX.md + 4 ADRs (0001 PGEN sole parser/no workarounds; 0002 subs/pgen read-only + regenerate; 0003 release on hold; 0004 accuracy-first ratchet) — each Context→Decision→Consequences, indexed, marked as superseding the harness-only ~/.claude notes. Cross-linked (0001↔0002, 0003↔0004).`
+  Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.2)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.3`
   Status: `pending`
@@ -87,12 +87,12 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `MEMORY-ARCHITECTURE-DOC.2` | `pending` | Layer C store before demoting MEMORY.md (so migrated facts have a home). |
-| 2 | `MEMORY-ARCHITECTURE-DOC.3` | `pending` | Demote MEMORY.md before installing the check (else the cap check fails on commit). |
-| 3 | `MEMORY-ARCHITECTURE-DOC.4` | `pending` | Install enforcement once A/B/C exist and MEMORY.md is within cap. |
-| 4 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify + close. |
+| 1 | `MEMORY-ARCHITECTURE-DOC.3` | `pending` | Demote MEMORY.md before installing the check (else the cap check fails on commit). |
+| 2 | `MEMORY-ARCHITECTURE-DOC.4` | `pending` | Install enforcement once A/B/C exist and MEMORY.md is within cap. |
+| 3 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify + close. |
 
-(`MEMORY-ARCHITECTURE-DOC.1` completed 2026-06-15 — standard authored + README routed.)
+(`.1` completed 2026-06-15 — standard authored + README routed. `.2` completed
+2026-06-15 — layer C `docs/decisions/` + INDEX + 4 ADRs.)
 
 ## Decisions
 
@@ -126,12 +126,14 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 | --- | --- | --- | --- |
 | `2026-06-15` | — | tree created | `n/a` |
 | `2026-06-15` | `.1` | MEMORY_ARCHITECTURE.md present at root (verbatim); README references it; docs-only / non-gate-affecting | `pass` |
+| `2026-06-15` | `.2` | docs/decisions/INDEX.md + 4 ADRs present + indexed; docs-only / non-gate-affecting | `pass` |
 
 ## Commit Log
 
 | Leaf | Commit subject or reference | Notes |
 | --- | --- | --- |
-| `.1` | `MEMORY-ARCHITECTURE-DOC.1 — author standard + README pointer` | docs-only; not pushed unless user asks. |
+| `.1` | `MEMORY-ARCHITECTURE-DOC.1 — author standard + README pointer` (`1976563`) | docs-only; not pushed unless user asks. |
+| `.2` | `MEMORY-ARCHITECTURE-DOC.2 — layer C docs/decisions + 4 migrated ADRs` | docs-only; not pushed unless user asks. |
 
 ## Changelog
 

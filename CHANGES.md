@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Add layer-C decision records (leaf MEMORY-ARCHITECTURE-DOC.2)
+- Scope: create the layer-C decision store and migrate durable cross-cutting facts out of harness-only `~/.claude` memory into the tracked repo. Docs-only.
+- Changes: new `docs/decisions/INDEX.md` + 4 ADRs — `0001` PGEN sole parser / no RGX workarounds, `0002` `subs/pgen` read-only + regenerate `generated/*`, `0003` crates.io on hold (user-triggered), `0004` accuracy-first (conformance ratchet is the merge gate). Each is Context→Decision→Consequences and records that it supersedes the corresponding harness-only note as the in-repo system of record.
+- Validation: docs-only / non-gate-affecting; INDEX in sync with the record files.
+- Notes/impact: these facts now survive a harness/model switch (in-repo + git-tracked). Next: `.3` demote MEMORY.md to the bounded resume pointer.
+
 ### 2026-06-15 - Author durable memory-architecture standard (leaf MEMORY-ARCHITECTURE-DOC.1)
 - Scope: adopt the portable, harness-agnostic Durable Agent Memory Architecture (from specforge) — step 1: author the standard + route to it. Docs-only.
 - Changes: new `MEMORY_ARCHITECTURE.md` at repo root (verbatim project-agnostic standard — 4 durability properties; layers A resume-pointer / B task-trees / C decision records / D git; write/read paths; §9 E1–E4 enforcement; §9.1 agnostic kit); README root-md index + ramp-up order reference it. New owning tree `docs/tasks/MEMORY-ARCHITECTURE-DOC.md` (5 leaves) registered in `docs/TASK_TREE.md`.
