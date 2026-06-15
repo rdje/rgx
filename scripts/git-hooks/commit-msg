@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# RGX commit-subject convention gate (layer E3 of MEMORY_ARCHITECTURE.md §8).
+#
+# The subject must be greppable by work unit. Accept any of RGX's styles:
+#   1. unit-id-first   — "TREE.path — summary"  (e.g. MEMORY-ARCHITECTURE-DOC.4 — install enforcement)
+#                        also matches "PGEN-RGX-0078: …"
+#   2. typed prefix    — "Docs: …" / "Book: …" / "fix: …" (case-insensitive)
+#   3. leaf token      — a "(leaf TREE.path)" reference anywhere in the subject
+#
+# Adapt these patterns to your scheme. Last-resort bypass: git commit --no-verify
+# (must be justified in the commit body per COMMIT.md — never a silent default).
+set -euo pipefail
+
+subject="$(head -1 "$1")"
+
+# unit_id and leaf_token are intentionally UPPERCASE-anchored — match case-SENSITIVELY.
+unit_id='^[A-Z][A-Z0-9-]+(\.[0-9A-Za-z]+)*[ —:-]'
+leaf_token='\(leaf [A-Z][A-Z0-9-]+(\.[0-9A-Za-z]+)+\)'
+if [[ "${subject}" =~ ${unit_id} ]] || [[ "${subject}" =~ ${leaf_token} ]]; then
+  exit 0
+fi
+
+# typed prefix is case-INSENSITIVE ("Docs:" / "docs:" / "Book:"); scope nocasematch
+# to just this test so it cannot relax the uppercase anchors above.
+typed='^(docs|book|chore|fix|feat|refactor|test|build|ci|perf|style|revert)(\(.+\))?(!)?:'
+shopt -s nocasematch
+if [[ "${subject}" =~ ${typed} ]]; then shopt -u nocasematch; exit 0; fi
+shopt -u nocasematch
+
+cat >&2 <<MSG
+[commit-msg] rejected: subject is not greppable by work unit.
+  got:      ${subject}
+  expected one of:
+    - 'TREE.path — summary'     (e.g. MEMORY-ARCHITECTURE-DOC.4 — install enforcement)
+    - 'Docs: …' / 'Book: …' / 'fix: …'   (typed prefix)
+    - a '(leaf TREE.path)' token in the subject
+See MEMORY_ARCHITECTURE.md §8 and docs/TASK_TREE.md (leaf-ID commit convention).
+MSG
+exit 1

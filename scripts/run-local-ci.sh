@@ -37,6 +37,11 @@ echo "[run-local-ci.sh] Starting local CI checks from project root"
 
 run_step "./scripts/check-ci-paths.sh --allow-dirty-worktree" ./scripts/check-ci-paths.sh --allow-dirty-worktree
 
+# Memory-architecture invariants (layer E4 of MEMORY_ARCHITECTURE.md). Runs
+# server-side too (this script IS the CI gate), so a non-compliant branch
+# cannot merge. Path-only; runs even in the no-PGEN fallback below.
+run_step "./scripts/check_memory_architecture.sh (memory-architecture invariants)" ./scripts/check_memory_architecture.sh
+
 if [[ "$have_pgen_checkout" != "1" ]]; then
   echo "[run-local-ci.sh] Skipping cargo-based validation because the PGEN submodule is not initialized."
   echo "[run-local-ci.sh] Only path-audit checks ran in this fallback mode."

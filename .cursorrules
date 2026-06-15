@@ -1,0 +1,10 @@
+# Cursor bootstrap — RGX (one-line pointer; do not duplicate the system here)
+
+Read `README.md` and `MEMORY_ARCHITECTURE.md` first, then `AGENTS.md` for the
+full agent bootstrap. Memory is layered: A `MEMORY.md` (bounded resume pointer)
+· B task-trees (`docs/tasks/`, index `docs/TASK_TREE.md`) · C decision records
+(`docs/decisions/`) · D git history. Track all work in task-trees, record
+durable facts in `docs/decisions/`, and follow `COMMIT.md`. **Every code change
+must be owned by a task-tree leaf** (Code-Change Doctrine). Run
+`scripts/check_memory_architecture.sh` before committing; `./scripts/run-local-ci.sh`
+for gate-affecting changes.

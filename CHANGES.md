@@ -14,6 +14,16 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-06-15 - Install memory-architecture enforcement E1–E4 (leaf MEMORY-ARCHITECTURE-DOC.4)
+- Scope: install the mechanical enforcement that makes the memory architecture hard to ignore. GATE-AFFECTING (scripts/CI/hooks).
+- Changes:
+  - **E2** `scripts/check_memory_architecture.sh` — single source of truth for the invariants (MEMORY.md ≤ cap 60; MEMORY_ARCHITECTURE.md present; AGENTS.md+CLAUDE.md route to it; docs/decisions/+INDEX.md; docs/tasks/+docs/TASK_TREE.md). Exits nonzero on any breach.
+  - **E3** `scripts/git-hooks/commit-msg` (new — work-unit-id subject gate, widened to accept RGX styles: unit-id-first, `Docs:`/`Book:`/typed prefixes, `(leaf …)` token, `PGEN-RGX-NNNN:`); `scripts/git-hooks/pre-commit` extended to run the memory-arch check before the existing gate-receipt guard (both preserved). RGX already uses `core.hooksPath scripts/git-hooks`, so the `.githooks/` knob is adapted to that dir; `setup-hooks.sh` now activates + chmods both hooks.
+  - **E4** the check wired as step 2 of `scripts/run-local-ci.sh` (server-side, un-bypassable); `scripts/check-ci-paths.sh` registers the new required paths (check script, both hooks, MEMORY_ARCHITECTURE.md, MEMORY.md, AGENTS.md).
+  - **E1** bootstrap pointers `AGENTS.md` (canonical), `.cursorrules`, `.github/copilot-instructions.md` (CLAUDE.md already routes); each points at README + MEMORY_ARCHITECTURE.md.
+- Validation: gates proven to bite — check passes clean (RC0) and fails on a planted `MEMORY_POINTER_LINE_CAP=5` breach (RC1); commit-msg accepts the RGX styles and rejects non-greppable subjects (fixed a `nocasematch` leak that had relaxed the uppercase anchor); check-ci-paths green with the new paths. **Full `./scripts/run-local-ci.sh` GREEN** ("ALL GATE STEPS PASSED", receipt written + matching). This commit was made through its own newly-activated hooks.
+- Notes/impact: non-compliance now fails fast locally (E3) and unconditionally in CI (E4); discovery is unavoidable (E1). Next: `.5` verify + close.
+
 ### 2026-06-15 - Demote MEMORY.md to the bounded resume pointer + flip doctrine (leaf MEMORY-ARCHITECTURE-DOC.3)
 - Scope: make MEMORY.md layer A (bounded, overwrite-only resume pointer) and update the project doctrine from "append forever / never delete" to the layered memory model. Docs-only.
 - Changes: `MEMORY.md` **4785 → 25 lines** (resume-pointer template: how-to-resume + an overwrite-only current-state block with latest commit, active work-unit + frontier, next action, blockers, invariants). The full pre-demotion log is preserved in git (`git show b636076:MEMORY.md` = 4785 lines) — not deleted, just no longer carried forward. Doctrine flipped in `CLAUDE.md` (commit-workflow step 4 + session-bootstrap), `COMMIT.md` (Files-involved entry, the doc-sync gate row, the handoff section), and `SESSION_BOOTSTRAP.md` (added `MEMORY_ARCHITECTURE.md` to the ritual; MEMORY.md described as the layer-A pointer).

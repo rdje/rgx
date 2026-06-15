@@ -14,6 +14,13 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
+
+# Memory-architecture gate (layer E3 of MEMORY_ARCHITECTURE.md) — runs on EVERY
+# commit, before the gate-receipt logic. It is the single source of truth for
+# the layer invariants (MEMORY.md cap, bootstrap pointers, decisions/task-tree
+# stores). Cheap; fails fast on a non-compliant tree.
+"$repo_root/scripts/check_memory_architecture.sh"
+
 # shellcheck source=scripts/lib-gate-receipt.sh
 . "$repo_root/scripts/lib-gate-receipt.sh"
 

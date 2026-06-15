@@ -70,11 +70,11 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
   Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.3)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.4`
-  Status: `pending`
-  Goal: `Install enforcement E1–E4: scripts/check_memory_architecture.sh; .githooks/{pre-commit,commit-msg} (pre-commit composes RGX's gate-receipt guard; commit-msg regex accepts RGX styles) via core.hooksPath; wire the check into run-local-ci.sh + check-ci-paths.sh (CI E4); bootstrap pointers AGENTS.md/.cursorrules/.github/copilot-instructions.md (+ CLAUDE.md pointer line).`
+  Status: `done`
+  Goal: `Install enforcement E1–E4: scripts/check_memory_architecture.sh; hooks {pre-commit,commit-msg} in scripts/git-hooks/ (RGX's existing core.hooksPath dir — the .githooks knob adapted; pre-commit composes RGX's gate-receipt guard; commit-msg regex accepts RGX styles) via core.hooksPath; wire the check into run-local-ci.sh + check-ci-paths.sh (CI E4); bootstrap pointers AGENTS.md/.cursorrules/.github/copilot-instructions.md (+ CLAUDE.md already routes).`
   Acceptance: `check script exits nonzero on a planted breach + zero when clean; commit-msg rejects a bad subject + accepts RGX styles; core.hooksPath set; run-local-ci.sh runs the check first; check-ci-paths.sh registers the new paths. GATE-AFFECTING → run-local-ci.sh green receipt required.`
-  Verification: `pending`
-  Commit: `pending`
+  Verification: `E2: check passes clean (RC0) + fails on planted MEMORY_POINTER_LINE_CAP=5 breach (RC1). E3 commit-msg: ACCEPTs unit-id/Docs:/Book:/PGEN-RGX-0078:/fix:/(leaf …); REJECTs non-greppable subjects (fixed a nocasematch leak that initially relaxed the uppercase anchor). check-ci-paths green with new required paths + no absolute-path trip. E4: check wired as run-local-ci.sh step 2. **Full ./scripts/run-local-ci.sh GREEN — "ALL GATE STEPS PASSED", receipt written + matches tree.** Hooks composed in scripts/git-hooks/ (not a new .githooks/) so RGX's gate-receipt guard survives; setup-hooks.sh activates core.hooksPath + chmods both hooks.`
+  Commit: `see Commit Log (leaf MEMORY-ARCHITECTURE-DOC.4)`
 
 - ID: `MEMORY-ARCHITECTURE-DOC.5`
   Status: `pending`
@@ -87,11 +87,11 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 
 | Order | Leaf | Status | Why next |
 | --- | --- | --- | --- |
-| 1 | `MEMORY-ARCHITECTURE-DOC.4` | `pending` | Install enforcement now that A/B/C exist and MEMORY.md is within cap. GATE-AFFECTING. |
-| 2 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify + close. |
+| 1 | `MEMORY-ARCHITECTURE-DOC.5` | `pending` | Verify end-to-end + sync live docs + close the tree. |
 
-(`.1`/`.2`/`.3` completed 2026-06-15 — standard authored + README routed; layer C
-`docs/decisions/` + 4 ADRs; MEMORY.md demoted 4785→25 lines + doctrine flipped.)
+(`.1`–`.4` completed 2026-06-15 — standard + README; layer C `docs/decisions/`
++ 4 ADRs; MEMORY.md demoted 4785→25 + doctrine flipped; enforcement E1–E4
+installed, gates proven to bite, full run-local-ci.sh GREEN.)
 
 ## Decisions
 
@@ -127,6 +127,7 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 | `2026-06-15` | `.1` | MEMORY_ARCHITECTURE.md present at root (verbatim); README references it; docs-only / non-gate-affecting | `pass` |
 | `2026-06-15` | `.2` | docs/decisions/INDEX.md + 4 ADRs present + indexed; docs-only / non-gate-affecting | `pass` |
 | `2026-06-15` | `.3` | MEMORY.md 4785→25 lines (≤ cap); history in git (b636076:MEMORY.md=4785); CLAUDE/COMMIT/SESSION_BOOTSTRAP doctrine flipped; docs-only | `pass` |
+| `2026-06-15` | `.4` | E2 check bites (clean RC0 / planted-breach RC1); E3 commit-msg accept/reject correct; check-ci-paths green; **full run-local-ci.sh GREEN + receipt**; hooks composed in scripts/git-hooks/; GATE-AFFECTING | `pass` |
 
 ## Commit Log
 
@@ -134,7 +135,8 @@ adopted earlier 2026-06-15); this adds A, C, D-wiring, and the mechanical gates.
 | --- | --- | --- |
 | `.1` | `MEMORY-ARCHITECTURE-DOC.1 — author standard + README pointer` (`1976563`) | docs-only; not pushed unless user asks. |
 | `.2` | `MEMORY-ARCHITECTURE-DOC.2 — layer C docs/decisions + 4 migrated ADRs` (`b636076`) | docs-only; not pushed unless user asks. |
-| `.3` | `MEMORY-ARCHITECTURE-DOC.3 — demote MEMORY.md to resume pointer + flip doctrine` | docs-only; not pushed unless user asks. |
+| `.3` | `MEMORY-ARCHITECTURE-DOC.3 — demote MEMORY.md to resume pointer + flip doctrine` (`88ff418`) | docs-only; not pushed unless user asks. |
+| `.4` | `MEMORY-ARCHITECTURE-DOC.4 — install enforcement E1-E4` | gate-affecting; full run-local-ci.sh green; committed through its own newly-active hooks; not pushed unless user asks. |
 
 ## Changelog
 
