@@ -83,6 +83,8 @@ Three details matter for performance:
 
 **`step_count` is checked every opcode.** This is how `set_max_steps` works. When the limit is `None`, the check is a single integer comparison and a branch that is always predicted correctly, so the overhead is effectively zero. When the limit is set, the VM aborts cleanly when exceeded.
 
+**One attempt, one `step_count` — across every dispatch loop.** The VM has three execution loops, not one: the top-level `execute_at`, the sub-expression loop `execute_subexpr_inner_full` (assertion bodies, lookbehind candidate starts, quantifier bodies, subroutine and recursion bodies, conditional and atomic-group probes), and `execute_at_continuation` (the async resume path). All three charge the *same* counter. Speculative sub-executions that run on a cloned `ExecContext` inherit `step_count` on the way in and fold what they spent back into the parent on the way out, so a failing lookahead cannot hand the rest of the attempt a fresh budget. This was a real bug, not a hypothetical: until 2026-07-21 only `execute_at` counted, and a variable-length lookbehind could run for 20+ minutes on an 8-byte subject with a 1,000,000-step cap set. See [Safety Limits](../core-api/safety-limits.md).
+
 ## Scanning: finding where to try
 
 `find_first("hello world", "world")` does not blindly start the VM at position 0. That would be `O(n*m)` in the worst case. Instead, the engine uses a **scanning strategy** selected at compile time based on what the optimizer found.

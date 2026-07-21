@@ -54,7 +54,8 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 
 | Roadmap lane | Owning tree | Status | Current frontier |
 | --- | --- | --- | --- |
-| Now — production safety (limits DoS gap, found 2026-07-21) | [`VM-LIMITS-SUBEXEC`](docs/tasks/VM-LIMITS-SUBEXEC.md) | `active` | `.1` — limits must bound lookbehind sub-execution |
+| Now — production safety (limits DoS gap, found + fixed 2026-07-21) | [`VM-LIMITS-SUBEXEC`](docs/tasks/VM-LIMITS-SUBEXEC.md) | `done` | — (closed; limits now bound every execution path) |
+| Now — PCRE2 parity (accuracy): excluded corpus file | [`CONFORMANCE-TESTINPUT15`](docs/tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `.1` — measure `testinput15` (its exclusion's stated cause is fixed) |
 | Next — SOTA algorithmic perf gaps | [`PERF-SOTA-GAPS`](docs/tasks/PERF-SOTA-GAPS.md) | `active` | `.1` — inner-literal prefilter |
 | Next — PCRE2 10.47+ syntax alignment | [`PCRE2-1047-SYNTAX`](docs/tasks/PCRE2-1047-SYNTAX.md) | `active` | `.1` — A12 capture-return VM semantics |
 | Next — code-block expansion | [`CODEBLOCK-EXPANSION`](docs/tasks/CODEBLOCK-EXPANSION.md) | `active` | `.1` — inline-language ergonomics |
@@ -71,6 +72,17 @@ in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-07-21` — `VM-LIMITS-SUBEXEC.1` (tree closed): **safety limits now bound
+  every VM execution path.** Only the top-level dispatch loop had been counting
+  steps, and speculative sub-contexts silently restarted the budget — so a
+  variable-length lookbehind ran 20+ minutes on an 8-byte subject with a
+  1,000,000-step cap set (PCRE2 `testinput2:6509`). All three dispatch loops now
+  charge one shared per-attempt budget and all three cloned-context sites fold
+  their spend back; the case completes in **37 ms**. 6 regression tests (each
+  timeout-guarded on a worker thread so a regression fails rather than hangs);
+  full gate + conformance ratchet green. Book: Safety Limits' "Known gap"
+  section replaced by the positive guarantee; VM chapter documents the
+  three-loop / one-counter invariant.
 - `2026-07-21` — `DOCTRINE-ADOPT.1`: adopted the **Doctrine Enforcement
   Architecture** (RGX's 4th portable architecture, from PGEN). One registry +
   driver (`scripts/check_doctrines.sh`) now runs 7 doctrine checks and gates

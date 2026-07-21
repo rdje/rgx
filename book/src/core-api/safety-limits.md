@@ -374,14 +374,51 @@ not pathological, and imposing a limit on well-behaved patterns adds
 complexity for no benefit. Set limits explicitly when accepting untrusted
 patterns or defending against adversarial input.
 
-## Known gap (2026-07-21, fix tracked)
+## One attempt, one budget — sub-executions included
 
-One execution path currently escapes the step/backtrack budgets: the
-variable-length **lookbehind** sub-execution. A pattern like
-`(?<=(\d{1,256}))X` can run for minutes on a short subject even with
-`set_max_steps(1_000_000)` set — the nested lookbehind evaluation loop
-maintains its own backtracking state without consulting the configured
-budget. Until the fix lands (task tree `VM-LIMITS-SUBEXEC`, which also audits
-every other sub-execution entry point — lookahead probes, subroutine bodies,
-conditional probes — for the same hole), do not rely on the limits alone to
-bound untrusted patterns containing variable-length lookbehinds.
+The engine does not evaluate a pattern in a single flat loop. Assertion
+bodies, lookbehind candidate starts, quantifier probes, subroutine and
+recursion bodies, conditional probes, and the async resume path all run in
+**sub-executions** — nested dispatch loops, some of them over a cloned copy
+of the execution state.
+
+The budget is defined per *match attempt*, not per loop: every one of those
+sub-executions spends the same `max_steps` / `max_backtrack_frames` /
+`max_trail_entries` budget as the top-level dispatch, and a sub-execution
+that runs on a cloned state folds what it spent back into its parent before
+returning. Ten thousand steps burned inside a failing lookahead are ten
+thousand steps the rest of the attempt no longer has.
+
+This matters because sub-execution is exactly where a pattern goes
+superlinear. A variable-length lookbehind is retried at every candidate
+start position, and each retry backtracks its own body:
+
+```rust
+# use rgx_core::Regex;
+let re = Regex::compile(r"(?<=(\d{1,256}))X")?;
+re.set_max_steps(Some(1_000_000));
+re.set_max_backtrack_frames(Some(65_536));
+
+// Bounded: the lookbehind body spends the attempt's budget like any
+// other execution path, so this returns in milliseconds.
+let _ = re.find_first("12345XYZ");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+> **History.** Before this guarantee shipped (2026-07-21, task tree
+> `VM-LIMITS-SUBEXEC`), only the top-level dispatch loop counted steps.
+> Sub-executions ran uncounted, and cloned sub-contexts silently restarted
+> the budget — so the pattern above pegged a core for **20+ minutes** on that
+> 8-byte subject with a 1,000,000-step cap in force. It now completes in
+> ~37 ms. If you pinned an older revision, treat the limits there as
+> covering only the top-level loop.
+
+Two properties follow from the budget being shared:
+
+- **Setting a limit is sufficient.** You do not need to know which engine
+  path a pattern will take. Any pattern, including one built from untrusted
+  input, is bounded by the numbers you set.
+- **The budget is still per starting position.** As described above, each
+  scan position gets a fresh budget, so total work for one `find_first` call
+  scales with (positions tried) × (budget). Size `max_steps` with that
+  product in mind when input length is attacker-controlled.

@@ -74,7 +74,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
 | `DOCTRINE-ADOPT` | [tasks/DOCTRINE-ADOPT.md](tasks/DOCTRINE-ADOPT.md) | `active` | `DOCTRINE-ADOPT.2` (evidence archetype) | Governance / process — 4th portable architecture |
-| `VM-LIMITS-SUBEXEC` | [tasks/VM-LIMITS-SUBEXEC.md](tasks/VM-LIMITS-SUBEXEC.md) | `active` | `VM-LIMITS-SUBEXEC.1` (limits must bound lookbehind sub-execution) | Now — production safety (correctness/DoS; found 2026-07-21) |
+| `CONFORMANCE-TESTINPUT15` | [tasks/CONFORMANCE-TESTINPUT15.md](tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `CONFORMANCE-TESTINPUT15.1` (measure the excluded file) | Now — PCRE2 parity (accuracy): the exclusion's stated cause was fixed by `VM-LIMITS-SUBEXEC.1` |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
@@ -101,6 +101,7 @@ activation.
 
 | Tree | File | Closed | Outcome |
 | --- | --- | --- | --- |
+| `VM-LIMITS-SUBEXEC` | [tasks/VM-LIMITS-SUBEXEC.md](tasks/VM-LIMITS-SUBEXEC.md) | `2026-07-21` | Safety limits now bound EVERY VM execution path (`.1`): all three dispatch loops charge one shared per-attempt budget and all three cloned-context sites fold their spend back. `testinput2:6509` `/(?<=(\d{1,256}))X/` 20+ min → 37 ms under harness limits; 6 regression tests. `.2` proved the suspected pin divergence did not exist. |
 | `TASKTREE-ADOPT` | [tasks/TASKTREE-ADOPT.md](tasks/TASKTREE-ADOPT.md) | `2026-06-15` | Task-tree workflow installed (`.1`), roadmap decomposed into 7 trees (`.2`), shipped code retro-audited (`.3`). |
 | `RETRO-AUDIT` | [tasks/RETRO-AUDIT.md](tasks/RETRO-AUDIT.md) | `2026-06-15` | Evidence-based audit of all major shipped subsystems (C1/C2/TDFA/AC, host-integration, A/B API, A9 capi, conformance); all verified present; drift D1 (PGEN-RGX ledger) flagged → `LEDGER-HYGIENE`. |
 | `LEDGER-HYGIENE` | [tasks/LEDGER-HYGIENE.md](tasks/LEDGER-HYGIENE.md) | `2026-06-15` | Closed `PGEN-RGX-0073` (superseded by `0078`); confirmed `0078` is the sole top-level open report; corrected D1's loose-grep overcount (only 0073 was actually open, not 15 files). |

@@ -202,11 +202,13 @@ cold-clone bootstrap and drifted version constants. Filed upstream as
 first release that fixes 0089 (measurement bundle:
 `pgen-issues/artifacts/PGEN-RGX-0078/measurements/*_1.1.104_preview*`).
 
-The adoption attempt also uncovered a pin-independent RGX bug: `set_max_steps`
-/ `set_max_backtrack_frames` do not bound one variable-length-lookbehind
-sub-execution path (`/(?<=(\d{1,256}))X/` runs unbounded despite harness
-limits). Tracked as the `VM-LIMITS-SUBEXEC` task tree; see
-[Safety Limits](../core-api/safety-limits.md) for the intended contract.
+The adoption attempt also uncovered a pin-independent RGX bug, since fixed:
+`set_max_steps` / `set_max_backtrack_frames` bounded only the top-level
+dispatch loop, so a variable-length lookbehind (`/(?<=(\d{1,256}))X/`) ran
+unbounded despite harness limits — 20+ minutes on an 8-byte subject. Every
+sub-execution path now spends the attempt's shared budget (`VM-LIMITS-SUBEXEC`,
+2026-07-21); the same case now finishes in ~37 ms. See
+[Safety Limits](../core-api/safety-limits.md) for the contract.
 
 Reproduce both measurements yourself from the repo root:
 

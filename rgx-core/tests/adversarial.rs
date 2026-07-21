@@ -869,3 +869,157 @@ fn concurrent_set_variable_and_matching() {
             .expect("thread panicked during concurrent variable mutation + matching");
     }
 }
+
+// =========================================================================
+// SAFETY LIMITS MUST BOUND EVERY EXECUTION PATH
+// =========================================================================
+//
+// `set_max_steps` / `set_max_backtrack_frames` / `set_max_recursion_depth`
+// are the shipped production-safety contract (Book → Core API → Safety
+// Limits). The contract is *whole-attempt*: one match attempt spends one
+// budget, no matter which execution path the engine takes.
+//
+// Before `VM-LIMITS-SUBEXEC.1` only the top-level dispatch loop counted
+// steps. Sub-executions — assertion bodies, lookbehind candidate starts,
+// quantifier probes, subroutine bodies, the async-resume loop — ran on an
+// uncounted loop and, when they ran on a cloned context, on a budget that
+// was never folded back. A variable-length lookbehind therefore escaped the
+// limits entirely: `(?<=(\d{1,256}))X` on an 8-byte subject pegged a core
+// for 20+ minutes with a 1M-step cap in force.
+//
+// Each test below runs the match on a worker thread so a regression is a
+// test *failure* with a clear message, never a hung CI job.
+
+/// Compile with an explicit step budget plus the frame/depth caps the PCRE2
+/// conformance harness uses.
+///
+/// The step budget is a per-test argument on purpose. Detection power does not
+/// depend on its value — a loop that never consults the budget runs forever at
+/// any setting — so most tests pick a small one to stay fast, while the
+/// originating case keeps the 1,000,000 it historically escaped.
+fn with_limits(pattern: &str, max_steps: u64) -> Regex {
+    let re = Regex::compile(pattern).expect("pattern must compile");
+    re.set_max_steps(Some(max_steps));
+    re.set_max_backtrack_frames(Some(65_536));
+    re.set_max_recursion_depth(Some(128));
+    re
+}
+
+/// Run `f` on a worker thread and fail if it does not finish in `budget`.
+///
+/// The budget is deliberately far larger than any of these matches needs
+/// (they run in milliseconds): it is a hang detector, not a performance
+/// assertion, so it must not go red on a slow or loaded CI machine. The
+/// failure it exists to catch ran for 20+ minutes.
+fn assert_completes_within<T: Send + 'static>(
+    label: &str,
+    budget: std::time::Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(budget) {
+        Ok(value) => value,
+        Err(_) => panic!(
+            "{label}: still running after {budget:?} — safety limits did not bound this execution path"
+        ),
+    }
+}
+
+/// Hang-detector budget for the tests below. See `assert_completes_within`.
+const HANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
+// The originating case: PCRE2 testinput2:6509. A variable-length lookbehind
+// body is retried at every candidate start, and each retry backtracks the
+// counted quantifier — the blowup the limits exist to stop.
+#[test]
+fn limits_bound_variable_length_lookbehind() {
+    assert_completes_within("variable-length lookbehind", HANG_BUDGET, || {
+        let re = with_limits(r"(?<=(\d{1,256}))X", 1_000_000);
+        let _ = re.find_first("12345XYZ");
+    });
+}
+
+// Sibling path (family gate): a failing lookahead body runs on a cloned
+// context via `execute_assertion_subexpr`.
+#[test]
+fn limits_bound_lookahead_body() {
+    assert_completes_within("lookahead body", HANG_BUDGET, || {
+        let re = with_limits(r"(?=(a+)+b)c", 200_000);
+        let _ = re.find_first(&"a".repeat(60));
+    });
+}
+
+// Sibling path (family gate): a negative lookbehind body — same clone path,
+// opposite polarity, and the one that cannot short-circuit on first success.
+#[test]
+fn limits_bound_negative_lookbehind_body() {
+    assert_completes_within("negative lookbehind body", HANG_BUDGET, || {
+        let re = with_limits(r"(?<!(\d{1,256}))X", 1_000_000);
+        let _ = re.find_first("12345XYZ");
+    });
+}
+
+// Sibling path (family gate): a subroutine body runs on the *shared* context
+// through `invoke_subroutine_inner` → `execute_subexpr`.
+#[test]
+fn limits_bound_subroutine_body() {
+    assert_completes_within("subroutine body", HANG_BUDGET, || {
+        let re = with_limits(
+            r"(?(DEFINE)(?<pathological>(a+)+b))(?&pathological)c",
+            200_000,
+        );
+        let _ = re.find_first(&"a".repeat(60));
+    });
+}
+
+// Sibling path (family gate): a quantifier body nests the sub-execution loop
+// inside itself, so the budget must survive re-entry.
+#[test]
+fn limits_bound_nested_quantifier_body() {
+    assert_completes_within("nested quantifier body", HANG_BUDGET, || {
+        let re = with_limits(r"((a+)+)+b", 200_000);
+        let _ = re.find_first(&"a".repeat(60));
+    });
+}
+
+// The limits must not change results for patterns that finish inside the
+// budget — bounding the sub-execution paths is a safety fix, not a semantic
+// one. (An over-eager budget would silently turn matches into non-matches.)
+#[test]
+fn limits_do_not_alter_well_formed_matches() {
+    let cases: &[(&str, &str, Option<&str>)] = &[
+        (r"(?<=foo)bar", "foobar", Some("bar")),
+        (r"(?<!foo)bar", "bazbar", Some("bar")),
+        (r"(?=\d{3})\d+", "abc 12345", Some("12345")),
+        (r"(?<=(\d{1,4}))X", "42X", Some("X")),
+        (r"(?(DEFINE)(?<word>\w+))(?&word)", "hello", Some("hello")),
+        (r"(a+)+b", "aaab", Some("aaab")),
+        (r"(?<=x)y", "zy", None),
+    ];
+    for (pattern, subject, expected) in cases {
+        let re = with_limits(pattern, 1_000_000);
+        let got = re
+            .find_first(subject)
+            .map(|m| subject[m.start..m.end].to_string());
+        assert_eq!(
+            got.as_deref(),
+            *expected,
+            "limits changed the result of `{pattern}` on `{subject}`"
+        );
+    }
+}
+
+// Unlimited (the default) must stay unlimited: the new counters are inert
+// when no limit is configured, so an expensive-but-finite pattern still runs
+// to completion instead of being cut short.
+#[test]
+fn unlimited_is_still_unlimited_by_default() {
+    let re = Regex::compile(r"(?<=(\d{1,4}))X").unwrap();
+    let m = re
+        .find_first("999999X")
+        .expect("must match with no limits set");
+    assert_eq!(&"999999X"[m.start..m.end], "X");
+}

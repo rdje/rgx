@@ -3259,6 +3259,30 @@ impl RegexVM {
         }
     }
 
+    /// Fold a finished sub-context's consumed step budget back into its parent.
+    ///
+    /// A speculative sub-execution runs on a *clone*
+    /// ([`Self::clone_exec_context`]), which inherits `step_count` at clone
+    /// time but is dropped afterwards. Without this write-back every clone
+    /// would silently restart the budget: an assertion body, a lookbehind
+    /// start-position clone, or a quantifier probe could burn unbounded work
+    /// while the parent's counter stood still, so `max_steps` bounded only the
+    /// top-level dispatch loop. One attempt means one budget — see the
+    /// `safety limits bound every execution path` tests in
+    /// `tests/adversarial.rs`.
+    fn absorb_sub_budget(ctx: &mut ExecContext<'_>, sub: &ExecContext<'_>) {
+        ctx.step_count = ctx.step_count.max(sub.step_count);
+    }
+
+    /// Returns `true` when the attempt has run out of step budget.
+    ///
+    /// Shared by every dispatch loop so the limit contract is stated once.
+    /// `max_steps == 0` means unlimited (the default), making this a single
+    /// predictable branch on the hot path.
+    fn step_budget_exhausted(ctx: &ExecContext<'_>) -> bool {
+        ctx.max_steps > 0 && ctx.step_count >= ctx.max_steps
+    }
+
     /// Clone the current execution state for speculative sub-expression execution.
     fn clone_exec_context<'a>(ctx: &ExecContext<'a>) -> ExecContext<'a> {
         ExecContext {
@@ -3411,7 +3435,7 @@ impl RegexVM {
 
         loop {
             // Step limit check — abort if the match attempt has exceeded max_steps.
-            if ctx.max_steps > 0 && ctx.step_count >= ctx.max_steps {
+            if Self::step_budget_exhausted(ctx) {
                 return false;
             }
             // Backtrack stack depth check.
@@ -5048,11 +5072,14 @@ impl RegexVM {
     }
 
     /// Probe whether a sub-expression can match once while advancing the input.
-    fn probe_subexpr<'a>(&self, ctx: &ExecContext<'a>, code: &[u8]) -> Option<ExecContext<'a>> {
+    fn probe_subexpr<'a>(&self, ctx: &mut ExecContext<'a>, code: &[u8]) -> Option<ExecContext<'a>> {
         let mut probe_ctx = Self::clone_exec_context(ctx);
-        if self.execute_subexpr(&mut probe_ctx, code)
-            && (probe_ctx.pos != ctx.pos || probe_ctx.accept_forced)
-        {
+        let advanced = self.execute_subexpr(&mut probe_ctx, code)
+            && (probe_ctx.pos != ctx.pos || probe_ctx.accept_forced);
+        // The probe spends the attempt's budget whether or not it succeeds —
+        // a quantifier that probes repeatedly must not run for free.
+        Self::absorb_sub_budget(ctx, &probe_ctx);
+        if advanced {
             Some(probe_ctx)
         } else {
             None
@@ -6581,6 +6608,21 @@ impl RegexVM {
                 return false;
             }
 
+            // Same per-attempt budget as `execute_at` — a resumed match
+            // (async suspend/resume) must not get a fresh, unbounded one.
+            if Self::step_budget_exhausted(ctx) {
+                return false;
+            }
+            if ctx.max_backtrack_frames > 0
+                && ctx.backtrack_stack.len() as u64 > ctx.max_backtrack_frames
+            {
+                return false;
+            }
+            if ctx.max_trail_entries > 0 && ctx.capture_trail.len() as u64 > ctx.max_trail_entries {
+                return false;
+            }
+            ctx.step_count += 1;
+
             let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
             ip += 1;
 
@@ -7612,6 +7654,35 @@ impl RegexVM {
             if ctx.accept_forced {
                 return true;
             }
+
+            // Safety limits — the sub-expression dispatch spends the SAME
+            // per-attempt budget as `execute_at`. Every sub-execution entry
+            // point funnels through this loop (assertion bodies, lookbehind
+            // bodies, quantifier bodies, subroutine/recursion invocations,
+            // conditional and atomic-group probes), so charging a step here
+            // is what makes `set_max_steps` a whole-attempt bound rather
+            // than a top-level-only one. Budget exhaustion reports "body did
+            // not match", exactly as the main loop reports "no match at this
+            // start position".
+            //
+            // The frame check sums the outer stack with this run's local
+            // stack; nested subexpr levels each hold their own local stack,
+            // and those deeper levels are bounded transitively by `max_steps`
+            // (every push costs at least one step).
+            if Self::step_budget_exhausted(ctx) {
+                return false;
+            }
+            if ctx.max_backtrack_frames > 0
+                && (ctx.backtrack_stack.len() + backtrack_stack.len()) as u64
+                    > ctx.max_backtrack_frames
+            {
+                return false;
+            }
+            if ctx.max_trail_entries > 0 && ctx.capture_trail.len() as u64 > ctx.max_trail_entries {
+                return false;
+            }
+            ctx.step_count += 1;
+
             let op = OpCode::try_from(code[ip]).unwrap_or(OpCode::Fail);
             ip += 1;
 
@@ -8787,6 +8858,9 @@ impl RegexVM {
     ) -> bool {
         let mut assertion_ctx = Self::clone_exec_context(ctx);
         let body_matched = self.execute_subexpr(&mut assertion_ctx, code);
+        // The assertion body spends the attempt's budget regardless of
+        // outcome — a failing lookaround is exactly the shape that runs long.
+        Self::absorb_sub_budget(ctx, &assertion_ctx);
         if body_matched && propagate_captures {
             // Cluster 1A — propagate only the *current-iteration*
             // capture slots (lower half). The upper half (prev-iter
@@ -9130,6 +9204,12 @@ impl RegexVM {
         let mut agg_skip: Option<usize> = None;
 
         for start in starts {
+            // Stop spawning candidate clones once the attempt's budget is
+            // spent; cloning a context is itself real work (captures, trail,
+            // recursion stack), so the guard belongs before the clone.
+            if Self::step_budget_exhausted(ctx) {
+                break;
+            }
             let mut lookbehind_ctx = Self::clone_exec_context(ctx);
             lookbehind_ctx.pos = start;
             // PCRE2 permits lookbehind bodies to contain nested
@@ -9144,7 +9224,14 @@ impl RegexVM {
             // when a greedy body overshoots — the key to getting
             // `(?<!a?)` to fail on `"a"` where `a?` can match
             // empty at the anchor position.
-            if self.execute_subexpr_ending_at(&mut lookbehind_ctx, code, assertion_end) {
+            let body_matched =
+                self.execute_subexpr_ending_at(&mut lookbehind_ctx, code, assertion_end);
+            // Every candidate start spends the attempt's shared budget. A
+            // variable-length body is retried once per codepoint back to the
+            // subject start, so without this the assertion's total cost was
+            // `starts.len()` × an unbounded body run.
+            Self::absorb_sub_budget(ctx, &lookbehind_ctx);
+            if body_matched {
                 if propagate_captures {
                     // Cluster 1A — same prev-iter isolation as
                     // execute_assertion_subexpr.

@@ -2754,12 +2754,20 @@ fn run_case(case: &TestCase) -> Outcome {
     // generous enough that normal patterns finish well under — 10M
     // opcode steps and 256K backtrack frames are ~50x the interior
     // test suite's highest-observed usage.
-    // Aggressive caps: testinput15 (match-limiting stress file)
-    // contains catastrophic-backtracking patterns like `(a+)*zz`
-    // that take seconds per subject at 10M steps. 1M steps (~10ms
-    // per attempt) is plenty for well-formed patterns and keeps the
-    // pathological cases from dominating wall time.
-    re.set_max_steps(Some(1_000_000));
+    // Recalibrated 2026-07-21 (`VM-LIMITS-SUBEXEC.1`). The old 1M cap was
+    // set when only the top-level dispatch loop charged steps: sub-executions
+    // (assertion bodies, lookbehind candidate starts, subroutine/recursion
+    // bodies) ran off-budget, so "1M steps" never measured the work actually
+    // being done. Now that every dispatch loop shares one per-attempt budget,
+    // the number means what it says — and 1M is *below* what legitimate cases
+    // need. Measured worst legitimate case: testinput1:4545
+    // `/^(?:((.)(?1)\2|)|((.)(?3)\4|.))$/i` on the 31-char palindrome
+    // "Satanoscillatemymetallicsonatas" consumes ~33M steps (~0.5s) and
+    // matches; at 1M it wrongly reports no-match. 64M gives ~1.9x headroom
+    // over that while still bounding the deliberately-pathological cases.
+    // Frames (65,536) and depth (128) were verified NON-binding on that case
+    // and are unchanged.
+    re.set_max_steps(Some(64_000_000));
     re.set_max_backtrack_frames(Some(65_536));
     re.set_max_recursion_depth(Some(128));
 
