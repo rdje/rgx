@@ -168,8 +168,14 @@ make -C path/to/rgx bootstrap     # regenerates subs/pgen/generated/*
 # then rebuild; do not trust a stale target/ from before the bump
 ```
 
-The expected clean git state shows only untracked content under `subs/pgen`
-(`?? subs/pgen` — the regenerated `generated/*`); never stage it.
+The expected clean git state is **completely clean**: since the PGEN 1.1.106
+pin the submodule gitignores its own `generated/`, so `git status` shows nothing
+even though the generated parser is present. (Through the older `db6f8c68` pin
+this showed as `?? subs/pgen`.) Never stage the generated artifacts either way.
+
+Note that `make bootstrap` is idempotent on *existence*, so after bumping the
+PGEN pin you must force a regeneration — `rm -rf subs/pgen/generated` first —
+or you will keep building against the previous pin's parser.
 
 ---
 
