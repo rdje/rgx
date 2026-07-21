@@ -74,7 +74,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
 | `DOCTRINE-ADOPT` | [tasks/DOCTRINE-ADOPT.md](tasks/DOCTRINE-ADOPT.md) | `active` | `DOCTRINE-ADOPT.2` (evidence archetype) | Governance / process — 4th portable architecture |
-| `CONFORMANCE-TESTINPUT15` | [tasks/CONFORMANCE-TESTINPUT15.md](tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `CONFORMANCE-TESTINPUT15.1` (measure the excluded file) | Now — PCRE2 parity (accuracy): the exclusion's stated cause was fixed by `VM-LIMITS-SUBEXEC.1` |
+| `CONFORMANCE-TESTINPUT15` | [tasks/CONFORMANCE-TESTINPUT15.md](tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `CONFORMANCE-TESTINPUT15.3` (close the `allusedtext` harness gap), then `.2` (adjudicate inclusion) | Now — PCRE2 parity (accuracy): `.1` measured 68/80 pass, no hangs |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |

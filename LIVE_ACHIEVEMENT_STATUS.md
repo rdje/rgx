@@ -55,7 +55,7 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Roadmap lane | Owning tree | Status | Current frontier |
 | --- | --- | --- | --- |
 | Now — production safety (limits DoS gap, found + fixed 2026-07-21) | [`VM-LIMITS-SUBEXEC`](docs/tasks/VM-LIMITS-SUBEXEC.md) | `done` | — (closed; limits now bound every execution path) |
-| Now — PCRE2 parity (accuracy): excluded corpus file | [`CONFORMANCE-TESTINPUT15`](docs/tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `.1` — measure `testinput15` (its exclusion's stated cause is fixed) |
+| Now — PCRE2 parity (accuracy): excluded corpus file | [`CONFORMANCE-TESTINPUT15`](docs/tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `.3` — close the `allusedtext` harness gap, then `.2` adjudicate (`.1` measured: 68/80 pass, **no hangs**) |
 | Next — SOTA algorithmic perf gaps | [`PERF-SOTA-GAPS`](docs/tasks/PERF-SOTA-GAPS.md) | `active` | `.1` — inner-literal prefilter |
 | Next — PCRE2 10.47+ syntax alignment | [`PCRE2-1047-SYNTAX`](docs/tasks/PCRE2-1047-SYNTAX.md) | `active` | `.1` — A12 capture-return VM semantics |
 | Next — code-block expansion | [`CODEBLOCK-EXPANSION`](docs/tasks/CODEBLOCK-EXPANSION.md) | `active` | `.1` — inline-language ergonomics |
@@ -72,6 +72,18 @@ in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-07-21` — `CONFORMANCE-TESTINPUT15.1` (measurement, docs-only): the one
+  PCRE2 corpus file RGX excludes, `testinput15`, **no longer hangs** — its
+  exclusion's stated cause was the limits bug fixed hours earlier. Measured
+  **80 cases: 68 pass / 12 fail / 0 panic**, at a cost of +65.6s sweep time.
+  Triage: **10 of the 12 failures are a single harness gap** (pcre2test's
+  `allusedtext` prints a span including lookaround-consulted text; the harness
+  never adjusts the expected side), 2 are real RGX gaps (pattern-level
+  `(*LIMIT_*)` verbs, infinite-recursion detection). Added `.3` to close the
+  harness gap *before* `.2` adjudicates inclusion. Also corrected a
+  transparency defect this surfaced: README claimed "no silent skips, no hidden
+  asterisks" while silently excluding the file — now declared there and
+  documented in the Book's Testing Philosophy.
 - `2026-07-21` — `VM-LIMITS-SUBEXEC.1` (tree closed): **safety limits now bound
   every VM execution path.** Only the top-level dispatch loop had been counting
   steps, and speculative sub-contexts silently restarted the budget — so a

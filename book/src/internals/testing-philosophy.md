@@ -163,6 +163,19 @@ Hostile skepticism requires honesty about what is **not** tested. Here are combi
 
 These are tracked explicitly because writing them down makes them actionable. When we ship a test for one of these, it moves from this list into the stress or integration suite.
 
+### One PCRE2 corpus file is excluded (and why that is changing)
+
+RGX runs PCRE2's own `testinput*` corpus as its accuracy oracle, and the headline numbers elsewhere in this book are honest about pass/fail — but they are computed over 23 of the 24 candidate files. **`testinput15` is excluded**, and saying "we run the full corpus" without that footnote would be exactly the kind of hidden asterisk this chapter exists to reject.
+
+The original reason was a real defect, not a judgement call: that file is PCRE2's match-limiting stress file, and several of its patterns *hung the engine* even with a step cap configured, because RGX's safety limits only bounded the top-level dispatch loop. Excluding the file kept the suite runnable. That defect was fixed in 2026-07-21 (see [Safety Limits](../core-api/safety-limits.md) — "one attempt, one budget"), so the exclusion's stated cause no longer exists.
+
+Measured immediately afterwards, with the file temporarily included: **80 cases, 68 pass, 12 fail, 0 panic, 0 hang.** The 12 failures break down as:
+
+- **10** are a *harness* limitation, not engine divergence. Those cases use pcre2test's `allusedtext` modifier, under which the printed span deliberately includes text consulted by lookarounds — so for `/abc(?=xyz)/` PCRE2 prints `abcxyz` where RGX correctly matches `abc`. The harness ignores the modifier on the input side but never adjusts the expected-output side.
+- **2** are genuine RGX gaps: pattern-level `(*LIMIT_MATCH=…)` / `(*LIMIT_DEPTH=…)` / `(*LIMIT_HEAP=…)` verbs, and PCRE2's infinite-recursion detection, neither of which RGX implements.
+
+Including the file costs about 66 seconds of gate time (the sweep goes from ~56s to ~122s) because those stress patterns now run to their honest step ceiling instead of hanging. Whether that trade is worth 68 more verified cases — and whether to close the `allusedtext` harness gap first — is tracked as the `CONFORMANCE-TESTINPUT15` task tree rather than decided quietly.
+
 ## The process
 
 1. **Every bug fix ships with a regression test** that would have caught the bug.
