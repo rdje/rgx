@@ -17,6 +17,7 @@ here is the authoritative, durable version.
 | [0003](0003-release-strategy-cratesio-on-hold.md) | crates.io publication is on hold; the PGEN regex parser is the eventual vehicle; user is the trigger | accepted | release |
 | [0004](0004-accuracy-first-conformance-ratchet-is-the-gate.md) | Accuracy-first: the PCRE2 differential conformance ratchet is the merge condition | accepted | quality / testing |
 | [0005](0005-compile-perf-5x-bar-kept-rgx-side.md) | The `<5×`-of-PCRE2 compile bar is kept; closing it is now RGX-side work | accepted | performance / compile-time |
+| [0006](0006-doctrine-enforcement-architecture-adopted.md) | The Doctrine Enforcement Architecture is adopted; every mechanizable doctrine gets a check | accepted | governance / enforcement |
 
 ## Conventions
 

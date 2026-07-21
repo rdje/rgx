@@ -106,6 +106,48 @@ documentation slices (live docs, this book, `pgen-issues/`) can be committed
 without a leaf; when a change touches both code and docs, it counts as a code
 change and needs a leaf.
 
+## Doctrine enforcement (the rules are machine-checked)
+
+Everything above — the Code-Change Doctrine, the changelog requirement, the
+"run the full local CI" rule — would be a suggestion if nothing checked it. As
+of 2026-07-21 RGX runs the **Doctrine Enforcement Architecture**
+(`DOCTRINE_ENFORCEMENT.md`, adopted from the sibling PGEN project), whose thesis
+is blunt:
+
+> A doctrine that is not mechanically checked is not enforced — it is a
+> suggestion.
+
+So every mechanizable doctrine is paired with a deterministic check that exits
+nonzero on a breach, all of them run from one registry + driver, and both gates
+run that driver:
+
+```bash
+./scripts/check_doctrines.sh            # what the pre-commit hook runs
+./scripts/check_doctrines.sh --scope ci # what CI runs
+```
+
+| Doctrine | Proves |
+|---|---|
+| `MEMORY-ARCH` | the 4-layer memory architecture invariants hold |
+| `KNOWLEDGE-MAP` | the derived Knowledge Map is in sync with its fact cards |
+| `PGEN-READONLY` | `subs/pgen` has no modified *tracked* content (it is read-only from RGX) |
+| `DOCTRINE-REGISTRY-SYNC` | the registry and the published manifest agree, id for id |
+| `CODE-CHANGE-LEAF` | staged code ships with an updated `docs/tasks/<TREE>.md` |
+| `TWO-TRACK-DOCS` | staged code ships with a `CHANGES.md` entry (the Book leg is advisory) |
+| `GATE-RECEIPT` | the commit is certified by a fresh green `run-local-ci.sh` receipt for exactly this content |
+
+Practical consequences for a contributor: if you change code, the hook expects
+an owning task-tree file and a changelog entry in the same commit, and it
+expects `./scripts/run-local-ci.sh` to have passed *for that exact tree* (the
+receipt is invalidated by any further code edit). Adding a doctrine of your own
+means writing `scripts/check_<id>.sh`, adding one registry line, and adding one
+`DOCTRINE_ENFORCEMENT.md` §10 row — never adding logic to the hook.
+
+Honest limits, stated so nobody over-trusts the machinery: local hooks can be
+bypassed with `git commit --no-verify` (which must then be justified in the
+commit body), so CI is the real backstop; and a structural check proves an
+artifact moved, not that it is semantically right.
+
 ## Running tests
 
 ### The day-to-day loop

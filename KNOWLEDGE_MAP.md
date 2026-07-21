@@ -3,7 +3,7 @@
 > **AUTO-GENERATED — DO NOT EDIT.** Regenerate with `knowledge-map/scripts/gen_knowledge_map.sh`.
 > Source of truth = YAML front-matter in: `docs/knowledge docs/decisions`. Edit the fact files, never this map.
 > A fact is any `.md` whose front-matter has a non-empty `answers:` list.
-> **6** facts · **34** question keys.
+> **7** facts · **40** question keys.
 
 ## Questions → fact
 
@@ -12,6 +12,8 @@
 - "cargo build fails couldn't read return_annotation_parser.rs" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "cargo build fails missing generated parser" -> [pgen-build-regenerate](docs/knowledge/pgen-build-regenerate.md) · 2026-06-15 · reverify: `ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_annotation_parser.rs`
 - "downstream project cannot compile RGX" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
+- "how are RGX's rules enforced" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
+- "how do I add a new doctrine or rule check" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
 - "how do I build RGX as a git submodule" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "how do I build RGX" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "how do I build rgx-core without PGEN" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
@@ -26,23 +28,36 @@
 - "what PGEN issue tracks compile-time performance" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-07-21 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
 - "what are PASS_BASELINE / FAIL_BASELINE" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "what does adopting the fast PGEN pin require" -> [pgen-1104-verified-blocked](docs/knowledge/pgen-1104-verified-blocked.md) · 2026-07-21 · reverify: `cargo run --release -p rgx-core --example pgen_compile_perf_dump --features pgen-parser  # on the adopted pin`
+- "what does the pre-commit hook run" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
 - "what does the untracked subs/pgen status mean" -> [pgen-build-regenerate](docs/knowledge/pgen-build-regenerate.md) · 2026-06-15 · reverify: `ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_annotation_parser.rs`
 - "what dominates Regex::compile time" -> [pgen-1104-verified-blocked](docs/knowledge/pgen-1104-verified-blocked.md) · 2026-07-21 · reverify: `cargo run --release -p rgx-core --example pgen_compile_perf_dump --features pgen-parser  # on the adopted pin`
 - "what happened to the PGEN speed campaign" -> [pgen-1104-verified-blocked](docs/knowledge/pgen-1104-verified-blocked.md) · 2026-07-21 · reverify: `cargo run --release -p rgx-core --example pgen_compile_perf_dump --features pgen-parser  # on the adopted pin`
 - "what is RGX's PCRE2 conformance pass count" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "what is the Code-Change Doctrine" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
+- "what is the doctrine enforcement architecture" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
 - "what is the merge gate for parsing / VM / compiler changes" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "what is the only open PGEN bug" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-07-21 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
 - "what is the simple command to build RGX and its dependencies" -> [rgx-build-as-submodule](docs/knowledge/rgx-build-as-submodule.md) · 2026-06-15 · reverify: `make -C . bootstrap`
 - "what should an agent read first" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
+- "what stops a code change landing without a task tree" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
 - "where is the conformance ratchet baseline" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "where is the task tree / how do I pick the next task" -> [governance-entrypoints](docs/knowledge/governance-entrypoints.md) · 2026-06-15 · reverify: `sed -n '1,12p' AGENTS.md`
 - "which PGEN-RGX reports are still open" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-07-21 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
 - "why are there 4 PCRE2 conformance residuals" -> [pcre2-conformance-ratchet](docs/knowledge/pcre2-conformance-ratchet.md) · 2026-06-15 · reverify: `grep -n PASS_BASELINE rgx-core/tests/pcre2_conformance.rs`
 - "why does include of return_annotation_parser.rs fail" -> [pgen-build-regenerate](docs/knowledge/pgen-build-regenerate.md) · 2026-06-15 · reverify: `ls subs/pgen/generated/regex_parser.rs subs/pgen/generated/return_annotation_parser.rs`
 - "why is the new fast PGEN pin not adopted" -> [pgen-sole-open-bug](docs/knowledge/pgen-sole-open-bug.md) · 2026-07-21 · reverify: `grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml`
+- "why was my commit blocked" -> [doctrine-enforcement](docs/knowledge/doctrine-enforcement.md) · 2026-07-21 · reverify: `./scripts/check_doctrines.sh --scope ci`
 
 ## Facts (by id)
+
+### doctrine-enforcement
+_RGX doctrines are machine-enforced — scripts/check_doctrines.sh is the registry+driver_
+
+- **answers:** how are RGX's rules enforced | what stops a code change landing without a task tree | how do I add a new doctrine or rule check | what does the pre-commit hook run | why was my commit blocked | what is the doctrine enforcement architecture
+- **date:** 2026-07-21 · **status:** current
+- **evidence:** `DOCTRINE_ENFORCEMENT.md §10; scripts/check_doctrines.sh (DOCTRINES array); scripts/git-hooks/pre-commit`
+- **reverify:** `./scripts/check_doctrines.sh --scope ci`
+- **source:** [`docs/knowledge/doctrine-enforcement.md`](docs/knowledge/doctrine-enforcement.md)
 
 ### governance-entrypoints
 _How RGX tracks work and memory — task-trees, Code-Change Doctrine, memory layers_

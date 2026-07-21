@@ -34,14 +34,19 @@ forward plan in `ROADMAP.md`.
 - **Engine:** 4-tier dispatch (DFA → Pike-VM → JIT → backtracking VM) plus AC
   literal-alternation and TDFA capture recovery, all default-on. C1 (JIT) and
   C2 (NFA/DFA hybrid) shipped.
-- **Process:** task-tree governance + the durable memory architecture (layers
-  A `MEMORY.md` / B task-trees / C `docs/decisions/` / D git, E1–E4) + the
-  Knowledge Map retrieval layer (derived `KNOWLEDGE_MAP.md` over
-  `docs/knowledge/` fact cards) all adopted `2026-06-15`. The Code-Change
-  Doctrine is binding — no code change without an owning task-tree leaf;
-  `core.hooksPath` enforces the memory-arch check + KM gen/stage/check +
-  gate-receipt + work-unit-id commit subjects locally, and `run-local-ci.sh`/CI
-  enforces server-side. **Grep `KNOWLEDGE_MAP.md` before re-deriving any logged fact.**
+- **Process — 4 portable architectures.** Task-trees (work memory) + the durable
+  memory architecture (layers A `MEMORY.md` / B task-trees / C `docs/decisions/`
+  / D git) + the Knowledge Map (derived `KNOWLEDGE_MAP.md` over
+  `docs/knowledge/` fact cards), all adopted `2026-06-15`; and since
+  `2026-07-21` the **Doctrine Enforcement Architecture**
+  (`DOCTRINE_ENFORCEMENT.md`, adopted from PGEN, ADR 0006) — every mechanizable
+  doctrine is a deterministic check run from one registry+driver
+  (`scripts/check_doctrines.sh`), gated at E3 (pre-commit hook) and E4
+  (`run-local-ci.sh`, which CI runs). **7 doctrines enforced:** `MEMORY-ARCH`,
+  `KNOWLEDGE-MAP`, `PGEN-READONLY`, `DOCTRINE-REGISTRY-SYNC`,
+  `CODE-CHANGE-LEAF`, `TWO-TRACK-DOCS`, `GATE-RECEIPT`. The Code-Change
+  Doctrine is therefore mechanically binding, not advisory. **Grep
+  `KNOWLEDGE_MAP.md` before re-deriving any logged fact.**
 
 ## Active Lanes → Task Trees
 
@@ -57,6 +62,7 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
 | Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
 | Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
+| Governance — doctrine enforcement (4th portable architecture) | [`DOCTRINE-ADOPT`](docs/tasks/DOCTRINE-ADOPT.md) | `active` | `.2` — the evidence archetype (`.1` shipped: driver + 7 doctrines gated at E3+E4) |
 | Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) · [`MEMORY-ARCHITECTURE-DOC`](docs/tasks/MEMORY-ARCHITECTURE-DOC.md) · [`KNOWLEDGE-MAP-DOC`](docs/tasks/KNOWLEDGE-MAP-DOC.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
 
 Ledger reconciled (`LEDGER-HYGIENE`, 2026-06-15): `PGEN-RGX-0078` is the sole
@@ -65,6 +71,13 @@ in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-07-21` — `DOCTRINE-ADOPT.1`: adopted the **Doctrine Enforcement
+  Architecture** (RGX's 4th portable architecture, from PGEN). One registry +
+  driver (`scripts/check_doctrines.sh`) now runs 7 doctrine checks and gates
+  both the pre-commit hook (E3) and `run-local-ci.sh`/CI (E4); new checks
+  `PGEN-READONLY`, `DOCTRINE-REGISTRY-SYNC`, `CODE-CHANGE-LEAF`,
+  `TWO-TRACK-DOCS` + `GATE-RECEIPT` extracted from the hook. Every check
+  negative-tested to prove it bites; full gate green. ADR 0006.
 - `2026-07-21` — `COMPILE-PERF-0078.1` execution (adoption attempt +
   verification; docs-only outcome): PGEN's 0078 speed-campaign closure
   verified on preview pin `960dddaa` — parse 26.9× faster, 8.44× vs

@@ -1,85 +1,32 @@
 #!/usr/bin/env bash
-# RGX pre-commit gate-receipt guard.
+# RGX pre-commit hook — layer E3 of the Doctrine Enforcement Architecture
+# (`DOCTRINE_ENFORCEMENT.md` §7).
 #
-# Blocks committing a *gate-affecting* tree (Rust / Cargo / CI /
-# scripts) unless `./scripts/run-local-ci.sh` exited 0 for exactly
-# this content (proven by a fresh matching receipt). Doc-only /
-# pgen-issues-only commits are allowed without a receipt — they
-# cannot change a Rust gate result.
+# Two phases, in order:
+#   1. DERIVE — regenerate derived artifacts and stage them, so a derived file
+#      is always in sync at zero agent cost (the one sanctioned mutation, per
+#      the standard's §4(4) "derive-and-stage" carve-out).
+#   2. ENFORCE — run THE driver (`scripts/check_doctrines.sh`), which owns the
+#      doctrine registry and reports per-doctrine PASS/FAIL/SKIP. Any breach
+#      blocks the commit.
+#
+# Adding or changing a doctrine is a change to the registry + its check script —
+# NOT to this hook. That is the point: one driver, gated identically here (E3)
+# and in CI (E4, via `scripts/run-local-ci.sh`).
 #
 # Activate once per clone:  ./scripts/setup-hooks.sh
-# Last-resort bypass:       git commit --no-verify   (must be
-#   justified in the commit body per COMMIT.md — never a silent
-#   default).
+# Last-resort bypass:       git commit --no-verify   (must be justified in the
+#   commit body per COMMIT.md — never a silent default).
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# Memory-architecture gate (layer E3 of MEMORY_ARCHITECTURE.md) — runs on EVERY
-# commit, before the gate-receipt logic. It is the single source of truth for
-# the layer invariants (MEMORY.md cap, bootstrap pointers, decisions/task-tree
-# stores). Cheap; fails fast on a non-compliant tree.
-"$repo_root/scripts/check_memory_architecture.sh"
-
-# Knowledge Map gate (KNOWLEDGE_MAP_ARCHITECTURE.md §6) — regenerate the derived
-# map, stage it (so it is always in sync at zero agent cost), then validate
-# facts + derive-and-diff sync. Runs on EVERY commit (before the gate-receipt
-# early-exit) so a doc-only fact-card change is still checked.
+# --- Phase 1: derive-and-stage -------------------------------------------------
+# Knowledge Map (KNOWLEDGE_MAP_ARCHITECTURE.md §6): regenerate the derived map and
+# stage it BEFORE the driver runs, so the KNOWLEDGE-MAP doctrine's derive-and-diff
+# check sees a synced tree instead of failing on drift the hook could fix itself.
 "$repo_root/knowledge-map/scripts/gen_knowledge_map.sh" >/dev/null
 git add "$("$repo_root/knowledge-map/scripts/gen_knowledge_map.sh" --print-map-path)" 2>/dev/null || true
-"$repo_root/knowledge-map/scripts/check_knowledge_map.sh"
 
-# shellcheck source=scripts/lib-gate-receipt.sh
-. "$repo_root/scripts/lib-gate-receipt.sh"
-
-gate_pathspec=(
-  '--' '*.rs' '*/Cargo.toml' 'Cargo.toml' 'Cargo.lock'
-  '*/build.rs' '.github/workflows/*' 'scripts/*'
-  'rgx-capi/cbindgen.toml' 'rgx-capi/include/*'
-  ':(exclude)subs/pgen' ':(exclude)git_message_brief.txt'
-)
-
-# Does this commit touch any gate-affecting path?
-staged_gate_files="$(git diff --cached --name-only "${gate_pathspec[@]}")"
-if [ -z "$staged_gate_files" ]; then
-  # Pure docs / pgen-issues / non-gate commit — nothing the local
-  # Rust gate could catch. Allow.
-  exit 0
-fi
-
-receipt="$(rgx_receipt_path)"
-if [ ! -f "$receipt" ]; then
-  cat >&2 <<'EOF'
-✗ pre-commit blocked: no green gate receipt.
-
-This commit changes gate-affecting files (Rust / Cargo / CI /
-scripts) but ./scripts/run-local-ci.sh has not been run green for
-this content. The mandatory gate is the FULL suite on the default
-thread stack (lib + integration incl. tests/stress_tests.rs + doc) —
-a filtered/`--lib`/`| tail`-masked run is NOT the gate (see
-COMMIT.md, and the 2026-05-18 deep-nesting incident).
-
-Fix: ./scripts/run-local-ci.sh   (then re-commit)
-Last resort, justified in the commit body: git commit --no-verify
-EOF
-  exit 1
-fi
-
-want="$(cat "$receipt")"
-have="$(rgx_gate_state_id)"
-if [ "$want" != "$have" ]; then
-  cat >&2 <<'EOF'
-✗ pre-commit blocked: stale gate receipt.
-
-Gate-affecting files changed since ./scripts/run-local-ci.sh last
-passed, so the green you have does not certify what you are about to
-commit. Re-run the gate against the current tree.
-
-Fix: ./scripts/run-local-ci.sh   (then re-commit)
-Last resort, justified in the commit body: git commit --no-verify
-EOF
-  exit 1
-fi
-
-echo "✓ pre-commit: gate receipt fresh and matching."
-exit 0
+# --- Phase 2: enforce every registered doctrine --------------------------------
+exec "$repo_root/scripts/check_doctrines.sh" --scope hook

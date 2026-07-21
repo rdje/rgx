@@ -37,15 +37,17 @@ echo "[run-local-ci.sh] Starting local CI checks from project root"
 
 run_step "./scripts/check-ci-paths.sh --allow-dirty-worktree" ./scripts/check-ci-paths.sh --allow-dirty-worktree
 
-# Memory-architecture invariants (layer E4 of MEMORY_ARCHITECTURE.md). Runs
-# server-side too (this script IS the CI gate), so a non-compliant branch
-# cannot merge. Path-only; runs even in the no-PGEN fallback below.
-run_step "./scripts/check_memory_architecture.sh (memory-architecture invariants)" ./scripts/check_memory_architecture.sh
-
-# Knowledge Map gate (KNOWLEDGE_MAP_ARCHITECTURE.md §6 — the un-bypassable CI
-# backstop): validate fact cards + assert KNOWLEDGE_MAP.md is in sync
-# (derive-and-diff). Path-only; runs even in the no-PGEN fallback below.
-run_step "./knowledge-map/scripts/check_knowledge_map.sh (knowledge-map gate)" ./knowledge-map/scripts/check_knowledge_map.sh
+# Doctrine enforcement (DOCTRINE_ENFORCEMENT.md §7, layer E4 — THE un-bypassable
+# backstop). This script IS the CI gate, so running the driver here means a
+# non-compliant branch cannot merge: `--no-verify` skips the local hook (E3) but
+# cannot reach here. The driver owns the registry — it runs the
+# memory-architecture and Knowledge Map checks that used to be listed
+# individually at this spot, plus the PGEN-read-only and registry-sync
+# invariants. `--scope ci` reports the commit-time-only doctrines (staged-set,
+# gate receipt) as SKIP rather than passing them vacuously.
+#
+# Path-only; runs even in the no-PGEN fallback below.
+run_step "./scripts/check_doctrines.sh --scope ci (doctrine enforcement)" ./scripts/check_doctrines.sh --scope ci
 
 if [[ "$have_pgen_checkout" != "1" ]]; then
   echo "[run-local-ci.sh] Skipping cargo-based validation because the PGEN submodule is not initialized."

@@ -13,10 +13,15 @@ point here so discovery is solved once.
    `docs/decisions/` (layer C); commit per `COMMIT.md` with the work-unit (leaf)
    id in the subject. **Every code change must be owned by a task-tree leaf**
    (the Code-Change Doctrine — `CLAUDE.md` / `docs/TASK_TREE.md`).
-5. Before committing run `scripts/check_memory_architecture.sh`; for
-   gate-affecting (Rust / Cargo / CI / scripts) changes run
-   `./scripts/run-local-ci.sh` — CI runs both too. Activate the local hooks once
-   per clone: `./scripts/setup-hooks.sh`.
+5. Read `DOCTRINE_ENFORCEMENT.md` — RGX's doctrines are **mechanically
+   enforced**, not advisory. `scripts/check_doctrines.sh` is the registry +
+   driver; the pre-commit hook (E3) and `./scripts/run-local-ci.sh` (E4, what CI
+   runs) both gate on it. Run it yourself any time:
+   `./scripts/check_doctrines.sh`.
+6. Before committing: for gate-affecting (Rust / Cargo / CI / scripts) changes
+   run `./scripts/run-local-ci.sh` — it stamps the green receipt the
+   `GATE-RECEIPT` doctrine requires. Activate the local hooks once per clone:
+   `./scripts/setup-hooks.sh`.
 
 Memory layers: **A** `MEMORY.md` (resume pointer) · **B** task-trees
 (`docs/tasks/`) · **C** decision records (`docs/decisions/`) · **D** git history.

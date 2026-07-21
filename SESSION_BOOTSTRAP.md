@@ -7,6 +7,9 @@ any work.
 2. `CLAUDE.md` — non-negotiable project rules (loaded automatically).
 3. `COMMIT.md` — the commit workflow contract.
 4. `MEMORY_ARCHITECTURE.md` — the memory system (4 layers + enforcement).
+   Then `DOCTRINE_ENFORCEMENT.md` — how RGX's doctrines are **machine-checked**
+   (`scripts/check_doctrines.sh` is the registry + driver the pre-commit hook and
+   CI both gate on; §10 lists every enforced doctrine).
 5. `MEMORY.md` — the bounded **layer-A resume pointer**; read it for current
    state + the active frontier (durable history is in `docs/tasks/`,
    `docs/decisions/`, and git — not in `MEMORY.md` anymore).

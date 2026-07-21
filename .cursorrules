@@ -5,6 +5,9 @@ full agent bootstrap. Memory is layered: A `MEMORY.md` (bounded resume pointer)
 · B task-trees (`docs/tasks/`, index `docs/TASK_TREE.md`) · C decision records
 (`docs/decisions/`) · D git history. Track all work in task-trees, record
 durable facts in `docs/decisions/`, and follow `COMMIT.md`. **Every code change
-must be owned by a task-tree leaf** (Code-Change Doctrine). Run
-`scripts/check_memory_architecture.sh` before committing; `./scripts/run-local-ci.sh`
-for gate-affecting changes.
+must be owned by a task-tree leaf** (Code-Change Doctrine). Those doctrines are
+**machine-enforced**: `DOCTRINE_ENFORCEMENT.md` is the standard and
+`scripts/check_doctrines.sh` the registry+driver that the pre-commit hook (E3)
+and CI (E4) both gate on. Run `./scripts/check_doctrines.sh` any time;
+`./scripts/run-local-ci.sh` for gate-affecting changes (it stamps the receipt
+the GATE-RECEIPT doctrine requires).

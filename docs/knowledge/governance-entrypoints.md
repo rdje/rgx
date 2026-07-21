@@ -24,6 +24,9 @@ task-tree leaf owns it first; the leaf id goes in the commit subject. Memory is
 layered: **A** `MEMORY.md` (overwrite-only pointer, ≤ cap) · **B** task-trees
 (`docs/tasks/`) · **C** decision records (`docs/decisions/`) · **D** git. A
 derived **Knowledge Map** (`KNOWLEDGE_MAP.md`) indexes durable facts; grep it
-before re-deriving. Local hooks (`core.hooksPath = scripts/git-hooks`) + CI
-enforce all of it. Canonical homes: `docs/TASK_TREE.md`, `MEMORY_ARCHITECTURE.md`,
-`knowledge-map/KNOWLEDGE_MAP_ARCHITECTURE.md`.
+before re-deriving. All of it is **machine-enforced** since 2026-07-21 by the
+doctrine driver `scripts/check_doctrines.sh` — run from the local hooks
+(`core.hooksPath = scripts/git-hooks`, E3) and from `run-local-ci.sh`/CI (E4);
+see [[doctrine-enforcement]]. Canonical homes: `docs/TASK_TREE.md`,
+`MEMORY_ARCHITECTURE.md`, `knowledge-map/KNOWLEDGE_MAP_ARCHITECTURE.md`,
+`DOCTRINE_ENFORCEMENT.md`.

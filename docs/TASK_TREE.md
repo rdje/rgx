@@ -23,6 +23,16 @@ scheme. Therefore, in RGX, the **leaf ID** (e.g. `TASKTREE-ADOPT.2`) is the
 unit of commit traceability and must appear in the commit subject or first
 body line whenever a commit completes a task-tree leaf.
 
+## Enforcement (this doctrine is machine-checked)
+
+The Code-Change Doctrine below is **not honour-system**. Since 2026-07-21 RGX
+runs the Doctrine Enforcement Architecture (`DOCTRINE_ENFORCEMENT.md`, ADR
+0006): `scripts/check_doctrines.sh` registers a `CODE-CHANGE-LEAF` check that
+blocks any commit staging code paths without an updated `docs/tasks/<TREE>.md`,
+alongside `TWO-TRACK-DOCS`, `GATE-RECEIPT`, `PGEN-READONLY`, `MEMORY-ARCH`,
+`KNOWLEDGE-MAP`, and `DOCTRINE-REGISTRY-SYNC`. The pre-commit hook (E3) and
+`scripts/run-local-ci.sh` (E4, what CI runs) both gate on that driver.
+
 ## Code-Change Doctrine (binding, non-negotiable — adopted 2026-06-15)
 
 **It is strictly forbidden to make any code change unless that change is
@@ -63,6 +73,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
+| `DOCTRINE-ADOPT` | [tasks/DOCTRINE-ADOPT.md](tasks/DOCTRINE-ADOPT.md) | `active` | `DOCTRINE-ADOPT.2` (evidence archetype) | Governance / process — 4th portable architecture |
 | `VM-LIMITS-SUBEXEC` | [tasks/VM-LIMITS-SUBEXEC.md](tasks/VM-LIMITS-SUBEXEC.md) | `active` | `VM-LIMITS-SUBEXEC.1` (limits must bound lookbehind sub-execution) | Now — production safety (correctness/DoS; found 2026-07-21) |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |

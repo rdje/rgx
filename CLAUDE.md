@@ -89,6 +89,20 @@ Follow `COMMIT.md` exactly. The critical step most likely to be skipped:
 - File bug reports to `pgen-issues/` with repro artifacts per `PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md`.
 - Verify PGEN parses correctly before assuming it's a PGEN bug — check with `parseability_probe` first.
 
+## Doctrine enforcement (these rules are machine-checked)
+
+The rules in this file are not honour-system. `DOCTRINE_ENFORCEMENT.md` is the
+standard; `scripts/check_doctrines.sh` is the registry + driver that runs every
+doctrine check; the pre-commit hook (E3) and `./scripts/run-local-ci.sh` (E4 —
+what CI runs) both gate on it. Currently enforced: `MEMORY-ARCH`,
+`KNOWLEDGE-MAP`, `PGEN-READONLY`, `DOCTRINE-REGISTRY-SYNC`, `CODE-CHANGE-LEAF`,
+`TWO-TRACK-DOCS`, `GATE-RECEIPT`. Run `./scripts/check_doctrines.sh` any time.
+
+Adding a doctrine = write `scripts/check_<id>.sh` (the §4 contract: exit code is
+the verdict, explain on stderr, deterministic, no side effects) + one registry
+line + one `DOCTRINE_ENFORCEMENT.md` §10 row. Do not add enforcement logic to
+the hook.
+
 ## Session bootstrap
 
 - Read `SESSION_BOOTSTRAP.md` → `README.md` → `MEMORY_ARCHITECTURE.md` → `MEMORY.md` → `COMMIT.md` in that order.

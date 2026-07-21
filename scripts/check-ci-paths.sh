@@ -32,6 +32,17 @@ required_paths=(
   "scripts/git-hooks/pre-commit"
   "scripts/git-hooks/commit-msg"
   "scripts/run-local-ci.sh"
+  # Doctrine Enforcement Architecture (DOCTRINE_ENFORCEMENT.md): the driver, its
+  # registered enforcers, and the shared code-change scope definition. Listed so
+  # a deleted enforcer fails CI loudly instead of silently disarming a doctrine.
+  "DOCTRINE_ENFORCEMENT.md"
+  "scripts/check_doctrines.sh"
+  "scripts/check_code_change_leaf.sh"
+  "scripts/check_two_track_docs.sh"
+  "scripts/check_pgen_submodule_readonly.sh"
+  "scripts/check_gate_receipt.sh"
+  "scripts/check_doctrine_registry_sync.sh"
+  "scripts/lib-code-change-scope.sh"
   "MEMORY_ARCHITECTURE.md"
   "MEMORY.md"
   "AGENTS.md"

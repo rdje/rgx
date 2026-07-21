@@ -137,6 +137,7 @@ If you are new to the repo, use this order:
 - [`CLAUDE.md`](CLAUDE.md) — non-negotiable project rules for AI assistants (loaded automatically)
 - [`SESSION_BOOTSTRAP.md`](SESSION_BOOTSTRAP.md) — new-session bootstrap instructions for AI/LLM handoff
 - [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md) — durable, harness-agnostic memory standard (4 layers A/B/C/D + E1–E4 enforcement); the system of record for how continuity works
+- [`DOCTRINE_ENFORCEMENT.md`](DOCTRINE_ENFORCEMENT.md) — **the doctrine-enforcement standard** (RGX's 4th portable architecture, adopted from PGEN 2026-07-21): every mechanizable doctrine is paired with a deterministic check, all run from one registry+driver ([`scripts/check_doctrines.sh`](scripts/check_doctrines.sh)) that the pre-commit hook (E3) and CI (E4) gate on. §10 is RGX's live registry of enforced doctrines.
 - [`KNOWLEDGE_MAP.md`](KNOWLEDGE_MAP.md) — **derived** question-keyed retrieval index over the fact cards in `docs/knowledge/` (+ `docs/decisions/`); grep it *before* re-deriving any logged fact. Auto-generated — never hand-edit.
 - [`knowledge-map/`](knowledge-map/) — the Knowledge Map bundle (standard `KNOWLEDGE_MAP_ARCHITECTURE.md`, FAQ, generator/checker scripts, fact template); makes archaeology a structural impossibility for facts logged once
 - [`CHANGES.md`](CHANGES.md) — authoritative change ledger
