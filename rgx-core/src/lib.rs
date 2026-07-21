@@ -5677,9 +5677,18 @@ mod tests {
             result.is_err(),
             "Recursive call to a missing named group should not silently compile"
         );
+        // Same ownership move as `named_backreference_missing_group_...`:
+        // PGEN 1.1.103 (`REGEX-0098`) rejects an unknown named reference at
+        // parse time. Match the diagnostic CODE per the integration contract,
+        // not the prose of whichever layer rejected it.
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg
-            .contains("recursive subroutine '(?&missing)' refers to missing named capture group"));
+        assert!(
+            msg.contains("E_PARSE_FAILURE")
+                || msg.contains(
+                    "recursive subroutine '(?&missing)' refers to missing named capture group"
+                ),
+            "unexpected diagnostic for an unknown named subroutine call: {msg}"
+        );
     }
 
     #[test]
@@ -6572,8 +6581,17 @@ mod tests {
             result.is_err(),
             "Named backreference to a missing group should not silently compile"
         );
+        // Which LAYER rejects this moved upstream in PGEN 1.1.103
+        // (`REGEX-0098`): an unknown named reference is now a parse-time
+        // reject, PCRE2-faithfully, instead of an RGX compile-time check.
+        // The integration contract's instruction for exactly this case is to
+        // match on the diagnostic CODE, never on message prose — so accept
+        // either owner and assert only that the rejection is identifiable.
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("named backreference"));
+        assert!(
+            msg.contains("E_PARSE_FAILURE") || msg.contains("named backreference"),
+            "unexpected diagnostic for an unknown named backreference: {msg}"
+        );
     }
 
     #[test]

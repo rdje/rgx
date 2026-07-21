@@ -36,7 +36,7 @@ summary: |
 
   Bug class: **integration/build contract breakage** (downstream
   bootstrap recipe non-functional as shipped).
-status: open
+status: closed
 opened_at: 2026-07-21T00:00:00Z
 first_seen_at: 2026-07-21T00:00:00Z
 last_updated_at: 2026-07-21T00:00:00Z
@@ -111,10 +111,14 @@ impact: |
   are unrelated: PGEN-RGX-0089 + the documented REGEX-0098 boundary
   change) — evidence the bootstrap-mode seed path itself is sound.
 resolution:
-  status: unresolved
+  status: resolved
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-07-21T00:00:00Z
   verification_notes: |
-    Close when `rm -rf generated && make -C rust regex_parser_bootstrap`
-    completes exit-0 on a fresh checkout of a PGEN release, with any
-    step failure propagating a nonzero exit.
+    FIXED upstream. Verified on the adopted pin d9d41c28 by deleting
+    `subs/pgen/generated/` outright (reproducing a cold clone) and
+    running the documented canonical path
+    `make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap`:
+    it seeded and generated successfully end-to-end
+    ("Bootstrap complete. generated/regex_parser.rs is ready"), with NO
+    manual `--bootstrap-mode` workaround and no silent exit-0 refusal.

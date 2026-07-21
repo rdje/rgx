@@ -127,7 +127,14 @@ C2 build, engine construction) are a comparatively thin slice. Phase-splitting
 **≈ 63–86 %** of total compile wall-clock; lazy engine-artifact construction
 already drove the `Engine::new` share down to ~0–1 %.
 
-Latest measurement — **PGEN `db6f8c68` (release 1.1.81 / contract 1.1.83),
+> **Superseded — historical.** The table immediately below is the
+> **2026-05-19** measurement on the *former* pin `db6f8c68` (release 1.1.81).
+> It is kept because it is the baseline every "N× faster" claim below is
+> measured against. For the **current shipped numbers, skip to
+> "Update 2026-07-21 — the fast parser is adopted"**; the ≈63–86 % and ≈214 ×
+> figures above/below describe the old pin and no longer hold.
+
+Superseded measurement — **PGEN `db6f8c68` (release 1.1.81 / contract 1.1.83),
 2026-05-19, Apple Silicon, default allocator**, PGEN parse p50 over 5000
 samples vs PCRE2 10.47 `pcre2_compile()` (10 000-compile batch mean):
 
@@ -156,59 +163,77 @@ are the RGX-side ground truth.) The ROADMAP target is **< 5× of PCRE2
 compile**; closing the remaining gap is sustained PGEN parser work and is the
 precondition for that target.
 
-### Update 2026-07-21 — PGEN's speed campaign verified (26.9× faster parse); adoption pending a fix release
+### Update 2026-07-21 — the fast parser is ADOPTED (parse 26.3× faster)
 
-PGEN closed its `PGEN-RGX-0078` speed campaign (upstream releases 1.1.82 →
-1.1.105). RGX verified the claim on a preview checkout of the closure release
-(`960dddaa`), same host, same standard methodology (default allocator,
-standard release profile, p50 of 5000 samples, same-session PCRE2 C
-baselines):
+PGEN closed its `PGEN-RGX-0078` speed campaign, and **RGX now ships it**: the
+`subs/pgen` pin is `d9d41c28` — release **1.1.106** / integration contract
+**1.1.109**, a 24-release jump from 1.1.81. Measured on the adopted pin, same
+host, same standard methodology (default allocator, standard release profile,
+p50 of 5000 samples, same-session PCRE2 C baselines):
 
-| Pattern | PGEN parse p50 (preview) | vs 1.1.81 pin | vs PCRE2 (no JIT) | vs PCRE2 (+JIT) |
+| Pattern | PGEN parse p50 (adopted) | vs 1.1.81 pin | vs PCRE2 (no JIT) | vs PCRE2 (+JIT) |
 |---|--:|--:|--:|--:|
-| `test` | 1.08 µs | 22× faster | 7.8× | 0.7× |
-| `\d{3}-\d{2}-\d{4}` | 2.1 µs | 28× faster | 7.8× | 1.0× |
-| `[a-zA-Z0-9._%+-]+@…` | 10.3 µs | 9× faster | 17.2× | 3.7× |
-| `cat\|dog\|bird` | 2.0 µs | 30× faster | 6.9× | 1.0× |
-| `(\d{4})-(\d{2})-(\d{2})` | 4.7 µs | 26× faster | 10.8× | 1.6× |
-| `https?://\S+` | 1.6 µs | 35× faster | 6.2× | 0.8× |
-| `\b\w+@\w+\.\w+\b` | 1.6 µs | 51× faster | 5.8× | 0.6× |
-| `^(\d+)\s+(?P<word>\w+)\s+(?:foo\|bar)$` | 5.5 µs | 34× faster | 9.2× | 1.8× |
-| **geomean** | **2.75 µs** | **26.9× faster** | **8.44×** | **1.17×** |
+| `test` | 1.08 µs | 22× faster | 7.79× | 0.69× |
+| `\d{3}-\d{2}-\d{4}` | 2.17 µs | 28× faster | 7.94× | 1.00× |
+| `[a-zA-Z0-9._%+-]+@…` | 10.75 µs | 9× faster | 17.86× | 3.83× |
+| `cat\|dog\|bird` | 2.04 µs | 29× faster | 7.09× | 1.03× |
+| `(\d{4})-(\d{2})-(\d{2})` | 4.83 µs | 26× faster | 11.06× | 1.68× |
+| `https?://\S+` | 1.67 µs | 35× faster | 6.33× | 0.81× |
+| `\b\w+@\w+\.\w+\b` | 1.67 µs | 49× faster | 5.97× | 0.63× |
+| `^(\d+)\s+(?P<word>\w+)\s+(?:foo\|bar)$` | 5.67 µs | 33× faster | 9.51× | 1.83× |
+| **geomean** | **2.81 µs** | **26.3× faster** | **8.64×** | **1.20×** |
 
-Raw PGEN parse is now at **parity with PCRE2's JIT-enabled compile** (five of
-the eight patterns are faster), and 25× closer to PCRE2's no-JIT compile than
-the shipped pin. The `<5×`-of-no-JIT ROADMAP line is still not met on RGX's
+These reproduce the pre-adoption preview measurement (2.75 µs geomean) within
++2.4 %, which is the useful part: the speedup survived contact with the shipped
+pin instead of evaporating, and the preview number was not an artefact.
+
+Raw PGEN parse is now at **rough parity with PCRE2's JIT-enabled compile**
+(three of the eight patterns are faster), and 25× closer to PCRE2's no-JIT
+compile than the previous pin. The `<5×`-of-no-JIT ROADMAP line is still not met on RGX's
 instrument (8.44× here; PGEN's own release-day run of RGX's vendored gate read
 6.6× on their host; their direct-path fat-LTO + mimalloc configuration reads
 ≈3.9×). PGEN's campaign was closed against a deliberately re-based *absolute*
 bar — sub-1 µs corpus geomean, met at 1,004.4 ns under their closure
 configuration — per their project's ruling.
 
-**The compile-time bottleneck has inverted.** On the preview pin, raw PGEN
-parse is only ~4–18 % of `Regex::compile`; the dominant costs are now
-RGX-side — the AST-dump adapter boundary (JSON serialize → serde → typed
-walker, ~10–25 µs/pattern) and the eager C2 program construction
-(~12–36 µs). Full `Regex::compile` geomean is ≈42 µs ⇒ ≈130× PCRE2-no-JIT.
-Closing further gap is RGX work (a native `ParseContent`-consumption fast
-path, lazy/skippable C2 build, the trivial-pattern short-circuit), tracked in
-the `COMPILE-PERF-0078` task tree.
+**The compile-time bottleneck has inverted — and this is now shipped fact, not
+a projection.** Raw PGEN parse is only ~4 % of `Regex::compile`. The dominant
+costs are RGX's own: the AST-dump adapter boundary (PGEN serialises the typed
+AST to JSON, RGX deserialises it with serde and walks it — roughly **ten times
+the cost of the parse it is importing**) and the eager C2 program construction.
+Put plainly: RGX now spends far more time *ingesting* the parse result than
+PGEN spends producing it.
 
-**Why the shipped pin is still 1.1.81:** the preview release carries a
-rejects-valid regression — `(?[\b])` / `(?[[\b]])` (backspace inside Perl
-extended classes; PCRE2 10.47 accepts and matches U+0008) — plus a broken
-cold-clone bootstrap and drifted version constants. Filed upstream as
-`PGEN-RGX-0089` / `0090` / `0091` with full repro bundles; RGX adopts the
-first release that fixes 0089 (measurement bundle:
-`pgen-issues/artifacts/PGEN-RGX-0078/measurements/*_1.1.104_preview*`).
+That makes the remaining `<5×` work RGX-side, tracked in the
+`COMPILE-PERF-0078` task tree: `.3` takes the adapter boundary (the contract
+sanctions consuming `ParseContent::Shaped` natively, or calling
+`to_json_value()` once at the boundary, instead of round-tripping through a
+JSON string), `.4` makes the C2 build lazy, and `.2` holds a trivial-pattern
+short-circuit in reserve.
 
-The adoption attempt also uncovered a pin-independent RGX bug, since fixed:
-`set_max_steps` / `set_max_backtrack_frames` bounded only the top-level
-dispatch loop, so a variable-length lookbehind (`/(?<=(\d{1,256}))X/`) ran
-unbounded despite harness limits — 20+ minutes on an 8-byte subject. Every
-sub-execution path now spends the attempt's shared budget (`VM-LIMITS-SUBEXEC`,
-2026-07-21); the same case now finishes in ~37 ms. See
-[Safety Limits](../core-api/safety-limits.md) for the contract.
+**What adoption cost, for the record.** The preview release had carried three
+downstream blockers, all filed by RGX and all fixed upstream before adoption:
+a rejects-valid regression on `(?[\b])` / `(?[[\b]])` (`PGEN-RGX-0089`, fixed
+as PGEN's ledger `REGEX-0115`), a broken cold-clone bootstrap
+(`PGEN-RGX-0090`), and version constants that disagreed with the contract
+identity (`PGEN-RGX-0091`). Each was re-verified against the adopted pin rather
+than taken on trust. RGX now has **zero open PGEN-RGX reports** — all 91 filed
+across the project's life are closed.
+
+Adoption also absorbed one deliberate upstream boundary move: since PGEN
+1.1.103 (`REGEX-0098`), a named reference to a group that is never defined —
+`\k<zzz>`, `(?&zzz)`, `(?P=zzz)` and friends — is rejected at **parse** time,
+PCRE2-faithfully (err 115), where RGX used to catch it later in its own
+compiler. The patterns are rejected either way; only the layer changed. RGX's
+tests now assert the diagnostic *code* rather than message prose, per the
+integration contract's explicit instruction.
+
+The PCRE2 conformance ratchet held at **12,806 / 4 / 0 / 0** across the whole
+24-release jump, and the AST shape was unaffected (`regex_ast_dump_schema_version`
+stayed `1`; the persisted AST dumps are byte-identical apart from an
+`api_version` string). RGX consumes only PGEN's serialised AST-dump surface, so
+PGEN's internal Rust-level changes in this range — a slimmer `ParseNode`, an
+arena-backed typed carrier — did not reach it.
 
 Reproduce both measurements yourself from the repo root:
 

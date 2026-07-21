@@ -26,7 +26,7 @@ summary: |
 
   Bug class: **rejects-valid** (parse failure on a PCRE2-valid
   pattern), per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md.
-status: open
+status: closed
 opened_at: 2026-07-21T00:00:00Z
 first_seen_at: 2026-07-21T00:00:00Z
 last_updated_at: 2026-07-21T00:00:00Z
@@ -140,10 +140,17 @@ impact: |
   family REGEX-0098 is a documented, PCRE2-convergent change RGX
   absorbs separately).
 resolution:
-  status: unresolved
+  status: resolved
   fixed_in_rgx_commit: null
-  verified_at: null
+  verified_at: 2026-07-21T00:00:00Z
   verification_notes: |
-    Close when `(?[\b])` and `(?[[\b]])` ACCEPT again on a PGEN
-    release (parse + typed AST class-member backspace), verified by
-    the two RGX tests above plus the PCRE2 conformance ratchet.
+    FIXED upstream in PGEN release 1.1.106 / contract 1.1.109
+    (ledger REGEX-0115, grammar-owned via a dedicated
+    `extended_class_backspace_escape` branch). Verified on the adopted
+    pin d9d41c28 by RGX: `(?[])` matches U+0008 (CLI `1..2` on
+    "ab") and the nested form `(?[[]])` does too; both shipped
+    extended-class fixture surfaces are green again
+    (`parser_contract_algebraic_extended_char_class_executes_on_default_path`,
+    `parser_extended_char_class_algebraic_cases_execute_on_default_path`);
+    rgx-core lib 1203 pass / 0 fail; PCRE2 conformance ratchet held at
+    12,806/4/0/0. No RGX walker change was required.

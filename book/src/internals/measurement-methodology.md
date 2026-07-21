@@ -123,7 +123,9 @@ These are mandatory. Changing any of them changes the number materially.
 ### Reconciling ~214× vs ~80×
 
 Older notes quoted "~80× slower than PCRE2-no-JIT". RGX's standard
-measurement on PGEN 1.1.81 (pin `db6f8c68`, 2026-05-19) is **≈214×**. Both can
+measurement on PGEN 1.1.81 (pin `db6f8c68`, 2026-05-19) was **≈214×**; on the
+adopted PGEN 1.1.106 pin (`d9d41c28`, 2026-07-21) the same instrument reads
+**8.64×** for raw parse. Both can
 be correct *for their methodology*:
 
 - The "~80×" came from **PGEN's own benchmark harness with mimalloc** and PGEN's internal sampling. mimalloc materially speeds up an allocation-heavy parser.

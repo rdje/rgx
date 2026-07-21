@@ -7659,7 +7659,12 @@ mod tests {
             "(?{wasm:mod:fn})",
             "(?R)",
             "(?1)",
-            "(?&word)",
+            // Was a bare `(?&word)`. PGEN 1.1.103 (REGEX-0098) made an
+            // unknown named reference a parse-time reject, PCRE2-faithfully
+            // (err 115), so the bare form belongs in the must-reject list
+            // below. Defining the group keeps this fixture's real purpose —
+            // exercising named-subroutine-call syntax on both backends.
+            "(?<word>a)(?&word)",
             r"(a)\1",
             r"\p{L}+",
             "(?i:abc)",
@@ -7674,6 +7679,33 @@ mod tests {
             r"(a)\g<-1>",
             "(?J)(?<x>a)(?<x>b)",
             "(*ACCEPT)",
+        ]
+    }
+
+    /// Patterns the parser must REJECT: a named reference to a group that is
+    /// never defined.
+    ///
+    /// PCRE2 10.47 rejects every one of these (err 115, "reference to
+    /// non-existent subpattern"). PGEN adopted that boundary in release
+    /// 1.1.103 (ledger `REGEX-0098`); before then it accepted them at parse
+    /// time and RGX caught the bad ones later in its own compiler. Locking the
+    /// reject here means a future pin cannot silently drift back to accepting
+    /// them.
+    ///
+    /// Deliberately excluded: the NUMERIC single-digit family (`\1`, `\g1`).
+    /// PGEN leaves `numeric_backreference_single` ungated by design
+    /// (`REGEX-0083`/`0086`), so it is a different boundary, not this one.
+    fn parser_contract_must_reject_fixtures() -> &'static [&'static str] {
+        &[
+            "(?&word)",
+            "(?P>word)",
+            r"\k<word>",
+            r"\k'word'",
+            r"\k{word}",
+            r"\g{word}",
+            r"\g<word>",
+            r"\g'word'",
+            "(?P=word)",
         ]
     }
 
@@ -7956,6 +7988,18 @@ mod tests {
             let mut pgen = PgenParser::new();
             pgen.parse_pattern(pattern)
                 .unwrap_or_else(|e| panic!("pgen parser failed for pattern '{pattern}': {e}"));
+        }
+    }
+
+    #[test]
+    fn parser_contract_unknown_named_reference_fixtures_reject() {
+        for pattern in parser_contract_must_reject_fixtures() {
+            let result = parse_pattern(pattern);
+            assert!(
+                result.is_err(),
+                "pattern '{pattern}' names an undefined group and must be rejected \
+                 (PCRE2 err 115; PGEN REGEX-0098)"
+            );
         }
     }
 

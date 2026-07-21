@@ -1,34 +1,50 @@
 ---
 id: pgen-sole-open-bug
-title: Open PGEN reports are 0089/0090/0091 (fast-pin blockers); 0078 closed upstream 2026-07-21
+title: Zero open PGEN-RGX reports — all 91 (0001–0091) closed as of 2026-07-21
 answers:
   - "which PGEN-RGX reports are still open"
   - "is PGEN-RGX-0078 still open"
   - "what is the only open PGEN bug"
   - "what PGEN issue tracks compile-time performance"
   - "why is the new fast PGEN pin not adopted"
+  - "how many PGEN bugs has RGX filed"
 date: 2026-07-21
 status: current
 tags: [pgen, ledger, compile-perf]
-evidence: pgen-issues/PGEN-RGX-0089.yaml/0090/0091 (status open); PGEN-RGX-0078.yaml (status closed 2026-07-21)
-reverify: grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml
+evidence: grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml returns NOTHING; 0089/0090/0091 closed with verification notes on pin d9d41c28
+reverify: grep -l '^status: open' pgen-issues/PGEN-RGX-*.yaml   # must print nothing
 ---
 
-**`PGEN-RGX-0078` (compile-time perf) is CLOSED** — PGEN's speed campaign
-delivered (RGX-verified 2026-07-21 on preview pin `960dddaa`: raw parse 26.9×
-faster; 8.44× vs PCRE2-no-JIT / 1.17× vs +JIT; bundle in
-`pgen-issues/artifacts/PGEN-RGX-0078/measurements/*_1.1.104_preview*`).
-Upstream adjudicated closure against its director's re-based absolute sub-1µs
-bar; the RGX `<5×` ROADMAP bar is unmet (8.44×) and awaiting a director ruling
-(see `docs/tasks/COMPILE-PERF-0078.md`).
+**There are currently NO open PGEN-RGX reports.** All 91 filed against this
+codebase (`0001`–`0091`) are closed. The `reverify` command must print nothing;
+if it prints a file, this card is stale.
 
-**Open PGEN-RGX reports (all filed 2026-07-21 against the fast pin, blocking
-its adoption):** `0089` — `(?[\b])`/`(?[[\b]])` rejects-valid regression
-(PCRE2-oracle-proven); `0090` — cold-clone `regex_parser_bootstrap` broken
-(seed REFUSED + exit-0); `0091` — embedding version constants drifted from the
-contract identity (0086-class). The shipped pin stays `db6f8c68` (rel 1.1.81)
-until a PGEN release fixes 0089. The `reverify` command must return exactly
-0089/0090/0091.
+The last three to close were the fast-pin adoption blockers, all filed
+2026-07-21 and all fixed upstream the same day (adopted pin `d9d41c28`, PGEN
+release **1.1.106** / contract **1.1.109**):
+
+- **`0089`** — `(?[\b])` / `(?[[\b]])` rejects-valid regression. Fixed upstream
+  as ledger `REGEX-0115` (grammar-owned `extended_class_backspace_escape`).
+  RGX-verified: both forms match U+0008 again; the two extended-class fixtures
+  are green.
+- **`0090`** — cold-clone `regex_parser_bootstrap` broken. RGX-verified by
+  deleting `subs/pgen/generated/` and running the canonical target: it
+  bootstraps end-to-end with no `--bootstrap-mode` workaround.
+- **`0091`** — embedding version constants drifted from contract identity.
+  RGX-verified: `parser_embedding_api_contract()` reports `1.1.106`/`1.1.109`,
+  matching the contract document exactly.
+
+**`PGEN-RGX-0078` (compile-time perf) closed earlier the same day** — the speed
+campaign delivered and is now *shipped* in RGX, not merely verified: raw parse
+geomean **2,813 ns** on the adopted pin = **26.3× faster** than the old
+`db6f8c68`, **8.64× vs PCRE2-no-JIT**, **1.20× vs PCRE2+JIT** (3/8 patterns
+parse faster than PCRE2 compiles with JIT). Bundle:
+`pgen-issues/artifacts/PGEN-RGX-0078/measurements/ratio_table_1.1.106_adopted.md`.
+
+The ROADMAP's `<5×`-vs-PCRE2-no-JIT bar is still unmet, and the director ruled
+(ADR 0005) that it is KEPT — but closing it is now **RGX-side** work: raw parse
+is only ~4% of `Regex::compile`; the adapter boundary and the eager C2 build
+dominate (`COMPILE-PERF-0078.3` / `.4`).
 
 Parser defects are fixed upstream in PGEN, never worked around in RGX
 (`docs/decisions/0001`, PGEN sole parser).

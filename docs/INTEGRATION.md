@@ -211,8 +211,8 @@ For C/C++/Go/Python/… link against the C ABI crate:
 ## 12. Current pins / versions
 
 - Workspace MSRV: **Rust 1.95**.
-- PGEN regex parser pin: `subs/pgen` at **`db6f8c68`** (release **1.1.81** /
-  integration contract **1.1.83**).
+- PGEN regex parser pin: `subs/pgen` at **`d9d41c28`** (release **1.1.106** /
+  integration contract **1.1.109**).
 - Binary name: **`rgx`** (the `rgx-cli` package installs a `rgx` binary).
 - crates.io: **not published yet** (vendoring / submodule is the supported path
   today — see `docs/decisions/0003`).

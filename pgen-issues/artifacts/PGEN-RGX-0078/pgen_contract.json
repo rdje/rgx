@@ -1,5 +1,5 @@
 {
-  "api_version": "1.2.0",
+  "api_version": "1.3.0",
   "schema_version": 2,
   "deterministic_by_default": true,
   "input_ownership_model": "borrowed_str",
@@ -26,6 +26,7 @@
   "supported_profiles": [
     "sv_2017",
     "sv_2023",
+    "verilog_2005",
     "vhdl_1076_2019",
     "regex_default"
   ],
@@ -34,7 +35,8 @@
       "grammar": "systemverilog",
       "profiles": [
         "sv_2017",
-        "sv_2023"
+        "sv_2023",
+        "verilog_2005"
       ]
     },
     {
@@ -53,8 +55,8 @@
   "supports_systemverilog_generated_backend": false,
   "supports_vhdl_generated_backend": false,
   "supports_regex_generated_backend": true,
-  "regex_integration_contract_version": "1.1.83",
-  "regex_parser_release_version": "1.1.81",
+  "regex_integration_contract_version": "1.1.109",
+  "regex_parser_release_version": "1.1.106",
   "regex_ast_dump_schema_version": 1,
   "regex_generated_backend_required_feature": "generated_parsers",
   "regex_generated_backend_required_artifact": "generated/regex_parser.rs",

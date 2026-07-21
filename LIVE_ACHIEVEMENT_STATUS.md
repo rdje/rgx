@@ -16,19 +16,17 @@ forward plan in `ROADMAP.md`.
   **12,806 pass / 4 fail / 0 panic / 0 skip**. The 4 residuals are by-design /
   won't-fix (Unicode/8-bit engine-model adjudications). Ratchet-gated in
   `rgx-core/tests/pcre2_conformance.rs`; any regression fails CI.
-- **PGEN pin:** `subs/pgen` at `db6f8c68` (regex release 1.1.81 / integration
-  contract 1.1.83). **PGEN's `0078` speed campaign is CLOSED upstream and
-  RGX-verified (2026-07-21, preview pin `960dddaa` / rel 1.1.105):** raw parse
-  **26.9× faster** (geomean 2.75µs), **8.44× vs PCRE2-no-JIT / 1.17× vs
-  PCRE2+JIT** on RGX's standard instrument — but the fast pin is
-  **unadoptable**: `PGEN-RGX-0089` (`(?[\b])` rejects-valid regression,
-  oracle-proven) + `0090` (cold-clone bootstrap broken) + `0091`
-  (version-constant drift) filed with full repro bundles. `0078` is closed;
-  **0089/0090/0091 are the open PGEN reports.** Adoption also absorbs the
-  documented REGEX-0098 named-reference boundary move (4 RGX test updates).
-  Compile-bottleneck inversion on the fast pin: raw parse ~4–18% of
-  `Regex::compile` — remaining compile-time work is RGX-side
-  (`COMPILE-PERF-0078.3`/`.4`).
+- **PGEN pin:** `subs/pgen` at **`d9d41c28`** (regex release **1.1.106** /
+  integration contract **1.1.109**), adopted `2026-07-21` — a 24-release jump.
+  Raw PGEN parse geomean **2.81µs = 26.3× faster** than the former `db6f8c68`
+  pin; **8.64× vs PCRE2-no-JIT**, **1.20× vs PCRE2+JIT** (3/8 patterns parse
+  faster than PCRE2 compiles with JIT). **RGX has ZERO open PGEN-RGX reports** —
+  all 91 (`0001`–`0091`) closed, including the three adoption blockers
+  (`0089` rejects-valid, `0090` cold-clone bootstrap, `0091` version drift),
+  each re-verified on the adopted pin. Ratchet held 12,806/4/0/0 across the
+  bump; AST schema unchanged (`1`). **Compile bottleneck inverted:** raw parse
+  is ~4% of `Regex::compile`; the adapter boundary + eager C2 build dominate —
+  remaining `<5×` work is RGX-side (`COMPILE-PERF-0078.3`/`.4`).
 - **Feature parity:** ~98% PCRE2 feature-family coverage (explicitly
   hand-maintained estimate, not a measured number — see the Book).
 - **Engine:** 4-tier dispatch (DFA → Pike-VM → JIT → backtracking VM) plus AC
@@ -59,19 +57,31 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Next — SOTA algorithmic perf gaps | [`PERF-SOTA-GAPS`](docs/tasks/PERF-SOTA-GAPS.md) | `active` | `.1` — inner-literal prefilter |
 | Next — PCRE2 10.47+ syntax alignment | [`PCRE2-1047-SYNTAX`](docs/tasks/PCRE2-1047-SYNTAX.md) | `active` | `.1` — A12 capture-return VM semantics |
 | Next — code-block expansion | [`CODEBLOCK-EXPANSION`](docs/tasks/CODEBLOCK-EXPANSION.md) | `active` | `.1` — inline-language ergonomics |
-| Next — compile-time `<5×` | [`COMPILE-PERF-0078`](docs/tasks/COMPILE-PERF-0078.md) | `blocked` | speed verified upstream; adoption blocked on `PGEN-RGX-0089` fix release (then `.1` absorb + `.3`/`.4` RGX-side levers) |
+| Next — compile-time `<5×` | [`COMPILE-PERF-0078`](docs/tasks/COMPILE-PERF-0078.md) | `active` | `.3` — adapter-boundary fast path (pin ADOPTED: parse 26.3× faster; bottleneck now RGX-side) |
 | Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
 | Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
 | Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
 | Governance — doctrine enforcement (4th portable architecture) | [`DOCTRINE-ADOPT`](docs/tasks/DOCTRINE-ADOPT.md) | `active` | `.2` — the evidence archetype (`.1` shipped: driver + 7 doctrines gated at E3+E4) |
 | Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) · [`MEMORY-ARCHITECTURE-DOC`](docs/tasks/MEMORY-ARCHITECTURE-DOC.md) · [`KNOWLEDGE-MAP-DOC`](docs/tasks/KNOWLEDGE-MAP-DOC.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
 
-Ledger reconciled (`LEDGER-HYGIENE`, 2026-06-15): `PGEN-RGX-0078` is the sole
-top-level open report (`0073` closed/superseded). Shipped lanes remain recorded
-in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
+Ledger status (2026-07-21): **no open PGEN-RGX reports** — all 91 closed.
+Shipped lanes remain recorded in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-07-21` — `COMPILE-PERF-0078.1`: **the fast PGEN parser is ADOPTED**
+  (user-directed once upstream fixed the blockers). Pin `db6f8c68` (1.1.81) →
+  **`d9d41c28` (1.1.106 / contract 1.1.109)**, 24 releases. Raw parse is
+  **26.3× faster** (geomean 2.81µs; 8.64× vs PCRE2-no-JIT, 1.20× vs +JIT),
+  reproducing the pre-adoption preview within +2.4%. All three blockers
+  re-verified rather than trusted: `(?[\b])`/`(?[[\b]])` match U+0008 again,
+  the cold-clone bootstrap completes with no workaround, and the version
+  constants match the contract identity — **RGX now has zero open PGEN
+  reports**. Absorbed PGEN's REGEX-0098 boundary move (unknown named references
+  reject at parse time; tests now match the diagnostic *code*, not prose) and
+  added a 9-form must-reject fixture family. Lib 1203/0; **ratchet held
+  12,806/4/0/0**; AST dumps byte-identical apart from `api_version`. The
+  compile bottleneck is now provably RGX-side, unblocking `.3`/`.4`.
 - `2026-07-21` — `CONFORMANCE-TESTINPUT15.1` (measurement, docs-only): the one
   PCRE2 corpus file RGX excludes, `testinput15`, **no longer hangs** — its
   exclusion's stated cause was the limits bug fixed hours earlier. Measured
