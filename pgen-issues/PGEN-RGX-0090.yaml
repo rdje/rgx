@@ -1,0 +1,120 @@
+id: PGEN-RGX-0090
+summary: |
+  BUILD-FLOW REGRESSION: the documented downstream cold-clone
+  bootstrap `make -C rust regex_parser_bootstrap` cannot complete on
+  pin 960dddaa (rel 1.1.104). The seed step C
+  (`ast_pipeline --generate-parser ... generated/ebnf.json -o
+  generated/ebnf.rs`) is REFUSED by the new annotation-backend guard
+  ("REFUSED: return annotation ... needs the generated annotation
+  backend, but this binary was built WITHOUT --features
+  generated_parsers and is not running in --bootstrap-mode") — the
+  Makefile recipe passes neither `--bootstrap-mode` nor
+  `PGEN_ALLOW_BOOTSTRAP_ANNOTATION_FALLBACK=1`, even though the
+  target's own design comment specifies a bootstrap-mode seed
+  ("bootstrap-mode AST pipeline binary ... so it does NOT depend on
+  any generated/* files").
+
+  Two compounding sub-defects:
+  1. `ast_pipeline` EXITS 0 on the REFUSED path, so the Make recipe
+     continues silently past the failed seed and dies later in step D
+     with the misleading `No rule to make target '../generated/ebnf.rs'`.
+     A refusal must be a nonzero exit.
+  2. The recipe itself never enables bootstrap-mode for the seed, so
+     a true cold clone (empty `generated/`) can never seed. The
+     guard's cited canonical alternative (`make -C rust
+     focus_<grammar>`) cannot run either — it needs the generated
+     parsers that don't exist yet. Chicken-and-egg re-introduced.
+
+  Additional friction (same flow, worth a guard): with a STALE
+  `generated/` from a previous pin (the normal downstream submodule-
+  bump state), the bootstrap fails earlier — the old `generated/ebnf.rs`
+  no longer compiles against the new sources (1,497 rustc errors from
+  the ParseNode 72→48B / u32-span slimming). `regex_parser_bootstrap`
+  only skips-or-seeds on ebnf.rs PRESENCE; it has no staleness check.
+  Downstream must know to `rm -rf generated/` (or run
+  `regex_parser_fresh`, which also cargo-cleans ~everything) first.
+
+  Bug class: **integration/build contract breakage** (downstream
+  bootstrap recipe non-functional as shipped).
+status: open
+opened_at: 2026-07-21T00:00:00Z
+first_seen_at: 2026-07-21T00:00:00Z
+last_updated_at: 2026-07-21T00:00:00Z
+parser_backend: pgen
+parser_backend_version: "960dddaa"
+rgx_commit: 8763a0e
+upstream_report: { reported: false, issue_id: null, issue_url: null, reported_at: null }
+context:
+  pgen_commit: 960dddaa5ace7bf5a4ed76eab7688225f6da39fc
+  regex_parser_release_version: "1.1.104"
+  regex_integration_contract_version: "1.1.106"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: "make -C subs/pgen/rust regex_parser_bootstrap (RGX root `make bootstrap` path)"
+  host_os_arch: Darwin arm64
+  rust_toolchain: "rustc 1.95.0 (59807616e 2026-04-14)"
+  command: "make -C subs/pgen/rust SHELL=/bin/bash regex_parser_bootstrap"
+  documented_in: |
+    The SAME seed commands (step C without --bootstrap-mode) are the
+    canonical documented downstream path in ALL THREE surfaces at this
+    pin: rust/Makefile `regex_parser_bootstrap`; the regex parser book
+    `build-recipe.md` ("Manual decomposition"); and
+    PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md § "Cold-zero-clone
+    bootstrap" ("That's the recommended single command for downstream
+    consumers"). All three predate the annotation-backend refusal
+    guard and none passes --bootstrap-mode for the seed.
+expected_behavior: |
+  Per the target's own documentation ("single-command path for cold
+  clones", "Idempotent"), the regex parser book's Build Recipe chapter
+  (docs/regex_parser_book/src/build-recipe.md — whose "Manual
+  decomposition" step D documents the exact same seed commands WITHOUT
+  `--bootstrap-mode`, so the canonical book recipe is broken by the
+  same guard; its "What can go wrong" table has no row for the REFUSED
+  case), and RGX's docs/INTEGRATION.md handoff guide:
+  from an empty `generated/`, `regex_parser_bootstrap` seeds
+  `generated/ebnf.rs` via the bootstrap-mode annotation path and then
+  regenerates `generated/regex_parser.rs` through the standard chain,
+  exiting nonzero on any step failure.
+actual_behavior: |
+  Cold clone (empty generated/): step A builds, step B emits
+  ebnf.json, step C prints the REFUSED error but exits 0, the recipe
+  continues, step D fails with `No rule to make target
+  '../generated/ebnf.rs'`. Net: bootstrap impossible without manual
+  intervention. Stale generated/ from pin db6f8c68: step A itself
+  fails with 1,497 compile errors (old generated/ebnf.rs vs new
+  48-byte ParseNode layout).
+reproduction: |
+  cd subs/pgen && rm -rf generated   # cold-clone state
+  make -C rust SHELL=/bin/bash regex_parser_bootstrap
+  # step C prints: "Error: REFUSED: return annotation '{type: "grammar_file", ...}'
+  #   needs the generated annotation backend ..." — and exits 0
+  # recipe then dies: make[1]: *** No rule to make target '../generated/ebnf.rs'
+  #
+  # Manual unblock used by RGX (matches the target's design comment):
+  rust/target/debug/ast_pipeline --generate-parser --bootstrap-mode --debug \
+    --eliminate-left-recursion generated/ebnf.json -o generated/ebnf.rs
+  make -C rust SHELL=/bin/bash regex_parser_bootstrap   # then completes green
+impact: |
+  Every downstream cold clone and every submodule pin-bump consumer
+  (RGX root `make` / `make bootstrap`, docs/INTEGRATION.md) is broken
+  at this pin until seeded manually. The silent exit-0 refusal makes
+  the failure look like a Makefile dependency bug rather than the
+  guard it is. Suggested fix shape (upstream's call): (a) REFUSED →
+  nonzero exit; (b) seed step C runs with `--bootstrap-mode` (per the
+  design comment), or the recipe exports
+  PGEN_ALLOW_BOOTSTRAP_ANNOTATION_FALLBACK=1 for the seed and
+  re-derives canonically afterwards; (c) optional: staleness guard
+  that reseeds when generated/ebnf.rs no longer matches the source
+  vintage. RGX verified the manually-seeded chain end-to-end: the
+  seeded ebnf.rs fed the canonical step-D regeneration, and the
+  resulting regex parser passed RGX's 1,196-test lib suite (6 fails
+  are unrelated: PGEN-RGX-0089 + the documented REGEX-0098 boundary
+  change) — evidence the bootstrap-mode seed path itself is sound.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Close when `rm -rf generated && make -C rust regex_parser_bootstrap`
+    completes exit-0 on a fresh checkout of a PGEN release, with any
+    step failure propagating a nonzero exit.

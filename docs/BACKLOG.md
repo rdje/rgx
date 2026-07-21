@@ -21,6 +21,7 @@ Complete inventory of remaining work — roadmap items, features to port from Ru
   - `Regex::set_max_recursion_depth(Some(n))` at `lib.rs:2056`. Tests at `lib.rs:8215+`. Default hard ceiling of 1024 even when `None`.
   - `Regex::set_max_trail_entries(Some(n))` at `lib.rs:2068`. Tests at `lib.rs:8245+`. Caps the capture-trail length so a single backtrack frame can't grow an unbounded undo log on pathological patterns (e.g. `(.)*` on long input).
 - **Production gate**: A1 (`set_max_steps`) + A2's three limits cover every resource axis the backtracking VM can blow up on — CPU time (steps), state count (frames), recursion depth, and per-state memory (trail). Defaults are `None` (unbounded) so existing users see no behaviour change; server deployments accepting user-supplied patterns MUST set limits explicitly. User-facing documentation in `book/src/core-api/safety-limits.md`.
+- **⚠️ Known gap (2026-07-21)**: the variable-length **lookbehind sub-execution** path escapes the step/backtrack budgets — `/(?<=(\d{1,256}))X/` runs for minutes on an 8-byte subject despite `set_max_steps(1_000_000)` (proven via the conformance harness + lldb; pin-independent). This is the concrete instance of the "audit every RGX hot path checks `max_steps`" follow-up (see the testinput15 note under the deep-nesting entry). Fix owned by the **`VM-LIMITS-SUBEXEC`** task tree (frontier `.1`); Book safety-limits chapter carries the user-facing caveat until it lands.
 
 ### A3. `tail_file` — file watching/streaming ✅ DONE
 - **Status**: shipped. `Regex::tail_file(path, options, on_match)` lives in `rgx-core/src/file.rs` with `TailHandle` / `TailOptions` types and integration tests (`tail_file_detects_appended_content`, `tail_file_from_beginning`).
@@ -328,6 +329,23 @@ The conformance fix audit at [`book/src/internals/pcre2-conformance-audit.md`](.
 
 ### C10. Open upstream PGEN-RGX issues (blocking conformance / robustness)
 Tracked here so open PGEN-side dependencies are visible from the backlog, not buried in the C7 narrative. RGX cannot fix these directly (PGEN is the sole parser and read-only); no RGX-side workarounds per `feedback_no_pgen_workarounds`.
+
+> **2026-07-21 — current open set: `PGEN-RGX-0089` / `0090` / `0091`** (all
+> filed against PGEN's 0078-closure release `960dddaa`, rel 1.1.105, which is
+> otherwise 26.9×-faster at raw parse and desired for adoption):
+> - **0089** — `(?[\b])` / `(?[[\b]])` backspace inside Perl extended classes
+>   REJECTS (rejects-valid regression; pcre2test 10.47 accepts + matches
+>   `\x08`; sole regressed escape of the shipped family; turns 2 RGX
+>   default-path tests red → **adoption blocker**).
+> - **0090** — cold-clone `regex_parser_bootstrap` broken (seed step REFUSED
+>   by the new annotation-backend guard AND exits 0 silently; same commands
+>   are the documented canonical path in Makefile/book/contract).
+> - **0091** — embedding version constants (1.1.104/1.1.106) drifted from the
+>   contract identity (1.1.105/1.1.108); 0086-class recurrence.
+> **`PGEN-RGX-0078` (compile-time perf) is CLOSED** — verified RGX-side
+> 2026-07-21 (8.44× vs PCRE2-no-JIT / 1.17× vs +JIT, parse 26.9× faster);
+> the residual compile gap is RGX-side (`COMPILE-PERF-0078.3`/`.4`). On
+> adoption, absorb REGEX-0098 (4 tests: match error CODE, not message).
 
 > **PGEN octal-vs-backref cluster (0084/0085/0086/0087/0088) FULLY
 > RESOLVED; pin `db6f8c68` adopted (2026-05-19).** Iterated across PGEN

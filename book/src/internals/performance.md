@@ -156,6 +156,58 @@ are the RGX-side ground truth.) The ROADMAP target is **< 5× of PCRE2
 compile**; closing the remaining gap is sustained PGEN parser work and is the
 precondition for that target.
 
+### Update 2026-07-21 — PGEN's speed campaign verified (26.9× faster parse); adoption pending a fix release
+
+PGEN closed its `PGEN-RGX-0078` speed campaign (upstream releases 1.1.82 →
+1.1.105). RGX verified the claim on a preview checkout of the closure release
+(`960dddaa`), same host, same standard methodology (default allocator,
+standard release profile, p50 of 5000 samples, same-session PCRE2 C
+baselines):
+
+| Pattern | PGEN parse p50 (preview) | vs 1.1.81 pin | vs PCRE2 (no JIT) | vs PCRE2 (+JIT) |
+|---|--:|--:|--:|--:|
+| `test` | 1.08 µs | 22× faster | 7.8× | 0.7× |
+| `\d{3}-\d{2}-\d{4}` | 2.1 µs | 28× faster | 7.8× | 1.0× |
+| `[a-zA-Z0-9._%+-]+@…` | 10.3 µs | 9× faster | 17.2× | 3.7× |
+| `cat\|dog\|bird` | 2.0 µs | 30× faster | 6.9× | 1.0× |
+| `(\d{4})-(\d{2})-(\d{2})` | 4.7 µs | 26× faster | 10.8× | 1.6× |
+| `https?://\S+` | 1.6 µs | 35× faster | 6.2× | 0.8× |
+| `\b\w+@\w+\.\w+\b` | 1.6 µs | 51× faster | 5.8× | 0.6× |
+| `^(\d+)\s+(?P<word>\w+)\s+(?:foo\|bar)$` | 5.5 µs | 34× faster | 9.2× | 1.8× |
+| **geomean** | **2.75 µs** | **26.9× faster** | **8.44×** | **1.17×** |
+
+Raw PGEN parse is now at **parity with PCRE2's JIT-enabled compile** (five of
+the eight patterns are faster), and 25× closer to PCRE2's no-JIT compile than
+the shipped pin. The `<5×`-of-no-JIT ROADMAP line is still not met on RGX's
+instrument (8.44× here; PGEN's own release-day run of RGX's vendored gate read
+6.6× on their host; their direct-path fat-LTO + mimalloc configuration reads
+≈3.9×). PGEN's campaign was closed against a deliberately re-based *absolute*
+bar — sub-1 µs corpus geomean, met at 1,004.4 ns under their closure
+configuration — per their project's ruling.
+
+**The compile-time bottleneck has inverted.** On the preview pin, raw PGEN
+parse is only ~4–18 % of `Regex::compile`; the dominant costs are now
+RGX-side — the AST-dump adapter boundary (JSON serialize → serde → typed
+walker, ~10–25 µs/pattern) and the eager C2 program construction
+(~12–36 µs). Full `Regex::compile` geomean is ≈42 µs ⇒ ≈130× PCRE2-no-JIT.
+Closing further gap is RGX work (a native `ParseContent`-consumption fast
+path, lazy/skippable C2 build, the trivial-pattern short-circuit), tracked in
+the `COMPILE-PERF-0078` task tree.
+
+**Why the shipped pin is still 1.1.81:** the preview release carries a
+rejects-valid regression — `(?[\b])` / `(?[[\b]])` (backspace inside Perl
+extended classes; PCRE2 10.47 accepts and matches U+0008) — plus a broken
+cold-clone bootstrap and drifted version constants. Filed upstream as
+`PGEN-RGX-0089` / `0090` / `0091` with full repro bundles; RGX adopts the
+first release that fixes 0089 (measurement bundle:
+`pgen-issues/artifacts/PGEN-RGX-0078/measurements/*_1.1.104_preview*`).
+
+The adoption attempt also uncovered a pin-independent RGX bug: `set_max_steps`
+/ `set_max_backtrack_frames` do not bound one variable-length-lookbehind
+sub-execution path (`/(?<=(\d{1,256}))X/` runs unbounded despite harness
+limits). Tracked as the `VM-LIMITS-SUBEXEC` task tree; see
+[Safety Limits](../core-api/safety-limits.md) for the intended contract.
+
 Reproduce both measurements yourself from the repo root:
 
 ```text

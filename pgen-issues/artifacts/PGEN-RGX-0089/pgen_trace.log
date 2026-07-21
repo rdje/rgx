@@ -1,0 +1,508 @@
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 0 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 1 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 2/2 for rule 'entry_concatenation' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 8 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 6/6 for rule 'piece' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 27 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 9/24 for rule 'atom' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 159 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 1/2 for rule 'subroutine_call' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(?' at position 0 (end: 2)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(?' matched, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memo miss for rule 160 at position 2 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'subroutine_target' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 160 at position 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'returned_capture_subroutine' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 2 }', backtracked to position 0 (rule=subroutine_call)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 1/2 for rule 'subroutine_call' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 2/2 for rule 'subroutine_call' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(?' at position 0 (end: 2)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(?' matched, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'subroutine_target' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 2 }', backtracked to position 0 (rule=subroutine_call)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 2/2 for rule 'subroutine_call' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized failed result for rule 159 at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Exiting rule 'subroutine_call' with error: Backtrack { position: 0 } - backtracked to 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=atom)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 9/24 for rule 'atom' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 10/24 for rule 'atom' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(?' at position 0 (end: 2)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(?' matched, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   🔤 Attempting to match terminal ')' at position 2 (end: 3)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Terminal ')' failed at position 2 - found '['
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'inline_modifiers' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 2 }', backtracked to position 0 (rule=atom)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 10/24 for rule 'atom' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 11/24 for rule 'atom' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 170 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(?' at position 0 (end: 2)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(?' matched, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'modifier_spec' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 170 at position 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'scoped_inline_modifiers' with error: Backtrack { position: 2 } - backtracked to 2
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 2 }', backtracked to position 0 (rule=atom)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 11/24 for rule 'atom' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 20/24 for rule 'atom' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(?[' at position 0 (end: 3)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(?[' matched, advanced to position 3
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memo miss for rule 240 at position 3 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔄 Starting speculative parse at position 3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memo miss for rule 241 at position 3 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔄 Starting speculative parse at position 3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🚪 Entering branch 2/3 for rule 'extended_class_element' at position 3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔤 Attempting to match terminal '\' at position 3 (end: 4)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:4
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '\' matched, advanced to position 4
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:4
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memo miss for rule 108 at position 4 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 108 at position 4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'escape_unit' with error: Backtrack { position: 4 } - backtracked to 4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'escape' with error: Backtrack { position: 4 } - backtracked to 4
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:4] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔙 Speculative parse failed with error 'Backtrack { position: 4 }', backtracked to position 3 (rule=extended_class_element)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Branch 2/3 for rule 'extended_class_element' failed at position 3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 241 at position 3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'extended_class_element' with error: Backtrack { position: 3 } - backtracked to 3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔙 Speculative parse failed with error 'Backtrack { position: 3 }', backtracked to position 3 (rule=extended_class_content)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized successful result for rule 240 at position 3
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ⚠️ Rule 'extended_class_content' matched with zero length at position 3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Exiting rule 'extended_class_content' successfully - advanced from 3 to 3
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   🔤 Attempting to match terminal '])' at position 3 (end: 5)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Terminal '])' failed at position 3 - found '\b'
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'extended_class' with error: Backtrack { position: 3 } - backtracked to 3
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:3] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 3 }', backtracked to position 0 (rule=atom)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 20/24 for rule 'atom' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 24/24 for rule 'atom' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 124 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🚪 Entering branch 1/4 for rule 'group' at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 126 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memo miss for rule 125 at position 0 - computing fresh result
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '(' at position 0 (end: 1)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '(' matched, advanced to position 1
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   🔄 Starting speculative parse at position 1
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   🔤 Attempting to match terminal '?' at position 1 (end: 2)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   ✅ Terminal '?' matched, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]   🔄 Speculative parse succeeded, advanced to position 2
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:2] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 125 at position 1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'capture_open' with error: Backtrack { position: 1 } - backtracked to 1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   💾 Memoized failed result for rule 126 at position 1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   📍 ../generated/regex_parser.rs:1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]   ❌ Exiting rule 'capturing_group' with error: Backtrack { position: 1 } - backtracked to 1
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:1] [pgen::generated_parsers::regex::RegexParser::match_string]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 1 }', backtracked to position 0 (rule=group)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 1/4 for rule 'group' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized failed result for rule 124 at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Exiting rule 'group' with error: Backtrack { position: 0 } - backtracked to 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=atom)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 24/24 for rule 'atom' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized failed result for rule 27 at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Exiting rule 'atom' with error: Backtrack { position: 0 } - backtracked to 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=piece)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 6/6 for rule 'piece' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized failed result for rule 8 at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Exiting rule 'piece' with error: Backtrack { position: 0 } - backtracked to 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=entry_alternation)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=entry_alternation)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Branch 2/2 for rule 'entry_concatenation' failed at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Exiting rule 'entry_concatenation' with error: Backtrack { position: 0 } - backtracked to 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=entry_alternation)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ⚠️ Rule 'entry_alternative' matched with zero length at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ✅ Exiting rule 'entry_alternative' successfully - advanced from 0 to 0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔄 Starting speculative parse at position 0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][DBG] 🧠
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔤 Attempting to match terminal '|' at position 0 (end: 1)
+[PGEN][DBG] 🧠 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ❌ Terminal '|' failed at position 0 - found '('
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   🔙 Speculative parse failed with error 'Backtrack { position: 0 }', backtracked to position 0 (rule=entry_alternation)
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized successful result for rule 1 at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ⚠️ Rule 'entry_alternation' matched with zero length at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ✅ Exiting rule 'entry_alternation' successfully - advanced from 0 to 0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][HIGH] 🔎
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   💾 Memoized successful result for rule 0 at position 0
+[PGEN][HIGH] 🔎 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][LOW] 🧭
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ⚠️ Rule 'regex' matched with zero length at position 0
+[PGEN][LOW] 🧭 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}] [TRACE][generated.regex][MED] 🧩
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   📍 ../generated/regex_parser.rs:0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]   ✅ Exiting rule 'regex' successfully - advanced from 0 to 0
+[PGEN][MED] 🧩 [../generated/regex_parser.rs:0] [pgen::generated_parsers::regex::RegexParser::parse_regex::{{closure}}]

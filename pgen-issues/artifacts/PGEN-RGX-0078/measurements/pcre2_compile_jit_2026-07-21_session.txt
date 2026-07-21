@@ -1,0 +1,8 @@
+literal_simple               1561 ns/compile+jit  (10000-batch took 15619000 ns)
+digit_sequence               2158 ns/compile+jit  (10000-batch took 21581000 ns)
+character_class              2806 ns/compile+jit  (10000-batch took 28060000 ns)
+alternation                  1977 ns/compile+jit  (10000-batch took 19773000 ns)
+capture_groups               2869 ns/compile+jit  (10000-batch took 28692000 ns)
+url_simple                   2056 ns/compile+jit  (10000-batch took 20568000 ns)
+email_basic                  2627 ns/compile+jit  (10000-batch took 26276000 ns)
+anchor_complex               3092 ns/compile+jit  (10000-batch took 30926000 ns)

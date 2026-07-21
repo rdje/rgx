@@ -1,0 +1,1 @@
+Error: parse_full rejected sample for grammar 'regex' on '/Users/richarddje/Documents/github/rgx/pgen-issues/artifacts/PGEN-RGX-0089/repro_input.txt': Parser did not consume full input at position 0

@@ -63,6 +63,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
+| `VM-LIMITS-SUBEXEC` | [tasks/VM-LIMITS-SUBEXEC.md](tasks/VM-LIMITS-SUBEXEC.md) | `active` | `VM-LIMITS-SUBEXEC.1` (limits must bound lookbehind sub-execution) | Now — production safety (correctness/DoS; found 2026-07-21) |
 | `PERF-SOTA-GAPS` | [tasks/PERF-SOTA-GAPS.md](tasks/PERF-SOTA-GAPS.md) | `active` | `PERF-SOTA-GAPS.1` (inner-literal prefilter) | Next — SOTA algorithmic gaps |
 | `PCRE2-1047-SYNTAX` | [tasks/PCRE2-1047-SYNTAX.md](tasks/PCRE2-1047-SYNTAX.md) | `active` | `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) | Next — PCRE2 10.47+ syntax |
 | `CODEBLOCK-EXPANSION` | [tasks/CODEBLOCK-EXPANSION.md](tasks/CODEBLOCK-EXPANSION.md) | `active` | `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics) | Next — code-block expansion |
@@ -73,7 +74,7 @@ Captured and tree-owned, but not PNT-eligible until their condition clears.
 
 | Tree | File | Status | Condition to re-activate |
 | --- | --- | --- | --- |
-| `COMPILE-PERF-0078` | [tasks/COMPILE-PERF-0078.md](tasks/COMPILE-PERF-0078.md) | `blocked` | PGEN addresses `PGEN-RGX-0078` (sole open bug; replaces `0073`) — faster regex-grammar parser; sole-parser design, no RGX fix |
+| `COMPILE-PERF-0078` | [tasks/COMPILE-PERF-0078.md](tasks/COMPILE-PERF-0078.md) | `blocked` | Speed DELIVERED upstream (verified 2026-07-21: parse 26.9× faster; 8.44× vs PCRE2-no-JIT, 1.17× vs +JIT) but the fast pin is unadoptable until PGEN fixes `PGEN-RGX-0089` (`(?[\b])` rejects-valid; `0090`/`0091` also filed). On adoption, `.1` absorbs REGEX-0098; RGX-side leaves `.3`/`.4` unlock (compile bottleneck now RGX-side) |
 | `RUNTIME-REMEASURE` | [tasks/RUNTIME-REMEASURE.md](tasks/RUNTIME-REMEASURE.md) | `blocked` | A quiescent machine for a trustworthy benchmark capture (task #57) |
 | `A9-BINDINGS` | [tasks/A9-BINDINGS.md](tasks/A9-BINDINGS.md) | `deferred` | A real user/use-case pulling for a specific binding (Phase 0/1 shipped) |
 | `RELEASE-CRATESIO` | [tasks/RELEASE-CRATESIO.md](tasks/RELEASE-CRATESIO.md) | `parked` | Explicit user authorization (`project_release_strategy`) |

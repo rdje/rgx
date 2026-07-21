@@ -373,3 +373,15 @@ The step and backtrack limits default to unlimited because most patterns are
 not pathological, and imposing a limit on well-behaved patterns adds
 complexity for no benefit. Set limits explicitly when accepting untrusted
 patterns or defending against adversarial input.
+
+## Known gap (2026-07-21, fix tracked)
+
+One execution path currently escapes the step/backtrack budgets: the
+variable-length **lookbehind** sub-execution. A pattern like
+`(?<=(\d{1,256}))X` can run for minutes on a short subject even with
+`set_max_steps(1_000_000)` set — the nested lookbehind evaluation loop
+maintains its own backtracking state without consulting the configured
+budget. Until the fix lands (task tree `VM-LIMITS-SUBEXEC`, which also audits
+every other sub-execution entry point — lookahead probes, subroutine bodies,
+conditional probes — for the same hole), do not rely on the limits alone to
+bound untrusted patterns containing variable-length lookbehinds.

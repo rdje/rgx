@@ -1,0 +1,149 @@
+id: PGEN-RGX-0089
+summary: |
+  REGRESSION (rejects-valid): the backspace escape `\b` inside a Perl
+  extended character class `(?[...])` is rejected by PGEN 1.1.104
+  (pin 960dddaa) in BOTH the bare form `(?[\b])` and the
+  nested-ordinary-bracket form `(?[[\b]])`. PCRE2 10.47 ACCEPTS both
+  and matches U+0008 (backspace) — oracle-verified with `pcre2test`.
+  The ordinary character class `[\b]` (backspace) is UNAFFECTED and
+  still accepts, exactly as the 1.1.92 class-escape-validity migration
+  documented ("ACCEPT (unchanged): ... `[\b]`(backspace)").
+
+  Cluster scope (probed exhaustively on the shipped RGX extended-class
+  escape family): `\b` is the SOLE regressed escape. All of
+  `\a \e \f \n \t \r \cA \040 \o{101} \x{41} \x41 \d \D \w \W \s \S
+  \h \H \v \V \-` still accept inside `(?[...])`, as do the algebra /
+  whitespace / nested forms without `\b`. This is the classic
+  dual-meaning escape: `\b` = word-boundary assertion in the pattern
+  body, backspace inside a class — the extended-class grammar path
+  appears to have lost the class-context meaning somewhere in the
+  1.1.83 → 1.1.106 contract range (no changelog entry documents an
+  intentional `(?[\b])` verdict change; the 1.1.92 entry's
+  `class_simple_escape` guards exclude only uppercase `!"B"`, so the
+  over-reject is presumably collateral of a later extended-class /
+  escape-routing migration whose oracle corpus lacks a `(?[\b])`
+  case).
+
+  Bug class: **rejects-valid** (parse failure on a PCRE2-valid
+  pattern), per PGEN_PARSER_ISSUE_REPORTING_PROTOCOL.md.
+status: open
+opened_at: 2026-07-21T00:00:00Z
+first_seen_at: 2026-07-21T00:00:00Z
+last_updated_at: 2026-07-21T00:00:00Z
+parser_backend: pgen
+parser_backend_version: "960dddaa"
+rgx_commit: 8763a0e
+family:
+  parent_cluster: "class-escape validity migration collateral (upstream ledger REGEX-0102 vicinity)"
+  relationship: |
+    The 1.1.92 (contract 1.1.94) migration moved class-member escape
+    validity from the out-of-band validator into the EBNF and
+    explicitly preserved `[\b]` (backspace) as ACCEPT for ordinary
+    classes with "no verdict flips". The extended-class `(?[...])`
+    surface regressed for `\b` at some later point in the
+    1.1.83→1.1.108 range (exact release not bisected RGX-side; the
+    upstream per-release oracle gate never flagged it, indicating the
+    oracle corpus has no `(?[\b])` cell). Not related to the
+    named-reference validation family (REGEX-0098) also adopted in
+    this range.
+  contract_audit: |
+    RGX read the FULL release-highlight chain 1.1.82→1.1.105 (contract
+    1.1.84→1.1.108) plus the maintenance updates in
+    PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md before filing: NO entry
+    documents an extended-class `\b` verdict change. The
+    REGEX-PCRE2-FIDELITY.DOCSYNC.1 snapshot does record 48 DELIBERATE
+    strict-default false-rejects whose classes include "extended
+    `(?[...])`" — but those are described as pre-existing ratcheted
+    divergences, and this specific surface ACCEPTED on rel 1.1.81
+    (RGX's shipped fixtures were green), so the `(?[\b])` flip is a
+    regression inside the window, not part of that documented posture.
+    If PGEN adjudicates it INTO the deliberate-divergence set instead
+    of fixing it, RGX requests that adjudication be recorded in the
+    contract (and notes it would diverge from pcre2test 10.47, the
+    fidelity campaign's own oracle).
+upstream_report: { reported: false, issue_id: null, issue_url: null, reported_at: null }
+context:
+  pgen_commit: 960dddaa5ace7bf5a4ed76eab7688225f6da39fc
+  regex_parser_release_version: "1.1.104"
+  regex_integration_contract_version: "1.1.106"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api
+  host_os_arch: Darwin arm64
+  rust_toolchain: "rustc 1.95.0 (59807616e 2026-04-14)"
+  feature_flag: pgen-parser
+  parser_entrypoint: rgx-core/src/parsing.rs
+  generated_artifact: |
+    generated/regex_parser.rs regenerated on the reporting host at pin
+    960dddaa via `make -C rust regex_parser_bootstrap` (seed step run
+    manually with --bootstrap-mode per PGEN-RGX-0090).
+  protocol_artifacts:
+    - artifacts/PGEN-RGX-0089/repro_input.txt
+    - artifacts/PGEN-RGX-0089/pgen_parse_outcome.txt
+    - artifacts/PGEN-RGX-0089/pgen_trace.log   # PGEN_TRACE_VERBOSITY=debug, --trace
+    - artifacts/PGEN-RGX-0089/probe_sweep.txt
+    - artifacts/PGEN-RGX-0089/pcre2test_oracle.txt
+  patterns:
+    - pattern: '(?[\b])'
+      note: 'bare backspace escape term; PCRE2 10.47 ACCEPTS, matches \x08'
+    - pattern: '(?[[\b]])'
+      note: 'nested-ordinary-bracket form; PCRE2 10.47 ACCEPTS, matches \x08'
+    - pattern: '\A(?[\a | \b | \e | \f])+\z'
+      note: 'RGX shipped control-literal fixture (green on pin db6f8c68 / rel 1.1.81)'
+expected_behavior: |
+  Inside a character class — ordinary `[...]` or Perl extended
+  `(?[...])` — `\b` means backspace (U+0008), not a word-boundary
+  assertion. PCRE2 10.47 accepts `(?[\b])` and `(?[[\b]])` and both
+  match "\x08" (pcre2test transcript in
+  pgen-issues/artifacts/PGEN-RGX-0089/pcre2test_oracle.txt).
+  PGEN rel 1.1.81 (pin db6f8c68) parsed all three patterns above;
+  RGX's parser-contract + default-path tests covering them were green
+  on that pin.
+actual_behavior: |
+  PGEN 1.1.104 (pin 960dddaa) rejects all three patterns with
+  `Parser did not consume full input at position 0` (probe) /
+  `E_PARSE_FAILURE ... position 2` (embedding surface, position of
+  `(?[`). parseability_probe outcomes (regex_default profile):
+    (?[\b])      REJECT   <- regression
+    (?[[\b]])    REJECT   <- regression
+    [\b]         ACCEPT   (ordinary class unaffected)
+    x\b          ACCEPT   (pattern-body assertion unaffected)
+    (?[\a]) (?[\e]) (?[\f]) (?[\a|\e]) (?[ \a ])  ACCEPT
+    full family sweep: only `\b` rejects (see artifacts/probe_sweep.txt)
+reproduction: |
+  # on subs/pgen @ 960dddaa, generated parsers freshly bootstrapped:
+  cd subs/pgen/rust
+  cargo build --release --features generated_parsers --bin parseability_probe
+  printf '(?[\\b])' > /tmp/p.txt
+  ./target/release/parseability_probe --parse regex /tmp/p.txt --profile regex_default
+  # => Error: parse_full rejected ... Parser did not consume full input at position 0
+  # PCRE2 oracle:
+  pcre2test -q <<'EOF'
+  /(?[\b])/
+  \x08
+  EOF
+  # => 0: \x08   (accepts + matches backspace)
+  # RGX regression surface (red on 960dddaa, green on db6f8c68):
+  cargo test -p rgx-core parser_contract_algebraic_extended_char_class_executes_on_default_path
+  cargo test -p rgx-core parser_extended_char_class_algebraic_cases_execute_on_default_path
+impact: |
+  Blocks RGX adoption of the 1.1.104 pin: two shipped default-path
+  test surfaces (parser-contract fixture + API test for the
+  control-literal extended-class family, PCRE2-differential-verified
+  when shipped) go red, and RGX's gate cannot be committed red. Per
+  feedback_no_pgen_workarounds RGX ships no adapter workaround; the
+  submodule stays pinned at db6f8c68 (rel 1.1.81) until a PGEN release
+  restores the class-context `\b` inside `(?[...])`. NOTE: adoption of
+  the 1.1.104 perf work (PGEN-RGX-0078 closure) is otherwise desired
+  and verified RGX-side — this report is the sole parse-verdict
+  blocker found by the full RGX suite (the named-reference validation
+  family REGEX-0098 is a documented, PCRE2-convergent change RGX
+  absorbs separately).
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Close when `(?[\b])` and `(?[[\b]])` ACCEPT again on a PGEN
+    release (parse + typed AST class-member backspace), verified by
+    the two RGX tests above plus the PCRE2 conformance ratchet.

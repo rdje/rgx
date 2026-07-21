@@ -1,0 +1,40 @@
+
+Phases (timed individually):
+  - PGEN parse        — `parsing::parse_pattern`
+  - compile_ast       — `Compiler::new().compile_ast(ast)`
+                          (assignment passes + lower + bytecode + classifier + C2 NFAs)
+  - Engine::new       — DFA caches (×3) + JIT codegen
+  - full Regex::compile — independent end-to-end measurement (control)
+
+pattern                   pgen (ns)     ast (ns)  engine (ns) phase-sum (ns) |  full (ns)    pgen/full   ast/full    engine/full
+---------------------- ------------ ------------ ------------ -------------- | ---------- ------------ ---------- --------------
+literal_simple                16166        11916          709          28791 |      29208        55.3%      40.8%           2.4%
+digit_sequence                17625        14292          833          32750 |      33500        52.6%      42.7%           2.5%
+character_class               34875        22042          834          57751 |      58417        59.7%      37.7%           1.4%
+alternation                   17000        16000          208          33208 |      33417        50.9%      47.9%           0.6%
+capture_groups                25833        15500         1000          42333 |      43250        59.7%      35.8%           2.3%
+url_simple                    17542        35833         1417          54792 |      56042        31.3%      63.9%           2.5%
+email_basic                   19500        16834          792          37126 |      38083        51.2%      44.2%           2.1%
+anchor_complex                34667        21542         1416          57625 |      58917        58.8%      36.6%           2.4%
+
+# PGEN parse-time distribution (per-pattern)
+
+pattern                       min        p50       mean        p99        max    samples
+---------------------- ---------- ---------- ---------- ---------- ---------- ----------
+literal_simple              10291      11167      11860      19917     163666       1000
+digit_sequence              16500      17542      18194      29875     147417       1000
+character_class             31500      34291      35149      48625     169375       1000
+alternation                 15708      16833      17678      25667     136667       1000
+capture_groups              24500      25375      25979      33792      48750       1000
+url_simple                  16792      17625      18239      24958      88583       1000
+email_basic                 18834      19417      19798      24334      38583       1000
+anchor_complex              32667      34500      35407      49541     160167       1000
+
+Notes:
+  - phase-sum vs full: the gap is timer overhead and any work the
+    full-compile path does that the phase-by-phase path doesn't
+    (e.g. unicode-name-escape rewriting, error wrapping).
+  - Decision rule: if PGEN >50% of `full Regex::compile`, the
+    achievable RGX-vs-PCRE2 compile gap is bounded by PGEN's own
+    parse speed and a PGEN-side fix is needed (per CLAUDE.md
+    `PGEN is the sole parser` rule, the fix lands in PGEN, not RGX).

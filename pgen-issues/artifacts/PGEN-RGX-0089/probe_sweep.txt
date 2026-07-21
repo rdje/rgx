@@ -1,0 +1,37 @@
+# parseability_probe sweep — subs/pgen 960dddaa (rel 1.1.104 / contract 1.1.106), regex_default, 2026-07-21, Darwin arm64
+# probe: cargo build --release --features generated_parsers --bin parseability_probe
+(?[\b])                          REJECT
+(?[[\b]])                        REJECT
+[\b]                             ACCEPT
+x\b                              ACCEPT
+(?[\a])                          ACCEPT
+(?[\e])                          ACCEPT
+(?[\f])                          ACCEPT
+(?[\a|\e])                       ACCEPT
+(?[ \a ])                        ACCEPT
+\A(?[\a | \b | \e | \f])+\z      REJECT
+
+# family sweep (?[<esc>]) — sole REJECT is \b:
+(?[\a]) ACCEPT
+(?[\b]) REJECT
+(?[\e]) ACCEPT
+(?[\f]) ACCEPT
+(?[\n]) ACCEPT
+(?[\t]) ACCEPT
+(?[\r]) ACCEPT
+(?[\cA]) ACCEPT
+(?[\040]) ACCEPT
+(?[\o{101}]) ACCEPT
+(?[\x{41}]) ACCEPT
+(?[\x41]) ACCEPT
+(?[\d]) ACCEPT
+(?[\D]) ACCEPT
+(?[\w]) ACCEPT
+(?[\W]) ACCEPT
+(?[\s]) ACCEPT
+(?[\S]) ACCEPT
+(?[\h]) ACCEPT
+(?[\H]) ACCEPT
+(?[\v]) ACCEPT
+(?[\V]) ACCEPT
+(?[\-]) ACCEPT

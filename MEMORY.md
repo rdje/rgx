@@ -16,10 +16,10 @@ carried forward.
 - Durable facts/decisions: `docs/decisions/` (layer C).
 
 ## Current state (OVERWRITE this block each update — do not append)
-- latest_commit: `e5d352a` — "BUILD-FLOW.4 — add docs/INTEGRATION.md downstream handoff guide". **Pushed to origin/main** 2026-06-15 (`b771c7b..e5d352a`); the local `main` was in sync at push (0 ahead). This pointer-refresh commit lands on top — `git log -1` / `git status -sb` for the true head/ahead-count.
-- active_work_unit: none in progress. All five governance trees (TASKTREE-ADOPT, RETRO-AUDIT, LEDGER-HYGIENE, MEMORY-ARCHITECTURE-DOC, KNOWLEDGE-MAP-DOC) + the downstream `BUILD-FLOW` fix are done + pushed.
-- next_action: PNT into the active CODE trees — `PERF-SOTA-GAPS.1` (inner-literal prefilter) → `PCRE2-1047-SYNTAX.1` (A12 capture-return VM) → `CODEBLOCK-EXPANSION.1` (inline-lang ergonomics; likely at-parity). Each = real engine change → full `./scripts/run-local-ci.sh` + PCRE2 conformance ratchet per leaf; one leaf at a time. Blocked/deferred/parked: `COMPILE-PERF-0078`, `RUNTIME-REMEASURE`, `A9-BINDINGS`, `RELEASE-CRATESIO`.
-- enforcement ACTIVE in this clone: `core.hooksPath = scripts/git-hooks`. pre-commit = memory-arch check + KM gen/stage/check + gate-receipt; commit-msg = work-unit-id. Memory layers A/B/C/D + E1–E4 + the Knowledge Map all live. Grep `KNOWLEDGE_MAP.md` before re-deriving a fact. Downstream build answer: `docs/INTEGRATION.md` + `docs/tasks/BUILD-FLOW.md`.
-- in_flight_uncommitted: none.
-- blockers: none.
-- invariants: conformance ratchet 12,806/4/0/0 is the merge gate; the sole open PGEN bug is `PGEN-RGX-0078`; working tree shows only `?? subs/pgen` (regenerated `generated/*`, never staged).
+- latest_commit: see `git log -1` — 2026-07-21 docs slice "PGEN 1.1.105 speed verified 26.9×; adoption blocked (0089/0090/0091); VM-LIMITS-SUBEXEC opened" (leaf `COMPILE-PERF-0078.1` execution; pin UNCHANGED `db6f8c68`).
+- active_work_unit: none mid-flight. 2026-07-21 session: PGEN's 0078 speed closure verified on preview `960dddaa` (parse 26.9× faster; 8.44×/1.17× vs PCRE2; compile bottleneck now RGX-side); 3 PGEN reports filed (`0089` `(?[\b])` rejects-valid = adoption blocker, `0090` cold-clone bootstrap, `0091` version consts); submodule restored, lib 1202/0 green.
+- next_action: PNT — `VM-LIMITS-SUBEXEC.1` (limits must bound lookbehind sub-execution; proven DoS gap, testinput2:6509) is the new top frontier, then `PERF-SOTA-GAPS.1` (inner-literal prefilter; design notes preserved in the tree file). On a PGEN release fixing 0089: re-run `COMPILE-PERF-0078.1` (bump + REGEX-0098 absorption per `docs/knowledge/pgen-1104-verified-blocked.md` checklist).
+- enforcement ACTIVE in this clone: `core.hooksPath = scripts/git-hooks`. pre-commit = memory-arch check + KM gen/stage/check + gate-receipt; commit-msg = work-unit-id. Grep `KNOWLEDGE_MAP.md` before re-deriving a fact.
+- in_flight_uncommitted: none (after this commit).
+- blockers: `COMPILE-PERF-0078` blocked on the PGEN 0089 fix release. Director question OPEN in that tree: keep or re-base the `<5×` compile bar (measured 8.44×; PGEN retired its own relative bar).
+- invariants: conformance ratchet 12,806/4/0/0 is the merge gate; open PGEN reports = `0089/0090/0091` (`0078` closed 2026-07-21); working tree shows only `?? subs/pgen` (regenerated `generated/*`, never staged). NOTE: conformance testinput2 wall-time is dominated by the un-bounded lookbehind case until `VM-LIMITS-SUBEXEC.1` lands.

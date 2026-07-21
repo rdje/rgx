@@ -1,0 +1,69 @@
+id: PGEN-RGX-0091
+summary: |
+  VERSION-CONSTANT DRIFT (recurrence of the PGEN-RGX-0086 class): at
+  pin 960dddaa the contract document's identity block declares
+  **release `1.1.105` / contract `1.1.108`** (after the
+  PARSER-NEUTRALITY.1 release bump 1.1.104→1.1.105 / contract
+  1.1.106→1.1.107 and the RESULT-CARRIER-SLIMMING contract bump
+  1.1.107→1.1.108), but `rust/src/embedding_api.rs` still reports
+  `REGEX_PARSER_RELEASE_VERSION = "1.1.104"` and
+  `REGEX_PARSER_INTEGRATION_CONTRACT_VERSION = "1.1.106"` — stale by
+  one release bump and two contract bumps. Downstream consumers that
+  verify the handoff via `parser_embedding_api_contract()` (as RGX
+  does, per the 0086 resolution) see versions that contradict the
+  contract document at the same commit.
+
+  PGEN-RGX-0086's fix installed a ledger-drift gate specifically to
+  keep these constants in lockstep with the contract document; that
+  gate did not catch these two bumps (both landed 2026-07-20/21).
+
+  Bug class: **integration-contract metadata drift** (not a parse
+  defect).
+status: open
+opened_at: 2026-07-21T00:00:00Z
+first_seen_at: 2026-07-21T00:00:00Z
+last_updated_at: 2026-07-21T00:00:00Z
+parser_backend: pgen
+parser_backend_version: "960dddaa"
+rgx_commit: 8763a0e
+family:
+  parent_cluster: "PGEN-RGX-0086 (handoff version-constant lockstep)"
+  relationship: |
+    Same defect class as 0086 (closed rel 1.1.81): embedding-API
+    version constants lagging the contract document. New instance,
+    not a reopen — 0086's cases were fixed; these are the 2026-07-20/21
+    bumps (PARSER-NEUTRALITY.1 and PGEN-RGX-0078-0212) missing their
+    constant updates.
+upstream_report: { reported: false, issue_id: null, issue_url: null, reported_at: null }
+context:
+  pgen_commit: 960dddaa5ace7bf5a4ed76eab7688225f6da39fc
+  regex_parser_release_version: "1.1.105 (contract doc) vs 1.1.104 (constants)"
+  regex_integration_contract_version: "1.1.108 (contract doc) vs 1.1.106 (constants)"
+  parser_family: regex
+  profile: regex_default
+  integration_surface: pgen::embedding_api::parser_embedding_api_contract
+  host_os_arch: Darwin arm64
+expected_behavior: |
+  `parser_embedding_api_contract()` reports exactly the versions the
+  contract document's Contract Identity block declares at the same
+  commit: release 1.1.105 / contract 1.1.108.
+actual_behavior: |
+  Constants report release 1.1.104 / contract 1.1.106
+  (rust/src/embedding_api.rs lines ~47/50 at 960dddaa).
+reproduction: |
+  grep -n 'REGEX_PARSER_RELEASE_VERSION\|REGEX_PARSER_INTEGRATION_CONTRACT_VERSION' \
+    subs/pgen/rust/src/embedding_api.rs
+  sed -n '8,20p' subs/pgen/docs/contracts/PGEN_REGEX_PARSER_INTEGRATION_CONTRACT.md
+  # constants: 1.1.104 / 1.1.106 ; contract identity: 1.1.105 / 1.1.108
+impact: |
+  RGX's adoption workflow verifies the pin via
+  parser_embedding_api_contract() (the 0086 lesson); a mismatch makes
+  the handoff ambiguous (which surface is authoritative?) and defeats
+  the lockstep gate 0086 installed. Low severity, high hygiene value.
+resolution:
+  status: unresolved
+  fixed_in_rgx_commit: null
+  verified_at: null
+  verification_notes: |
+    Close when constants and contract-identity agree at the released
+    pin and the lockstep gate demonstrably fires on a mismatch.
