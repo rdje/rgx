@@ -143,3 +143,8 @@ drift, 100% test suite green, PCRE2 conformance ratchet unchanged.
   acceptance bar (still unmet at 8.44×, now mostly RGX-side), or re-base it
   (PGEN retired its own relative bar)?** The tree keeps the `<5×` bar until
   the director rules otherwise.
+- `2026-07-21` (later same day): **DIRECTOR RULING — the `<5×` bar is KEPT;
+  "the ball is now in RGX's yard."** Recorded as decision record
+  `docs/decisions/0005-compile-perf-5x-bar-kept-rgx-side.md`. Acceptance
+  criteria unchanged; the path of record to `<5×` is the RGX-side leaves
+  `.3`/`.4`/`.2` once the fast pin is adopted (post-`PGEN-RGX-0089` fix).

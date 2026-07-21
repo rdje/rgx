@@ -14,6 +14,12 @@ This is the living progress ledger for rgx.
 - Notes/impact:
 
 ## Entries
+### 2026-07-21 - Director ruling: the <5× compile bar is KEPT; closing it is RGX-side work (ADR 0005; docs-only)
+- Scope: record the director's ruling on the question surfaced by the COMPILE-PERF-0078.1 verification ("keep or re-base the `<5×`-vs-PCRE2 compile bar?").
+- Changes: new decision record `docs/decisions/0005-compile-perf-5x-bar-kept-rgx-side.md` (+ INDEX row); `COMPILE-PERF-0078` tree changelog records the ruling; `MEMORY.md` blockers line updated. Acceptance criteria unchanged — `<5×` stands; path of record = RGX-side leaves `.3` (adapter fast path) / `.4` (lazy C2 build) / `.2` (trivial short-circuit) once the fast pin is adopted.
+- Validation: docs-only / non-gate-affecting.
+- Notes/impact: RGX does not follow PGEN's re-base to an absolute bar; RGX's default-allocator standard instrument remains the criterion.
+
 ### 2026-07-21 - PGEN 1.1.104/1.1.105 adoption attempt: speed verified 26.9×, pin held back, 3 PGEN reports filed, VM limits gap discovered (leaf COMPILE-PERF-0078.1; docs-only)
 - Scope: user-directed adoption of PGEN's `PGEN-RGX-0078` speed-campaign closure release (`960dddaa`, rel 1.1.105 / contract 1.1.108 per the contract doc) + RGX-side verification of the speed claim. Outcome is docs-only: the submodule pin is UNCHANGED (`db6f8c68`).
 - Changes:
