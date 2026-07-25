@@ -73,6 +73,7 @@ another tree or `LIVE_ACHIEVEMENT_STATUS.md` names a different immediate lane.
 
 | Tree | File | Status | Current frontier | Roadmap lane |
 | --- | --- | --- | --- | --- |
+| `BOOK-DRIFT-SYNC` | [tasks/BOOK-DRIFT-SYNC.md](tasks/BOOK-DRIFT-SYNC.md) | `active` | `BOOK-DRIFT-SYNC.1` (correct the 6 measured drifted claims) | Governance / process — two-track docs; the Book is the director's review surface |
 | `DOCTRINE-ADOPT` | [tasks/DOCTRINE-ADOPT.md](tasks/DOCTRINE-ADOPT.md) | `active` | `DOCTRINE-ADOPT.2` (evidence archetype) | Governance / process — 4th portable architecture |
 | `CONFORMANCE-TESTINPUT15` | [tasks/CONFORMANCE-TESTINPUT15.md](tasks/CONFORMANCE-TESTINPUT15.md) | `active` | `CONFORMANCE-TESTINPUT15.3` (close the `allusedtext` harness gap), then `.2` (adjudicate inclusion) | Now — PCRE2 parity (accuracy): `.1` measured 68/80 pass, no hangs |
 | `COMPILE-PERF-0078` | [tasks/COMPILE-PERF-0078.md](tasks/COMPILE-PERF-0078.md) | `active` | `COMPILE-PERF-0078.3` (adapter-boundary fast path), then `.4` (lazy C2 build) | Next — compile-time `<5×`; pin ADOPTED 2026-07-21, remaining work is RGX-side |

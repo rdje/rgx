@@ -61,6 +61,7 @@ Every open roadmap lane is now tree-owned (`TASKTREE-ADOPT.2`, 2026-06-15).
 | Next — perf validation loop | [`RUNTIME-REMEASURE`](docs/tasks/RUNTIME-REMEASURE.md) | `blocked` | needs a quiescent machine (task #57) |
 | Later — language bindings (A9) | [`A9-BINDINGS`](docs/tasks/A9-BINDINGS.md) | `deferred` | pending a demand signal |
 | Later — crates.io release | [`RELEASE-CRATESIO`](docs/tasks/RELEASE-CRATESIO.md) | `parked` | user is the trigger |
+| Governance — two-track docs: measured Book↔code drift | [`BOOK-DRIFT-SYNC`](docs/tasks/BOOK-DRIFT-SYNC.md) | `active` | `.1` — correct the 6 architecture-level claims proven false against the code |
 | Governance — doctrine enforcement (4th portable architecture) | [`DOCTRINE-ADOPT`](docs/tasks/DOCTRINE-ADOPT.md) | `active` | `.2` — the evidence archetype (`.1` shipped: driver + 7 doctrines gated at E3+E4) |
 | Governance / process | [`TASKTREE-ADOPT`](docs/tasks/TASKTREE-ADOPT.md) · [`RETRO-AUDIT`](docs/tasks/RETRO-AUDIT.md) · [`LEDGER-HYGIENE`](docs/tasks/LEDGER-HYGIENE.md) · [`MEMORY-ARCHITECTURE-DOC`](docs/tasks/MEMORY-ARCHITECTURE-DOC.md) · [`KNOWLEDGE-MAP-DOC`](docs/tasks/KNOWLEDGE-MAP-DOC.md) | `done` | — (complete; see Completed Task Trees in `docs/TASK_TREE.md`) |
 
@@ -69,6 +70,19 @@ Shipped lanes remain recorded in `CHANGES.md` / `RUST_CODEBASE_ANALYSIS.md`.
 
 ## Latest Completed Slice
 
+- `2026-07-25` — session ramp (docs/tracking only, no code touched): mandated
+  re-read of roadmap + codebase + mdBook. Found and **treed** six
+  architecture-level Book claims that are false against the code
+  (`BOOK-DRIFT-SYNC`): the architecture chapter still names PGEN **1.1.10**
+  (actual: 1.1.106) and "four crates" (actual: five — `rgx-capi` omitted), and
+  three chapters describe the public dispatch chain as 3- or 4-tier when
+  `rgx-core/src/lib.rs:1406` is explicit that it is **5-tier
+  (AC → DFA → Pike-VM → JIT → interpreter)**. `pgen-integration.md` was
+  verified already correct, so the drift is localized to the summaries.
+  Artifact cleanup: removed the regenerable `book/book/` mdBook output
+  (7.9 MB), a stale root `trace.log`, and four `.DS_Store` files; no `target/`
+  tree existed. Nothing else in the repo is deletable — `pgen-issues/` (138 MB)
+  is entirely tracked evidence and `subs/` is the read-only submodule tree.
 - `2026-07-21` — `COMPILE-PERF-0078.1`: **the fast PGEN parser is ADOPTED**
   (user-directed once upstream fixed the blockers). Pin `db6f8c68` (1.1.81) →
   **`d9d41c28` (1.1.106 / contract 1.1.109)**, 24 releases. Raw parse is
